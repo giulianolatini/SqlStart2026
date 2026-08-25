@@ -695,3 +695,17 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   Docker 29.7.2 con Compose v5.4.0, contesto `desktop-linux`.
 - **Data:** 2026-08-24
 - **Usata da:** ADR-0008, ADR-0009, ADR-0010, ADR-0025
+
+<a id="v-003"></a>
+### V-003 — Digest dell'immagine `mongo:8.0` e verifica offline
+
+- **Comandi:** `tools/pull-images.sh --pull` · `tools/pull-images.sh --verify`
+- **Ambiente:** Docker 29.7.2, host macOS arm64
+- **Esito:** `mongo:8.0` risolve a
+  `mongo@sha256:02a0cc7939f5ed38f30f9bc714ef5f682d49baf9350c54acf302ce833087fe8a`;
+  immagine `linux/arm64/v8`, costruita il 2026-08-18, 302 MB. Con il digest presente in
+  cache `--verify` esce 0; guastando una cifra del digest esce 1 in 0,15 s — un tempo che
+  esclude qualsiasi tentativo di contattare il registro, perché `docker image inspect`
+  interroga solo il demone locale.
+- **Data:** 2026-08-25
+- **Usata da:** ADR-0008, ADR-0009

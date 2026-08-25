@@ -287,7 +287,7 @@ specifico che lo rende incompatibile con il funzionamento offline: vedi
 UID e GID non sono pubblicati. Per quei tre punti le fonti sono il codice sorgente
 dell'immagine, citato come tale in [ADR-0005](#adr-0005) e [ADR-0014](#adr-0014).
 
-**Fonti:** [S-009](Sources.md#s-009), [V-002](Sources.md#v-002)
+**Fonti:** [S-009](Sources.md#s-009), [V-002](Sources.md#v-002), [V-003](Sources.md#v-003)
 
 ---
 
@@ -323,7 +323,7 @@ offline sul pinning per digest. Non regge: **il digest stabilisce *quale* immagi
 si va in rete.** Sono due proprietà distinte, e la seconda si ottiene solo con `pull_policy`.
 Il pinning resta, per la ragione sua propria, in [ADR-0008](#adr-0008).
 
-**Fonti:** [S-019](Sources.md#s-019), [V-002](Sources.md#v-002)
+**Fonti:** [S-019](Sources.md#s-019), [V-002](Sources.md#v-002), [V-003](Sources.md#v-003)
 
 ---
 
