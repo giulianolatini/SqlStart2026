@@ -821,3 +821,45 @@ il resto (si perderebbero il codice sorgente delle immagini e le verifiche empir
 più di un punto sono le uniche fonti esistenti).
 
 **Fonti:** [S-014](Sources.md#s-014)
+
+---
+
+<a id="adr-0025"></a>
+## ADR-0025 — Dodici GiB alla VM Docker per il profilo `completo`
+
+**Data:** 2026-08-25 · **Stato:** Accettata
+
+**Contesto:** [ADR-0010](#adr-0010) ha diviso lo sharded cluster in due profili perché undici
+container non stanno su una VM Docker da 7,65 GiB [V-002](Sources.md#v-002). Quella misura
+però non era un limite dell'host, che di GiB ne ha 16: era il valore che Docker Desktop si era
+assegnato da solo. Il profilo `completo` risultava così previsto come «eseguibile su una
+macchina capiente» senza che una macchina capiente esistesse — e senza poterlo eseguire non si
+possono registrare i filmati di riserva dell'architettura vera, quella a tre membri per
+componente.
+
+**Decisione:** portare a 12 GiB la memoria assegnata alla VM Docker sulla macchina di sviluppo
+e di palco. Il profilo `completo` diventa eseguibile in locale; il profilo `palco` resta quello
+che va in scena.
+
+**Conseguenze:** i filmati di riserva del blocco sharded possono mostrare tre membri per
+componente invece di uno. All'host restano 4 GiB per macOS, le slide, il browser e la
+registrazione dello schermo: abbastanza per sviluppare e registrare quando non gira altro,
+stretti durante il talk. Per questo la scelta non tocca [ADR-0010](#adr-0010) — dal palco si
+esegue `palco`, e i 12 GiB abilitano la registrazione, non la demo dal vivo. Il `preflight`
+deve leggere la memoria effettiva della VM e avvisare quando è inferiore a quanto il profilo
+richiesto pretende, invece di lasciare che sia Compose a scoprirlo a metà avvio.
+
+**Alternative scartate:** restare a 7,65 GiB e registrare il profilo `completo` altrove (non
+c'è un'altra macchina, e introdurrebbe nel repository un ambiente non riproducibile); salire
+oltre i 12 GiB (lascerebbe all'host meno di quanto macOS occupa a riposo, e la registrazione
+dello schermo è la prima cosa che ne soffrirebbe); comprimere i limiti per container fino a far
+stare undici nodi in 7,65 GiB (si scenderebbe verso il minimo della cache WiredTiger, `0.256`
+GB: il nodo parte, ma il comportamento sotto carico smette di essere rappresentativo, e sotto
+carico è esattamente ciò che il talk mostra).
+
+**Riserva dichiarata:** che undici container entrino davvero in 12 GiB non è misurato. Al
+momento della decisione il demone Docker non era in esecuzione e la nuova assegnazione non era
+ancora applicata. La verifica appartiene allo spike sharded, che deve produrre il numero e, se
+non torna, far rientrare questa decisione con una che la superi.
+
+**Fonti:** [S-001](Sources.md#s-001), [V-002](Sources.md#v-002)

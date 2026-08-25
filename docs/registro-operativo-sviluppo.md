@@ -62,3 +62,12 @@ erano state trascritte così prima che il problema si notasse, e sono state rifa
    `pyproject.toml` nella radice, non legge la riga `pythonpath` che sta in quello di
    `tools/`. La forma giusta è `uv run --directory tools pytest -q`. Il `Makefile` del
    Task 7 userà questa.
+6. Il `Makefile` chiude la prima metà della feature. Tre dei sei target — `images-pull`,
+   `images-verify`, `preflight` — puntano a script che arrivano coi Task 8 e 9 e fino ad
+   allora falliscono. Sono rimasti nel file perché l'elenco dei target è anche il piano di
+   lavoro di chi legge il repository a metà costruzione.
+
+**Deciso in corsa:** portare a 12 GiB la memoria della VM Docker (ADR-0025), per poter
+eseguire e registrare il profilo `completo` dello sharded cluster invece di lasciarlo una
+promessa. Il numero non è ancora misurato: al momento della decisione il demone Docker era
+spento. Lo verifica lo spike del Task 10.

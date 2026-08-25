@@ -79,7 +79,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   formulazione è stata **indebolita** fra la 5.0 e la 8.3. Nessun marcatore di versione
   («Starting in MongoDB 3.4/5.0») è associato alla formula: l'attribuzione di versione che
   davamo per nota **non esiste** nel testo.
-- **Usata da:** ADR-0004
+- **Usata da:** ADR-0004, ADR-0025
 
 <a id="s-002"></a>
 ### S-002 — MongoDB Manual: `mongod` Instances
@@ -694,4 +694,4 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 - **Esito:** host macOS 26.6.2 arm64, 8 CPU, 16 GiB; VM Docker 7,65 GiB e 8 CPU;
   Docker 29.7.2 con Compose v5.4.0, contesto `desktop-linux`.
 - **Data:** 2026-08-24
-- **Usata da:** ADR-0008, ADR-0009, ADR-0010
+- **Usata da:** ADR-0008, ADR-0009, ADR-0010, ADR-0025

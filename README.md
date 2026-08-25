@@ -60,10 +60,11 @@ nell'[indice](docs/README.md) con la feature che le produrrà.
 
 - **Docker Desktop** o un runtime equivalente che fornisca `docker compose`. Gli stack sono
   stati sviluppati con Docker 29.7.2 e Compose v5.4.0.
-- **RAM.** Lo standalone e il replica set stanno comodi in 4 GiB assegnati al runtime. Lo
-  sharded cluster completo no: è stato sviluppato su una VM Docker da 7,65 GiB, ricavata da
-  un host con 16 GiB [V-002](docs/Sources.md#v-002), e per questo lo stack sharded ha due
-  profili di dimensione diversa.
+- **RAM.** Lo standalone, il replica set e il profilo `palco` dello sharded cluster stanno
+  in 4 GiB assegnati al runtime. Il profilo `completo` — tre membri per ogni componente,
+  undici container — ne vuole 12 assegnati alla VM Docker, su un host che ne abbia 16
+  [ADR-0025](docs/Decision.md#adr-0025). È il motivo per cui lo stack sharded ha due
+  profili invece di uno: il primo entra ovunque, il secondo mostra l'architettura vera.
 - **`make`** per i comandi di uso quotidiano, e **[`uv`](https://docs.astral.sh/uv/)** per
   eseguire gli strumenti Python senza installare nulla a mano.
 
