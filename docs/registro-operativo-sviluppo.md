@@ -56,3 +56,9 @@ erano state trascritte così prima che il problema si notasse, e sono state rifa
    i rimandi `Usata da:` erano già cablati in `Sources.md` prima che gli ADR esistessero,
    quindi scrivere `Decision.md` è stato riempire una forma già verificabile. È passato
    verde al primo tentativo, e non per fortuna.
+5. La regola «esegui ogni comando che citi» ha ripagato subito. Il piano prevedeva
+   `uv run --project tools pytest -q`: da radice fallisce con `ModuleNotFoundError`,
+   perché `--project` non sposta la directory di lavoro e pytest, non trovando un
+   `pyproject.toml` nella radice, non legge la riga `pythonpath` che sta in quello di
+   `tools/`. La forma giusta è `uv run --directory tools pytest -q`. Il `Makefile` del
+   Task 7 userà questa.
