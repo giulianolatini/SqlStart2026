@@ -1,4 +1,4 @@
-from check_citations import Fonte, parse_decisions, parse_sources
+from check_citations import Fonte, parse_decisions, parse_sources, verifica
 
 
 def test_estrae_un_adr_con_le_sue_fonti():
@@ -34,3 +34,31 @@ def test_estrae_una_fonte_con_il_collegamento_inverso():
             ancora="s-001",
         )
     }
+
+
+def test_segnala_una_fonte_citata_ma_inesistente():
+    problemi = verifica({"ADR-0001": {"S-999"}}, {})
+    assert any("S-999" in p and "ADR-0001" in p for p in problemi)
+
+
+def test_segnala_una_fonte_orfana():
+    fonti = {"S-001": Fonte("S-001", "https://esempio", set(), "s-001")}
+    problemi = verifica({}, fonti)
+    assert any("S-001" in p and "orfana" in p for p in problemi)
+
+
+def test_segnala_un_collegamento_inverso_incompleto():
+    fonti = {"S-001": Fonte("S-001", "https://esempio", {"ADR-0001"}, "s-001")}
+    problemi = verifica({"ADR-0001": {"S-001"}, "ADR-0002": {"S-001"}}, fonti)
+    assert any("ADR-0002" in p and "Usata da" in p for p in problemi)
+
+
+def test_segnala_unancora_non_corrispondente():
+    fonti = {"S-001": Fonte("S-001", "https://esempio", {"ADR-0001"}, "s-002")}
+    problemi = verifica({"ADR-0001": {"S-001"}}, fonti)
+    assert any("ancora" in p for p in problemi)
+
+
+def test_nessun_problema_su_un_insieme_coerente():
+    fonti = {"S-001": Fonte("S-001", "https://esempio", {"ADR-0001"}, "s-001")}
+    assert verifica({"ADR-0001": {"S-001"}}, fonti) == []

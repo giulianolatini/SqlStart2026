@@ -54,3 +54,40 @@ def parse_sources(testo: str) -> dict[str, Fonte]:
             ancora=ancore[-1] if ancore else None,
         )
     return risultato
+
+
+def verifica(decisioni: dict[str, set[str]], fonti: dict[str, Fonte]) -> list[str]:
+    """Restituisce l'elenco dei problemi. Lista vuota significa coerenza."""
+    problemi: list[str] = []
+
+    for adr, riferimenti in sorted(decisioni.items()):
+        for riferimento in sorted(riferimenti):
+            if riferimento not in fonti:
+                problemi.append(
+                    f"{adr} cita {riferimento}, che non esiste in Sources.md"
+                )
+
+    citata_da: dict[str, set[str]] = {}
+    for adr, riferimenti in decisioni.items():
+        for riferimento in riferimenti:
+            citata_da.setdefault(riferimento, set()).add(adr)
+
+    for identificatore, fonte in sorted(fonti.items()):
+        effettivi = citata_da.get(identificatore, set())
+        if not effettivi:
+            problemi.append(f"{identificatore} è orfana: nessun ADR la cita")
+            continue
+        if fonte.usata_da != effettivi:
+            mancanti = sorted(effettivi - set(fonte.usata_da))
+            eccedenti = sorted(set(fonte.usata_da) - effettivi)
+            problemi.append(
+                f"{identificatore}: «Usata da» non corrisponde — "
+                f"mancano {mancanti or '—'}, sono di troppo {eccedenti or '—'}"
+            )
+        atteso = identificatore.lower()
+        if fonte.ancora != atteso:
+            problemi.append(
+                f"{identificatore}: ancora «{fonte.ancora}», attesa «{atteso}»"
+            )
+
+    return problemi
