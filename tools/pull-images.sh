@@ -2,7 +2,7 @@
 # Scarica le immagini del lab e le pinna per digest, oppure verifica che siano
 # già presenti in locale. Il talk gira senza rete: il digest è ciò che lo garantisce.
 #
-# Un tag come `mongo:8.0` è un puntatore mobile. Se l'immagine locale manca, o se il
+# Un tag come `mongo:7.0` è un puntatore mobile. Se l'immagine locale manca, o se il
 # tag si è spostato, `docker compose up` va in rete — e la mattina del talk la rete
 # non è un'ipotesi su cui costruire. Un digest no: identifica un contenuto preciso, e
 # se quel contenuto è già nella cache locale Compose non ha motivo di uscire.
@@ -12,10 +12,12 @@ RADICE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FILE_IMMAGINI="${RADICE}/tools/images.env"
 
 # NOME_VARIABILE=riferimento:tag — gli stack Compose si agganciano con ${NOME_VARIABILE}.
-# `mongo:8.0` porta con sé mongosh e i Database Tools: una sola immagine copre mongod,
+# `mongo:7.0` porta con sé mongosh e i Database Tools: una sola immagine copre mongod,
 # la shell e mongodump. Se una feature successiva ne richiederà un'altra, si aggiunge qui.
+# La versione è 7.0 e non 8.0 per il motivo scritto in ADR-0028: sul kernel della VM di
+# Docker Desktop nessuna MongoDB 8 pubblicata si avvia. Il traguardo resta la 8.0.30.
 declare -a IMMAGINI=(
-  "MONGO_IMAGE=mongo:8.0"
+  "MONGO_IMAGE=mongo:7.0"
 )
 
 # Impostare PIATTAFORMA (per esempio a linux/arm64) solo per forzare un'architettura

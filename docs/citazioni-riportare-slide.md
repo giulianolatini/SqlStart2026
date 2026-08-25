@@ -16,6 +16,78 @@ e una riga su *perché* vale una slide. Se la citazione smentisce un'assunzione 
 
 ---
 
+## Blocco 0 — La versione, che si dice prima di tutto il resto
+
+### Il lab gira su MongoDB 7.0, e va detto dal palco
+
+**Promemoria del relatore, 2026-08-25:** «Sulle architetture del talk 7.0 e 8.0 non
+differiscono; va detto dal palco, non lasciato scoprire dal prompt di `mongosh`.»
+
+È l'unica voce di questo file che non nasce da una fonte esterna: è una decisione di regia,
+registrata qui perché è in slide che deve finire. La ragione tecnica sta in
+[ADR-0028](Decision.md#adr-0028) — sul kernel della VM di Docker Desktop nessuna MongoDB 8
+pubblicata si avvia.
+
+**Attenzione, la frase va detta nella forma esatta.** La verifica contro le note di
+compatibilità della 8.0 le ha tolto l'assoluto: «non differiscono» regge su replica set,
+sharding, `mongodump` e `mongorestore` — termini che in quella pagina non compaiono affatto —
+ma **due differenze esistono**, ed entrambe toccano proprio ciò che si mostra. Sono le due
+citazioni qui sotto. Sulla slide vale la versione circostanziata: *su ciò che vedete oggi, 7.0
+e 8.0 si comportano allo stesso modo, con due eccezioni che vi dico subito.* Promettere
+identità piena è una promessa che il manuale smentisce in due righe.
+
+### Dalla 8.0 non ci si collega più direttamente a uno shard
+
+> «Starting in MongoDB 8.0, you can only run certain commands on nodes in sharded clusters. If
+> you attempt to connect directly to a node and run an unsupported command, MongoDB returns an
+> error: *"You are connecting to a sharded cluster improperly by connecting directly to a
+> shard. Please connect to the cluster via a router (mongos)."*»
+
+> «To run a non-supported database command directly against a node in a sharded cluster, you
+> must either connect to `mongos` or have the maintenance-only `directShardOperations` role.»
+
+Fonte: [S-029](Sources.md#s-029) — MongoDB Manual, Compatibility Changes in MongoDB 8.0,
+sezione *Backward-Incompatible Features*.
+
+**Perché una slide:** è la differenza che il pubblico può toccare. Nello spike ci si è
+collegati direttamente a uno shard per leggere `hostInfo`, ed è servito
+[V-006](Sources.md#v-006): su 8.0 quella stessa mossa sarebbe stata respinta. Chi torna a casa
+e rifà la demo su una 8 incontra l'errore, quindi va anticipato. Nota il dettaglio che quasi
+tutti perdono: il vincolo scatta «once the cluster has more than one shard» — con un solo
+shard la connessione diretta resta ammessa, perché serve alla transizione da replica set a
+cluster.
+
+### Dalla 8.0 `majority` conferma sulla scrittura, non sull'applicazione
+
+> «Starting in MongoDB 8.0, write operations that use the `"majority"` write concern return an
+> acknowledgment when the majority of replica set members have **written the oplog entry** for
+> the change. This improves the performance of `"majority"` writes. In previous releases, these
+> operations would wait and return an acknowledgment after the majority of replica set members
+> **applied** the change.»
+
+Fonte: [S-029](Sources.md#s-029).
+
+**Perché una slide:** scritto contro applicato è una distinzione da mezza riga che cambia i
+numeri, e i numeri sono ciò che l'applicazione del talk cronometra durante il failover. Se
+qualcuno in sala confronta le proprie latenze con quelle proiettate, è qui la spiegazione della
+differenza — non nell'hardware.
+
+### La 8.0 è la versione che ha cambiato allocatore
+
+> «Starting in MongoDB 8.0, MongoDB uses an upgraded version of TCMalloc that uses **per-CPU
+> caches, instead of per-thread caches**, to reduce memory fragmentation and make your database
+> more resilient to high-stress workloads.»
+
+Fonte: [S-029](Sources.md#s-029).
+
+**Perché una slide:** chiude il cerchio sulla trappola del kernel. La cache per-CPU è il
+meccanismo che dal kernel 6.19 in poi non è più tollerato, ed è entrato **con la 8.0**: la 7.0
+non aggira il problema per fortuna, lo precede per costruzione. Vale come esempio di come si
+indaga un blocco — la causa stava nelle note di compatibilità, non nel messaggio d'errore, che
+rimandava a due ticket Jira di cui uno chiuso «Gone away».
+
+---
+
 ## Blocco 1 — Standalone e fondamenta in Docker
 
 ### La cache WiredTiger va impostata a mano nei container

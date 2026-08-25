@@ -130,3 +130,29 @@ spento. Lo verifica lo spike del Task 10.
     riserva di [ADR-0025](Decision.md#adr-0025) è sciolta, ma il numero va letto per quello
     che è: `mem_limit` è un tetto, non una prenotazione, e i 12 GiB servono al caso sotto
     carico — che è precisamente quello che l'applicazione del talk andrà a produrre.
+15. Il Product Owner ha approvato [ADR-0028](Decision.md#adr-0028) il 2026-08-25: il lab passa
+    a **MongoDB 7.0.40**, con la 8.0.30 come traguardo. [ADR-0008](Decision.md#adr-0008) è
+    superata, non riscritta — a cadere è il numero di versione, non il pinning per digest, che
+    anzi è ciò che ha reso il cambio un'operazione da un file solo. `make images-pull` ha
+    riscritto `tools/images.env`, `make preflight` è tornato verde con `Superati: 8 · Avvisi: 1
+    · Errori: 0`, e l'unico avviso è l'assenza dei filmati, che non sono ancora girati
+    [V-008](Sources.md#v-008).
+16. La citazione da slide chiesta dal relatore — «sulle architetture del talk 7.0 e 8.0 non
+    differiscono, va detto dal palco» — è entrata in
+    [`citazioni-riportare-slide.md`](citazioni-riportare-slide.md), ma **non nella forma in cui
+    era stata dettata**. Prima di scriverla è stata controllata contro le note di compatibilità
+    della 8.0 [S-029](Sources.md#s-029), e la pagina l'ha smentita su due punti: dalla 8.0 non
+    si eseguono comandi collegandosi direttamente a uno shard senza il ruolo
+    `directShardOperations`, e `majority` conferma sulla scrittura dell'oplog invece che
+    sull'applicazione. Nessuno dei due ribalta la decisione — il primo rende la 7.0 più comoda
+    per la demo — ma entrambi si vedono proprio in ciò che si mostra, e una promessa di
+    identità piena sarebbe stata smentibile dal manuale in due righe. La slide porta la
+    versione circostanziata.
+17. La stessa verifica ha restituito qualcosa che non si cercava: la causa del blocco sul
+    kernel, documentata. «Starting in MongoDB 8.0, MongoDB uses an upgraded version of TCMalloc
+    that uses per-CPU caches, instead of per-thread caches» — è **la 8.0** a introdurre il
+    meccanismo che il kernel dal 6.19 non tollera. La riserva di ADR-0028, che poggiava su due
+    ticket Jira di cui uno chiuso «Gone away», si scioglie in parte: la 7.0 non aggira il
+    problema per fortuna, lo precede per costruzione. Vale come metodo, e non solo qui: la
+    spiegazione stava in una pagina di *compatibility changes*, cioè dove non si sarebbe andati
+    a cercarla, perché il messaggio d'errore rimandava altrove.

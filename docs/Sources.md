@@ -725,6 +725,48 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 
 ---
 
+<a id="s-029"></a>
+### S-029 — MongoDB Manual: Compatibility Changes in MongoDB 8.0
+
+- **URL:** https://www.mongodb.com/docs/manual/release-notes/8.0-compatibility/ (letta nella
+  variante `8.0-compatibility.md`, che restituisce il testo integrale)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** serie 8.0
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma una causa, e smentisce un'assunzione del progetto
+- **Cosa afferma, primo punto — la causa del blocco, finalmente documentata.** Sezione
+  *Upgraded TCMalloc*: «Starting in MongoDB 8.0, MongoDB uses an upgraded version of TCMalloc
+  that uses per-CPU caches, instead of per-thread caches, to reduce memory fragmentation and
+  make your database more resilient to high-stress workloads.» È **la 8.0** a introdurre la
+  cache per-CPU, cioè esattamente il meccanismo che sul kernel dal 6.19 in su viola l'ABI di
+  `rseq`. Spiega in una riga perché la 7.0 si avvia e la 8.0 no, senza passare dai ticket
+  Jira, e scioglie in parte la riserva di [V-007](#v-007).
+- **Cosa afferma, secondo punto — una differenza fra 7.0 e 8.0 che tocca la demo.** Sezione
+  *Cannot Connect Directly to Shard and Run Commands*, elencata fra le **Backward-Incompatible
+  Features**: «Starting in MongoDB 8.0, you can only run certain commands on nodes in sharded
+  clusters. If you attempt to connect directly to a node and run an unsupported command,
+  MongoDB returns an error» — e l'errore è «You are connecting to a sharded cluster improperly
+  by connecting directly to a shard. Please connect to the cluster via a router (mongos).»
+  Segue la via d'uscita: «you must either connect to `mongos` or have the maintenance-only
+  `directShardOperations` role», con la precisazione che il vincolo vale «once the cluster has
+  more than one shard».
+- **Cosa afferma, terzo punto — la semantica di `majority` cambia.** Sezione *Write Concern
+  Majority*: «Starting in MongoDB 8.0, write operations that use the `"majority"` write concern
+  return an acknowledgment when the majority of replica set members have written the oplog
+  entry for the change. […] In previous releases, these operations would wait and return an
+  acknowledgment after the majority of replica set members applied the change.» Scritto contro
+  applicato: è una differenza osservabile proprio nelle misure di latenza sotto failover.
+- **Cosa non afferma:** le stringhe `mongodump`, `mongorestore`, `rs.initiate`, `sh.addShard`,
+  `keyfile` e `config server` **non compaiono** nella pagina. Su quei punti la 8.0 non dichiara
+  incompatibilità.
+- **Riserve:** una pagina di *compatibility changes* elenca ciò che rompe, non ciò che resta
+  uguale. L'assenza di una voce è un indizio forte, non una prova di identità di comportamento:
+  non esiste una pagina che affermi «7.0 e 8.0 si comportano allo stesso modo». La lettura
+  copre inoltre la sola 8.0; per la 8.2 e la 8.3 esistono pagine analoghe non consultate.
+- **Usata da:** ADR-0028
+
+---
+
 ## Verifiche empiriche
 
 <a id="v-001"></a>
@@ -856,3 +898,23 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   riceve più patch [S-027](#s-027) è comunque fuori scelta.
 - **Data:** 2026-08-25
 - **Usata da:** ADR-0027, ADR-0028
+
+<a id="v-008"></a>
+### V-008 — Ripinnatura alla 7.0.40: digest, piattaforme, strumenti a bordo
+
+- **Comandi:** `make images-pull` · `docker manifest inspect mongo:7.0` ·
+  `docker run --rm --entrypoint {mongod,mongosh,mongodump} mongo:7.0 --version` ·
+  `make preflight`
+- **Ambiente:** Docker 29.7.2, host macOS 26.6.2 arm64, 2026-08-25
+- **Esito:** `mongo:7.0` risolve a
+  `mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b`. Il manifest
+  dichiara `linux/amd64`, `linux/arm64/v8` e `windows/amd64`: il requisito arm64 della macchina
+  di palco è soddisfatto anche sulla versione nuova. L'immagine porta a bordo `mongod` 7.0.40,
+  `mongosh` 2.10.0 e `mongodump` 100.18.0 — una sola immagine copre demone, shell e strumenti,
+  come nella 8.0. Con la ripinnatura `make preflight` torna verde: `Superati: 8 · Avvisi: 1 ·
+  Errori: 0`, dove l'unico avviso è l'assenza dei filmati di riserva, non ancora girati.
+- **Riserve:** verifica il ritorno alla normalità del preflight, non il comportamento del lab:
+  gli stack Compose non esistono ancora su questo branch. La versione degli strumenti a bordo
+  (`mongosh`, `mongodump`) non è pinnata separatamente e segue l'immagine.
+- **Data:** 2026-08-25
+- **Usata da:** ADR-0028

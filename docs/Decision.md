@@ -260,7 +260,7 @@ nel riferimento dell'API. Non esiste alcuna indicazione documentata sull'aggiorn
 <a id="adr-0008"></a>
 ## ADR-0008 — MongoDB 8.0, immagine ufficiale pinnata per digest
 
-**Data:** 2026-08-24 · **Stato:** Accettata
+**Data:** 2026-08-24 · **Stato:** **Superata da [ADR-0028](#adr-0028)** il 2026-08-25
 
 **Contesto:** il lab deve produrre lo stesso risultato sulla macchina di chi parla, su quella
 di chi ascolta e fra dodici mesi. Un tag mobile non lo garantisce. L'immagine ufficiale
@@ -286,6 +286,16 @@ specifico che lo rende incompatibile con il funzionamento offline: vedi
 — né `--replSet` né `--keyFile` vi compaiono, la fase del mongod temporaneo non è descritta,
 UID e GID non sono pubblicati. Per quei tre punti le fonti sono il codice sorgente
 dell'immagine, citato come tale in [ADR-0005](#adr-0005) e [ADR-0014](#adr-0014).
+
+**Motivo del superamento:** non la forma, ma il numero. La decisione di pinnare per digest
+l'immagine ufficiale in una variabile sola è rimasta valida ed è stata ereditata da
+[ADR-0028](#adr-0028) — anzi, è ciò che ha reso il cambio di versione un'operazione da un
+file solo. A cadere è «MongoDB 8.0»: sul kernel della VM di Docker Desktop nessuna 8.0
+pubblicata si avvia, e la patch che lo risolve esiste nel changelog ma non in distribuzione.
+Anche la verifica su `linux/arm64/v8` è stata rifatta sulla versione nuova. Tutto il resto
+di questo ADR — il perché del digest, il comportamento di `MONGO_INITDB_ROOT_*` su un volume
+già popolato, la riserva sulla documentazione di Docker Hub — vale ancora e non è stato
+toccato.
 
 **Fonti:** [S-009](Sources.md#s-009), [V-002](Sources.md#v-002), [V-003](Sources.md#v-003)
 
@@ -974,7 +984,7 @@ esercita lo stesso percorso di codice che fallisce, in mezzo secondo e senza eff
 <a id="adr-0028"></a>
 ## ADR-0028 — La versione di MongoDB del lab
 
-**Data:** 2026-08-25 · **Stato:** Proposta — attende la decisione del relatore
+**Data:** 2026-08-25 · **Stato:** Accettata — sostituisce [ADR-0008](#adr-0008)
 
 **Contesto:** [ADR-0008](#adr-0008) fissa MongoDB 8.0, immagine ufficiale pinnata per digest.
 Lo spike del 2026-08-25 ha scoperto che quella decisione non è eseguibile
@@ -997,15 +1007,16 @@ a new minor release becomes available, MongoDB does not continue patching the pr
 release» [S-027](Sources.md#s-027). Uscita la 8.3, la 8.2 non riceve più patch, e infatti fra i
 tag correnti dell'immagine ufficiale non compare più.
 
-**Decisione proposta:** adottare **MongoDB 7.0.40** come versione del lab, con la 8.0.30 come
+**Decisione:** adottare **MongoDB 7.0.40** come versione del lab, con la 8.0.30 come
 traguardo. Si sviluppa e si documenta su 7.0.40 adesso; si ripinna alla 8.0.30 appena i binari
 escono, rigenerando `tools/images.env` con `make images-pull`. Se questo accade prima del 18
 settembre, si ripinna e si rigirano i filmati; se non accade, il lab funziona lo stesso. Il
 costo del cambio è basso per costruzione: la versione è una variabile sola, `${MONGO_IMAGE}`,
 e questo è il motivo per cui [ADR-0008](#adr-0008) la teneva fuori dai file Compose.
 
-**Conseguenze se accettata:** [ADR-0008](#adr-0008) va superata — non riscritta — da questa,
-con lo stato aggiornato e il rimando. Le pagine che nominano una versione vanno allineate, e
+**Conseguenze:** [ADR-0008](#adr-0008) è superata — non riscritta — da questa: lo stato è
+aggiornato e il rimando è al suo posto. Il pinning per digest **non** è in discussione, resta
+la regola e viene ereditato qui; a cambiare è solo quale versione si pinna. Le pagine che nominano una versione vanno allineate, e
 non sono molte proprio perché la versione è parametrica. Il talk parla di una 7.0 anziché di
 una 8.0: sulle architetture non cambia nulla, perché replica set, sharding, `mongodump` e
 `mongorestore` si comportano allo stesso modo, ma va detto dal palco invece che lasciato
@@ -1023,11 +1034,31 @@ retrocedere la versione di Docker Desktop per ottenere un kernel più vecchio, p
 imporrebbe a chi clona il repository di replicare una versione precisa di un prodotto che si
 aggiorna da solo, ed è la definizione di lab non riproducibile.
 
-**Riserva dichiarata:** la ricostruzione della causa poggia su ticket Jira linkati dal
-messaggio d'errore, non su documentazione di piattaforma; il primo è chiuso con risoluzione
-«Gone away» e senza *Fix Version* [V-007](Sources.md#v-007). Il fatto osservabile — quali
+**Riserva dichiarata, sciolta in parte il 2026-08-25:** la ricostruzione della causa poggiava
+su ticket Jira linkati dal messaggio d'errore, non su documentazione di piattaforma; il primo
+è chiuso con risoluzione «Gone away» e senza *Fix Version* [V-007](Sources.md#v-007). Il
+manuale però la conferma dove non si pensava di cercarla, cioè nelle note di compatibilità:
+«Starting in MongoDB 8.0, MongoDB uses an upgraded version of TCMalloc that uses **per-CPU
+caches, instead of per-thread caches**» [S-029](Sources.md#s-029). È la 8.0 a introdurre il
+meccanismo che il kernel dal 6.19 non tollera più: la scelta della 7.0 non aggira il problema
+per fortuna, lo precede per costruzione. Il fatto osservabile — quali
 versioni si avviano e quali no — è invece misurato e ripetibile. Non è stato verificato se la
 8.0.30, una volta pubblicata, si avvii davvero su questo kernel: al momento non esiste nulla
 da provare.
 
-**Fonti:** [S-027](Sources.md#s-027), [S-028](Sources.md#s-028), [V-007](Sources.md#v-007)
+**Nota di verifica (2026-08-25):** la frase «sulle architetture non cambia nulla», scritta
+qui sopra, è stata controllata contro le note di compatibilità della 8.0 e va corretta.
+Regge su replica set, sharding, `mongodump` e `mongorestore`, che nella pagina non compaiono
+affatto — ma la 8.0 elenca fra le *Backward-Incompatible Features* il divieto di eseguire
+comandi collegandosi **direttamente** a uno shard: «you must either connect to `mongos` or
+have the maintenance-only `directShardOperations` role», e il vincolo scatta «once the
+cluster has more than one shard» [S-029](Sources.md#s-029). Lo spike ha fatto esattamente
+quello per leggere `hostInfo` da uno shard: su 8.0 sarebbe stato respinto. Cambia anche la
+semantica di `majority`, che dalla 8.0 conferma sulla **scrittura** dell'oplog invece che
+sull'**applicazione** — una differenza osservabile proprio nelle misure di failover che
+l'applicazione cronometra. Nessuna delle due ribalta la decisione: la prima rende la 7.0 più
+comoda per la demo, la seconda va detta quando si mostrano i tempi. Va detta anche la forma
+del ragionamento: una pagina di *compatibility changes* elenca ciò che rompe, non ciò che
+resta uguale, e l'assenza di una voce è un indizio forte, non una prova.
+
+**Fonti:** [S-027](Sources.md#s-027), [S-028](Sources.md#s-028), [S-029](Sources.md#s-029), [V-007](Sources.md#v-007), [V-008](Sources.md#v-008)

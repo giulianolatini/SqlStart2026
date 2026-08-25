@@ -4,6 +4,17 @@
 > termina con un deliverable verificabile e un commit. Leggere anche la specifica
 > collegata: questo piano attua decisioni prese lì, non le rimette in discussione.
 
+> **Nota di allineamento, 2026-08-25.** Dove questo documento dice «MongoDB 8.0» e
+> `mongo:8.0`, leggere **MongoDB 7.0** e `mongo:7.0`. La versione è cambiata dopo lo spike
+> dello sharded cluster: sul kernel della VM di Docker Desktop nessuna MongoDB 8 pubblicata
+> si avvia. Il perché, le alternative scartate e le due differenze fra 7.0 e 8.0 che si
+> vedono in demo stanno in [ADR-0028](../Decision.md#adr-0028), che supera
+> [ADR-0008](../Decision.md#adr-0008). Il testo qui sotto **non** è stato riscritto: è la
+> fotografia di ciò che si sapeva quando è stato scritto, e il repository non riscrive le
+> decisioni, le supera.
+
+---
+
 **Obiettivo:** dotare il repository di igiene, impianto documentale verificabile e
 strumenti di palco, e sondare il punto di massima incertezza del progetto — la catena di
 inizializzazione dello sharded cluster — prima di aprire le altre branch.
