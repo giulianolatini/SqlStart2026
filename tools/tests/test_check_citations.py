@@ -1,4 +1,4 @@
-from check_citations import Fonte, parse_decisions, parse_sources, verifica
+from check_citations import Fonte, main, parse_decisions, parse_sources, verifica
 
 
 def test_estrae_un_adr_con_le_sue_fonti():
@@ -62,3 +62,11 @@ def test_segnala_unancora_non_corrispondente():
 def test_nessun_problema_su_un_insieme_coerente():
     fonti = {"S-001": Fonte("S-001", "https://esempio", {"ADR-0001"}, "s-001")}
     assert verifica({"ADR-0001": {"S-001"}}, fonti) == []
+
+
+def test_segnala_un_percorso_inesistente_senza_traceback(tmp_path, capsys):
+    codice = main([str(tmp_path / "assente.md"), str(tmp_path / "nemmeno.md")])
+    catturato = capsys.readouterr()
+    assert codice == 2
+    assert "assente.md" in catturato.err
+    assert "Traceback" not in catturato.err

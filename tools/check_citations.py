@@ -103,10 +103,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("sources", type=pathlib.Path)
     argomenti = parser.parse_args(argv)
 
-    problemi = verifica(
-        parse_decisions(argomenti.decision.read_text(encoding="utf-8")),
-        parse_sources(argomenti.sources.read_text(encoding="utf-8")),
-    )
+    testi = []
+    for percorso in (argomenti.decision, argomenti.sources):
+        try:
+            testi.append(percorso.read_text(encoding="utf-8"))
+        except OSError as errore:
+            # Chi clona il repository sbaglia il percorso prima di sbagliare
+            # le citazioni: un traceback qui non aiuterebbe nessuno.
+            print(f"Non riesco a leggere «{percorso}»: {errore.strerror}.", file=sys.stderr)
+            print(
+                "Attesi due argomenti, nell'ordine: docs/Decision.md e docs/Sources.md. "
+                "I percorsi sono relativi alla radice del repository.",
+                file=sys.stderr,
+            )
+            return 2
+
+    problemi = verifica(parse_decisions(testi[0]), parse_sources(testi[1]))
     for problema in problemi:
         print(f"  ✗ {problema}", file=sys.stderr)
     if problemi:
