@@ -1,0 +1,697 @@
+# Fonti
+
+Registro delle fonti consultate. Ogni affermazione tecnica in `docs/` cita almeno una voce
+di questo file; ogni voce di questo file è citata da almeno un ADR di
+[`Decision.md`](Decision.md). Il vincolo è verificato da `tools/check_citations.py`.
+
+| Prefisso | Tipo |
+|---|---|
+| `S-NNN` | fonte ufficiale — URL, editore, versione documentata, data di consultazione |
+| `V-NNN` | verifica empirica su questo lab — comando eseguito, output osservato, data |
+| `C-NNN` | fonte comunitaria — indizio, mai unica base di una decisione |
+
+## Come sono state verificate
+
+Ogni URL è stato aperto e letto integralmente il **2026-08-25**. Per ciascuna fonte è
+registrato un **verdetto** su ciò che la pagina afferma davvero, confrontato con
+l'assunzione che avevamo dato per buona in fase di progettazione:
+
+| Verdetto | Significato |
+|---|---|
+| conferma | la pagina dice quello che assumevamo, alla lettera |
+| conferma parziale | una parte è confermata, il resto non è scritto o è scritto diversamente |
+| non trovato | la pagina non tratta l'argomento: l'assunzione non è né confermata né smentita |
+| contraddice | la pagina afferma qualcosa di incompatibile con l'assunzione |
+
+Il campo **Riserve** esiste perché una fonte serve a poco se non si sa dove smette di
+coprirci. Quando una riserva è presente, l'affermazione corrispondente non va portata sul
+palco come citazione: o si riformula, o si sostiene con una verifica empirica `V-NNN`.
+
+Due note di metodo utili a chi ripete la verifica:
+
+- **`mongodb.com/docs` serve una variante Markdown della stessa pagina**, allo stesso URL
+  con suffisso `.md` (per esempio `core/wiredtiger.md`). La resa HTML recuperata da
+  strumenti automatici risultava in più casi compressa, con parole funzione mancanti: non
+  utilizzabile per citare alla lettera. Tutte le citazioni qui sotto provengono dalla
+  variante Markdown quando indicato.
+- **`docs.docker.com` fa lo stesso**, ed è l'endpoint dietro il pulsante «View Markdown»
+  delle sue pagine.
+
+## Assunzioni di progetto non confermate dalle fonti
+
+Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata.
+
+| Assunzione iniziale | Esito | Voce |
+|---|---|---|
+| Cache WiredTiger a `0.25` GB | il minimo documentato è `0.256 GB` | [S-002](#s-002) |
+| In container mongod legge il limite del cgroup | la pagina corrente dice l'opposto, e due pagine ufficiali si contraddicono | [S-001](#s-001), [S-026](#s-026) |
+| `deploy.resources.limits` è ignorato fuori da Swarm | non documentato in nessuna direzione: la frase storica è stata ritirata | [S-004](#s-004) |
+| Il digest garantisce il funzionamento offline | il digest garantisce *quale* immagine, non *se* si va in rete | [S-019](#s-019) |
+| `testcontainers-python` copre i replica set | `MongoDbContainer` avvia solo istanze standalone | [S-013](#s-013) |
+| I listener pymongo girano su un thread separato | sono consegnati **sincronamente** e bloccano il chiamante | [S-010](#s-010) |
+| Rich documenta vincoli di thread su `Live` | la parola «thread» non compare nella documentazione | [S-018](#s-018) |
+| L'eccezione localhost vale solo da loopback | vero per convenzione, ma non enunciato da alcuna fonte primaria | [S-006](#s-006) |
+| Il keyfile ammette `600` | documentato solo `chmod 400` | [S-005](#s-005) |
+
+---
+
+## Fonti ufficiali
+
+<a id="s-001"></a>
+### S-001 — MongoDB Manual: WiredTiger Storage Engine
+
+- **URL:** https://www.mongodb.com/docs/manual/core/wiredtiger/ (citazioni dalla variante `core/wiredtiger.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Database Manual 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** la dimensione predefinita della cache interna è «the larger of either:
+  50% of (RAM - 1GB), or 0.256 GB», con estremi dichiarati «ensure the RAM does not exceed
+  the bounds of 0.256GB to 10000GB». Sui container prescrive di impostarla a mano: «If you
+  run `mongod` in a container (for example, `lxc`, `cgroups`, Docker, etc.) that does *not*
+  have access to all of the RAM available in a system, you **must** set
+  `--wiredTigerCacheSizeGB` or `--wiredTigerCacheSizePct` to a value less than the amount
+  of RAM available in the container».
+- **Riserve:** la pagina **non** afferma che mongod legga il limite del cgroup. Afferma il
+  contrario: «WiredTiger may not account for the memory limits of the specific container in
+  certain cases». Contraddice [S-026](#s-026), che è sullo stesso manuale. Il manuale
+  archiviato v5.0 era invece affermativo e scriveva `256 MB` anziché `0.256 GB`: la
+  formulazione è stata **indebolita** fra la 5.0 e la 8.3. Nessun marcatore di versione
+  («Starting in MongoDB 3.4/5.0») è associato alla formula: l'attribuzione di versione che
+  davamo per nota **non esiste** nel testo.
+- **Usata da:** ADR-0004
+
+<a id="s-002"></a>
+### S-002 — MongoDB Manual: `mongod` Instances
+
+- **URL:** https://www.mongodb.com/docs/manual/reference/program/mongod/ (citazioni dalla variante `mongod.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** manuale 8.x (marcatori interni «Changed in version 6.1», «Starting in MongoDB 8.0»)
+- **Consultata:** 2026-08-25
+- **Verdetto:** contraddice
+- **Cosa afferma:** «Avoid increasing the WiredTiger internal cache size above its default
+  value. If your use case requires to do so, you can use `--wiredTigerCacheSizePct` to
+  specify a percentage of up to 80% of available memory. **Values can range from 0.256GB to
+  10000GB.**» La stessa pagina documenta inoltre, per l'autenticazione interna:
+  «`--keyFile` implies `--auth`».
+- **Riserve:** il valore `0.25` che il progetto aveva scelto per la cache **è sotto il
+  minimo dichiarato**. Onestà sulla forza della fonte: la frase compare dentro la voce
+  `--wiredTigerCacheSizeGB` ma in un periodo che parla di `--wiredTigerCacheSizePct`, quindi
+  non è sintatticamente certo che il minimo sia normativo per l'opzione in GB — ragione in
+  più per la verifica empirica. Il tipo dell'opzione (intero o frazionario) e il suo default
+  non sono pubblicati: la pagina `reference/configuration-options` viene servita troncata
+  prima delle Storage Options.
+- **Usata da:** ADR-0004, ADR-0005
+
+<a id="s-003"></a>
+### S-003 — Docker Docs: Define services in Docker Compose
+
+- **URL:** https://docs.docker.com/reference/compose-file/services/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** Compose Specification (nessun numero di versione sulla pagina)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** «`mem_limit` configures a limit on the amount of memory a container can
+  allocate, set as a string expressing a byte value»; «`cpus` define the number of
+  (potentially virtual) CPUs to allocate to service containers. This is a fractional number.
+  `0.000` means no limit». Le unità ammesse sono `b`, `k`/`kb`, `m`/`mb`, `g`/`gb`. Sul
+  reperimento dell'immagine: «If the image does not exist on the platform, Compose attempts
+  to pull it based on the `pull_policy`». Il digest è una forma valida di riferimento:
+  «must follow the OCI addressable image format, as
+  `[<registry>/][<project>/]<image>[:<tag>|@<digest>]`».
+- **Riserve:** due punti che davamo per acquisiti non sono scritti. Primo, la pagina **non
+  dice** che questi attributi siano applicati da `docker compose` fuori da Swarm: la parola
+  «Swarm» compare una sola volta nell'intera pagina, a proposito di `ports.mode`. Secondo, e
+  controintuitivo, la documentazione **non** presenta la sintassi breve come alternativa a
+  `deploy`, ma ne impone la coerenza: «When set, `mem_limit` must be consistent with the
+  `limits.memory` attribute in the Deploy Specification». La narrazione «usa `mem_limit`
+  *invece di* `deploy`» non è sostenuta dalla fonte. Nota favorevole: nessun marcatore di
+  deprecazione su `mem_limit` o `cpus` — l'ipotesi che fossero attributi legacy è falsa.
+- **Usata da:** ADR-0004, ADR-0013, ADR-0018
+
+<a id="s-004"></a>
+### S-004 — Docker Docs: Compose Deploy Specification
+
+- **URL:** https://docs.docker.com/reference/compose-file/deploy/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** nessuna indicata
+- **Consultata:** 2026-08-25
+- **Verdetto:** non trovato
+- **Cosa afferma:** «Deploy is an optional part of the Compose Specification. It provides a
+  set of deployment specifications for managing the behavior of containers across different
+  environments.» I vincoli sono espressi in termini astratti di piattaforma: «`limits`: The
+  platform must prevent the container from allocating more resources.»
+- **Riserve:** è il risultato più importante della verifica su Docker. Nel corpo
+  dell'articolo (303 righe di sorgente Markdown) i termini «Swarm», «ignored», «not
+  supported» e «docker compose up» hanno **zero occorrenze**; le occorrenze di «swarm»
+  nell'HTML stanno tutte nella barra di navigazione. Non esiste alcun elenco di attributi
+  `deploy` ignorati fuori da Swarm. La frase storica che lo affermava apparteneva al
+  riferimento del formato v3, oggi ritirato: «The legacy versions of the Compose file
+  reference has moved to the V1 branch of the Compose repository. They are no longer being
+  actively maintained.» Conseguenza: **la documentazione odierna non conferma né smentisce**
+  che i limiti sotto `deploy` siano applicati da `docker compose up`. Qualunque affermazione
+  in merito va presentata come verifica empirica — `docker inspect` sui campi
+  `HostConfig.Memory` e `HostConfig.NanoCpus` — non come citazione.
+- **Usata da:** ADR-0013
+
+<a id="s-005"></a>
+### S-005 — MongoDB Manual: Deploy Self-Managed Replica Set With Keyfile Authentication
+
+- **URL:** https://www.mongodb.com/docs/manual/tutorial/deploy-replica-set-with-keyfile-access-control/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Self-Managed Deployments 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** «On UNIX systems, the keyfile must not have group or world permissions.
+  On Windows systems, keyfile permissions are not checked.» e «Ensure that the user running
+  the `mongod` instances is the owner of the file and can access the keyfile». Sulla chiave:
+  «A key's length must be between 6 and 1024 characters and may only contain characters in
+  the base64 set. All members of the replica set must share at least one common key»,
+  generata con `openssl rand -base64 756 > <path-to-keyfile>`. L'esecuzione con `--keyFile`
+  «enforces both Self-Managed Internal/Membership Authentication and Role-Based Access
+  Control».
+- **Riserve:** l'esempio ufficiale usa **solo** `chmod 400`; `600` non compare in nessun
+  punto. Dire «400 o 600» è una deduzione corretta ma non una citazione. Anche
+  l'affermazione «altrimenti mongod rifiuta di avviarsi» **non è scritta**: la pagina pone
+  il requisito ma non descrive il comportamento in caso di violazione, e su Windows dichiara
+  che i permessi non vengono controllati affatto. Avvertenza da anticipare al pubblico:
+  «Use keyfiles only for testing and development environments because of their limited
+  manageability and cryptographic strength. For production environments, use X.509
+  certificates».
+- **Usata da:** ADR-0005, ADR-0014
+
+<a id="s-006"></a>
+### S-006 — MongoDB Manual: Localhost Exception in Self-Managed Deployments
+
+- **URL:** https://www.mongodb.com/docs/manual/core/localhost-exception/ (citazioni dalla variante `localhost-exception.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Self-Managed Deployments 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** «On a `mongod` instance, the localhost exception only applies when there
+  are **no users or roles** created in the MongoDB instance», e decade con «Run the
+  `createUser` command or `db.createUser()` method. This ends the localhost exception». In
+  cluster sharded: «In a sharded cluster, the localhost exception applies to each shard
+  individually as well as to the cluster as a whole», con l'obbligo di impedire comunque
+  l'accesso non autorizzato ai singoli shard. Operazioni ammesse sotto eccezione:
+  `createUser`, `createRole`, `grantRole` verso sistemi esterni, `replSetInitiate`,
+  `replSetGetStatus`, `replSetReconfig`, e su mongos `addShard` «if the cluster is hosted on
+  `localhost`».
+- **Riserve:** il vincolo che tutti danno per ovvio — la connessione deve arrivare da
+  `127.0.0.1`/`::1` — **non è enunciato in nessuna fonte primaria trovata**. Le stringhe
+  `127.0.0.1`, `::1`, «loopback», «same host» non compaiono nella pagina letta
+  integralmente, né nella voce `enableLocalhostAuthBypass` di `reference/parameters`. Se lo
+  si afferma, va qualificato come comportamento noto, non come citazione. Correzione
+  all'assunzione di progetto: l'eccezione decade anche con `createRole`, e non si attiva
+  affatto se esiste già un ruolo — perimetro più stretto di quello che avevamo scritto. I
+  config server non sono menzionati.
+- **Usata da:** ADR-0005
+
+<a id="s-007"></a>
+### S-007 — MongoDB Manual: Connection String Options
+
+- **URL:** https://www.mongodb.com/docs/manual/reference/connection-string-options/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Database Manual 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** su `directConnection` — «Specifies whether the client connects directly
+  to the `host[:port]` in the connection URI: `true`: The client sends operations only to
+  the specified host and does not attempt to discover other replica set members.; `false`:
+  The client attempts to discover all servers in the replica set, and sends operations to
+  the primary member. This is the default value.» Su `replicaSet`: «When connecting to a
+  replica set, provide a seed list of the replica set members in the `host[:port]`
+  component.» La pagina contiene un avviso specifico per Docker, che descrive esattamente la
+  trappola del nostro lab: «When a replica set runs in Docker, it might expose only one
+  MongoDB endpoint. In this case, the replica set is not discoverable, and specifying
+  `directConnection=false` can prevent your application from connecting to it. In a test or
+  development environment, you can connect to the replica set by specifying
+  `directConnection=true` in your connection URI. In a production environment, we recommend
+  configuring the cluster to make each MongoDB instance accessible outside of the Docker
+  virtual network.»
+- **Riserve:** l'URL che il progetto citava, `reference/connection-string/`, **non contiene
+  più** la descrizione delle opzioni: è diventato una pagina di ingresso con selettore. Chi
+  fosse andato a verificare non avrebbe trovato nulla. Inoltre la pagina dice «attempts to
+  discover all servers in the replica set» ma **non** dice che il driver usi i nomi host
+  memorizzati nella configurazione del replica set: il meccanismo — la risposta a `hello`
+  che restituisce `members[n].host` — non è enunciato qui.
+- **Usata da:** ADR-0012
+
+<a id="s-008"></a>
+### S-008 — MongoDB Manual: Sharded Cluster Components
+
+- **URL:** https://www.mongodb.com/docs/manual/core/sharded-cluster-components/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Database Manual 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** «shard: Each shard contains a subset of the sharded data. **Each shard
+  must be deployed as a replica set.**» e «config servers: Config servers store metadata and
+  configuration settings for the cluster. **Config servers must be deployed as a replica set
+  (CSRS).**» Sul numero minimo: «Sharding requires at least two shards to distribute sharded
+  data.» Novità 8.0 utile a un lab con poca RAM: «A cluster requires a config server, but it
+  can be a config shard instead of a dedicated config server. Using a config shard reduces
+  the number of nodes required and can simplify your deployment.» Avvertenza: «Use the test
+  cluster architecture for testing and development only.»
+- **Riserve:** questa pagina **non dice nulla** sui replica set a un solo membro — non
+  nomina mai «single-member». La sezione «Development Configuration» elenca «A single shard
+  replica set», dove «single shard» significa *un solo shard*, non *un solo membro*. La
+  risposta esiste ed è favorevole al lab, ma sta su [S-024](#s-024): è quella la fonte da
+  citare.
+- **Usata da:** ADR-0010
+
+<a id="s-009"></a>
+### S-009 — Docker Hub: immagine ufficiale `mongo`
+
+- **URL:** https://hub.docker.com/_/mongo (testo mantenuto in `docker-library/docs`, directory `mongo/`)
+- **Editore:** Docker, Inc. — Docker Official Images
+- **Versione documentata:** snapshot al 2026-08-25; tag `8.0.29`/`8.0` su base Ubuntu Noble
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** «These variables, used in conjunction, create a new user and set that
+  user's password. This user is created in the `admin` authentication database and given the
+  role of `root`, which is a "superuser" role.» Sull'inizializzazione: «Do note that none of
+  the variables below will have any effect if you start the container with a data directory
+  that already contains a database» e «When a container is started for the first time it
+  will execute files with extensions `.sh` and `.js` that are found in
+  `/docker-entrypoint-initdb.d`». Architetture dichiarate: «Supported architectures:
+  `amd64`, `arm64v8`, `windows-amd64`» — la presenza di `linux/arm64/v8` nel manifest del tag
+  `8.0` è stata confermata sull'API di Docker Hub.
+- **Riserve:** la pagina **non copre il punto che ci serve davvero**. Né `--replSet` né
+  `--keyFile` vi compaiono: la replicazione è liquidata con un rimando al manuale. Non
+  descrive la fase di mongod temporaneo — la parola «temporary» è assente — e non pubblica
+  UID e GID. Per questi tre punti si vedano [S-022](#s-022) e [S-023](#s-023), che sono
+  **codice sorgente, non prosa documentale**: vanno citati come tali.
+- **Usata da:** ADR-0008
+
+<a id="s-010"></a>
+### S-010 — PyMongo: `monitoring` — Tools for monitoring driver events
+
+- **URL:** https://pymongo.readthedocs.io/en/stable/api/pymongo/monitoring.html
+- **Editore:** MongoDB, Inc. — documentazione PyMongo su Read the Docs
+- **Versione documentata:** PyMongo 4.17.0
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** cinque classi astratte di listener — `CommandListener`, `ServerListener`,
+  `ServerHeartbeatListener`, `TopologyListener`, `ConnectionPoolListener` — registrabili
+  globalmente o per singolo client: «Use `register()` to register global listeners for
+  specific events», con la forma per client `MongoClient(event_listeners=[CommandLogger()])`.
+  Gli eventi che servono a cronometrare un failover: `ServerDescriptionChangedEvent`
+  («Published when server description changes»), `ServerHeartbeatFailedEvent` — il momento in
+  cui il client si accorge della caduta — e `TopologyDescriptionChangedEvent` («Published
+  when the topology description changes»). Tutte le classi sono «Added in version 3.3».
+- **Riserve:** la documentazione afferma **l'opposto** di quanto il progetto assumeva sui
+  thread: «Events are delivered synchronously. Application threads block waiting for event
+  handlers (e.g. `started()`) to return. Care must be taken to ensure that your event
+  handlers are efficient enough to not adversely affect overall application performance.» Un
+  handler lento non rallenta solo la UI: rallenta il driver, e falsa proprio le misure di
+  failover che la demo vuole mostrare. Ulteriore avvertenza se si registrano i comandi: «The
+  command documents published through this API are not copies.»
+- **Usata da:** ADR-0006, ADR-0019
+
+<a id="s-011"></a>
+### S-011 — MongoDB Database Tools: `mongodump`
+
+- **URL:** https://www.mongodb.com/docs/database-tools/mongodump/
+- **Editore:** MongoDB, Inc. — MongoDB Database Tools (prodotto distinto dal server)
+- **Versione documentata:** Database Tools ≥ 100.18.0 (marcatori interni «New in version 100.3.0», «Starting in Database Tools 100.18.0»)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** `--oplog` «Creates a file named `oplog.bson` as part of the `mongodump`
+  output. The `oplog.bson` file, located in the top level of the output directory, contains
+  oplog entries that occur during the `mongodump` operation.» Ambito: «`--oplog` only works
+  against nodes that maintain an oplog. This includes all members of a replica set», e il
+  divieto netto «**You can't run `mongodump` with `--oplog` on a sharded cluster.**» Senza
+  l'opzione: «if there are write operations during the dump operation, the dump will not
+  reflect a single moment in time». `--readPreference=secondary` permette di scaricare da un
+  secondario, e «the command-line `--readPreference` overrides the read preference specified
+  in the URI string».
+- **Riserve:** limitazione operativa che condiziona il copione della demo: `--oplog`
+  **fallisce** se combinato con `--db`, `--collection`, `--dumpDbUsersAndRoles` o `--query`
+  — «To use `mongodump` with `--oplog`, you must create a full dump of a replica set
+  member» — e fallisce se durante il dump un client esegue `renameCollection`, `$out`,
+  `mapReduce`, operazioni su utenti o ruoli, o `setDefaultRWConcern`. Le espressioni «point
+  in time» e «does not guarantee» non compaiono: il paradosso dello standalone — senza oplog
+  `--oplog` non è utilizzabile, quindi il dump non può essere coerente a un istante — è vero
+  ma **non è scritto**.
+- **Usata da:** ADR-0022
+
+<a id="s-012"></a>
+### S-012 — Docker Docs: `depends_on`
+
+- **URL:** https://docs.docker.com/reference/compose-file/services/#depends_on
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** Compose Specification; i singoli attributi sono datati alle release Compose 2.17.0 e 2.20.0
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** la forma lunga ammette esattamente tre condizioni — `service_started`
+  («An equivalent of the short syntax described previously»), `service_healthy`
+  («Specifies that a dependency is expected to be "healthy" (as indicated by `healthcheck`)
+  before starting a dependent service») e `service_completed_successfully` («Specifies that
+  a dependency is expected to run to successful completion before starting a dependent
+  service»). Il contrasto fra le due forme è esplicito e citabile: «With short syntax,
+  Compose does not wait for dependency services to be "healthy" before starting a dependent
+  service» contro «Compose waits for healthchecks to pass on dependencies marked with
+  `service_healthy`». Esistono inoltre `restart` (booleano, Compose 2.17.0) e `required`
+  («When set to `false` Compose only warns you when the dependency service isn't started or
+  available», default `true`, Compose 2.20.0).
+- **Riserve:** nessuna. È l'unica fonte Docker confermata senza riserve.
+- **Usata da:** ADR-0023
+
+<a id="s-013"></a>
+### S-013 — testcontainers-python
+
+- **URL:** https://testcontainers-python.readthedocs.io/en/latest/ e https://testcontainers-python.readthedocs.io/en/latest/modules/mongodb/README.html
+- **Editore:** Sergey Pirogov e i contributori Testcontainers Python, su Read the Docs
+- **Versione documentata:** testcontainers 2.0.0
+- **Consultata:** 2026-08-25
+- **Verdetto:** contraddice
+- **Cosa afferma:** «class `MongoDbContainer`(image: str = 'mongo:latest', port: int = 27017,
+  username: str | None = None, password: str | None = None, dbname: str | None = None,
+  **kwargs) — Mongo document-based database container.» I parametri sono esattamente questi
+  cinque.
+- **Riserve:** il modulo **non supporta i replica set**. Le stringhe «replica», «replSet» e
+  «rs.initiate» non compaiono in nessun punto della pagina, e il sorgente
+  (`src/testcontainers/community/mongodb/__init__.py`) imposta solo
+  `MONGO_INITDB_ROOT_USERNAME`, `MONGO_INITDB_ROOT_PASSWORD` e `MONGO_DB`, attendendo la
+  stringa di log `waiting for connections`: **avvia un'istanza standalone**. Per una demo di
+  failover il componente non serve. L'alternativa interna alla libreria, la classe
+  `DockerCompose`, **esiste nel codice** (`src/testcontainers/compose/compose.py`) ma ha zero
+  occorrenze nell'indice, nella pagina Core e nel `genindex` della documentazione
+  pubblicata: costruirci sopra significa dipendere da un'API non documentata. Aggravante: il
+  sito Read the Docs descrive un layout di pacchetti superato rispetto al repository, che
+  punta a un nuovo sito `python.testcontainers.org` non ancora raggiungibile alla data di
+  consultazione. Il vecchio percorso `testcontainers.mongodb` è già uno shim che avverte
+  «testcontainers.mongodb is deprecated, use testcontainers.community.mongodb instead».
+- **Usata da:** ADR-0011, ADR-0020
+
+<a id="s-014"></a>
+### S-014 — MongoDB Resources: Come configurare un cluster MongoDB
+
+- **URL:** https://www.mongodb.com/it-it/resources/products/fundamentals/mongodb-cluster-setup
+- **Editore:** MongoDB, Inc. — sezione `/resources/products/fundamentals/`, **non** `/docs/`
+- **Versione documentata:** nessuna. Pagina senza numero di versione e senza data di pubblicazione o aggiornamento
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** «Un replica set di MongoDB è un gruppo di uno o più server che contiene
+  una copia esatta dei dati. Sebbene sia tecnicamente possibile avere uno o due nodi, il
+  minimo consigliato è tre.» Introduce i due significati di «cluster», poi passa quasi
+  interamente alla creazione di un cluster su MongoDB Atlas.
+- **Riserve:** **non è utilizzabile come riferimento normativo.** È materiale divulgativo:
+  nessun comando, nessun file di configurazione, nessun esempio di codice; l'unica procedura
+  è un percorso di clic a cinque passi nella interfaccia di Atlas, fra due inviti alla prova
+  gratuita. Senza versione e senza data, non può sostenere affermazioni versionate. Resta
+  utile come **raccolta di collegamenti** verso il manuale, dove risiedono le affermazioni
+  citabili. La frase sul minimo di tre nodi è coerente con [S-008](#s-008), ma se qualcuno
+  dal pubblico contesta il replica set a nodo singolo la difesa va costruita su
+  [S-024](#s-024), non su questa pagina.
+- **Usata da:** ADR-0024
+
+<a id="s-015"></a>
+### S-015 — Docker Docs: Using profiles with Compose
+
+- **URL:** https://docs.docker.com/compose/how-tos/profiles/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** nessuna indicata
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** «Services without a `profiles` attribute are always enabled.»
+  L'attivazione avviene con «the `--profile` command-line option or [...] the
+  `COMPOSE_PROFILES` environment variable»; «If you want to enable all profiles at the same
+  time, you can run `docker compose --profile "*"`». Un servizio con profilo può essere
+  avviato nominandolo esplicitamente: «When you explicitly target a service on the command
+  line that has one or more profiles assigned, you do not need to enable the profile manually
+  as Compose runs that service regardless of whether its profile is activated», e in tal caso
+  «Only the targeted service (and any of its declared dependencies via `depends_on`) is
+  started». I nomi dei profili seguono «the regex format of `[a-zA-Z0-9][a-zA-Z0-9_.-]+`».
+- **Riserve:** la documentazione copre **una sola direzione** della relazione con
+  `depends_on`: servizio con profilo → sue dipendenze. Il caso inverso — un servizio *senza*
+  profilo che dichiara `depends_on` verso un servizio *con* profilo non attivo — non è
+  trattato né qui né nella voce `profiles` del riferimento dei servizi. Se il lab vi si
+  appoggia, va verificato empiricamente e non citato come documentato.
+- **Usata da:** ADR-0010
+
+<a id="s-016"></a>
+### S-016 — Docker Docs: Version and name top-level elements
+
+- **URL:** https://docs.docker.com/reference/compose-file/version-and-name/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** Compose Specification
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** il titolo di sezione è «Version top-level element (**obsolete**)», e
+  l'avviso è esplicito: «The top-level `version` property is defined by the Compose
+  Specification for backward compatibility. It is only informative and you'll receive a
+  warning message that it is obsolete if used.» Inoltre: «Compose always uses the most recent
+  schema to validate the Compose file, regardless of the `version` field.»
+- **Riserve:** l'URL che il progetto citava, `reference/compose-file/`, è una pagina indice
+  di ventitré righe che **non nomina mai** la chiave `version`: l'assunzione non vi era
+  verificabile. Correzione terminologica per le slide: la documentazione dice «obsolete», non
+  «deprecated», e dice «only informative» più «warning message», non «ignored». La resa
+  fedele è «obsoleto, puramente informativo, produce un avviso; lo schema di validazione
+  usato è comunque il più recente».
+- **Usata da:** ADR-0001
+
+<a id="s-017"></a>
+### S-017 — Docker Docs: Specify a project name
+
+- **URL:** https://docs.docker.com/compose/how-tos/project-name/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** nessuna indicata
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** «Compose uses a project name to isolate environments from each other», e
+  fra i casi d'uso «On a shared or development host: Avoid interference between different
+  projects that might share the same service names». La precedenza è enumerata: «The
+  precedence order for each method, from highest to lowest, is as follows: 1. The `-p`
+  command line flag. 2. The COMPOSE_PROJECT_NAME environment variable. 3. The top-level
+  `name:` attribute in your Compose file [...] 4. The base name of the project directory
+  containing your Compose file [...] 5. The base name of the current directory if no Compose
+  file is specified.» Vincolo sui nomi: «Project names must contain only lowercase letters,
+  decimal digits, dashes, and underscores, and must begin with a lowercase letter or decimal
+  digit.»
+- **Riserve:** la pagina **non enumera mai** reti, volumi e container come le risorse
+  isolate: dice genericamente «isolate environments from each other». L'affermazione «isola
+  reti, volumi e container», che il progetto dava per acquisita, è più specifica di quanto la
+  fonte sostenga. Inoltre i livelli di precedenza sono **cinque**, non quattro.
+- **Usata da:** ADR-0003
+
+<a id="s-018"></a>
+### S-018 — Rich: Live Display
+
+- **URL:** https://rich.readthedocs.io/en/stable/live.html
+- **Editore:** Will McGugan / Textualize, su Read the Docs
+- **Versione documentata:** Rich 14.1.0
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** «By default, the live display will refresh 4 times a second. You can set
+  the refresh rate with the `refresh_per_second` argument on the Live constructor», con la
+  raccomandazione «You should set this to something lower than 4 if you know your updates
+  will not be that frequent or higher for a smoother feeling». Stampare mentre il display è
+  attivo è previsto, in due modi: «The Live class will create an internal Console object
+  which you can access via `live.console`. If you print or log to this console, the output
+  will be displayed above the live display», e «To avoid breaking the live display visuals,
+  Rich will redirect `stdout` and `stderr` so that you can use the builtin `print`
+  statement». Sul nidificare due display: «If you create a `Live` instance within the context
+  of an existing `Live` instance, then the content of the inner `Live` will be displayed
+  below the outer `Live`. Prior to version 14.0.0 this would have resulted in a `LiveError`
+  exception.»
+- **Riserve:** l'assunzione di progetto sui vincoli di thread è **infondata**: la parola
+  «thread» non compare **nemmeno una volta**, né in questa pagina né nell'API reference
+  `reference/live.html`; non compaiono neppure «concurrent» o «lock». Non esiste alcuna
+  avvertenza documentata sull'aggiornamento di `Live` da più thread, né in un senso né
+  nell'altro. Se la domanda arriva dal pubblico, la risposta onesta è che la documentazione
+  tace.
+- **Usata da:** ADR-0007, ADR-0019
+
+<a id="s-019"></a>
+### S-019 — Docker Docs: `docker compose up`
+
+- **URL:** https://docs.docker.com/reference/cli/docker/compose/up/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** riferimento CLI Compose v2
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** l'opzione `--pull` ha valore predefinito `policy` e accetta
+  `"always"|"missing"|"never"`. I valori di `pull_policy` documentati sul riferimento dei
+  servizi sono: `always` («Compose always pulls the image from the registry»), **`never`
+  («Compose doesn't pull the image from a registry and relies on the platform cached image.
+  If there is no cached image, a failure is reported»)**, `missing` («Compose pulls the image
+  only if it's not available in the platform cache», predefinito), `build`, `daily`,
+  `weekly`, `every_<duration>`.
+- **Riserve:** tre punti pesano su un lab che deve funzionare senza rete. Primo: **la parola
+  «offline» non compare** su nessuna delle pagine consultate — non esiste una modalità
+  offline globale documentata di Compose; il solo meccanismo con una frase esplicita sul non
+  contattare il registry è `pull_policy: never`. Secondo, la trappola: «The `latest` tag is
+  always pulled even when the `missing` pull policy is used». Terzo, la documentazione Docker
+  è internamente incoerente sui valori ammessi — `up` ne elenca tre, `create` ne elenca
+  quattro aggiungendo `build`, e `docker compose pull` usa una flag diversa, `--policy`, con
+  due soli valori. Infine: nessuna pagina ufficiale dice se `compose up` contatti il registry
+  per un'immagine **pinnata a digest e già presente in locale**. La deduzione è ragionevole
+  ma non è una citazione: **il digest garantisce *quale* immagine, non *se* si va in rete**.
+- **Usata da:** ADR-0009, ADR-0018
+
+<a id="s-020"></a>
+### S-020 — MongoDB Manual: Change Hostnames in a Self-Managed Replica Set
+
+- **URL:** https://www.mongodb.com/docs/manual/tutorial/change-hostnames-in-a-replica-set/ (citazioni dalla variante `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Database Manual 8.3
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** i nomi host risiedono nella configurazione del replica set — «For most
+  replica sets, the hostnames in the `members[n].host` field never change» — e si cambiano
+  con `rs.reconfig()`, nella sequenza `cfg = rs.conf()` / `cfg.members[1].host =
+  "mongodb1.example.net:27017"` / `rs.reconfig(cfg)`. Raccomandazione esplicita: «Always use
+  resolvable hostnames for the value of the `members[n].host` field in the replica set
+  configuration to avoid confusion and complexity». Vincolo duro e versionato, decisivo per
+  un lab in Docker: «**Starting in MongoDB 5.0, nodes that are only configured with an IP
+  address fail startup validation and do not start.**»
+- **Riserve:** la pagina dimostra che gli host stanno in configurazione, ma **non enuncia**
+  né che siano i nomi con cui i membri si raggiungono fra loro, né che i client li usino per
+  connettersi. Su quest'ultimo punto esiste solo evidenza operativa indiretta: «you must
+  configure your applications to connect to the replica set at both the old and new
+  locations». Il nesso è deducibile, non citabile.
+- **Usata da:** ADR-0021
+
+<a id="s-021"></a>
+### S-021 — GitHub Docs: About large files on GitHub
+
+- **URL:** https://docs.github.com/en/repositories/working-with-files/managing-large-files/about-large-files-on-github
+- **Editore:** GitHub, Inc.
+- **Versione documentata:** GitHub.com, piani Free, Pro e Team
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** «We recommend repositories remain small, ideally less than 1 GB, and less
+  than 5 GB is strongly recommended. Smaller repositories are faster to clone and easier to
+  work with and maintain.» Sui singoli file: «If you attempt to add or update a file that is
+  larger than 50 MiB, you will receive a warning from Git» e «GitHub blocks files larger than
+  100 MiB. To track files beyond this limit, you must use Git Large File Storage (Git LFS).»
+  Limite ulteriore: «If you add a file to a repository via a browser, the file can be no
+  larger than 25 MiB.»
+- **Riserve:** le unità sono **MiB**, non MB: scrivere «100 MB» in slide è impreciso ed è
+  esattamente il dettaglio che viene fatto notare. I valori valgono per GitHub.com; su
+  GitHub Enterprise Server «a site administrator can configure a different limit».
+- **Usata da:** ADR-0016
+
+<a id="s-022"></a>
+### S-022 — `docker-library/mongo`: `8.0/docker-entrypoint.sh`
+
+- **URL:** https://github.com/docker-library/mongo/blob/7c24b37b8e53a41b56c450b653c582ff7c3f7fcb/8.0/docker-entrypoint.sh
+- **Editore:** Docker Official Images — repository `docker-library/mongo`
+- **Versione documentata:** branch `8.0`, commit `7c24b37b8e53a41b56c450b653c582ff7c3f7fcb`, lo stesso referenziato dal README per il tag `8.0.29-noble`
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** **è codice sorgente, non documentazione** — va citato come tale. Un
+  mongod temporaneo viene avviato con `--fork`, forzato su `--bind_ip 127.0.0.1 --port
+  27017`, e arrestato con `--shutdown` prima di `exec "$@"`. I commenti nel sorgente sono
+  espliciti: `# remove "--auth" and "--replSet" for our initial startup` e `# "keyFile
+  implies security.authorization"`. Il comportamento esatto sui tre flag: `--auth` e
+  `--keyFile` sono **sempre** rimossi dal mongod temporaneo; `--replSet` è rimosso **solo
+  se entrambe** le variabili root sono presenti. La condizione di inizializzazione non è
+  «directory vuota» ma la presenza di uno fra `$dbPath/WiredTiger`, `$dbPath/journal`,
+  `$dbPath/local.0`, `$dbPath/storage.bson`. Se manca una sola delle due variabili root,
+  l'entrypoint termina con `error: missing 'MONGO_INITDB_ROOT_USERNAME' or
+  'MONGO_INITDB_ROOT_PASSWORD'`.
+- **Riserve:** conseguenza pratica **non documentata da nessuna parte**: passando
+  `MONGO_INITDB_ROOT_USERNAME` insieme a `--replSet` e `--keyFile`, il mongod di
+  inizializzazione parte standalone, senza replica set e senza autenticazione; l'utente root
+  viene creato in quel contesto; poi il processo definitivo riparte con `--replSet` e
+  `--keyFile`. **`rs.initiate()` non viene mai eseguito dall'immagine: resta a nostro
+  carico.** Trattandosi di sorgente, l'API non ha garanzie di stabilità fra versioni: la
+  citazione deve indicare commit e riga.
+- **Usata da:** ADR-0005
+
+<a id="s-023"></a>
+### S-023 — `docker-library/mongo`: `8.0/Dockerfile`
+
+- **URL:** https://github.com/docker-library/mongo/blob/7c24b37b8e53a41b56c450b653c582ff7c3f7fcb/8.0/Dockerfile
+- **Editore:** Docker Official Images — repository `docker-library/mongo`
+- **Versione documentata:** MongoDB 8.0 su base Ubuntu Noble, stesso commit di [S-022](#s-022)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** `groupadd --gid 999 --system mongodb;` e `useradd --uid 999 --system
+  --gid mongodb --home-dir /data/db mongodb;`. Utente e gruppo `mongodb` hanno entrambi
+  identificativo **999**; `/data/db` e `/data/configdb` appartengono a `mongodb:mongodb`. La
+  scelta è motivata nel sorgente: «add our user and group first to make sure their IDs get
+  assigned consistently, regardless of whatever dependencies get added».
+- **Riserve:** il valore **non è pubblicato su Docker Hub**: è vero, ma leggibile solo dal
+  Dockerfile. È il numero da usare per un eventuale `chown` su bind mount — ed è la ragione
+  per cui il keyfile sta in un volume nominato.
+- **Usata da:** ADR-0014
+
+<a id="s-024"></a>
+### S-024 — MongoDB Manual: Deploy a Self-Managed Sharded Cluster
+
+- **URL:** https://www.mongodb.com/docs/manual/tutorial/deploy-shard-cluster/ (citazioni dalla variante `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Database Manual 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** è la fonte che autorizza esplicitamente il replica set a un solo membro,
+  e lo fa **due volte**. Per i config server: «For a production deployment, deploy a config
+  server replica set with at least three members. **For testing purposes, you can create a
+  single-member replica set.**» Per gli shard: «For a production deployment, use a replica
+  set with at least three members. **For testing purposes, you can create a single-member
+  replica set.**»
+- **Riserve:** l'autorizzazione è circoscritta agli scopi di test, e va presentata come tale.
+  Non è la pagina che si troverebbe cercando i componenti di uno sharded cluster: chi
+  verifica su [S-008](#s-008) non trova nulla in merito.
+- **Usata da:** ADR-0010
+
+<a id="s-025"></a>
+### S-025 — MongoDB Manual: Config Servers
+
+- **URL:** https://www.mongodb.com/docs/manual/core/sharded-cluster-config-servers/ (citazioni dalla variante `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Database Manual 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** vincoli sul replica set dei config server, da opporre a chi propone un
+  arbitro per risparmiare risorse: «Must have zero arbiters. / Must have no delayed members.
+  / Must build indexes (i.e. no member should have `members[n].buildIndexes` setting set to
+  false).» Vincolo sui nomi: «The config server replica set must not use the same name as any
+  of the shard replica sets.»
+- **Riserve:** nessuna.
+- **Usata da:** ADR-0010
+
+<a id="s-026"></a>
+### S-026 — MongoDB Manual: `hostInfo`
+
+- **URL:** https://www.mongodb.com/docs/manual/reference/command/hostInfo/ (citazioni dalla variante `hostInfo.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Database Manual 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** contraddice
+- **Cosa afferma:** «For example, running in a container may impose memory limits that are
+  lower than the total system memory. This memory limit, rather than the total system memory,
+  is used as the maximum RAM available to calculate WiredTiger internal cache.»
+- **Riserve:** questa frase è **incompatibile** con [S-001](#s-001), che sullo stesso manuale
+  e alla stessa versione afferma che WiredTiger «may not account for the memory limits of the
+  specific container in certain cases» e prescrive di impostare la cache a mano. Non è una
+  divergenza fra versioni: **le due pagine correnti si contraddicono**. Conseguenza pratica:
+  non affermare sul palco che il rilevamento del limite avviene automaticamente; mostrarlo
+  con `db.hostInfo()` in demo, e impostare comunque la cache in modo esplicito.
+- **Usata da:** ADR-0004
+
+---
+
+## Verifiche empiriche
+
+<a id="v-001"></a>
+### V-001 — Apple `container` non espone un subcomando `compose`
+
+- **Comando:** `container --help` · `container compose --help`
+- **Ambiente:** macOS 26.6.2, Apple `container` 1.2.2
+- **Esito:** nessun subcomando `compose`; il secondo comando termina con errore.
+- **Data:** 2026-08-24
+- **Usata da:** ADR-0002
+
+<a id="v-002"></a>
+### V-002 — Inventario dell'ambiente di sviluppo e di palco
+
+- **Comandi:** `docker version` · `docker info` · `sysctl hw.memsize`
+- **Esito:** host macOS 26.6.2 arm64, 8 CPU, 16 GiB; VM Docker 7,65 GiB e 8 CPU;
+  Docker 29.7.2 con Compose v5.4.0, contesto `desktop-linux`.
+- **Data:** 2026-08-24
+- **Usata da:** ADR-0008, ADR-0009, ADR-0010
