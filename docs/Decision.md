@@ -833,21 +833,27 @@ più di un punto sono le uniche fonti esistenti).
 container non stanno su una VM Docker da 7,65 GiB [V-002](Sources.md#v-002). Quella misura
 però non era un limite dell'host, che di GiB ne ha 16: era il valore che Docker Desktop si era
 assegnato da solo. Il profilo `completo` risultava così previsto come «eseguibile su una
-macchina capiente» senza che una macchina capiente esistesse — e senza poterlo eseguire non si
-possono registrare i filmati di riserva dell'architettura vera, quella a tre membri per
-componente.
+macchina capiente» senza che una macchina capiente esistesse. Un profilo dichiarato nel file
+Compose che nessuno ha mai visto partire non è documentazione: è una promessa. E il suo
+destinatario non è il palco, è chi clona il repository per studiare le architetture.
 
 **Decisione:** portare a 12 GiB la memoria assegnata alla VM Docker sulla macchina di sviluppo
 e di palco. Il profilo `completo` diventa eseguibile in locale; il profilo `palco` resta quello
 che va in scena.
 
-**Conseguenze:** i filmati di riserva del blocco sharded possono mostrare tre membri per
-componente invece di uno. All'host restano 4 GiB per macOS, le slide, il browser e la
-registrazione dello schermo: abbastanza per sviluppare e registrare quando non gira altro,
-stretti durante il talk. Per questo la scelta non tocca [ADR-0010](#adr-0010) — dal palco si
-esegue `palco`, e i 12 GiB abilitano la registrazione, non la demo dal vivo. Il `preflight`
-deve leggere la memoria effettiva della VM e avvisare quando è inferiore a quanto il profilo
-richiesto pretende, invece di lasciare che sia Compose a scoprirlo a metà avvio.
+**Conseguenze:** chi clona il repository può avviare lo sharded cluster nella sua forma
+canonica — tre membri per ogni componente — invece di limitarsi a leggerne la descrizione. Di
+riflesso, anche i filmati di riserva del blocco sharded possono mostrare quella forma. La
+ripartizione dei ruoli resta quella di [ADR-0010](#adr-0010) e la decisione non la tocca:
+`palco` è il profilo della presentazione, `completo` è il profilo dello studio, e i 12 GiB
+servono a rendere il secondo eseguibile invece che teorico. All'host ne restano 4 per macOS, le
+slide, il browser e la registrazione dello schermo: abbastanza quando non gira altro, stretti
+durante il talk — un'altra ragione per cui dal vivo si esegue `palco`. Due obblighi ne
+discendono: il `preflight` deve leggere la memoria effettiva della VM e avvisare quando è
+inferiore a quanto il profilo richiesto pretende, invece di lasciare che sia Compose a
+scoprirlo a metà avvio; e
+[`06-sviluppo/gestione-risorse-compose.md`](06-sviluppo/gestione-risorse-compose.md) deve dire
+in modo esplicito a chi serve ciascun profilo, quanto costa e con quale comando si sceglie.
 
 **Alternative scartate:** restare a 7,65 GiB e registrare il profilo `completo` altrove (non
 c'è un'altra macchina, e introdurrebbe nel repository un ambiente non riproducibile); salire
