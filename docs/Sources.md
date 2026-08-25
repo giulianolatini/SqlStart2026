@@ -867,7 +867,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   quel profilo — dove infatti non ce n'è.
 - **Verbale completo:** [`00-progetto/2026-08-25-spike-sharded.md`](00-progetto/2026-08-25-spike-sharded.md)
 - **Data:** 2026-08-25
-- **Usata da:** ADR-0026, ADR-0027
+- **Usata da:** ADR-0025, ADR-0026, ADR-0027
 
 <a id="v-007"></a>
 ### V-007 — Quali versioni di MongoDB si avviano sul kernel della VM Docker
@@ -995,4 +995,4 @@ quello libero: è la lettura più leggibile su un proiettore.
   rapporto dipende anche dall'attesa su I/O. Tutto è misurato su MongoDB 7.0.40: il minimo
   della cache e il pavimento potrebbero differire su altre versioni.
 - **Data:** 2026-08-25
-- **Usata da:** ADR-0004, ADR-0013
+- **Usata da:** ADR-0004, ADR-0013, ADR-0025

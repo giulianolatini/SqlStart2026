@@ -901,7 +901,24 @@ carico è esattamente ciò che il talk mostra).
 verifica appartiene allo spike sharded, che deve produrre il numero e, se non torna, far
 rientrare questa decisione con una che la superi.
 
-**Fonti:** [S-001](Sources.md#s-001), [V-002](Sources.md#v-002), [V-004](Sources.md#v-004)
+**Nota di verifica (2026-08-25), che scioglie la riserva:** lo spike ha eseguito il profilo
+`completo` per intero. Undici container occupano **1.356 MiB reali contro 6.144 MiB di
+`mem_limit` dichiarati**, e nella VM restano 9.021 MiB disponibili
+[V-006](Sources.md#v-006). La decisione non rientra: i 12 GiB bastano, e con margine. Il
+numero però va letto per quello che è. `mem_limit` è un tetto, non una prenotazione, e durante
+la misura il cluster era a riposo salvo gli inserimenti: il caso che consuma davvero è il
+carico concorrente che l'applicazione del talk produrrà, e quello non esiste ancora. Il margine
+va quindi considerato dimostrato per l'avvio e la topologia, non per il picco.
+
+Una correzione minore alle alternative scartate, dove si legge che il minimo della cache
+WiredTiger è `0.256` GB: il minimo imposto dal binario è `0.25`, e `0.25` configura esattamente
+256 MiB perché l'opzione è letta in GiB [V-009](Sources.md#v-009). Il corpo non viene riscritto
+e la seconda nota di revisione di [ADR-0004](#adr-0004) porta la correzione per esteso.
+L'argomento regge invariato — comprimere undici nodi verso il pavimento della cache resta
+scartato perché il comportamento sotto carico smetterebbe di essere rappresentativo — a
+cambiare è soltanto la cifra.
+
+**Fonti:** [S-001](Sources.md#s-001), [V-002](Sources.md#v-002), [V-004](Sources.md#v-004), [V-006](Sources.md#v-006), [V-009](Sources.md#v-009)
 
 ---
 

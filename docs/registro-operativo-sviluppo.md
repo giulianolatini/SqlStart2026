@@ -235,6 +235,15 @@ esattamente la promessa — e il controllo che ogni rimando con ancora risolva.
    nessun renderer li tratta come link. Quando diventerà un target dovrà saltare le
    recinzioni, altrimenti il primo effetto di un controllo nuovo è insegnare a ignorarlo. È
    il debito con cui questo branch si chiude.
+3. Il criterio di completamento numero 5 non chiedeva «lo spike ha risposto alle cinque
+   domande», chiedeva «**e [ADR-0025](Decision.md#adr-0025) registra l'esito**». Rileggendolo
+   voce per voce invece che a memoria si è visto che non lo registrava: lo spike aveva
+   misurato — 1.356 MiB reali contro 6.144 dichiarati — e l'ADR portava ancora la riserva
+   aperta, con scritto che la verifica «appartiene allo spike sharded». Il numero esisteva da
+   ore nel documento accanto e non era mai tornato indietro. La nota di verifica lo scioglie
+   adesso, e ne approfitta per correggere il `0.256` rimasto fra le alternative scartate. La
+   lezione riguarda la forma degli ADR: una riserva è un debito verso un documento, e un
+   debito che nessun controllo automatico vede si paga solo se qualcuno rilegge.
 
 **Imparato, e in evidenza perché cambia i piani: l'esito dello spike.** Il lab non gira su
 MongoDB 8. Sul kernel della VM di Docker Desktop nessuna 8.0 pubblicata si avvia, la causa è
@@ -260,7 +269,10 @@ E tre note di metodo che questo branch ha pagato per imparare.
     in cache, e `inspect` non va a prenderla. È il secondo modo usato per dimostrare la stessa
     cosa dopo la misura dei 0,15 secondi del Task 8, e serviva: `make images-verify` che esce
     `0` non distingue fra «l'ho trovata in locale» e «sono andato a scaricarla».
-24. Un branch di fondamenta si chiude bene se l'ultimo passo non trova sorprese, ed è successo
-    — ma solo perché ogni task aveva già chiuso il proprio. La verifica finale ha confermato,
-    non scoperto. Quando invece scopre, il problema non è la verifica finale: è che i task
-    prima non la facevano.
+24. L'ultimo passo doveva confermare e invece ha scoperto, due volte: un rimando morto e una
+    riserva rimasta aperta in un ADR mentre il documento che la scioglieva era già scritto.
+    Nessuna delle due è grave, ed è esattamente il punto — la verifica finale ha trovato ciò
+    che i singoli task non avevano chiuso da sé, che è il suo mestiere. A farle emergere è
+    stato un criterio di completamento scritto in anticipo e riletto voce per voce invece che
+    a memoria: «lo spike ha risposto» e «lo spike ha risposto **e l'ADR lo registra**» sono
+    due criteri diversi, e solo il secondo era scritto.
