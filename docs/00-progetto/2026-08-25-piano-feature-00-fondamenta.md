@@ -112,6 +112,7 @@ __pycache__/
 # Strumenti locali di sviluppo (non fanno parte del materiale didattico)
 .tokensave/
 .rtk/
+.serena/
 .claude/worktrees/
 
 # Spike: codice usa-e-getta, nel repository entra solo il verbale
