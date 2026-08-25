@@ -63,7 +63,9 @@ Cosa esiste alla fine del branch, e di chi è la responsabilità.
 | `Makefile` | unico punto d'ingresso; qui solo i target di fondamenta |
 | `docs/README.md` | indice della documentazione |
 | `docs/Sources.md` | fonti numerate, con collegamento inverso agli ADR |
-| `docs/Decision.md` | ADR-0001…ADR-0018 in ordine cronologico |
+| `docs/citazioni-riportare-slide.md` | sede unica delle citazioni letterali destinate alle slide |
+| `docs/00-progetto/limiti-noti.md` | confini dichiarati: dove il lab semplifica e dove la documentazione non copre |
+| `docs/Decision.md` | ADR-0001…ADR-0025 in ordine cronologico |
 | `docs/registro-operativo-sviluppo.md` | diario cronologico di sessione |
 | `docs/00-progetto/2026-08-25-spike-sharded.md` | verbale dello spike, con il Compose funzionante |
 | `docs/06-sviluppo/gestione-risorse-compose.md` | `mem_limit`/`cpus`, cache WiredTiger, cgroup |
@@ -161,13 +163,11 @@ indent_style = tab
 Il file **esiste già**: GPL-3.0, scelta alla creazione del repository. Non va toccato.
 La licenza è una prerogativa del titolare del copyright, non una scelta di questo piano.
 
-Resta aperta una domanda per il Product Owner, da porre senza cambiare nulla nel
-frattempo: il materiale è pensato per essere **copiato** dal pubblico nei propri progetti,
-e la GPL-3.0 è copyleft — chi riusa i file Compose o l'applicazione in un lavoro proprio
-eredita l'obbligo di rilasciare con la stessa licenza. Se l'intento è la massima
-diffusione, MIT o Apache-2.0 rimuovono quell'attrito; se l'intento è che le derivazioni
-restino libere, la GPL-3.0 è già la scelta giusta. In assenza di indicazione contraria,
-**resta GPL-3.0** e il `README.md` (Task 6) lo dichiara esplicitamente.
+La domanda era stata posta al Product Owner: il materiale è pensato per essere **copiato**
+dal pubblico nei propri progetti, e la GPL-3.0 è copyleft — chi riusa i file Compose o
+l'applicazione in un lavoro proprio eredita l'obbligo di rilasciare con la stessa licenza.
+**Risposta del 2026-08-25: resta GPL-3.0.** Il `README.md` (Task 6) lo dichiara
+esplicitamente. Questione chiusa.
 
 - [ ] **Passo 4: verificare che l'esclusione funzioni**
 
@@ -602,7 +602,7 @@ Messaggio: `feat: interfaccia a riga di comando di check_citations`
 
 ---
 
-## Task 4 — `docs/Decision.md`: i diciassette ADR
+## Task 4 — `docs/Decision.md`: gli ADR
 
 **File:**
 - Crea: `docs/Decision.md`
@@ -610,7 +610,44 @@ Messaggio: `feat: interfaccia a riga di comando di check_citations`
 **Interfacce:**
 - Consuma: gli identificatori di `Sources.md` (Task 2) e le regole di
   `check_citations.py` (Task 3).
-- Produce: gli ADR-0001…ADR-0017. Il Task 10 aggiunge ADR-0018.
+- Produce: gli ADR-0001…ADR-0024. Il Task 10 aggiunge ADR-0025.
+
+### Esito del Task 2: cosa cambia rispetto ai diciassette ADR iniziali
+
+La verifica delle fonti ha modificato il contenuto di questo task. Il Product Owner ha
+approvato quanto segue il **2026-08-25**; il campo `Usata da` di ogni voce di
+`Sources.md` è già allineato a questa lista, e `check_citations.py` fallirà se il Task 4
+se ne discosta.
+
+**Decisioni riformulate nella motivazione, non nel merito:**
+
+| ADR | Cosa cambia |
+|---|---|
+| ADR-0004 | la cache si imposta a mano non perché mongod legga il cgroup, ma perché la documentazione dice che *potrebbe non leggerlo* e prescrive di impostarla. Il valore passa da `0.25` a un valore ≥ `0.256 GB`, fissato dalla verifica empirica del Task 10 |
+| ADR-0009 | la garanzia offline non poggia sul digest ma su `pull_policy`: il digest stabilisce *quale* immagine, non *se* si va in rete |
+| ADR-0013 | cadono entrambe le gambe della motivazione originale — che `deploy` sia ignorato fuori da Swarm non è documentato, e la sintassi breve non è un'alternativa a `deploy` ma deve restarvi coerente. La decisione resta; la nuova motivazione è leggibilità, portabilità verso Podman ed efficacia dimostrata con `docker inspect` |
+
+**Decisione revocata:**
+
+| ADR | Stato |
+|---|---|
+| ADR-0011 | **Superata da ADR-0020.** `MongoDbContainer` avvia solo istanze standalone; la classe `DockerCompose` non è documentata |
+
+**Nuove decisioni da registrare:**
+
+| ADR | Decisione | Fonti |
+|---|---|---|
+| ADR-0018 | `pull_policy: ${PULL_POLICY:-missing}` nei file Compose, `PULL_POLICY=never` sul profilo di palco | S-003, S-019 |
+| ADR-0019 | i listener del driver depositano un evento in una `queue.Queue` e ritornano subito; il ciclo di disegno legge dalla coda sul thread principale | S-010, S-018 |
+| ADR-0020 | niente `testcontainers`: i test di integrazione girano contro gli stack Compose del repository | S-013 |
+| ADR-0021 | nomi host risolvibili ovunque, mai indirizzi IP: dalla 5.0 i nodi con solo IP non superano la validazione all'avvio | S-020 |
+| ADR-0022 | il backup a caldo si dimostra sul replica set, mai sullo sharded cluster | S-011 |
+| ADR-0023 | l'ordine di avvio si esprime con le condizioni di `depends_on` e gli healthcheck, mai con attese a tempo | S-012 |
+| ADR-0024 | gerarchia delle fonti: il materiale divulgativo di un produttore non è documentazione normativa | S-014 |
+
+**Senza fonte, per scelta dichiarata:** ADR-0015 e ADR-0017 sono decisioni organizzative e
+devono riportare `**Fonti:** nessuna (decisione organizzativa)` — la regola 4 di
+`check_citations.py` non ammette il silenzio.
 
 - [ ] **Passo 1: intestazione**
 
@@ -994,7 +1031,7 @@ il verbale.
 **File:**
 - Crea (ignorato): `spike/03-sharded/docker-compose.yml`, `spike/03-sharded/init/*`
 - Crea (versionato): `docs/00-progetto/2026-08-25-spike-sharded.md`
-- Modifica: `docs/Decision.md` (ADR-0018), `docs/Sources.md` (V-005),
+- Modifica: `docs/Decision.md` (ADR-0025), `docs/Sources.md` (V-005),
   `docs/registro-operativo-sviluppo.md`
 
 **Interfacce:**
@@ -1052,11 +1089,11 @@ raccomandazioni per `feature/03`.
 Se qualcosa non ha funzionato, il verbale lo dice. Uno spike che riporta solo successi non
 ha sondato niente.
 
-- [ ] **Passo 6: ADR-0018 con l'esito**
+- [ ] **Passo 6: ADR-0025 con l'esito**
 
 Titolo secondo il risultato, per esempio *«Catena di inizializzazione dello sharded cluster
 sotto keyfile»*. Stato Accettata. Fonti: la nuova verifica `V-005` più `S-005` e `S-008`.
-Se lo spike **contraddice** la specifica, ADR-0018 lo dichiara e segnala quale ADR
+Se lo spike **contraddice** la specifica, ADR-0025 lo dichiara e segnala quale ADR
 precedente ne risulta superato: è a questo che serve un registro cronologico.
 
 - [ ] **Passo 7: aggiornare `Sources.md` e il registro operativo, poi verificare**
@@ -1070,7 +1107,7 @@ poi copiato da qualcuno.
 
 - [ ] **Passo 9: commit**
 
-Messaggio: `docs: verbale dello spike sharded cluster e ADR-0018`
+Messaggio: `docs: verbale dello spike sharded cluster e ADR-0025`
 
 ---
 
@@ -1168,7 +1205,7 @@ Il branch è finito quando:
 3. `make images-verify` esce `0` **con la rete disattivata**.
 4. `make preflight` gira e riporta un esito comprensibile a chi non lo ha scritto.
 5. Lo spike sharded ha una risposta scritta per ciascuna delle cinque domande del Task 10,
-   e ADR-0018 registra l'esito.
+   e ADR-0025 registra l'esito.
 6. Un clone pulito è utilizzabile seguendo il solo `README.md`.
 
 Se il calendario stringe, l'unico task rinviabile è il **Task 11**: la pagina sulle risorse
