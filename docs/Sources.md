@@ -720,3 +720,20 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   Resta non misurato se undici container ci stiano davvero: quello è lo spike sharded.
 - **Data:** 2026-08-25
 - **Usata da:** ADR-0025
+
+<a id="v-005"></a>
+### V-005 — Prima esecuzione del preflight
+
+- **Comando:** `make preflight`
+- **Ambiente:** Docker 29.7.2, host macOS arm64, 2026-08-25
+- **Esito:** sette controlli superati, un avviso, nessun errore. Demone attivo su contesto
+  `desktop-linux`, `docker` risolto a `/usr/local/bin/docker` e nessun residuo in `~/.rd`,
+  VM da 11,67 GiB e 8 CPU, quindici porte del lab libere, immagini pinnate presenti.
+  L'unico avviso è l'assenza della cartella dei filmati di riserva, che diventa errore
+  bloccante dal giorno del talk.
+- **Percorsi di fallimento provati:** porta 27017 tenuta da un processo estraneo → errore e
+  uscita 1; digest guastato in `images.env` → errore e uscita 1; demone irraggiungibile
+  (`DOCKER_HOST` inesistente) → tre errori e uscita 1, con gli altri controlli comunque
+  eseguiti; data del talk simulata al passato senza filmati → l'avviso diventa errore.
+- **Data:** 2026-08-25
+- **Usata da:** ADR-0009

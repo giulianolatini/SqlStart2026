@@ -83,3 +83,12 @@ spento. Lo verifica lo spike del Task 10.
    che non ha tentato di contattare il registro, perché `docker image inspect` interroga
    soltanto il demone locale. Senza quella misura la promessa «non tocca la rete» sarebbe
    rimasta un'affermazione sul codice invece che sul comportamento.
+
+**E una dal Task 9:**
+
+9. Il preflight ha chiuso da solo una pendenza aperta il 24 agosto: `~/.rd` non esiste
+   più, il controllo sui residui di Rancher Desktop non è scattato e `docker` risolve a
+   `/usr/local/bin/docker`. La promozione dell'avviso sui filmati a errore bloccante è
+   affidata alla data anziché a un promemoria: dal 2026-09-18 lo script cambia da sé
+   comportamento, perché il giorno del talk nessuno rilegge il piano per ricordarsi di
+   modificare uno script.

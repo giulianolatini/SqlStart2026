@@ -323,7 +323,7 @@ offline sul pinning per digest. Non regge: **il digest stabilisce *quale* immagi
 si va in rete.** Sono due proprietà distinte, e la seconda si ottiene solo con `pull_policy`.
 Il pinning resta, per la ragione sua propria, in [ADR-0008](#adr-0008).
 
-**Fonti:** [S-019](Sources.md#s-019), [V-002](Sources.md#v-002), [V-003](Sources.md#v-003)
+**Fonti:** [S-019](Sources.md#s-019), [V-002](Sources.md#v-002), [V-003](Sources.md#v-003), [V-005](Sources.md#v-005)
 
 ---
 
