@@ -863,9 +863,9 @@ stare undici nodi in 7,65 GiB (si scenderebbe verso il minimo della cache WiredT
 GB: il nodo parte, ma il comportamento sotto carico smette di essere rappresentativo, e sotto
 carico è esattamente ciò che il talk mostra).
 
-**Riserva dichiarata:** che undici container entrino davvero in 12 GiB non è misurato. Al
-momento della decisione il demone Docker non era in esecuzione e la nuova assegnazione non era
-ancora applicata. La verifica appartiene allo spike sharded, che deve produrre il numero e, se
-non torna, far rientrare questa decisione con una che la superi.
+**Riserva dichiarata:** l'assegnazione è stata applicata e verificata — 11,67 GiB alla VM
+[V-004](Sources.md#v-004) — ma che undici container ci entrino davvero non è misurato. La
+verifica appartiene allo spike sharded, che deve produrre il numero e, se non torna, far
+rientrare questa decisione con una che la superi.
 
-**Fonti:** [S-001](Sources.md#s-001), [V-002](Sources.md#v-002)
+**Fonti:** [S-001](Sources.md#s-001), [V-002](Sources.md#v-002), [V-004](Sources.md#v-004)

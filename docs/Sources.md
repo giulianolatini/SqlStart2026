@@ -709,3 +709,14 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   interroga solo il demone locale.
 - **Data:** 2026-08-25
 - **Usata da:** ADR-0008, ADR-0009
+
+<a id="v-004"></a>
+### V-004 — Memoria della VM Docker dopo l'aumento
+
+- **Comando:** `docker info --format '{{.MemTotal}}'`
+- **Ambiente:** Docker 29.7.2, host macOS arm64 da 16 GiB
+- **Esito:** 11,67 GiB e 8 CPU assegnati alla VM, contro i 7,65 GiB rilevati il giorno
+  prima [V-002](#v-002). L'aumento deciso in [ADR-0025](Decision.md#adr-0025) è applicato.
+  Resta non misurato se undici container ci stiano davvero: quello è lo spike sharded.
+- **Data:** 2026-08-25
+- **Usata da:** ADR-0025
