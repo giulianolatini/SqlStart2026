@@ -58,7 +58,7 @@ Cosa esiste alla fine del branch, e di chi è la responsabilità.
 |---|---|
 | `.gitignore` | escludere artefatti di runtime, spike, filmati, virtualenv |
 | `.editorconfig` | uniformare fine riga e indentazione |
-| `LICENSE` | licenza del materiale didattico |
+| `LICENSE` | licenza del materiale didattico — **già presente (GPL-3.0), non toccare** |
 | `README.md` | abstract del progetto e indice di primo livello |
 | `Makefile` | unico punto d'ingresso; qui solo i target di fondamenta |
 | `docs/README.md` | indice della documentazione |
@@ -92,7 +92,8 @@ esempio senza variabili da esemplificare insegna solo a ignorarlo.
 ## Task 1 — Igiene del repository
 
 **File:**
-- Crea: `.gitignore`, `.editorconfig`, `LICENSE`
+- Crea: `.gitignore`, `.editorconfig`
+- Lascia invariato: `LICENSE` (GPL-3.0, già nel repository)
 
 **Interfacce:**
 - Produce: la cartella ignorata `spike/`, usata dal Task 10; il pattern `*.mp4`, che attua
@@ -155,10 +156,18 @@ trim_trailing_whitespace = false
 indent_style = tab
 ```
 
-- [ ] **Passo 3: scrivere `LICENSE`**
+- [ ] **Passo 3: lasciare `LICENSE` com'è**
 
-Materiale didattico destinato a essere copiato: **MIT**, testo canonico senza modifiche,
-intestato `Copyright (c) 2026 Giuliano Latini`.
+Il file **esiste già**: GPL-3.0, scelta alla creazione del repository. Non va toccato.
+La licenza è una prerogativa del titolare del copyright, non una scelta di questo piano.
+
+Resta aperta una domanda per il Product Owner, da porre senza cambiare nulla nel
+frattempo: il materiale è pensato per essere **copiato** dal pubblico nei propri progetti,
+e la GPL-3.0 è copyleft — chi riusa i file Compose o l'applicazione in un lavoro proprio
+eredita l'obbligo di rilasciare con la stessa licenza. Se l'intento è la massima
+diffusione, MIT o Apache-2.0 rimuovono quell'attrito; se l'intento è che le derivazioni
+restino libere, la GPL-3.0 è già la scelta giusta. In assenza di indicazione contraria,
+**resta GPL-3.0** e il `README.md` (Task 6) lo dichiara esplicitamente.
 
 - [ ] **Passo 4: verificare che l'esclusione funzioni**
 
@@ -167,7 +176,7 @@ compaia. Poi rimuovere la cartella.
 
 - [ ] **Passo 5: commit**
 
-Messaggio: `chore: igiene del repository — gitignore, editorconfig, licenza MIT`
+Messaggio: `chore: igiene del repository — gitignore ed editorconfig`
 
 ---
 
