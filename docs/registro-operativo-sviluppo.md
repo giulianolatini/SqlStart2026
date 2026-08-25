@@ -92,3 +92,41 @@ spento. Lo verifica lo spike del Task 10.
    affidata alla data anziché a un promemoria: dal 2026-09-18 lo script cambia da sé
    comportamento, perché il giorno del talk nessuno rilegge il piano per ricordarsi di
    modificare uno script.
+
+**E dal Task 10, lo spike sharded** — verbale in
+[`00-progetto/2026-08-25-spike-sharded.md`](00-progetto/2026-08-25-spike-sharded.md):
+
+10. **Il lab non può girare su MongoDB 8.** Sul kernel `7.0.12-linuxkit` della VM di Docker
+    Desktop, `mongod` esce prima di leggere i parametri: la 8.0.29 e la 8.3.8 rifiutano, la
+    8.2.12 parte solo perché precede l'introduzione del controllo, la 7.0.40 parte davvero.
+    La correzione esiste ma è nella 8.0.30, che nel changelog c'è e in distribuzione no. È il
+    guasto più grave incontrato finora, ed è arrivato dallo spike: [ADR-0028](Decision.md#adr-0028)
+    lo mette per iscritto e propone la 7.0.40 con la 8.0.30 come traguardo, ma la scelta
+    supera una decisione accettata e resta in stato **Proposta** finché non è approvata. Fino
+    ad allora `tools/images.env` resta pinnato alla 8.0 e `make preflight` fallisce: è la
+    verità sullo stato del lab, e nasconderla renderebbe verde un controllo su un lab rotto.
+11. Il valore di uno spike sta nei fallimenti, e questo ne ha prodotti tre in mezz'ora, tutti
+    su passaggi che il design dava per meccanici. `MONGO_INITDB_ROOT_*` non funziona su un
+    config server, perché l'entrypoint toglie `--replSet` per creare l'utente ma non toglie
+    `--configsvr`, e un config server standalone non esiste. `rs.initiate()` senza argomenti
+    registra come host l'ID del container, che nessun altro container sa risolvere.
+    L'eccezione localhost non copre `hostInfo`: consente solo di creare il primo utente, e
+    dopo `sh.addShard()` per ispezionare uno shard da vicino serve un utente locale a quello
+    shard. Nessuno dei tre si sarebbe visto leggendo la documentazione.
+12. Il preflight misurava la proprietà sbagliata. Verificava che le immagini pinnate fossero
+    **presenti** e passava, mentre nessuna di quelle immagini era in grado di **avviarsi**.
+    Adesso esegue `mongod --version` nell'immagine pinnata ([ADR-0027](Decision.md#adr-0027)):
+    mezzo secondo, e copre l'unica classe di guasto che sarebbe arrivata intatta fino al
+    `compose up` sul palco. La lezione non è sul kernel, è sui controlli: un controllo che non
+    è mai stato visto fallire su un guasto reale non è ancora un controllo.
+13. Due domande aperte si sono chiuse per strada. La contraddizione fra
+    [S-001](Sources.md#s-001) e [S-026](Sources.md#s-026) sui limiti di memoria nei container
+    era apparente: le due pagine descrivono campi diversi. `hostInfo.system.memSizeMB` riporta
+    la VM, `memLimitMB` riporta il `mem_limit`, ed è il secondo a guidare la cache — misurato,
+    640 MiB di limite danno 256 MiB di cache e 4.096 ne danno 1.536. E la domanda «`compose up`
+    contatta il registro?» era mal posta: invece di cercarne la prova, si mette
+    `pull_policy: never` e non se ne parla più.
+14. Undici container occupano 1,32 GiB reali contro 6 GiB di `mem_limit` dichiarati. La
+    riserva di [ADR-0025](Decision.md#adr-0025) è sciolta, ma il numero va letto per quello
+    che è: `mem_limit` è un tetto, non una prenotazione, e i 12 GiB servono al caso sotto
+    carico — che è precisamente quello che l'applicazione del talk andrà a produrre.

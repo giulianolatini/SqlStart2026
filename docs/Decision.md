@@ -869,3 +869,162 @@ verifica appartiene allo spike sharded, che deve produrre il numero e, se non to
 rientrare questa decisione con una che la superi.
 
 **Fonti:** [S-001](Sources.md#s-001), [V-002](Sources.md#v-002), [V-004](Sources.md#v-004)
+
+---
+
+## ADR-0026 — La catena di inizializzazione dello sharded cluster
+
+**Data:** 2026-08-25 · **Stato:** Accettata
+
+**Contesto:** il design descriveva lo sharded cluster come una topologia — un config server,
+due shard, un router — senza dire come i pezzi arrivano a conoscersi sotto autenticazione a
+keyfile. Lo spike del 2026-08-25 ha provato a montarlo davvero
+[V-006](Sources.md#v-006), e tre passaggi che sembravano meccanici si sono rivelati sbagliati.
+Il primo: passare `MONGO_INITDB_ROOT_USERNAME` e `MONGO_INITDB_ROOT_PASSWORD` a un nodo
+`--configsvr` lo fa uscire con `BadValue`, perché l'entrypoint dell'immagine ufficiale toglie
+`--replSet` per avviare un mongod temporaneo con cui creare l'utente
+[S-022](Sources.md#s-022), ma non toglie `--configsvr`, e un config server standalone non
+esiste. Il secondo: `rs.initiate()` senza argomenti registra come host l'ID del container,
+irraggiungibile dagli altri. Il terzo: l'eccezione localhost concede meno di quanto il nome
+suggerisca — solo la creazione del primo utente o ruolo, non comandi diagnostici — e dopo
+`sh.addShard()` una connessione diretta a uno shard con le credenziali del cluster viene
+rifiutata.
+
+**Decisione:** la catena di inizializzazione è fissata in sei passi, nell'ordine, ed è la
+stessa per entrambi i profili. Un servizio one-shot genera il keyfile con `openssl rand
+-base64 756`, lo assegna a `999:999` — l'utente `mongodb` dell'immagine
+[S-023](Sources.md#s-023) — e lo porta a `chmod 400`. I `mongod` partono con `--keyFile` e
+**senza** variabili di root. Si esegue `rs.initiate()` elencando i membri per nome di servizio
+Compose. Si crea l'utente amministratore sul config server, sotto eccezione localhost. Si
+avviano i `mongos`. Si eseguono le `sh.addShard()` autenticati. Dove una demo debba ispezionare
+un singolo shard, quel nodo riceve anche un utente locale, creato apposta.
+
+**Conseguenze:** l'inizializzazione non può stare tutta in `docker-compose.yml`: serve un passo
+esterno, che sia uno script o un servizio dedicato, perché `rs.initiate()` va eseguito dopo che
+i nodi sono `healthy` e prima che il router serva. Lo stesso vale per il replica set di
+`feature/02`, che è la stessa catena senza gli shard: le due feature condividono il
+meccanismo e vanno scritte per condividerlo. La documentazione ne guadagna: la distinzione fra
+utenti del cluster e utenti locali allo shard è materia da
+`03-amministrazione/sicurezza-keyfile-x509.md`, e il fatto che `MONGO_INITDB_ROOT_*` non serva
+a niente su un config server è materia da `02-architetture/trappole-mongodb-in-docker.md`.
+Sulla topologia lo spike non lascia dubbi: cinquantamila documenti si sono distribuiti sui due
+shard, e fermando il primario di uno shard il cluster ha continuato a leggere e scrivere
+attraverso mongos, con il nodo rientrato da solo come secondario al riavvio.
+
+**Alternative scartate:** usare `MONGO_INITDB_ROOT_*` solo sugli shard e non sul config server
+(funzionerebbe, ma renderebbe l'avvio di due componenti simili asimmetrico per un motivo che
+nessuno ricorderebbe sei mesi dopo); affidarsi a `rs.initiate()` senza argomenti e correggere
+dopo la configurazione con `rs.reconfig()` (due passi invece di uno, e uno stato intermedio
+sbagliato che può essere osservato); montare il keyfile dall'host anziché generarlo in un
+volume (i permessi dei file montati da macOS non sono governabili con `chmod`, ed è
+esattamente il tipo di dettaglio che funziona sulla macchina di chi scrive e fallisce su
+quella di chi clona).
+
+**Riserva dichiarata:** lo spike ha usato MongoDB 7.0.40, non la versione che finirà nel lab —
+vedi [ADR-0028](#adr-0028). La catena non dipende dalla versione in nessuno dei suoi passi, ma
+questo non è stato verificato su una 8.x, perché su questo kernel nessuna 8.x pubblicata si
+avvia.
+
+**Fonti:** [S-022](Sources.md#s-022), [S-023](Sources.md#s-023), [V-006](Sources.md#v-006)
+
+---
+
+## ADR-0027 — `pull_policy: never`, e un preflight che avvia l'immagine invece di censirla
+
+**Data:** 2026-08-25 · **Stato:** Accettata
+
+**Contesto:** [ADR-0009](#adr-0009) lasciava aperta una domanda: se un'immagine è pinnata per
+digest ed è già nella cache locale, `docker compose up` contatta comunque il registro? La
+domanda era mal posta. Invece di cercare una prova che Compose non esca, conviene toglierli la
+possibilità di farlo: la Compose Specification prevede `pull_policy`, e il valore `never`
+significa che l'immagine non viene mai scaricata. Nel frattempo lo spike ha messo in luce un
+buco più serio [V-007](Sources.md#v-007). Il `preflight` verificava che le immagini pinnate
+fossero presenti in cache, e passava — mentre nessuna di quelle immagini era in grado di
+avviarsi su questo kernel. «Presente» e «funzionante» sono due proprietà diverse, e il
+controllo ne misurava una sola.
+
+**Decisione:** ogni servizio di ogni stack porta `pull_policy: never`. E il `preflight` esegue
+l'immagine pinnata — `mongod --version` in un container usa e getta — trattando un'uscita
+diversa da zero come errore bloccante.
+
+**Conseguenze:** l'assenza di rete smette di essere una speranza e diventa una proprietà del
+file Compose, leggibile da chi lo apre. Il fallimento è immediato e dice la cosa giusta:
+digest presente, container avviato in 0,674 s; digest inesistente, `No such image` in 0,110 s
+[V-006](Sources.md#v-006). Un decimo di secondo non è un tentativo di rete andato male: è un
+tentativo di rete mai iniziato. Il costo è che `make images-pull` diventa obbligatorio prima
+del primo avvio, invece di essere una comodità: chi clona il repository e lancia direttamente
+`compose up` riceve un errore anziché uno scaricamento implicito. È il compromesso giusto —
+l'errore arriva a casa propria, con la rete, non in sala. Sul preflight, il controllo aggiunto
+costa mezzo secondo e copre l'unica classe di guasto che sarebbe passata indenne attraverso
+tutti gli altri fino al `compose up` sul palco.
+
+**Alternative scartate:** `pull_policy: missing`, il comportamento predefinito (scarica se
+manca: esattamente ciò che non deve accadere il 18 settembre); lasciare che sia
+`tools/pull-images.sh --verify` l'unico presidio (verifica la presenza, che è la proprietà
+sbagliata, come questo spike ha dimostrato); far provare al preflight un avvio completo dello
+stack (dura minuti, richiede porte libere e lascia volumi da ripulire — `mongod --version`
+esercita lo stesso percorso di codice che fallisce, in mezzo secondo e senza effetti).
+
+**Fonti:** [V-006](Sources.md#v-006), [V-007](Sources.md#v-007)
+
+---
+
+## ADR-0028 — La versione di MongoDB del lab
+
+**Data:** 2026-08-25 · **Stato:** Proposta — attende la decisione del relatore
+
+**Contesto:** [ADR-0008](#adr-0008) fissa MongoDB 8.0, immagine ufficiale pinnata per digest.
+Lo spike del 2026-08-25 ha scoperto che quella decisione non è eseguibile
+[V-007](Sources.md#v-007): sul kernel `7.0.12-linuxkit` della VM di Docker Desktop, `mongod`
+esce prima di leggere i parametri con un messaggio fatale — «Linux kernel versions 6.19 and
+newer has a known incompatibility with this version of MongoDB». Riguarda la 8.0.29, che è
+l'ultima patch pubblicata della 8.0, e la 8.3.8, che è la stabile corrente. Nessuna variabile
+d'ambiente e nessun parametro di avvio lo aggira. La causa è l'allocatore TCMalloc, che nella
+cache per-CPU usa `rseq` in un modo che il kernel dal 6.19 non tollera più; MongoDB ha reagito
+prima trasformando il crash in un'uscita pulita, poi restringendo il controllo ai soli kernel
+dal 7.0.14 in su. La correzione esiste, ed è datata: compare nel changelog sotto la **8.0.30**
+[S-028](Sources.md#s-028). Ma i binari della 8.0.30 non sono pubblicati — né su Docker Hub, né
+sull'immagine di MongoDB, né nel feed dei download.
+
+Restano in piedi due versioni: la 8.2.12 e la 7.0.40. La 8.2.12 si avvia, ma non perché sia
+sana: è *precedente* all'introduzione del controllo, quindi gira sul percorso difettoso, ed è
+la famiglia per cui è segnalato un ciclo di crash con SIGSEGV. Ha inoltre un difetto
+amministrativo che da solo basterebbe: con il nuovo schema di rilascio adottato dalla 8.2, «After
+a new minor release becomes available, MongoDB does not continue patching the previous minor
+release» [S-027](Sources.md#s-027). Uscita la 8.3, la 8.2 non riceve più patch, e infatti fra i
+tag correnti dell'immagine ufficiale non compare più.
+
+**Decisione proposta:** adottare **MongoDB 7.0.40** come versione del lab, con la 8.0.30 come
+traguardo. Si sviluppa e si documenta su 7.0.40 adesso; si ripinna alla 8.0.30 appena i binari
+escono, rigenerando `tools/images.env` con `make images-pull`. Se questo accade prima del 18
+settembre, si ripinna e si rigirano i filmati; se non accade, il lab funziona lo stesso. Il
+costo del cambio è basso per costruzione: la versione è una variabile sola, `${MONGO_IMAGE}`,
+e questo è il motivo per cui [ADR-0008](#adr-0008) la teneva fuori dai file Compose.
+
+**Conseguenze se accettata:** [ADR-0008](#adr-0008) va superata — non riscritta — da questa,
+con lo stato aggiornato e il rimando. Le pagine che nominano una versione vanno allineate, e
+non sono molte proprio perché la versione è parametrica. Il talk parla di una 7.0 anziché di
+una 8.0: sulle architetture non cambia nulla, perché replica set, sharding, `mongodump` e
+`mongorestore` si comportano allo stesso modo, ma va detto dal palco invece che lasciato
+scoprire a chi legge il prompt di `mongosh`. In compenso il progetto guadagna un contenuto che
+non aveva: l'incompatibilità è **di tutti**, non nostra, e chiunque in sala avvii oggi MongoDB
+8 su Docker Desktop incontra lo stesso muro. È materiale da
+`02-architetture/trappole-mongodb-in-docker.md`, e vale più di una slide teorica sulla scelta
+delle versioni.
+
+**Alternative scartate:** la 8.2.12, perché non riceve più patch e si avvia solo in quanto
+precede il controllo — sarebbe scegliere la versione difettosa fra quelle disponibili, per il
+solo gusto di scrivere «8» sulle slide; aspettare la 8.0.30 come piano unico, perché mancano
+ventiquattro giorni al talk e la data di pubblicazione non esiste; cambiare runtime o
+retrocedere la versione di Docker Desktop per ottenere un kernel più vecchio, perché
+imporrebbe a chi clona il repository di replicare una versione precisa di un prodotto che si
+aggiorna da solo, ed è la definizione di lab non riproducibile.
+
+**Riserva dichiarata:** la ricostruzione della causa poggia su ticket Jira linkati dal
+messaggio d'errore, non su documentazione di piattaforma; il primo è chiuso con risoluzione
+«Gone away» e senza *Fix Version* [V-007](Sources.md#v-007). Il fatto osservabile — quali
+versioni si avviano e quali no — è invece misurato e ripetibile. Non è stato verificato se la
+8.0.30, una volta pubblicata, si avvii davvero su questo kernel: al momento non esiste nulla
+da provare.
+
+**Fonti:** [S-027](Sources.md#s-027), [S-028](Sources.md#s-028), [V-007](Sources.md#v-007)

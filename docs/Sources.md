@@ -600,7 +600,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   `--keyFile`. **`rs.initiate()` non viene mai eseguito dall'immagine: resta a nostro
   carico.** Trattandosi di sorgente, l'API non ha garanzie di stabilità fra versioni: la
   citazione deve indicare commit e riga.
-- **Usata da:** ADR-0005
+- **Usata da:** ADR-0005, ADR-0026
 
 <a id="s-023"></a>
 ### S-023 — `docker-library/mongo`: `8.0/Dockerfile`
@@ -618,7 +618,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 - **Riserve:** il valore **non è pubblicato su Docker Hub**: è vero, ma leggibile solo dal
   Dockerfile. È il numero da usare per un eventuale `chown` su bind mount — ed è la ragione
   per cui il keyfile sta in un volume nominato.
-- **Usata da:** ADR-0014
+- **Usata da:** ADR-0014, ADR-0026
 
 <a id="s-024"></a>
 ### S-024 — MongoDB Manual: Deploy a Self-Managed Sharded Cluster
@@ -672,7 +672,56 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   divergenza fra versioni: **le due pagine correnti si contraddicono**. Conseguenza pratica:
   non affermare sul palco che il rilevamento del limite avviene automaticamente; mostrarlo
   con `db.hostInfo()` in demo, e impostare comunque la cache in modo esplicito.
+- **Sciolta il 2026-08-25:** la contraddizione era apparente e la misura la spiega
+  [V-006](#v-006). Le due pagine parlano di campi diversi: `hostInfo.system.memSizeMB` riporta
+  la memoria della macchina — 11946 MiB, la VM — mentre `hostInfo.system.memLimitMB` riporta il
+  `mem_limit` del container, 640 MiB. È il secondo a guidare la cache: senza
+  `--wiredTigerCacheSizeGB`, un container limitato a 640 MiB sceglie 256 MiB e uno limitato a
+  4.096 MiB sceglie 1.536 MiB, cioè 0,5 × (limite − 1 GiB). La prescrizione qui sopra resta
+  valida — impostare la cache a mano — ma per rendere il valore esplicito e leggibile, non
+  perché il rilevamento non funzioni.
 - **Usata da:** ADR-0004
+
+<a id="s-027"></a>
+### S-027 — MongoDB Manual: MongoDB Versioning
+
+- **URL:** https://www.mongodb.com/docs/manual/reference/versioning/ (citazioni dalla variante `versioning.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Database Manual 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma, e cambia una premessa del progetto
+- **Cosa afferma:** dalla 8.2 lo schema di rilascio è cambiato. «Starting with MongoDB 8.2,
+  MongoDB adopts a new versioning and release strategy». Le *Major Releases* escono «every two
+  years and have a five-year lifecycle»; le *Minor Releases* «are as stable as major releases
+  and suitable for production workloads». La frase che decide, però, è sulle minor: «After a
+  new minor release becomes available, MongoDB does not continue patching the previous minor
+  release.»
+- **Riserve:** la pagina non nomina versioni specifiche oltre agli esempi (`7.0`, `8.0` per le
+  major, `8.2` per le minor), quindi la classificazione della 8.3 si deduce dallo schema e dal
+  fatto che l'indice delle release notes la elenchi come stabile corrente, non da
+  un'affermazione esplicita. La pagina non dice nulla sui vincoli di piattaforma né sui kernel.
+- **Usata da:** ADR-0028
+
+<a id="s-028"></a>
+### S-028 — MongoDB Manual: Release Notes for MongoDB 8.0 — Changelog
+
+- **URL:** https://www.mongodb.com/docs/manual/release-notes/8.0-changelog/ (consultata nella variante `8.0-changelog.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** serie 8.0
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** sotto la voce **8.0.30**, sezione *Internals*, compare `SERVER-125742` —
+  il ticket che restringe l'uscita anticipata ai soli kernel dalla versione 7.0.14 in su. È la
+  correzione che renderebbe di nuovo avviabile la 8.0 sul kernel `7.0.12-linuxkit` della VM di
+  Docker Desktop.
+- **Riserve:** due, entrambe rilevanti. La pagina è servita in forma compressa e troncata:
+  molte voci perdono il testo descrittivo e restano il solo identificatore, `SERVER-125742`
+  compreso — il numero è confermato, il contenuto va letto sul ticket. E la presenza di una
+  voce nel changelog **non implica** che i binari siano pubblicati: al 2026-08-25 la 8.0.30 non
+  compare né in `downloads.mongodb.org/current.json`, né fra i tag di `library/mongo`, né fra
+  quelli di `mongodb/mongodb-community-server` [V-007](#v-007). Il changelog documenta il ramo
+  di rilascio, non la disponibilità.
+- **Usata da:** ADR-0028
 
 ---
 
@@ -737,3 +786,73 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   eseguiti; data del talk simulata al passato senza filmati → l'avviso diventa errore.
 - **Data:** 2026-08-25
 - **Usata da:** ADR-0009
+
+<a id="v-006"></a>
+### V-006 — Spike dello sharded cluster: topologia, memoria, profili
+
+- **Comandi:** `docker compose --profile completo up -d --wait` · `rs.initiate()` ·
+  `sh.addShard()` · `sh.status()` · `getShardDistribution()` · `docker stats --no-stream` ·
+  `db.adminCommand({hostInfo: 1})` · `db.serverStatus()`
+- **Ambiente:** Docker 29.7.2, Compose v5.4.0, VM `7.0.12-linuxkit` con 11.946 MiB e 8 CPU,
+  host macOS arm64. Immagine `mongo:7.0` (7.0.40) pinnata per digest — la 8.0 non parte su
+  questo kernel [V-007](#v-007).
+- **Esito:** la catena keyfile → `rs.initiate()` → `createUser()` → `mongos` → `sh.addShard()`
+  funziona su entrambi i profili. Undici container in esecuzione occupano **1.356 MiB reali
+  contro 6.144 MiB di `mem_limit` dichiarati**; nella VM restano 9.021 MiB disponibili.
+  Cinquantamila documenti con shard key `{_id: "hashed"}` si distribuiscono su entrambi gli
+  shard (a ventimila documenti: 4 chunk, 50,7 % / 49,3 %). Fermato il primario di uno shard,
+  un secondario è stato eletto e il cluster ha continuato a servire letture e scritture
+  attraverso mongos; riavviato il nodo, è rientrato come `SECONDARY` senza intervento.
+  `docker compose --profile palco config --services` elenca 5 servizi, `--profile completo` 12,
+  senza profilo 1.
+- **Misure collaterali:** `hostInfo.system.memSizeMB` riporta 11946 — la memoria della VM —
+  mentre `hostInfo.system.memLimitMB` riporta 640, cioè il `mem_limit` del container. Due
+  mongod avviati senza `--wiredTigerCacheSizeGB` scelgono da soli 256 MiB con limite 640 MiB e
+  1.536 MiB con limite 4.096 MiB: la formula `max(0,5 × (RAM − 1 GiB), pavimento)` si applica
+  alla memoria del **container**. Con `pull_policy: never`, un digest presente in cache avvia
+  in 0,674 s e uno inesistente fallisce in **0,110 s** con `No such image`, senza contattare
+  il registro.
+- **Fallimenti incontrati:** `MONGO_INITDB_ROOT_USERNAME`/`_PASSWORD` su un nodo `--configsvr`
+  lo fanno uscire con `BadValue: Cannot start a configsvr as a standalone server`, perché
+  l'entrypoint toglie `--replSet` per creare l'utente [S-022](#s-022) ma non `--configsvr`.
+  L'eccezione localhost non copre `hostInfo`: consente solo di creare il primo utente o ruolo.
+  Dopo `sh.addShard()`, una connessione diretta a uno shard con le credenziali del cluster
+  risponde `Authentication failed`: servono utenti locali allo shard.
+- **Riserve:** misurato su MongoDB 7.0.40, non sulla versione che finirà nel lab; i consumi di
+  memoria della 8.x possono differire. Il cluster era a riposo salvo gli inserimenti: sotto il
+  carico dell'applicazione del talk i numeri saliranno verso i tetti. Il profilo `palco` è
+  stato provato con un solo membro per componente, quindi non dimostra nulla sul failover in
+  quel profilo — dove infatti non ce n'è.
+- **Verbale completo:** [`00-progetto/2026-08-25-spike-sharded.md`](00-progetto/2026-08-25-spike-sharded.md)
+- **Data:** 2026-08-25
+- **Usata da:** ADR-0026, ADR-0027
+
+<a id="v-007"></a>
+### V-007 — Quali versioni di MongoDB si avviano sul kernel della VM Docker
+
+- **Comandi:** `docker run --rm --entrypoint mongod mongo:<tag> --version` ·
+  `docker info --format '{{.KernelVersion}}'` · `curl downloads.mongodb.org/current.json` ·
+  interrogazione dei tag di `library/mongo` e `mongodb/mongodb-community-server`
+- **Ambiente:** VM Docker Desktop, kernel `7.0.12-linuxkit`, `aarch64`, 2026-08-25
+- **Esito:** `mongo:8.0` (8.0.29), `mongo:8.0.29` e `mongo:8.3` (8.3.8) escono con codice
+  diverso da zero e messaggio fatale `id: 12257600` — «Linux kernel versions 6.19 and newer has
+  a known incompatibility with this version of MongoDB». `mongo:8.2` (8.2.12) e `mongo:7.0`
+  (7.0.40) si avviano. Il controllo scatta in `ctx: main`, prima della lettura dei parametri.
+- **Tentativi di aggiramento, tutti falliti:** `GLIBC_TUNABLES=glibc.pthread.rseq=0`;
+  `--setParameter tcmallocEnablePerCPUCaches=false`. Nel binario compaiono i simboli
+  `isKernelVersionSafeForTCMallocPerCPUCache` e `validateRseqKernelCompat`, ma nessuna
+  variabile o parametro che li disattivi.
+- **Disponibilità della correzione:** `downloads.mongodb.org/current.json` elenca 8.3.8,
+  8.2.12, 8.0.29, 7.0.40, 6.0.29, 5.0.34, 4.4.31. La **8.0.30** — che contiene il ticket
+  correttivo [S-028](#s-028) — non compare, né lì né fra i tag delle due immagini. Fra i tag
+  correnti di `library/mongo` la 8.2 non è più pubblicata: restano 8.3.8, 8.0.29 e 7.0.40.
+- **Riserve:** la ricostruzione della causa — TCMalloc che usa `rseq` violando l'ABI del
+  kernel — poggia sui ticket `SERVER-121912` e `SERVER-121911`, linkati dal messaggio di errore
+  stesso. Sono tracce di lavoro, non documentazione: il primo è chiuso con risoluzione «Gone
+  away» e senza *Fix Version*. Che la 8.2.12 si avvii **non significa** che sia sana: si avvia
+  perché precede l'introduzione del controllo, e per la stessa famiglia è segnalato un ciclo di
+  crash con SIGSEGV sul kernel 6.19 (`SERVER-122741`). Non è stato verificato per quanto tempo
+  la 8.2.12 regga sotto carico, e non lo si è verificato di proposito: una versione che non
+  riceve più patch [S-027](#s-027) è comunque fuori scelta.
+- **Data:** 2026-08-25
+- **Usata da:** ADR-0027, ADR-0028

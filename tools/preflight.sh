@@ -122,6 +122,22 @@ else
   while IFS= read -r riga; do nota "${riga}"; done <<< "${esito_immagini}"
 fi
 
+# «Presente» e «funzionante» sono due proprietà diverse, e fino al 2026-08-25 il preflight
+# misurava solo la prima: le immagini erano tutte in cache e nessuna si avviava, perché
+# MongoDB 8 rifiuta i kernel dal 6.19 in su. Da allora l'immagine si esegue (ADR-0027).
+immagine_mongo="$(sed -n 's/^MONGO_IMAGE=//p' "${RADICE}/tools/images.env" 2>/dev/null | head -1)"
+if ! (( demone_vivo )); then
+  errore "avvio dell'immagine non verificabile: il demone non risponde"
+elif [[ -z "${immagine_mongo}" ]]; then
+  errore "MONGO_IMAGE non è definita in tools/images.env"
+elif esito_avvio="$(docker run --rm --entrypoint mongod "${immagine_mongo}" --version 2>&1)"; then
+  ok "l'immagine pinnata si avvia — $(printf '%s\n' "${esito_avvio}" | head -1)"
+else
+  errore "l'immagine pinnata non si avvia su questo kernel"
+  nota "kernel della VM: $(docker info --format '{{.KernelVersion}}' 2>/dev/null || echo '?')"
+  while IFS= read -r riga; do nota "${riga}"; done < <(printf '%s\n' "${esito_avvio}" | head -2)
+fi
+
 # --- Filmati di riserva (ADR-0016) --------------------------------------------------
 titolo "Filmati di riserva"
 
