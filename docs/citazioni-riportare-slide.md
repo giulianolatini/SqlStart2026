@@ -55,6 +55,18 @@ Fonte: [S-001](Sources.md#s-001).
 sotto quella soglia il valore potrebbe essere rifiutato. Da confermare con la verifica
 empirica dello spike prima di portarlo sul palco come numero certo.
 
+### Le variabili di inizializzazione non fanno nulla su un volume già popolato
+
+> «Do note that none of the variables below will have any effect if you start the container
+> with a data directory that already contains a database.»
+
+Fonte: [S-009](Sources.md#s-009) — Docker Hub, immagine ufficiale `mongo`.
+
+**Perché una slide:** è la spiegazione della domanda più frequente di chiunque abbia provato
+MongoDB in Docker — «ho cambiato la password nel Compose e non funziona». Vale anche come
+avvertenza operativa a noi: fra una prova e l'altra i volumi vanno azzerati, altrimenti la
+demo parte con lo stato della prova precedente.
+
 ---
 
 ## Blocco 2 — Replica set, failover, sicurezza
@@ -256,6 +268,29 @@ Fonte: [S-016](Sources.md#s-016) — Docker Docs, Version and name top-level ele
 **Perché una slide:** la parola esatta è **obsolete**, e il comportamento è «only informative»
 più un avviso — non «ignored». Se in slide si scrive «deprecato e ignorato», la citazione non
 regge alla verifica.
+
+### Il riferimento che diceva «ignorato fuori da Swarm» non è più mantenuto
+
+> «The legacy versions of the Compose file reference has moved to the V1 branch of the Compose
+> repository. They are no longer being actively maintained.»
+
+Fonte: [S-004](Sources.md#s-004) — Docker Docs, Compose Deploy Specification.
+
+**Perché una slide:** è l'origine di una convinzione diffusissima. La frase secondo cui gli
+attributi sotto `deploy` sarebbero ignorati fuori da Swarm stava nel riferimento del formato
+v3, oggi ritirato. Nella documentazione attuale «Swarm», «ignored» e «not supported» hanno
+zero occorrenze nel corpo della pagina: non è che la risposta sia cambiata, è che la domanda
+non ha più una risposta scritta. Da qui la scelta di dimostrarlo con `docker inspect`.
+
+### I servizi senza `profiles` sono sempre attivi
+
+> «Services without a `profiles` attribute are always enabled.»
+
+Fonte: [S-015](Sources.md#s-015) — Docker Docs, Using profiles with Compose.
+
+**Perché una slide:** una riga che chiude il dubbio ricorrente su cosa parta quando si usa un
+profilo. È la regola su cui poggia la distinzione fra il profilo di palco e quello completo
+dello stack sharded.
 
 ---
 
