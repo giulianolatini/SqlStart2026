@@ -872,6 +872,7 @@ rientrare questa decisione con una che la superi.
 
 ---
 
+<a id="adr-0026"></a>
 ## ADR-0026 — La catena di inizializzazione dello sharded cluster
 
 **Data:** 2026-08-25 · **Stato:** Accettata
@@ -929,6 +930,7 @@ avvia.
 
 ---
 
+<a id="adr-0027"></a>
 ## ADR-0027 — `pull_policy: never`, e un preflight che avvia l'immagine invece di censirla
 
 **Data:** 2026-08-25 · **Stato:** Accettata
@@ -969,6 +971,7 @@ esercita lo stesso percorso di codice che fallisce, in mezzo secondo e senza eff
 
 ---
 
+<a id="adr-0028"></a>
 ## ADR-0028 — La versione di MongoDB del lab
 
 **Data:** 2026-08-25 · **Stato:** Proposta — attende la decisione del relatore

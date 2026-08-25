@@ -346,7 +346,7 @@ def test_estrae_un_adr_con_le_sue_fonti():
     testo = """
 ## ADR-0004 — Limiti di risorsa espliciti
 **Data:** 2026-08-24 · **Stato:** Accettata
-**Fonti:** [S-001](Sources.md#s-001), [S-003](Sources.md#s-003)
+**Fonti:** [S-001](../Sources.md#s-001), [S-003](../Sources.md#s-003)
 """
     assert parse_decisions(testo) == {"ADR-0004": {"S-001", "S-003"}}
 
@@ -686,7 +686,7 @@ per mostrarne il ritardo di replica.
 **Alternative scartate:** lasciare i valori predefiniti (l'OOM killer arriva sul palco);
 alzare la memoria della VM (non risolve, e il pubblico può avere meno RAM).
 
-**Fonti:** [S-001](Sources.md#s-001), [S-002](Sources.md#s-002), [S-003](Sources.md#s-003)
+**Fonti:** [S-001](../Sources.md#s-001), [S-002](../Sources.md#s-002), [S-003](../Sources.md#s-003)
 ```
 
 - [ ] **Passo 3: gli ADR senza fonte tecnica dichiarano l'assenza in modo esplicito**
