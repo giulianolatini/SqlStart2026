@@ -91,3 +91,30 @@ def verifica(decisioni: dict[str, set[str]], fonti: dict[str, Fonte]) -> list[st
             )
 
     return problemi
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    import pathlib
+    import sys
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("decision", type=pathlib.Path)
+    parser.add_argument("sources", type=pathlib.Path)
+    argomenti = parser.parse_args(argv)
+
+    problemi = verifica(
+        parse_decisions(argomenti.decision.read_text(encoding="utf-8")),
+        parse_sources(argomenti.sources.read_text(encoding="utf-8")),
+    )
+    for problema in problemi:
+        print(f"  ✗ {problema}", file=sys.stderr)
+    if problemi:
+        print(f"\n{len(problemi)} problemi di citazione.", file=sys.stderr)
+        return 1
+    print("Citazioni coerenti.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
