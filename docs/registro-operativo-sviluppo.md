@@ -184,3 +184,83 @@ spento. Lo verifica lo spike del Task 10.
     `SIGKILL` non lascia messaggi, e l'unico posto dove il fatto è scritto è
     `docker inspect`, con `OOMKilled=true` ed `ExitCode=137`. Il comando da avere nelle dita
     davanti al pubblico è quello, non `docker logs`.
+
+---
+
+## 2026-08-25 — Chiusura di `feature/00-fondamenta`
+
+**Fatto:** dodici task, ventisette commit, ventun file rispetto a `main`. Il branch consegna
+l'impianto e nessuno stack, che è ciò per cui era stato aperto:
+[`Sources.md`](Sources.md) con ventinove fonti primarie e nove verifiche empiriche, ciascuna
+con verdetto e riserve; [`Decision.md`](Decision.md) con ventotto ADR, due delle quali già
+superate e nessuna riscritta; `tools/check_citations.py`, scritto in TDD con nove test, che
+lega le due cose e fallisce se il legame si rompe; il `Makefile` a sei target;
+`tools/pull-images.sh` col pinning per digest e la verifica offline; `tools/preflight.sh`; lo
+[spike sharded](00-progetto/2026-08-25-spike-sharded.md); la pagina sulla
+[gestione delle risorse in Compose](06-sviluppo/gestione-risorse-compose.md); i
+[limiti noti](00-progetto/limiti-noti.md); le
+[citazioni da riportare in slide](citazioni-riportare-slide.md); i due indici.
+
+Verifica finale su albero pulito, nell'ordine prescritto dal piano: `make tools-test` esce `0`
+con nove test, `make docs-check` esce `0`, `make images-verify` esce `0`, `make preflight` esce
+`0` e riporta `Superati: 8 · Avvisi: 1 · Errori: 0`. L'unico avviso è l'assenza della cartella
+dei filmati di riserva, che non sono ancora girati e che dal 2026-09-18 lo script promuove da
+sé a errore bloccante.
+
+Prova del clone pulito: clonato il branch in una cartella temporanea ed eseguiti **soltanto** i
+comandi scritti nel [`README.md`](../README.md), senza sapere nient'altro. I due dell'avvio
+rapido escono `0`; escono `0` anche `make help`, `make images-verify` — perché
+`tools/images.env` è versionato e l'immagine pinnata sta nella cache Docker dell'host, che è
+esattamente la promessa — e il controllo che ogni rimando con ancora risolva.
+
+**Fallito:** due cose, e nessuna delle due si vedeva prima di provare.
+
+1. Il `git clone` dell'avvio rapido, preso alla lettera stamattina, non riproduce niente. Clona
+   il ramo predefinito, e `main` contiene due file: `LICENSE` e `README.md`. Il criterio «un
+   lettore riproduce il lab dalla sola documentazione» è verificato sul branch e diventa vero
+   su `main` al merge di questa PR — ma fino a quel momento resta uno scostamento fra ciò che
+   il README promette e ciò che un estraneo otterrebbe eseguendolo. Vale la pena averlo
+   scritto: è la prima volta che la documentazione corre più veloce del ramo che la pubblica,
+   e non sarà l'ultima.
+2. Il controllo che i rimandi relativi risolvano è rimasto uno script usa-e-getta fuori dal
+   repository. `check_citations.py` non vede quella classe di errore — lega ADR e fonti, non
+   percorsi — e lo script buttato via ne aveva trovati sette reali. Finché non diventa un
+   target stabile, quella verifica dipende dal fatto che qualcuno si ricordi di rifarla: la
+   stessa forma di promemoria che il preflight ha già eliminato per i filmati, lasciata in
+   piedi qui. La chiusura ne ha dato la prova doppia. La voce che state leggendo conteneva un
+   rimando morto — `limiti-noti.md` cercato in `06-sviluppo/` mentre sta in `00-progetto/` —
+   e nessun controllo del repository l'avrebbe intercettato. E lo stesso script, esteso a
+   tutto `docs/`, ne ha segnalati altri quattro che erano **falsi positivi**: stanno dentro
+   blocchi di codice recintati, dove sono campioni letterali di file che vivono altrove e
+   nessun renderer li tratta come link. Quando diventerà un target dovrà saltare le
+   recinzioni, altrimenti il primo effetto di un controllo nuovo è insegnare a ignorarlo. È
+   il debito con cui questo branch si chiude.
+
+**Imparato, e in evidenza perché cambia i piani: l'esito dello spike.** Il lab non gira su
+MongoDB 8. Sul kernel della VM di Docker Desktop nessuna 8.0 pubblicata si avvia, la causa è
+documentata — dalla 8.0 TCMalloc usa cache per-CPU invece che per-thread
+[S-029](Sources.md#s-029) — e la correzione è annunciata in una 8.0.30 che nel changelog c'è e
+in distribuzione no. Il lab passa a **7.0.40** ([ADR-0028](Decision.md#adr-0028)), e le tre
+branch degli stack nascono su quella versione, non su quella scritta nel design del 24 agosto.
+Il traguardo resta, e ha un comando invece di un proposito: `MONGO_IMAGE=mongo:8.0
+make images-pull` seguito da `make preflight`. Dal palco la versione va detta per prima, nella
+forma circostanziata registrata fra le citazioni: sulle architetture 7.0 e 8.0 non differiscono
+in ciò che si mostra, con due eccezioni che si vedono proprio lì.
+
+E tre note di metodo che questo branch ha pagato per imparare.
+
+22. La verifica genera decisioni, non solo bibliografia. Il piano ne prevedeva ventiquattro e
+    ne sono uscite ventotto, con ventinove fonti e nove verifiche al posto delle ventisei e due
+    di partenza: ogni misura che ha smentito un'assunzione ha prodotto un ADR o una nota di
+    revisione. La numerazione del piano non corrisponde più a quella del repository, e il
+    repository ha ragione.
+23. La proprietà «non tocca la rete» non si prova eseguendo il comando con la rete accesa. La
+    si prova negando: `docker image inspect alpine:3.19` esce `1` mentre
+    `docker manifest inspect alpine:3.19` esce `0` — la stessa immagine è nel registro e non è
+    in cache, e `inspect` non va a prenderla. È il secondo modo usato per dimostrare la stessa
+    cosa dopo la misura dei 0,15 secondi del Task 8, e serviva: `make images-verify` che esce
+    `0` non distingue fra «l'ho trovata in locale» e «sono andato a scaricarla».
+24. Un branch di fondamenta si chiude bene se l'ultimo passo non trova sorprese, ed è successo
+    — ma solo perché ogni task aveva già chiuso il proprio. La verifica finale ha confermato,
+    non scoperto. Quando invece scopre, il problema non è la verifica finale: è che i task
+    prima non la facevano.
