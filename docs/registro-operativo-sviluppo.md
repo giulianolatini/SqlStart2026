@@ -71,3 +71,15 @@ erano state trascritte così prima che il problema si notasse, e sono state rifa
 eseguire e registrare il profilo `completo` dello sharded cluster invece di lasciarlo una
 promessa. Il numero non è ancora misurato: al momento della decisione il demone Docker era
 spento. Lo verifica lo spike del Task 10.
+
+**Altre due dal Task 8:**
+
+7. `"${VARIABILE:-quella dell'host}"` non compila. Dentro un'espansione di parametro bash
+   legge l'apostrofo come apertura di quote, e l'errore che riporta punta a una riga
+   distante quindici righe da quella colpevole. Il valore va estratto in una variabile
+   prima di usarlo.
+8. Uno script di sicurezza va visto fallire, non solo riuscire. Guastando una cifra del
+   digest in `tools/images.env`, `--verify` esce 1 in 0,15 secondi: è il tempo la prova
+   che non ha tentato di contattare il registro, perché `docker image inspect` interroga
+   soltanto il demone locale. Senza quella misura la promessa «non tocca la rete» sarebbe
+   rimasta un'affermazione sul codice invece che sul comportamento.
