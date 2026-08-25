@@ -112,9 +112,23 @@ buon senso. Chiude in anticipo la domanda «ma non se ne accorge da solo?».
 
 Fonti: [S-001](Sources.md#s-001) e [S-026](Sources.md#s-026), stesso manuale, stessa versione 8.3.
 
-**Perché una slide:** due pagine ufficiali correnti che si contraddicono sono il modo più
-onesto di spiegare perché in demo si guarda `db.hostInfo()` invece di fidarsi. Il manuale v5.0
-archiviato era affermativo: la formulazione è stata **indebolita**, non chiarita.
+**Perché una slide, e come è finita.** La contraddizione era **apparente**, e va portata sul
+palco così: prima le due frasi, poi la misura che le riconcilia. Le due pagine parlano di campi
+diversi. `hostInfo.system.memSizeMB` riporta la memoria della macchina — 11.946 MiB, la VM —
+mentre `hostInfo.system.memLimitMB` riporta il `mem_limit` del container. È il secondo a
+guidare la cache, misurato su sei configurazioni [V-009](Sources.md#v-009): il rilevamento
+automatico **funziona**.
+
+Resta il fatto che le due pagine, lette di seguito, dicono cose opposte, e resta la
+prescrizione di impostare la cache a mano — ma per renderla leggibile nel file Compose, non
+perché mongod non sappia leggerla. La slide vale ancora, con la conclusione capovolta: non
+«fidarsi è pericoloso», ma «leggere due pagine non basta, si guarda `db.hostInfo()` e si
+smette di discutere». Nota storica che regge: il manuale v5.0 archiviato era affermativo, e la
+formulazione è stata **indebolita**, non chiarita.
+
+Il rischio vero è altrove, e la misura l'ha trovato: una cache **maggiore** del `mem_limit`
+viene accettata senza un solo avviso. Vedi
+[gestione delle risorse in Compose](06-sviluppo/gestione-risorse-compose.md).
 
 ### La dimensione predefinita della cache, con gli estremi
 
@@ -123,9 +137,21 @@ archiviato era affermativo: la formulazione è stata **indebolita**, non chiarit
 
 Fonte: [S-001](Sources.md#s-001).
 
-**Perché una slide:** il minimo è `0.256 GB`, non `256 MB`, e non è un dettaglio estetico —
-sotto quella soglia il valore potrebbe essere rifiutato. Da confermare con la verifica
-empirica dello spike prima di portarlo sul palco come numero certo.
+**Perché una slide:** perché la cifra sulla slide sarebbe stata **sbagliata**, e la verifica
+l'ha presa in tempo. La formula è confermata su sei misure [V-009](Sources.md#v-009), ma il
+minimo dichiarato non è quello vero, e le unità non sono quelle scritte.
+
+> `storage.wiredTiger.engineConfig.cacheSizeGB must be greater than or equal to **0.25**`
+
+Fonte: il binario stesso, MongoDB 7.0.40, che rifiuta l'avvio con `0.1`
+[V-009](Sources.md#v-009).
+
+Il minimo imposto è `0.25`, non `0.256`. E `0.25` configura `268435456` byte, cioè
+**esattamente 256 MiB**: l'opzione si chiama `cacheSizeGB` ma è letta in **GiB**. Il `0.256`
+del manuale, preso alla lettera, produce 262 MiB — un valore che non corrisponde a nulla, né
+alla formula né al pavimento. La riserva registrata qui il 2026-08-25 chiedeva la verifica
+empirica prima del palco: è arrivata, e ha smentito la fonte. **Questa è la slide**, più della
+formula: una cifra ufficiale, un binario che dice altro, e la differenza fra citare e provare.
 
 ### Le variabili di inizializzazione non fanno nulla su un volume già popolato
 

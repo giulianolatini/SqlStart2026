@@ -146,7 +146,21 @@ contrario di ciò che davamo per acquisito. Anche il valore che avevamo scelto p
 motivo opposto a quello scritto: la cache va impostata a mano non perché mongod legga il
 cgroup, ma perché la documentazione avverte che potrebbe non leggerlo.
 
-**Fonti:** [S-001](Sources.md#s-001), [S-002](Sources.md#s-002), [S-003](Sources.md#s-003), [S-026](Sources.md#s-026)
+**Seconda nota di revisione (2026-08-25), che corregge la prima:** «`0.25` GB risulta sotto
+il minimo documentato di `0.256` GB» è **falso**, e la misura lo dimostra
+[V-009](Sources.md#v-009). Il minimo che il binario impone è `0.25`, dichiarato alla lettera
+dal messaggio di rifiuto: `storage.wiredTiger.engineConfig.cacheSizeGB must be greater than
+or equal to 0.25`. Con `0.25` mongod configura `268435456` byte, cioè **esattamente 256
+MiB** — lo stesso valore che sceglierebbe da solo. La cifra `0.256` del manuale è un GB
+decimale scritto dove l'implementazione usa GiB: `0.256` produce 262 MiB, un valore che non
+corrisponde a nulla. Il valore del lab resta `0.25`, ora per una ragione misurata invece che
+temuta. Cade anche il timore residuo sul rilevamento automatico: `hostInfo.system.memLimitMB`
+riporta il `mem_limit` e la cache lo segue su sei misure. Si continua a dichiararla a mano
+perché sia **leggibile nel file Compose**, che è materiale didattico, non perché mongod non
+sappia leggerla. Il rischio vero è un altro, e la misura l'ha trovato: una cache **maggiore**
+del `mem_limit` viene accettata senza un solo avviso che metta in relazione le due cifre.
+
+**Fonti:** [S-001](Sources.md#s-001), [S-002](Sources.md#s-002), [S-003](Sources.md#s-003), [S-026](Sources.md#s-026), [V-009](Sources.md#v-009)
 
 ---
 
@@ -476,7 +490,16 @@ ed efficacia dimostrata invece che citata. Nota favorevole emersa dalla stessa v
 `mem_limit` e `cpus` non esiste alcun marcatore di deprecazione. L'ipotesi che fossero
 attributi legacy è falsa.
 
-**Fonti:** [S-003](Sources.md#s-003), [S-004](Sources.md#s-004)
+**Nota di verifica (2026-08-25):** la dimostrazione promessa qui sopra è stata eseguita, e ha
+un esito che vale più della decisione che doveva sostenere [V-009](Sources.md#v-009). Due
+servizi identici, uno con `mem_limit`/`cpus` e uno con `deploy.resources.limits`, producono
+`HostConfig.Memory` e `HostConfig.NanoCpus` **identici byte per byte**: `671088640` e
+`500000000`. `deploy` **non** è ignorato fuori da Swarm su Compose v5.4.0. La decisione non
+cambia — la sintassi breve resta, per leggibilità su proiettore e portabilità — ma il suo
+unico argomento residuo cade: non si sceglie la forma breve perché l'altra non funzioni, si
+sceglie perché è più corta. Chi migra verso `deploy` non perde nulla.
+
+**Fonti:** [S-003](Sources.md#s-003), [S-004](Sources.md#s-004), [V-009](Sources.md#v-009)
 
 ---
 

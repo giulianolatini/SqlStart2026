@@ -88,7 +88,7 @@ pagine rispondono con le procedure ufficiali.
 
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
-| `06-sviluppo/gestione-risorse-compose.md` | `mem_limit` e `cpus`, la cache WiredTiger nei container, come si dimostra che i limiti sono applicati; i due profili dello sharded cluster — a chi serve ciascuno, quanto costa, come si sceglie | `feature/00-fondamenta` |
+| [`06-sviluppo/gestione-risorse-compose.md`](06-sviluppo/gestione-risorse-compose.md) | `mem_limit` e `cpus`, la cache WiredTiger nei container, come si dimostra che i limiti sono applicati; i due profili dello sharded cluster — a chi serve ciascuno, quanto costa, come si sceglie | già nel repository |
 | `06-sviluppo/architettura-app.md` | stratificazione dell'applicazione, porte, modello a eventi, composition root | `feature/04-app-python` |
 | `06-sviluppo/tdd-e-doppi.md` | separazione fra suite unitaria e di integrazione, fake contro mock, come si prova il failover senza aspettarlo | `feature/04-app-python` |
 

@@ -156,3 +156,31 @@ spento. Lo verifica lo spike del Task 10.
     problema per fortuna, lo precede per costruzione. Vale come metodo, e non solo qui: la
     spiegazione stava in una pagina di *compatibility changes*, cioè dove non si sarebbe andati
     a cercarla, perché il messaggio d'errore rimandava altrove.
+18. Il Task 11 doveva scrivere
+    [`06-sviluppo/gestione-risorse-compose.md`](06-sviluppo/gestione-risorse-compose.md)
+    partendo dalle fonti già raccolte. Prima di scriverla si è preferito misurare, e le misure
+    [V-009](Sources.md#v-009) hanno cambiato tre affermazioni su cui la pagina si sarebbe
+    appoggiata. Vale la pena notare il metodo: nessuna delle tre si sarebbe scoperta
+    rileggendo la documentazione, perché tutte e tre nascono da una documentazione o assente o
+    imprecisa.
+19. La prima. `deploy.resources.limits` **è** applicato da `docker compose up`: due servizi
+    identici, uno con la sintassi breve e uno con `deploy`, producono `HostConfig.Memory` e
+    `HostConfig.NanoCpus` uguali byte per byte. È la domanda che [S-004](Sources.md#s-004)
+    lasciava aperta e che [ADR-0013](Decision.md#adr-0013) prometteva di chiudere con
+    `docker inspect`. La decisione non cambia — la sintassi breve resta per leggibilità su
+    proiettore — ma perde il suo argomento migliore, e la pagina lo dice invece di nasconderlo.
+20. La seconda, ed è un errore nostro rimasto in un ADR per un giorno. La nota di revisione di
+    [ADR-0004](Decision.md#adr-0004) affermava che `0.25` fosse sotto il minimo documentato di
+    `0.256`. Il binario risponde `cacheSizeGB must be greater than or equal to 0.25`: il minimo
+    è `0.25`, e `0.25` configura esattamente 268435456 byte, cioè 256 MiB, lo stesso valore che
+    mongod sceglierebbe da solo. La cifra `0.256` del manuale è un GB decimale scritto dove
+    l'implementazione usa GiB, e produce 262 MiB — un numero che non corrisponde a niente. La
+    lezione è vecchia e continua a presentarsi: avevamo corretto una decisione giusta sulla
+    base di una lettura, invece di provarla.
+21. La terza è quella che sul palco pesa di più. Un container da 512 MiB con
+    `--wiredTigerCacheSizeGB 4` **parte**, configura 4.096 MiB di cache e non emette un solo
+    avviso che metta in relazione le due cifre. Supera l'healthcheck, risponde al `ping`, e
+    muore alla prima scrittura seria. Quando muore, `docker logs` restituisce zero righe:
+    `SIGKILL` non lascia messaggi, e l'unico posto dove il fatto è scritto è
+    `docker inspect`, con `OOMKilled=true` ed `ExitCode=137`. Il comando da avere nelle dita
+    davanti al pubblico è quello, non `docker logs`.

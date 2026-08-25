@@ -918,3 +918,81 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   (`mongosh`, `mongodump`) non è pinnata separatamente e segue l'immagine.
 - **Data:** 2026-08-25
 - **Usata da:** ADR-0028
+
+<a id="v-009"></a>
+### V-009 — Limiti di risorsa in Compose: le due sintassi, la cache, l'OOM, la CPU
+
+- **Comandi:** `docker compose up -d` su tre servizi identici salvo i limiti ·
+  `docker inspect --format '{{.HostConfig.Memory}} {{.HostConfig.NanoCpus}}'` ·
+  `docker stats --no-stream` · `db.adminCommand({hostInfo: 1})` ·
+  `db.serverStatus().wiredTiger.cache` · `docker inspect --format '{{.State.OOMKilled}}'`
+- **Ambiente:** Docker 29.7.2, Compose v5.4.0, VM `7.0.12-linuxkit` con 11.946 MiB e 8 CPU,
+  host macOS 26.6.2 arm64, immagine `mongo:7.0` (7.0.40) pinnata per digest, 2026-08-25
+
+**1. `deploy.resources.limits` è applicato da `docker compose up`.** È la domanda che
+[S-004](#s-004) lascia senza risposta e che [ADR-0013](Decision.md#adr-0013) prometteva di
+risolvere con `docker inspect`. Tre servizi nello stesso file, stessa immagine, stesso comando:
+
+| Servizio | Come sono dichiarati i limiti | `HostConfig.Memory` | `HostConfig.NanoCpus` |
+|---|---|---|---|
+| `breve` | `mem_limit: 640m` + `cpus: 0.5` | `671088640` | `500000000` |
+| `deploy_solo` | `deploy.resources.limits` | `671088640` | `500000000` |
+| `nessun_limite` | niente | `0` | `0` |
+
+I due valori sono **identici byte per byte**. La convinzione diffusa secondo cui `deploy`
+sarebbe ignorato fuori da Swarm è falsa su questa versione di Compose: apparteneva al
+riferimento del formato v3, ritirato [S-004](#s-004). `671088640` è esattamente 640 × 1024²,
+cioè `640m` letto in **MiB**; `500000000` nanoCPU è mezza CPU.
+
+**2. La cache WiredTiger si dimensiona sul limite del container, e ha un pavimento.** Nessun
+`--wiredTigerCacheSizeGB`, solo `mem_limit` variabile, cache letta da `serverStatus()`:
+
+| `mem_limit` | `hostInfo.system.memLimitMB` | Cache scelta | `0,5 × (limite − 1 GiB)` |
+|---|---|---|---|
+| 640 MiB | 640 | **256 MiB** | negativo → pavimento |
+| 768 MiB | 768 | **256 MiB** | negativo → pavimento |
+| 1.024 MiB | 1024 | **256 MiB** | 0 → pavimento |
+| 2.048 MiB | 2048 | **512 MiB** | 512 MiB |
+| 4.096 MiB | 4096 | **1.536 MiB** | 1.536 MiB [V-006](#v-006) |
+| nessuno | 11946 | **5.461 MiB** | 5.461 MiB |
+
+`hostInfo.system.memSizeMB` riporta sempre 11946, cioè la VM. È `memLimitMB` a guidare il
+calcolo, e senza `mem_limit` i due campi coincidono. Il pavimento misurato è **256 MiB**, non
+«0.256 GB» = 244 MiB: l'unità dichiarata dal manuale è GB, quella applicata è GiB.
+
+**3. Il minimo accettato per `--wiredTigerCacheSizeGB` è `0.25`, non `0.256`.** Con `0.1`
+mongod esce prima di aprire il database: `BadValue: storage.wiredTiger.engineConfig.cacheSizeGB
+must be greater than or equal to 0.25`. Con `0.25` parte e configura `268435456` byte, cioè
+**esattamente 256 MiB** — lo stesso valore che sceglierebbe da solo. Con `0.256` configura
+`274726912` byte, 262 MiB. Il valore `0.25` scelto in [ADR-0004](Decision.md#adr-0004) era
+dunque legittimo: è il minimo, e coincide con il pavimento automatico.
+
+**4. Una cache più grande del container non impedisce l'avvio.** `mem_limit: 512m` con
+`--wiredTigerCacheSizeGB 4` parte senza errori e configura 4.096 MiB di cache in un container
+da 512. Nessun avviso mette in relazione le due cifre. Compare invece, e solo quando un limite
+c'è, l'avviso `id: 20720` — «Memory available to mongo process is less than total system
+memory», con `availableMemSizeMB: 512` e `systemMemSizeMB: 11946`. Nel container senza limite
+quell'avviso ha **zero occorrenze**: è il modo più diretto per mostrare dal vivo che mongod il
+limite lo vede.
+
+**5. L'OOM non lascia traccia nel log del container.** Un processo che alloca oltre
+`mem_limit` in un container da 256 MiB senza swap viene ucciso con `SIGKILL`: `docker logs`
+restituisce **zero righe**, e l'unico posto dove il fatto è registrato è
+`docker inspect`, che riporta `OOMKilled=true`, `ExitCode=137` ed `Error=""` — vuoto. 137 è
+128 + 9.
+
+**6. `cpus` strozza davvero, e nella proporzione dichiarata.** Un ciclo occupato in bash,
+tempo di CPU sul tempo di parete: senza limite 3,946 s su 3,947 s, rapporto **1,00**; con
+`--cpus 0.5` 1,541 s su 3,069 s, rapporto **0,502**. `docker stats` mostra la colonna
+`MEM USAGE / LIMIT` come `228.2MiB / 640MiB` nel container limitato e `78.48MiB / 11.67GiB` in
+quello libero: è la lettura più leggibile su un proiettore.
+
+- **Riserve:** il punto 1 vale per Compose v5.4.0; la documentazione continua a non affermarlo
+  [S-004](#s-004), quindi resta una misura, non una garanzia, e va rifatta se la versione di
+  Compose cambia. Il punto 5 è stato prodotto con un allocatore artificiale, non con un mongod
+  sotto carico: che l'OOM di un mongod reale si presenti allo stesso modo è plausibile ma non
+  misurato qui. Il punto 6 misura una CPU occupata in un ciclo, non un carico MongoDB, dove il
+  rapporto dipende anche dall'attesa su I/O. Tutto è misurato su MongoDB 7.0.40: il minimo
+  della cache e il pavimento potrebbero differire su altre versioni.
+- **Data:** 2026-08-25
+- **Usata da:** ADR-0004, ADR-0013
