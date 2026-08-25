@@ -1,4 +1,4 @@
-from check_citations import parse_decisions
+from check_citations import Fonte, parse_decisions, parse_sources
 
 
 def test_estrae_un_adr_con_le_sue_fonti():
@@ -16,3 +16,21 @@ def test_riconosce_un_adr_senza_fonti_dichiarato_organizzativo():
 **Fonti:** nessuna (decisione organizzativa)
 """
     assert parse_decisions(testo) == {"ADR-0015": set()}
+
+
+def test_estrae_una_fonte_con_il_collegamento_inverso():
+    testo = """
+<a id="s-001"></a>
+### S-001 — WiredTiger Storage Engine
+
+- **URL:** https://www.mongodb.com/docs/manual/core/wiredtiger/
+- **Usata da:** ADR-0004, ADR-0008
+"""
+    assert parse_sources(testo) == {
+        "S-001": Fonte(
+            identificatore="S-001",
+            url="https://www.mongodb.com/docs/manual/core/wiredtiger/",
+            usata_da={"ADR-0004", "ADR-0008"},
+            ancora="s-001",
+        )
+    }
