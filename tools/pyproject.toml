@@ -3,7 +3,7 @@ name = "sqlstart2026-tools"
 version = "0.1.0"
 description = "Strumenti di repository per il lab MongoDB di SqlStart 2026"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = ["pyyaml>=6.0"]
 
 [dependency-groups]
 dev = ["pytest>=8.0"]
