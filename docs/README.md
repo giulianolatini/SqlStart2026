@@ -40,6 +40,7 @@ produrrà. Un indice che promette senza datare invecchia male.
 |---|---|---|
 | [`2026-08-24-design.md`](00-progetto/2026-08-24-design.md) | il documento di design: vincoli, architetture, applicazione, impianto documentale, piano di lavoro | già nel repository |
 | [`2026-08-25-piano-feature-00-fondamenta.md`](00-progetto/2026-08-25-piano-feature-00-fondamenta.md) | il piano di implementazione della prima feature, passo per passo | già nel repository |
+| [`2026-08-28-piano-feature-01-stack-standalone.md`](00-progetto/2026-08-28-piano-feature-01-stack-standalone.md) | il piano della seconda feature: lo stack a istanza singola, la verifica eseguibile sui file Compose e le sei pagine di documentazione dovute | già nel repository |
 | [`2026-08-25-spike-sharded.md`](00-progetto/2026-08-25-spike-sharded.md) | il verbale dello spike: il file Compose che ha funzionato, la memoria misurata sugli undici container, i tre punti in cui il design si era sbagliato, e la versione di MongoDB che su Docker Desktop non parte | già nel repository |
 | [`limiti-noti.md`](00-progetto/limiti-noti.md) | i confini dichiarati: dove il lab semplifica, dove la documentazione ufficiale non copre, quali affermazioni diffuse non risultano scritte | già nel repository |
 
