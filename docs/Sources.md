@@ -921,7 +921,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   [ADR-0028](Decision.md#adr-0028), quindi per gli stack vale questa voce e non quella. I due
   file si somigliano molto, ed è esattamente il motivo per cui citare quello sbagliato non si
   noterebbe fino al giorno in cui cambia.
-- **Usata da:** ADR-0030, ADR-0031
+- **Usata da:** ADR-0030, ADR-0031, ADR-0033
 
 ---
 
@@ -1042,6 +1042,92 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 
 ---
 
+<a id="s-039"></a>
+### S-039 — Docker Docs: Start containers automatically
+
+- **URL:** https://docs.docker.com/engine/containers/start-containers-automatically/
+- **Editore:** Docker, Inc. — Docker Docs
+- **Versione documentata:** pagina viva, consultata contro Docker Engine 29.7.2
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma parziale
+- **Cosa afferma, primo punto — che cosa significa `unless-stopped`.** Nella tabella delle
+  politiche: «Similar to `always`, except that when the container is stopped (manually or
+  otherwise), it isn't restarted even after Docker daemon restarts.» E poco sotto, in prosa:
+  «Docker restarts the container if it exits or if the daemon restarts, but not if you stopped
+  the container yourself.»
+- **Cosa afferma, secondo punto — la politica si disattiva dopo una fermata.** «If you manually
+  stop a container, the restart policy is ignored until the Docker daemon restarts or the
+  container is manually restarted. This prevents a restart loop.»
+- **Cosa afferma, terzo punto — e non copre chi non è mai partito.** «A restart policy only takes
+  effect after a container starts successfully. In this case, starting successfully means that
+  the container is up for at least 10 seconds and Docker has started monitoring it.»
+- **Cosa non afferma:** quali comandi contino come «stop». La pagina dice «manually or
+  otherwise» e «if you manually stop a container», e non elenca mai i sottocomandi. In
+  particolare `docker kill` non compare in nessun punto della pagina. Il lettore normale legge
+  «kill» come «il processo è morto» e «stop» come «`docker stop`»; il demone li mette nella
+  stessa casella. La differenza è misurata in [V-017](#v-017).
+- **Riserve:** «manually or otherwise» copre il caso solo perché è abbastanza vaga da coprire
+  tutto. Non è una frase da cui prevedere un comportamento, ed è la ragione per cui il
+  comportamento è stato misurato invece che dedotto ([ADR-0024](Decision.md#adr-0024)).
+- **Usata da:** ADR-0034
+
+---
+
+<a id="s-040"></a>
+### S-040 — Docker Docs: `docker container kill`
+
+- **URL:** https://docs.docker.com/reference/cli/docker/container/kill/
+- **Editore:** Docker, Inc. — Docker Docs / CLI reference
+- **Versione documentata:** pagina viva, consultata contro Docker Engine 29.7.2
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** «The `docker kill` subcommand kills one or more containers. The main process
+  inside the container is sent `SIGKILL` signal (default)». Il segnale arriva a **PID 1** del
+  container, ed è il demone a mandarlo — cioè un processo del namespace antenato, il che secondo
+  [S-041](#s-041) è esattamente il caso in cui `SIGKILL` viene consegnato per forza.
+- **Cosa non afferma:** la parola «restart» non compare da nessuna parte nella pagina. Nulla
+  avverte che un `docker kill` metta il container nello stato in cui la politica di riavvio non
+  si applica più. Chi cerca «come simulo la caduta di un nodo» arriva qui, legge «kills», e non
+  ha modo di sospettare che stia chiedendo una fermata invece di un guasto. Misurato in
+  [V-017](#v-017).
+- **Riserve:** l'assenza della parola «restart» è stata contata sulla pagina come resa il
+  2026-08-28. È una pagina viva: l'assenza di oggi non è una garanzia per domani, ed è il tipo
+  di affermazione che va ricontrollata prima di ripeterla dal palco.
+- **Usata da:** ADR-0034
+
+---
+
+<a id="s-041"></a>
+### S-041 — Linux man-pages: `pid_namespaces(7)`
+
+- **URL:** https://man7.org/linux/man-pages/man7/pid_namespaces.7.html
+- **Editore:** The Linux man-pages project
+- **Versione documentata:** `man-pages-6.18`, come dichiarato nel colophon della pagina resa
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — dall'interno, PID 1 è intoccabile.** «Only signals for which the
+  "init" process has established a signal handler can be sent to the "init" process by other
+  members of the PID namespace. This restriction applies even to privileged processes, and
+  prevents other members of the PID namespace from accidentally killing the "init" process.»
+  Poiché `SIGKILL` non è gestibile per definizione, `kill -9 1` eseguito **dentro** un container
+  non può funzionare — e infatti non funziona, senza però dare errore ([V-017](#v-017)).
+- **Cosa afferma, secondo punto — dall'esterno, sì.** «`SIGKILL` or `SIGSTOP` are treated
+  exceptionally: these signals are forcibly delivered when sent from an ancestor PID namespace.»
+  Il demone Docker sta in quel namespace antenato: `docker kill` arriva a destinazione.
+- **Cosa afferma, terzo punto — e se PID 1 muore, muoiono tutti.** «If the "init" process of a
+  PID namespace terminates, the kernel terminates all of the processes in the namespace via a
+  `SIGKILL` signal.» È il motivo per cui un container è vivo esattamente quanto il suo PID 1.
+- **Cosa non afferma:** non nomina Docker, né i container, né `mongod`. Il collegamento — «PID 1
+  del container è `mongod`, il demone Docker sta nel namespace antenato, quindi `docker kill`
+  passa e `kill -9 1` no» — è nostro, e vale quanto la verifica che lo sostiene
+  ([V-017](#v-017), [ADR-0024](Decision.md#adr-0024)).
+- **Riserve:** è la documentazione del kernel Linux, non del runtime. Descrive un comportamento
+  stabile da anni, ma la pagina è viva e la sua numerazione segue i rilasci di `man-pages`. Su
+  macOS il kernel in gioco è quello della VM di Docker Desktop, non quello del portatile.
+- **Usata da:** ADR-0034
+
+---
+
 ## Verifiche empiriche
 
 <a id="v-001"></a>
@@ -1142,7 +1228,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   quel profilo — dove infatti non ce n'è.
 - **Verbale completo:** [`00-progetto/2026-08-25-spike-sharded.md`](00-progetto/2026-08-25-spike-sharded.md)
 - **Data:** 2026-08-25
-- **Usata da:** ADR-0025, ADR-0026, ADR-0027
+- **Usata da:** ADR-0025, ADR-0026, ADR-0027, ADR-0033
 
 <a id="v-007"></a>
 ### V-007 — Quali versioni di MongoDB si avviano sul kernel della VM Docker
@@ -1172,7 +1258,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   la 8.2.12 regga sotto carico, e non lo si è verificato di proposito: una versione che non
   riceve più patch [S-027](#s-027) è comunque fuori scelta.
 - **Data:** 2026-08-25
-- **Usata da:** ADR-0027, ADR-0028
+- **Usata da:** ADR-0027, ADR-0028, ADR-0033
 
 <a id="v-008"></a>
 ### V-008 — Ripinnatura alla 7.0.40: digest, piattaforme, strumenti a bordo
@@ -1579,7 +1665,7 @@ succedendo è «la mia modifica non è stata nemmeno letta».
   perché il volume non è di Docker: bisogna cancellare la cartella sull'host. Non provato qui,
   perché il lab non usa bind mount per i dati.
 - **Data:** 2026-08-28
-- **Usata da:** ADR-0031
+- **Usata da:** ADR-0031, ADR-0033
 
 ---
 
@@ -1713,3 +1799,118 @@ sorprendente, misurato nella stessa sessione e registrato dove gli compete, in
   (`feature/04`) potrà farla sotto carico controllato.
 - **Data:** 2026-08-28
 - **Usata da:** ADR-0032
+
+---
+
+<a id="v-017"></a>
+### V-017 — Tre modi di far morire `mongod`, e solo uno fa ripartire il container
+
+- **Comandi:** `docker inspect` (politica e `RestartCount`) · `docker kill -s KILL
+  mongo-standalone` · `docker exec mongo-standalone kill -9 1` · `docker exec … mongosh --eval
+  "db.adminCommand({shutdown: 1, force: true})"`
+- **Ambiente:** stack `docker/01-standalone` con `restart: unless-stopped`, Docker Engine 29.7.2
+  su Docker Desktop (macOS), `mongo` 7.0.40 pinnata per digest, 2026-08-28
+
+La politica dichiarata è la stessa in tutte e tre le prove:
+`{"Name": "unless-stopped", "MaximumRetryCount": 0}`. Cambia solo **chi manda il segnale**, e
+l'esito cambia con lui.
+
+| Come muore | Chi manda il segnale | Esito osservato | `RestartCount` |
+|---|---|---|---:|
+| `docker kill -s KILL` | il demone, dal namespace **antenato** | container `exited`, `ExitCode=137`, `OOMKilled=false`; ancora `exited` dopo 12 s | **0** |
+| `kill -9 1` **dentro** il container | un processo dello **stesso** namespace | **niente**: il comando esce con `rc=0`, il container resta `running` e `healthy` | 0 |
+| `shutdown` chiesto a `mongod` | il processo a se stesso | il container **riparte da solo**, `healthy` di nuovo in pochi secondi | **1** |
+
+**1. `docker kill` non fa ripartire niente, ed è il contrario di quello che quasi tutti si
+aspettano.** Il container resta `exited` a tempo indeterminato: dodici secondi dopo il segnale
+`RestartCount` è ancora `0`, cioè il demone non ha nemmeno *provato*. Ci vuole un `docker start`
+a mano, dopo il quale il nodo torna `healthy` in **6 secondi** e `RestartCount` resta `0`.
+
+La spiegazione sta in [S-039](#s-039): la politica «is ignored until the Docker daemon restarts
+or the container is manually restarted» dopo che il container «is stopped (manually or
+otherwise)». Un `docker kill` è, per il demone, una fermata chiesta da un umano — non un guasto.
+Nessuna delle due pagine ([S-039](#s-039), [S-040](#s-040)) lo scrive in modo che un lettore
+possa prevederlo: la prima dice «manually or otherwise», la seconda non nomina mai la parola
+«restart».
+
+**Conseguenza pratica, ed è quella che conta:** `docker kill` **non simula un guasto**. Simula
+uno spegnimento. Chi dimostra la resilienza di un cluster uccidendo un container sta mostrando
+uno scenario in cui l'infrastruttura ha deliberatamente scelto di non intervenire.
+
+**2. Dall'interno del container, `kill -9 1` non fa assolutamente niente — e non lo dice.** Il
+PID 1 visto da dentro è `mongod` (letto in `/proc/1/comm`). Il comando ritorna `rc=0`, senza
+stdout e senza stderr: sembra riuscito. Cinque secondi dopo il container è `running` e
+`healthy`, `RestartCount=0`.
+
+Non è una stranezza di Docker, è il kernel: [S-041](#s-041) dice che solo i segnali per cui il
+processo «init» ha installato un gestore possono essergli inviati dagli altri membri del suo
+namespace, «even to privileged processes». `SIGKILL` non è gestibile per definizione, quindi
+viene semplicemente scartato. Il successo apparente di `kill` è il fatto più insidioso della
+prova: nessun errore, nessun effetto.
+
+**3. Se `mongod` termina da sé, la politica funziona come ci si aspetta.** Chiesto lo `shutdown`
+al server, il container riparte **da solo**: entro tre secondi è già `running` con
+`RestartCount=1` e stato di salute `starting`; entro cinque è `healthy`. Nessun intervento
+manuale.
+
+Dettaglio da conoscere se si ripete la prova: il `mongosh` che manda lo `shutdown` esce con
+`rc=137`, perché il server chiude la connessione del client che gli ha appena chiesto di
+spegnersi. Non è un fallimento del comando.
+
+**4. Il dataset attraversa tutte e tre le prove.** `make smoke-01` dopo la sequenza completa:
+dodici controlli verdi, impronta invariata.
+
+- **Riserve:** una esecuzione per ciascuna delle tre prove, su una sola macchina, con Docker
+  Desktop su macOS — quindi il kernel in gioco è quello della VM. Non è stata isolata la regola
+  dei «at least 10 seconds» di [S-039](#s-039): il container era in piedi da molto più tempo in
+  tutte e tre le prove, quindi la politica era certamente attiva. Non è stato provato `docker
+  stop`, che [S-039](#s-039) copre esplicitamente ed è il caso non interessante. Il numero
+  `RestartCount` è cumulativo sulla vita del container: azzerarlo richiede ricrearlo.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0034
+
+---
+
+<a id="v-018"></a>
+### V-018 — `localhost` non è un posto: è un punto di vista, e sbagliarlo dà due errori diversi
+
+- **Comandi:** `mongosh --host <nome> --eval "db.adminCommand('ping').ok"` da quattro posizioni
+  diverse · `nc -z <nome> 27017` dall'host
+- **Ambiente:** stack `docker/01-standalone` avviato e `healthy`, rete
+  `sqlstart-01-standalone_default` creata da Compose, `mongo` 7.0.40, macOS, 2026-08-28
+
+| Da dove | Nome chiesto | Esito |
+|---|---|---|
+| dentro `mongo-standalone` | `localhost` | `1` |
+| dentro `mongo-standalone` | `127.0.0.1` | `1` |
+| dentro `mongo-standalone` | `mongo-standalone` | `1` |
+| da un **altro** container sulla stessa rete | `localhost` | `MongoNetworkError: connect ECONNREFUSED 127.0.0.1:27017` |
+| da un **altro** container sulla stessa rete | `mongo-standalone` | `1` |
+| da un container **fuori** da quella rete | `mongo-standalone` | `MongoNetworkError: getaddrinfo ENOTFOUND mongo-standalone` |
+| dall'host | `localhost:27017` | connessione TCP riuscita |
+| dall'host | `mongo-standalone:27017` | `nc: getaddrinfo: nodename nor servname provided, or not known` |
+
+**I due errori non sono lo stesso errore, ed è tutta la lezione.**
+
+- `ECONNREFUSED` significa che il nome **ha risolto** — verso 127.0.0.1, che dal punto di vista
+  di quel container è quel container. Il client ha bussato alla porta giusta della macchina
+  sbagliata: se stesso. È l'errore di chi ha copiato una stringa di connessione da un contesto
+  all'altro.
+- `ENOTFOUND` significa che il nome **non ha risolto affatto**. Il DNS interno di Docker
+  risponde solo ai container attaccati a quella rete; da fuori, `mongo-standalone` non esiste.
+
+L'unico nome che funziona da tutte le posizioni interne alla rete è quello del servizio, ed è la
+ragione della regola di [ADR-0021](Decision.md#adr-0021). Su un'istanza singola la differenza è
+un fastidio di dieci secondi; su un replica set diventa un guasto vero, perché i membri si
+scambiano gli indirizzi con cui sono stati configurati e un client che riceve `localhost` dal
+`hello` prova a connettersi a se stesso ([S-020](#s-020)).
+
+- **Riserve:** dall'host la prova è a livello TCP (`nc`), non MongoDB, perché su questa macchina
+  `mongosh` non è installato fuori dai container: dimostra che la porta pubblicata è
+  raggiungibile, non che il server risponda — per quello valgono l'healthcheck e `make smoke-01`.
+  La risoluzione dei nomi **sull'host** non dipende da Docker ma dal sistema operativo: su una
+  macchina con una voce in `/etc/hosts`, o con un resolver aziendale che rispondesse a quel nome,
+  l'ultima riga della tabella cambierebbe. Rete singola creata da Compose; con reti multiple o
+  alias di rete il quadro si arricchisce e non è stato esplorato.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0033

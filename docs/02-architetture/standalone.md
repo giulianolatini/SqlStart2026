@@ -41,7 +41,7 @@ l'infrastruttura.
 
 Con `restart: unless-stopped` nel file Compose il container riparte da solo in molti casi, ma non
 in tutti, e i casi scoperti non sono quelli che si immaginano: vedi
-[le trappole](trappole-mongodb-in-docker.md), alla voce sulla politica di riavvio.
+[la voce 6 delle trappole](trappole-mongodb-in-docker.md#t-06).
 
 ### 1.2 `w: 1` è tutto ciò che si può chiedere — e `w: "majority"` è la stessa cosa travestita
 
@@ -312,7 +312,7 @@ Il secondo montaggio ha una trappola dentro, ed è quella che morde più spesso 
 inizializzato, e quando decide di saltarli non stampa niente.** Non un avviso, non una riga
 [V-014](../Sources.md#v-014). Il criterio non è nemmeno «la cartella è vuota»: è la presenza di uno
 fra quattro percorsi noti [S-034](../Sources.md#s-034). Dettagli e rimedio in
-[le trappole](trappole-mongodb-in-docker.md), alla prima voce;
+[la voce 1 delle trappole](trappole-mongodb-in-docker.md#t-01);
 la seconda strada per caricare i dati è `make seed-01` ([ADR-0031](../Decision.md#adr-0031)).
 
 ### La rotazione dei log
@@ -384,7 +384,7 @@ Se questo file finisce fuori dal lab, i due interventi minimi sono: pubblicare l
 loopback (`"127.0.0.1:27017:27017"`) e aggiungere `MONGO_INITDB_ROOT_USERNAME` /
 `MONGO_INITDB_ROOT_PASSWORD` più `--auth`. Il secondo intervento ha una trappola sua sugli stack con
 `--replSet`, ed è documentata fra
-[le trappole](trappole-mongodb-in-docker.md), alla voce su `MONGO_INITDB_ROOT_*`.
+[la voce 3 delle trappole](trappole-mongodb-in-docker.md#t-03).
 
 ---
 

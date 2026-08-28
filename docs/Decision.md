@@ -1416,3 +1416,123 @@ bello lì, ma la pagina dell'istanza singola sarebbe rimasta senza la sua prova,
 senza prova in questo repository ha una scadenza breve).
 
 **Fonti:** [S-035](Sources.md#s-035), [S-036](Sources.md#s-036), [S-037](Sources.md#s-037), [S-038](Sources.md#s-038), [V-015](Sources.md#v-015), [V-016](Sources.md#v-016)
+
+---
+
+<a id="adr-0033"></a>
+## ADR-0033 — Le trappole si raccolgono in una pagina sola, e ogni voce comincia dal sintomo
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** durante `feature/00` e `feature/01` sono emersi diversi punti in cui MongoDB e
+Docker si fraintendono, e hanno una caratteristica in comune: **nessuno di essi produce un
+messaggio d'errore che nomini la causa**. Gli script di inizializzazione vengono saltati in
+silenzio su un volume popolato ([V-014](Sources.md#v-014)); una versione di MongoDB che il
+kernel della VM non regge esce senza dire perché ([V-007](Sources.md#v-007)); le variabili
+`MONGO_INITDB_ROOT_*` su un config server producono un avvio apparentemente riuscito e un
+cluster che non si forma ([V-006](Sources.md#v-006), [S-034](Sources.md#s-034));
+`localhost` risolve verso la macchina sbagliata invece di non risolvere
+([V-018](Sources.md#v-018)).
+
+Chi incontra uno di questi casi non parte dalla causa: parte dal sintomo. Ha davanti un
+container che è uscito, o un dataset che non c'è, o un `ECONNREFUSED`, e cerca quello. Una
+documentazione organizzata per argomento — «volumi», «rete», «entrypoint» — è inutile a
+quella persona, perché per trovare la sezione giusta dovrebbe già sapere la risposta.
+
+C'è anche un problema di proprietà. Le trappole non appartengono a una feature: nascono qui, ma
+`feature/02` ne aggiungerà sui permessi del keyfile e sulla scoperta della topologia, e
+`feature/03` sui config server e sul bilanciamento. Se ognuna se le tiene nella propria pagina,
+la stessa trappola viene raccontata tre volte e nessuna delle tre versioni è quella completa.
+
+**Decisione:** `docs/02-architetture/trappole-mongodb-in-docker.md` è la sede unica. Il suo
+contratto, che i branch successivi ereditano:
+
+1. **Una sezione per trappola, numerata**, e le sezioni esistenti non si riscrivono: i branch
+   successivi ne aggiungono in coda. La numerazione diventa così un riferimento stabile.
+2. **Il titolo della sezione è il sintomo, non la causa.** «Il container esce e il log non dice
+   niente», non «incompatibilità fra kernel e versione». Chi cerca, cerca il sintomo.
+3. **Quattro voci fisse in ogni sezione:** *sintomo* (cosa si vede), *causa* (cosa sta davvero
+   succedendo), *rimedio* (cosa fare), *fonte* (dove è scritto o dove è stato misurato).
+4. **Ogni trappola porta almeno un riferimento verificabile**, come ovunque in `docs/`. Una
+   trappola raccontata a memoria è un aneddoto, e gli aneddoti in questo repository hanno una
+   scadenza breve ([ADR-0024](#adr-0024)).
+5. **Se una trappola ha una decisione dietro, la sezione la nomina e non la ripete.** La pagina
+   dice cosa si vede e cosa fare; il perché sta nell'ADR.
+
+**Conseguenze:** la pagina cresce per aggiunta e non per riscrittura, il che la rende
+modificabile da tre branch diversi senza conflitti di merito. Il costo è la ridondanza: la
+stessa informazione compare nella pagina dell'architettura e nella pagina delle trappole, con
+angolazioni diverse. È una ridondanza voluta, perché i due lettori sono diversi — uno sta
+studiando, l'altro sta cercando di far ripartire qualcosa.
+
+Il vincolo del sintomo-come-titolo ha un effetto collaterale utile: obbliga a ricordare **cosa
+si vedeva** prima di sapere cosa fosse. È l'informazione che si perde per prima, subito dopo
+aver risolto il problema, ed è l'unica che serve a chi il problema ce l'ha ancora.
+
+**Alternative scartate:** una sezione «problemi noti» in fondo a ciascuna pagina di architettura
+(la stessa trappola andrebbe ripetuta tre volte, e chi cerca non sa in quale pagina guardare);
+un file per trappola (comodo da versionare, ostile da sfogliare, e il valore di questa pagina è
+proprio poterla scorrere); rimandare la pagina a fine progetto, quando le trappole saranno tutte
+note (è esattamente il momento in cui nessuno ricorda più il sintomo).
+
+**Fonti:** [S-034](Sources.md#s-034), [V-006](Sources.md#v-006), [V-007](Sources.md#v-007), [V-014](Sources.md#v-014), [V-018](Sources.md#v-018)
+
+---
+
+<a id="adr-0034"></a>
+## ADR-0034 — `docker kill` non simula un guasto, e il lab lo dirà invece di fingere
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** la demo che regge la seconda metà del talk è la caduta di un nodo. Il gesto ovvio
+per provocarla è `docker kill`, ed è il gesto che si vede in quasi tutte le presentazioni su
+MongoDB in container. Misurandolo è saltato fuori che quel gesto non fa quello che sembra.
+
+Con `restart: unless-stopped` in vigore, un `docker kill -s KILL` lascia il container `exited` e
+`RestartCount` a **zero**: il demone non prova nemmeno a rialzarlo, né subito né dodici secondi
+dopo ([V-017](Sources.md#v-017)). Lo stesso container, se `mongod` termina da sé, riparte da
+solo in pochi secondi con `RestartCount=1`. Stessa politica, stesso container, esito opposto: a
+cambiare è soltanto chi ha mandato il segnale.
+
+La documentazione lo copre, ma non in modo che qualcuno potesse prevederlo.
+[S-039](Sources.md#s-039) dice che la politica «is ignored until the Docker daemon restarts or
+the container is manually restarted» dopo che il container «is stopped (manually or otherwise)»,
+e la pagina di `docker kill` ([S-040](Sources.md#s-040)) non contiene la parola «restart». Per
+il demone un `docker kill` è una fermata voluta da un umano. Per chi guarda lo schermo è un
+crash.
+
+Nella stessa sessione è emerso il caso simmetrico: `kill -9 1` **dentro** il container non fa
+niente e ritorna successo. Non è una stranezza del runtime, è il kernel: solo i segnali per cui
+«init» ha installato un gestore possono raggiungerlo dagli altri membri del suo namespace, e
+`SIGKILL` non è gestibile ([S-041](Sources.md#s-041)).
+
+**Decisione:** il lab non finge che `docker kill` sia un guasto.
+
+1. Le demo di caduta nodo **dichiarano cosa stanno simulando**. `docker kill` resta lo strumento
+   — è immediato, è riproducibile, è quello che il pubblico si aspetta — ma la narrazione dice
+   «sto spegnendo un nodo», non «sto simulando un crash».
+2. **Dove serve mostrare la ripartenza automatica**, il nodo si fa terminare da sé (comando
+   `shutdown`), che è la via misurata in cui la politica di riavvio interviene davvero.
+3. La trappola sta in `trappole-mongodb-in-docker.md` con il suo sintomo per titolo — «ho ucciso
+   il container e `restart: unless-stopped` non l'ha rialzato» — secondo il contratto di
+   [ADR-0033](#adr-0033).
+4. `restart: unless-stopped` **resta** nei tre file Compose. Serve al caso per cui esiste: la
+   macchina che si riavvia, il demone che riparte, il processo che muore da solo. Toglierlo
+   perché non copre un caso che non gli compete sarebbe la reazione sbagliata alla scoperta.
+
+**Conseguenze:** la demo di failover di `feature/02` va progettata sapendo questo, e il runbook
+del talk ([ADR-0015](#adr-0015)) deve contenere la frase giusta accanto al comando — perché è
+esattamente il momento in cui un ascoltatore attento chiede «ma allora non riparte da solo?», e
+la risposta onesta è più interessante della domanda.
+
+C'è un guadagno inatteso. «Il gesto con cui tutti simulano un guasto non simula un guasto» è un
+aneddoto migliore di qualunque diagramma sulle politiche di riavvio, e viene con tre fonti e una
+tabella di misure. Va in [`citazioni-riportare-slide.md`](citazioni-riportare-slide.md).
+
+**Alternative scartate:** togliere `restart: unless-stopped` dai file per evitare l'imbarazzo
+(nasconde il fenomeno invece di spiegarlo, e priva gli stack di una protezione che serve
+davvero); usare `docker stop` nelle demo perché «è più onesto» (è più lento e mette in mezzo un
+arresto pulito, che è un terzo scenario ancora diverso); tacere e lasciare che la demo suggerisca
+una conclusione sbagliata (funziona finché in sala non c'è nessuno che conosce Docker).
+
+**Fonti:** [S-039](Sources.md#s-039), [S-040](Sources.md#s-040), [S-041](Sources.md#s-041), [V-017](Sources.md#v-017)
