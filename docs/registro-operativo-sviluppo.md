@@ -380,7 +380,8 @@ E tre note di metodo.
 
 ## 2026-08-28 — Chiusura di `feature/01-stack-standalone`
 
-**Fatto:** tredici task, quindici commit, ventidue file rispetto a `develop`. Il branch
+**Fatto:** tredici task, sedici commit, venticinque file rispetto a `develop` — quindici
+nuovi e dieci modificati. Il branch
 consegna il primo stack e le pagine che lo spiegano: `docker/01-standalone/compose.yaml` con
 le risorse dichiarate e l'immagine pinnata per digest, il seed deterministico in
 `init/10-dati-demo.js`, sei target `make` per governarlo, `tools/smoke-standalone.sh` con
