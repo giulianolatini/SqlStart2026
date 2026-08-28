@@ -76,7 +76,7 @@ pagine rispondono con le procedure ufficiali.
 
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
-| `04-mongosh/guida-mongosh.md` | connessione, comandi di uso quotidiano, comandi di amministrazione del replica set e dello sharded cluster, script non interattivi | `feature/01-stack-standalone` |
+| [`04-mongosh/guida-mongosh.md`](04-mongosh/guida-mongosh.md) | connettersi da dentro il container e i tre parametri che `mongosh` sceglie da sé, comandi di uso quotidiano, comandi di amministrazione di replica set e sharded cluster (scritti qui, eseguiti in `02` e `03`), script non interattivi e la tabella dei codici di uscita | già nel repository |
 
 ## 05-talk — il palco
 

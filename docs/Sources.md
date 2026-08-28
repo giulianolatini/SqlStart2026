@@ -1244,7 +1244,120 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   `docs/03-amministrazione/log.md`, che per questa ragione è **dichiarata non verificata** su
   questo branch: qui non esiste un replica set. La verifica è dovuta a `feature/02`
   ([ADR-0035](Decision.md#adr-0035)).
-- **Usata da:** ADR-0035
+- **Usata da:** ADR-0035, ADR-0036
+
+---
+
+<a id="s-045"></a>
+### S-045 — MongoDB Shell: Connect to a Deployment
+
+- **URL:** https://www.mongodb.com/docs/mongodb-shell/connect/ (consultata nella variante
+  `connect.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / MongoDB Shell
+- **Versione documentata:** `mongosh` corrente alla consultazione; il lab usa la **2.10.0**
+  contenuta nell'immagine `mongo:7.0.40`
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — senza argomenti va su localhost.** «To connect to a MongoDB
+  deployment running on **localhost** with **default port** 27017, run `mongosh` without any
+  options». E per le opzioni separate: «The `--host` and `--port` command-line options. If you
+  omit the `--port` option, `mongosh` uses the default port 27017.»
+- **Cosa afferma, secondo punto — il database predefinito è `test`.** «To connect to a specific
+  default database, specify a database in your connection string URI path. If unspecified by the
+  connection string, the default database is the `test` database.» Da cui la forma
+  `mongosh "mongodb://localhost:27017/qa"`.
+- **Cosa afferma, terzo punto — la connessione diretta è implicita, e ha quattro eccezioni.**
+  «When you specify individual replica set members in the connection string, `mongosh`
+  automatically adds the `directConnection=true` parameter, unless at least one of the following
+  is true»: c'è il parametro `replicaSet`; la stringa usa il formato `mongodb+srv://`; la stringa
+  contiene una seed list con più host; la stringa contiene già `directConnection`. È la regola che
+  decide se si sta parlando con **un nodo** o con **un replica set**, e da `feature/02` in poi
+  fa la differenza fra leggere un secondario e leggere il primario.
+- **Cosa afferma, quarto punto — `+srv` implica TLS.** «When you use the `+srv` connection string
+  modifier, MongoDB automatically sets the `--tls` option to `true`.»
+- **Cosa non afferma:** il valore predefinito di `serverSelectionTimeoutMS`. La pagina non lo
+  nomina. `mongosh` 2.10.0 lo imposta a **2000 ms** e lo si scopre solo leggendo la stringa che
+  costruisce da sé ([V-020](#v-020)) — un dettaglio che conta quando il server dall'altra parte è
+  un replica set in mezzo a un'elezione, che [S-044](#s-044) dà per lunga fino a dodici secondi.
+- **Riserve:** la pagina è scritta pensando ad Atlas e a installazioni sull'host. Il caso di
+  questo lab — `mongosh` che vive **dentro** il container a cui si connette — non è contemplato,
+  e cambia il significato di «localhost» ([V-018](#v-018)).
+- **Usata da:** ADR-0036
+
+---
+
+<a id="s-046"></a>
+### S-046 — MongoDB Shell: Options (riferimento della riga di comando)
+
+- **URL:** https://www.mongodb.com/docs/mongodb-shell/reference/options/ (consultata nella
+  variante `options.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / MongoDB Shell
+- **Versione documentata:** `mongosh` corrente alla consultazione; misurata la 2.10.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — `--eval` si può ripetere, e stampa solo l'ultimo.** «Evaluates a
+  JavaScript expression. You can use a single `--eval` argument or multiple `--eval` arguments
+  together.» E poi la regola che sorprende: «After `mongosh` evaluates the `--eval` argument, it
+  prints the results to your command line. If you use multiple `--eval` statements, `mongosh`
+  only prints the results of the last `--eval`.»
+- **Cosa afferma, secondo punto — `--quiet` è già acceso quando non c'è un umano.** Sotto
+  `--no-quiet`: «Disables the default `--quiet` option mode for non-interactive shell sessions.
+  When specified, `mongosh` displays all messages during startup.» E, esplicitamente: «For
+  non-interactive shell sessions, MongoDB enables `--quiet` by default.» Di `--quiet` dice che
+  «Skips all messages during startup (such as welcome messages and startup warnings) and goes
+  directly to the prompt».
+- **Cosa afferma, terzo punto — `--json` e le sue due modalità.** «You can use the `--json` flag
+  with `--eval` to return `mongosh` results in Extended JSON format. `mongosh` supports both
+  `--json=canonical` and `--json=relaxed` modes. If you omit the mode, `mongosh` defaults to the
+  `canonical` mode. The `--json` flag is mutually exclusive with `--shell`.»
+- **Cosa afferma, quarto punto — due opzioni che rendono ripetibile uno script.**
+  `--norc`: «Prevents the shell from sourcing and evaluating `~/.mongoshrc.js` on startup.»
+  `--nodb`: avvia la shell senza collegarsi ad alcun server.
+- **Cosa non afferma:** **i codici di uscita.** In tutta la pagina non c'è una tabella, né una
+  frase, che dica con quale codice `mongosh` termini in caso di errore. Chi scrive uno script di
+  automazione deve misurarlo, ed è quello che fa [V-020](#v-020).
+- **Riserve:** il comportamento predefinito di `--quiet` dipende dal fatto che la sessione sia
+  «non interattiva», nozione che la pagina non definisce. Nel lab la stessa riga di comando può
+  finire in uno script o essere incollata in un terminale, e per questo `--quiet` si scrive
+  comunque ([ADR-0036](Decision.md#adr-0036)).
+- **Usata da:** ADR-0036
+
+---
+
+<a id="s-047"></a>
+### S-047 — MongoDB Shell: Write Scripts
+
+- **URL:** https://www.mongodb.com/docs/mongodb-shell/write-scripts/ (consultata nella variante
+  `write-scripts.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / MongoDB Shell
+- **Versione documentata:** `mongosh` corrente alla consultazione; misurata la 2.10.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — i file si passano con `--file`.** «To specify the filename, use
+  the `--file` or `-f` parameter to specify the filename», e più oltre, in grassetto nella
+  pagina: «To pass filenames always use `--file` or `-f`.» L'opzione si ripete:
+  `mongosh --file loadMovies.js --file queryMovies.js` esegue i due file in ordine.
+- **Cosa afferma, secondo punto — `load()` non cerca da nessuna parte.** «There is no search path
+  for the `load()` method. If the target script is not in the current working directory or the
+  full specified path, the MongoDB Shell cannot access the file.» Dentro un container, dove la
+  directory di lavoro non è quella da cui si è digitato il comando, è la differenza fra uno script
+  che parte e uno che non si trova.
+- **Cosa afferma, terzo punto — uscire è una scelta esplicita.** «It is often useful to terminate
+  a running script if an exception is thrown, or in the case of unexpected results.» Il modo è
+  uno: «To terminate a script, you can call the `exit(<code>)` method, where the `<code>` is any
+  user-specified value.» E la buona pratica: «As a best practice, wrap code in a `try - catch`,
+  calling the `exit` method in the `catch` block. Likewise, to check the results of a query or
+  any command, you can add an `if - else` statement and call the `exit` method if the results are
+  not what is expected.»
+- **Cosa non afferma:** che cosa succeda **senza** `exit()`. La pagina raccomanda di uscire
+  esplicitamente e tace su quale codice restituisca `mongosh` quando un'eccezione non viene
+  catturata, o quando la connessione fallisce. Sono i due casi che contano di più in
+  automazione, e sono misurati in [V-020](#v-020).
+- **Riserve:** «any user-specified value» va preso alla lettera solo fin dove arriva il sistema
+  operativo. Misurato: `exit(300)` fa uscire il processo con **44** (cioè 300 modulo 256) ed
+  `exit(-1)` con **255** ([V-020](#v-020)). Il valore che lo script sceglie e il valore che lo
+  script di chiamata legge non sono la stessa cosa, e la pagina non avvisa.
+- **Usata da:** ADR-0036
 
 ---
 
@@ -2033,7 +2146,7 @@ scambiano gli indirizzi con cui sono stati configurati e un client che riceve `l
   l'ultima riga della tabella cambierebbe. Rete singola creata da Compose; con reti multiple o
   alias di rete il quadro si arricchisce e non è stato esplorato.
 - **Data:** 2026-08-28
-- **Usata da:** ADR-0033
+- **Usata da:** ADR-0033, ADR-0036
 
 ---
 
@@ -2156,5 +2269,182 @@ nodo replichi qualcosa.
   resoconto di un'istanza che, in questa finestra, non ha mai sbagliato niente.
 - **Data:** 2026-08-28
 - **Usata da:** ADR-0035
+
+---
+
+<a id="v-020"></a>
+### V-020 — `mongosh` in automazione: ogni errore vale 1, e il silenzio vale 0
+
+- **Domanda:** che cosa può promettere uno script che chiama `mongosh`? Il codice di uscita
+  distingue un errore del server da un server irraggiungibile? E una ricerca che non trova
+  niente è un errore?
+- **Ambiente:** stack `01-standalone`, immagine `mongo:7.0.40`, `mongosh` **2.10.0** eseguito
+  dentro il container `mongo-standalone`. Macchina di sviluppo: macOS 26.6.2 (Darwin 25.6.0),
+  Docker Desktop. Data: 2026-08-28.
+- **Comandi:** una quarantina di invocazioni non interattive, ciascuna con il proprio codice
+  di uscita raccolto dal processo chiamante.
+
+**Primo risultato — sull'host `mongosh` non c'è, e non serve.**
+
+```console
+$ which mongosh
+mongosh not found
+$ which mongo
+mongo not found
+$ docker exec mongo-standalone sh -c 'command -v mongosh; command -v mongod; command -v mongodump'
+/usr/bin/mongosh
+/usr/bin/mongod
+/usr/bin/mongodump
+$ docker exec mongo-standalone mongosh --version
+2.10.0
+```
+
+L'immagine porta con sé la shell, il server e gli strumenti di backup. Nessuna installazione sul
+portatile, e una versione sola: quella misurata qui.
+
+**Secondo risultato — la stringa che `mongosh` costruisce da sé.** Invocato senza argomenti si
+collega a `localhost:27017` ([S-045](#s-045)); interrogato su dove sia andato, risponde:
+
+```text
+mongodb://127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+2.10.0
+```
+
+Tre valori impliciti che nessuno ha scritto: `directConnection=true`, `appName`, e soprattutto
+**`serverSelectionTimeoutMS=2000`**. Due secondi. [S-044](#s-044) dà un'elezione per lunga fino a
+dodici. Un `mongosh` invocato senza pensarci, contro un replica set che sta rieleggendo, si
+arrende **dieci secondi prima** che il cluster abbia finito — e l'errore che stampa somiglia a
+quello di un cluster morto. Nessuna delle pagine consultate nomina questo valore predefinito.
+
+Il database predefinito è `test`, come dichiarato:
+
+```console
+$ mongosh --quiet --eval "db.getName()"
+test
+$ mongosh --quiet "mongodb://localhost:27017/lab" --eval "db.getName()"
+lab
+```
+
+**Terzo risultato — `--quiet` è già acceso, quando non c'è un umano.**
+
+| invocazione | prima riga stampata |
+| --- | --- |
+| `mongosh --eval "1 + 1"` | `2` |
+| `mongosh --quiet --eval "1 + 1"` | `2` |
+| `mongosh --no-quiet --eval "1 + 1"` | `Current Mongosh Log ID:	6a91801e…` |
+
+Conferma di [S-046](#s-046): in sessione non interattiva il silenzio è il valore predefinito, e
+`--no-quiet` serve a **ri**accendere il preambolo. Con `--no-quiet` compaiono sei righe di
+intestazione — identificativo di sessione, stringa di connessione, versione del server, versione
+della shell — prima del risultato.
+
+**Quarto risultato — con più `--eval`, si stampa solo l'ultimo valore.**
+
+| comando | stampa |
+| --- | --- |
+| `--eval "1 + 1" --eval "2 + 2"` | `4` |
+| `--eval "print('uno')" --eval "print('due')" --eval "3 + 3"` | `uno`, `due`, `6` |
+| `--eval "use lab" --eval "db.getName()"` | `lab` |
+
+Il **valore** dell'espressione viene stampato solo per l'ultimo `--eval` ([S-046](#s-046)),
+mentre `print()` scrive sempre. E lo stato attraversa i frammenti: un `use lab` nel primo
+`--eval` vale ancora nel secondo. Chi vuole vedere i risultati intermedi deve chiedere `print()`;
+chi si limita a scrivere l'espressione ottiene silenzio, non un errore.
+
+**Quinto risultato — la tabella dei codici di uscita.** Nessuna delle pagine consultate la
+contiene. Misurata:
+
+| situazione | codice |
+| --- | ---: |
+| espressione valutata senza errori | **0** |
+| `countDocuments` che non trova nulla (restituisce `0`) | **0** |
+| `throw new Error("rotto")` non catturato | **1** |
+| `TypeError` — metodo che non esiste | **1** |
+| `ReferenceError` — identificatore non definito | **1** |
+| `MongoServerError` — `no such command` | **1** |
+| `MongoServerError` — `E11000 duplicate key error` | **1** |
+| `MongoServerError` — `cannot use 'w' > 1 when a host is not replicated` | **1** |
+| `MongoNetworkError` — `getaddrinfo ENOTFOUND` | **1** |
+| `MongoNetworkError` — `connect ECONNREFUSED` | **1** |
+| `--file` su un percorso che non esiste (`ENOENT`) | **1** |
+| `exit(3)` | **3** |
+| `quit(7)` | **7** |
+| `exit(300)` | **44** |
+| `exit(-1)` | **255** |
+
+Tre conclusioni, e sono tutte scomode.
+
+1. **Ogni errore vale `1`.** Dal codice di uscita non si distingue «il server ha risposto di no»
+   da «il server non l'ho trovato». Chi deve distinguere deve leggere `stderr`, oppure catturare
+   l'eccezione e uscire con un codice proprio, come raccomanda [S-047](#s-047).
+2. **Il silenzio vale `0`.** Una ricerca che non trova niente termina con successo. Uno script di
+   verifica che si limiti a interrogare, e che giudichi dal codice di uscita, **dichiara sano un
+   database vuoto**. È lo stesso genere di trappola di `logRotate` che risponde `ok: 1`
+   ([V-010](#v-010)): l'operazione riesce, il fatto non è avvenuto.
+3. **Il codice scelto non è sempre il codice consegnato.** `exit(300)` diventa 44 (300 modulo
+   256) ed `exit(-1)` diventa 255. Restare fra 1 e 125 evita anche la sovrapposizione con i
+   codici che le shell si riservano.
+
+**Sesto risultato — `load()` non cerca da nessuna parte, e `--file` neanche.** Con lo script in
+`/tmp/controllo.js` e la directory di lavoro in `/etc`:
+
+```console
+$ mongosh --quiet --eval 'load("controllo.js")'
+Error: ENOENT: no such file or directory, open '/etc/controllo.js'
+    rc = 1
+$ mongosh --quiet --eval 'load("/tmp/controllo.js")'
+ordini: 50000
+true
+    rc = 0
+```
+
+Conferma letterale di [S-047](#s-047). Dentro un container la directory di lavoro non è quella da
+cui si è digitato il comando: i percorsi vanno assoluti, sempre.
+
+**Settimo risultato — non si passa uno script per pipe.** `mongosh` legge lo standard input come
+una sessione interattiva e ci stampa sopra i suoi prompt:
+
+```console
+$ echo 'print("dallo standard input: " + …)' | docker compose exec -T mongo-standalone mongosh --quiet
+test> dallo standard input: 50000
+
+test>     rc = 0
+```
+
+Il risultato c'è, ma è annegato fra due `test>`. E `--file -` non è una scorciatoia: `mongosh`
+cerca un file che si chiama `-` (`ENOENT: … open '/-'`, codice 1). Gli unici due modi puliti
+restano `--eval` e `--file <percorso assoluto>`.
+
+**Ottavo risultato — `-T` non è il colpevole che si crede.** Le prove:
+
+| comando | stdin | esito |
+| --- | --- | --- |
+| `docker compose exec mongo-standalone mongosh …` | `/dev/null` | `2`, codice 0 |
+| `docker compose exec mongo-standalone mongosh …` | **chiuso** | `2`, codice 0 |
+| `docker compose exec -T mongo-standalone mongosh …` | chiuso | `2`, codice 0 |
+| `docker exec -it mongo-standalone mongosh …` | `/dev/null` | **fallisce**, codice 1 |
+
+L'ultima riga stampa `cannot attach stdin to a TTY-enabled container because stdin is not a
+terminal`. Non è l'assenza di `-T` a rompere gli script: è la **presenza di `-it`**, l'abitudine
+copiata da mille esempi interattivi. `docker compose exec` da solo si arrangia; `-T` è esplicito
+e non costa niente.
+
+- **Interpretazione:** `mongosh` è un ottimo strumento interattivo e un pessimo oracolo
+  automatico, se lo si interroga solo con il codice di uscita. Uno script che deve **verificare**
+  qualcosa deve dirlo: controllare il risultato e chiamare `exit()` con un codice scelto da chi
+  scrive. Questa è la ragione per cui gli strumenti di verifica di questo repository non si
+  limitano a lanciare comandi e guardare se tornano zero.
+- **Riserve:** tutti i codici valgono per `mongosh` 2.10.0; la documentazione non li dichiara, il
+  che significa che non sono un contratto e possono cambiare senza preavviso — motivo in più per
+  uscire esplicitamente. I codici `3`, `7`, `44` e `255` sono stati scelti per la prova e non
+  hanno alcun significato convenzionale. Il comportamento di `-T` è stato misurato su Docker
+  Desktop per macOS e su `docker compose` v2: su altre versioni del client, e nelle CI dove lo
+  standard input è chiuso in modi diversi, l'esito potrebbe non essere lo stesso.
+- **Nota di percorso.** Durante queste prove un `insertOne({_id: 1})` ha incontrato un `_id`
+  che nel dataset di demo esisteva già, e la pulizia successiva ha cancellato il documento
+  originale: l'impronta di `lab.ordini` è scesa a 49999. `make seed-01` ha ricaricato il dataset e
+  l'impronta è tornata **`50000 124861860.70 150281`**, identica. È la prima volta che il dataset
+  deterministico di [ADR-0031](Decision.md#adr-0031) ha ripagato il proprio costo.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0036
 
 ---

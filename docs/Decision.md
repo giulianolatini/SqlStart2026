@@ -1611,3 +1611,88 @@ superiori sono mostrate comunque); togliere l'healthcheck per avere un log pulit
 leggibilità del log con la diagnosi di uno stack che non parte, che è il problema più frequente).
 
 **Fonti:** [S-042](Sources.md#s-042), [S-043](Sources.md#s-043), [S-044](Sources.md#s-044), [V-010](Sources.md#v-010), [V-019](Sources.md#v-019)
+
+---
+
+<a id="adr-0036"></a>
+## ADR-0036 — `mongosh` si usa dentro il container, e in automazione non si crede al codice di uscita
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** la guida a `mongosh` deve servire due lettori diversi con la stessa pagina. Il
+primo è chi segue il talk e riproduce i comandi: per lui conta che la riga da incollare funzioni
+al primo colpo. Il secondo è chi scrive uno strumento di verifica del repository — `smoke-01`,
+`stack-check`, e domani l'applicazione Python: per lui conta sapere che cosa il comando promette
+quando nessuno lo guarda.
+
+Il primo fatto è che sul portatile di sviluppo `mongosh` **non esiste**. `which mongosh` non
+trova niente; la shell, il server e gli strumenti di backup vivono dentro l'immagine
+`mongo:7.0.40`, nella versione **2.10.0** ([V-020](Sources.md#v-020)). Una guida scritta come le
+guide di [S-045](Sources.md#s-045), che presuppongono `mongosh` installato accanto al database,
+manderebbe il lettore a installare un pacchetto che non serve e a collegarsi a un «localhost» che
+per lui significa un'altra macchina ([V-018](Sources.md#v-018)).
+
+Il secondo fatto è che `mongosh` sceglie da sé tre parametri che nessuno ha scritto. Interrogato
+su dove sia andato risponde
+`mongodb://127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+2.10.0`.
+Il terzo è il pericoloso: **due secondi** di attesa per trovare un server, contro un'elezione che
+[S-044](Sources.md#s-044) dà per lunga fino a dodici. Nessuna delle pagine consultate nomina
+quel valore predefinito.
+
+Il terzo fatto è la tabella dei codici di uscita, che non esiste in nessuna pagina di
+[S-046](Sources.md#s-046) né di [S-047](Sources.md#s-047). Misurata su quindici casi
+([V-020](Sources.md#v-020)) dice due cose scomode: **ogni errore vale `1`** — un `throw`, un
+`TypeError`, un `MongoServerError` e un server irraggiungibile sono indistinguibili dal codice di
+uscita — e **il silenzio vale `0`**: un `countDocuments` che restituisce zero termina con
+successo. Uno script di verifica che si limiti a interrogare e a guardare se torna zero
+**dichiara sano un database vuoto**.
+
+**Decisione.**
+
+1. **Ogni comando della guida passa da `docker compose exec`.** La pagina apre dichiarando che
+   `mongosh` non è sull'host, e non offre la variante «installalo e collegati»: non è il lab.
+   L'invocazione canonica del repository è
+   `docker compose --env-file tools/images.env -f docker/01-standalone/compose.yaml exec -T mongo-standalone mongosh --quiet --eval "…"`,
+   e la sua forma breve è il bersaglio del `Makefile`.
+2. **Negli script si scrive `-T`, e non si scrive mai `-it`.** Misurato: senza `-T` i comandi
+   funzionano lo stesso, anche con lo standard input chiuso; è `docker exec -it` a fallire con
+   `cannot attach stdin to a TTY-enabled container because stdin is not a terminal`. `-T` resta
+   perché è esplicito e non costa niente, ma la pagina dice qual è il vero colpevole, perché la
+   diagnosi sbagliata circola più della giusta.
+3. **In automazione si scrive `--quiet` anche dove sarebbe già implicito.** [S-046](Sources.md#s-046)
+   accende `--quiet` da sé nelle sessioni non interattive, ma non definisce «non interattiva», e
+   la stessa riga di comando nel lab finisce ora in uno script ora incollata a mano. Scriverlo
+   rende l'output indipendente da quella distinzione.
+4. **Uno script che verifica qualcosa esce con un codice scelto da chi lo scrive.** Mai affidarsi
+   al codice implicito: si controlla il risultato e si chiama `exit(<codice>)`, come raccomanda
+   [S-047](Sources.md#s-047), restando fra 1 e 125 perché `exit(300)` arriva al chiamante come 44
+   ed `exit(-1)` come 255.
+5. **I file di script si passano con `--file` e con percorso assoluto.** Dentro un container la
+   directory di lavoro non è quella da cui si è digitato il comando, e `load()` non ha percorso di
+   ricerca ([S-047](Sources.md#s-047)). Niente script per pipe: `mongosh` tratta lo standard input
+   come una sessione interattiva e ci stampa sopra i prompt.
+6. **Le sezioni non eseguibili su questo branch sono dichiarate tali.** I comandi di
+   amministrazione di un replica set e di uno sharded cluster stanno nella pagina perché servono
+   al talk, ma sono marcati come **non eseguiti qui**: la verifica è dovuta a `feature/02` e
+   `feature/03`. È la stessa regola di [ADR-0035](#adr-0035).
+
+**Conseguenze:** i comandi della guida sono lunghi, e la pagina lo ammette invece di accorciarli
+barando. In cambio si incollano e funzionano, anche a chi non ha mai visto questo repository, e
+sono gli stessi che girano nel `Makefile`. La regola 4 spiega perché gli strumenti di verifica del
+repository non si limitano a lanciare comandi: `smoke-01` conta i documenti e confronta
+un'impronta, e questa ADR è la ragione scritta di quella scelta.
+
+Il costo è che la guida è meno portabile di quanto sembri: chi ha `mongosh` installato sull'host
+deve tradurre. La pagina lo dice in apertura e mostra una volta la forma equivalente, poi non ci
+torna più.
+
+**Alternative scartate:** installare `mongosh` sul portatile e scrivere la guida «normale» (una
+versione in più da tenere allineata, e il rischio che in sala si parli a un server diverso da
+quello che si crede — [V-018](Sources.md#v-018)); avvolgere ogni comando in un bersaglio del
+`Makefile` e documentare solo quelli (comodo e opaco: chi guarda le slide non impara `mongosh`,
+impara questo repository); fidarsi del codice di uscita e scrivere strumenti più corti (è
+esattamente la trappola che [V-020](Sources.md#v-020) misura); rimandare la pagina a quando
+esisterà l'applicazione Python (la shell serve prima, ed è ciò che si proietta quando la demo si
+inceppa).
+
+**Fonti:** [S-044](Sources.md#s-044), [S-045](Sources.md#s-045), [S-046](Sources.md#s-046), [S-047](Sources.md#s-047), [V-018](Sources.md#v-018), [V-020](Sources.md#v-020)
