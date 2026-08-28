@@ -1,0 +1,56 @@
+# Stack 01 — istanza singola.
+#
+# È il più semplice dei tre e il meno interessante da guardare: il suo valore non è
+# tecnico, è narrativo. Mostra cosa si ottiene con un solo mongod e — soprattutto —
+# cosa non si ottiene, che è la domanda a cui rispondono gli altri due stack.
+#
+# Gira DELIBERATAMENTE senza autenticazione. Non è una svista da correggere: è
+# l'esempio negativo di ADR-0005, e chiunque copi questo file per usarlo altrove
+# deve leggere prima docs/02-architetture/standalone.md.
+#
+# Verificato da `make stack-check`, che applica a questo file le otto regole degli
+# ADR di feature/00 (tools/check_stack.py).
+
+name: sqlstart-01-standalone
+
+services:
+  mongo-standalone:
+    # Il digest arriva da tools/images.env, generato da `make images-pull`. La forma
+    # `:?` fa fallire Compose subito e dicendo cosa manca, invece di avviare un
+    # container con un'immagine vuota.
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: mongo-standalone
+    # Nome host esplicito, mai indirizzi IP: ADR-0021. Qui non serve ancora a
+    # nessuno, ma la buona abitudine si prende sullo stack in cui non costa nulla.
+    hostname: mongo-standalone
+    # `missing` durante lo sviluppo, `never` sul palco: una variabile sola,
+    # controllata dal preflight. ADR-0018.
+    pull_policy: ${PULL_POLICY:-missing}
+    restart: unless-stopped
+
+    mem_limit: 1024m
+    cpus: 1.0
+
+    command:
+      - mongod
+      # 0.25 GiB = 256 MiB di cache dentro 1024 MiB di limite. Il valore è dichiarato
+      # a mano non perché mongod non sappia leggere il proprio cgroup — lo legge, ed
+      # è misurato in V-009 — ma perché questo file è materiale didattico e il calcolo
+      # deve vedersi. Nessuno controlla che la cache stia sotto il mem_limit: mongod
+      # accetta senza un avviso una cache più grande della memoria che avrà.
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+
+    ports:
+      # Porta 27017 come da mappa del design §5.2. Gli altri due stack usano intervalli
+      # diversi apposta: i tre progetti devono poter convivere senza collisioni.
+      - "${PORTA_HOST:-27017}:27017"
+
+    volumes:
+      # Volume NOMINATO, non bind mount: su macOS un bind mount di /data/db paga il
+      # filesystem condiviso a ogni scrittura, e la demo sulle prestazioni misurerebbe
+      # VirtioFS invece di WiredTiger.
+      - dati:/data/db
+
+volumes:
+  dati:
