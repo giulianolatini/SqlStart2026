@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
 # Scarica le immagini del lab e le pinna per digest, oppure verifica che siano
-# già presenti in locale. Il talk gira senza rete: il digest è ciò che lo garantisce.
+# già presenti in locale.
 #
-# Un tag come `mongo:7.0` è un puntatore mobile. Se l'immagine locale manca, o se il
-# tag si è spostato, `docker compose up` va in rete — e la mattina del talk la rete
-# non è un'ipotesi su cui costruire. Un digest no: identifica un contenuto preciso, e
-# se quel contenuto è già nella cache locale Compose non ha motivo di uscire.
+# Un tag come `mongo:7.0` è un puntatore mobile: domani può indicare un altro
+# contenuto. Un digest no, identifica un contenuto preciso — ed è tutto ciò che il
+# digest fa. Stabilisce **quale** immagine si usa, non **se** si va in rete: sono due
+# proprietà distinte, e la seconda il pinning non la dà. Lo dice la nota di revisione
+# di ADR-0009, che ritira la motivazione contraria, e il punto 2 di
+# docs/00-progetto/limiti-noti.md: nessuna pagina Docker afferma che un'immagine
+# pinnata e già in cache eviti il registry.
+#
+# Il talk gira senza rete grazie a due cose che stanno altrove: questo script,
+# eseguito prima quando la rete c'è, e `pull_policy: never` sul profilo di palco
+# (ADR-0018, ADR-0027) — l'unico meccanismo con una frase documentale esplicita sul
+# non contattare il registry. Qui si prepara la cache e si verifica che sia piena;
+# a non uscire ci pensa Compose.
 set -euo pipefail
 
 RADICE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -114,7 +123,9 @@ verifica() {
     exit 1
   fi
 
-  echo "✓ Immagini presenti in locale: ${presenti}. Il lab parte senza rete."
+  # Ciò che è stato misurato è la cache, non il comportamento di Compose: a non
+  # uscire in rete ci pensa `pull_policy: never`. Il messaggio dice l'una cosa.
+  echo "✓ Immagini presenti nella cache locale: ${presenti}. Niente da scaricare."
 }
 
 case "${1:-}" in

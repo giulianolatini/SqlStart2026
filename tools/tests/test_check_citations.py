@@ -70,3 +70,24 @@ def test_segnala_un_percorso_inesistente_senza_traceback(tmp_path, capsys):
     assert codice == 2
     assert "assente.md" in catturato.err
     assert "Traceback" not in catturato.err
+
+
+def test_distingue_un_adr_a_cui_manca_la_riga_delle_fonti():
+    # Non è la stessa cosa di «nessuna (decisione organizzativa)»: quella è una
+    # scelta dichiarata, questa è una svista. Il controllo deve vedere solo la seconda.
+    testo = """
+## ADR-0099 — Una decisione a cui è caduta la riga delle fonti
+**Data:** 2026-08-28 · **Stato:** Accettata
+"""
+    assert parse_decisions(testo) == {"ADR-0099": None}
+
+
+def test_segnala_un_adr_a_cui_manca_la_riga_delle_fonti():
+    problemi = verifica({"ADR-0099": None}, {})
+    assert any("ADR-0099" in p and "Fonti" in p for p in problemi)
+
+
+def test_una_fonte_e_immutabile_e_utilizzabile_come_chiave():
+    fonte = Fonte("S-001", "https://esempio", {"ADR-0001"}, "s-001")
+    assert isinstance(fonte.usata_da, frozenset)
+    assert hash(fonte) == hash(Fonte("S-001", "https://esempio", {"ADR-0001"}, "s-001"))

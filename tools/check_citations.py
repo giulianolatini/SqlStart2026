@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 ADR_TITOLO = re.compile(r"^## (ADR-\d{4}) ", re.MULTILINE)
 RIGA_FONTI = re.compile(r"^\*\*Fonti:\*\* (.+)$", re.MULTILINE)
@@ -20,19 +20,30 @@ ADR_RIFERITO = re.compile(r"ADR-\d{4}")
 class Fonte:
     identificatore: str
     url: str | None
-    usata_da: frozenset[str] | set[str] = field(default_factory=set)
+    usata_da: frozenset[str] = frozenset()
     ancora: str | None = None
 
+    def __post_init__(self) -> None:
+        # `frozen=True` congela i campi, non ciò che contengono: un `set` passato
+        # qui resterebbe mutabile dall'esterno e renderebbe la Fonte non hashabile,
+        # cioè inutilizzabile come chiave. Lo si congela una volta, all'ingresso.
+        object.__setattr__(self, "usata_da", frozenset(self.usata_da))
 
-def parse_decisions(testo: str) -> dict[str, set[str]]:
-    """Associa a ogni ADR l'insieme delle fonti che cita."""
-    risultato: dict[str, set[str]] = {}
+
+def parse_decisions(testo: str) -> dict[str, set[str] | None]:
+    """Associa a ogni ADR l'insieme delle fonti che cita.
+
+    `None` non è l'insieme vuoto: significa che l'ADR non ha proprio la riga
+    `**Fonti:**`. Un insieme vuoto è la riga presente che dichiara di non citare
+    nulla — «nessuna (decisione organizzativa)» — che è una scelta, non una svista.
+    """
+    risultato: dict[str, set[str] | None] = {}
     posizioni = [(m.group(1), m.start()) for m in ADR_TITOLO.finditer(testo)]
     for indice, (adr, inizio) in enumerate(posizioni):
         fine = posizioni[indice + 1][1] if indice + 1 < len(posizioni) else len(testo)
         blocco = testo[inizio:fine]
         riga = RIGA_FONTI.search(blocco)
-        risultato[adr] = set(RIFERIMENTO.findall(riga.group(1))) if riga else set()
+        risultato[adr] = set(RIFERIMENTO.findall(riga.group(1))) if riga else None
     return risultato
 
 
@@ -56,11 +67,20 @@ def parse_sources(testo: str) -> dict[str, Fonte]:
     return risultato
 
 
-def verifica(decisioni: dict[str, set[str]], fonti: dict[str, Fonte]) -> list[str]:
+def verifica(
+    decisioni: dict[str, set[str] | None], fonti: dict[str, Fonte]
+) -> list[str]:
     """Restituisce l'elenco dei problemi. Lista vuota significa coerenza."""
     problemi: list[str] = []
 
     for adr, riferimenti in sorted(decisioni.items()):
+        if riferimenti is None:
+            problemi.append(
+                f"{adr} non ha la riga «**Fonti:**»: ogni ADR deve dichiarare le "
+                "fonti che lo giustificano, o scrivere «nessuna (decisione "
+                "organizzativa)» per dire che non ne ha apposta"
+            )
+            continue
         for riferimento in sorted(riferimenti):
             if riferimento not in fonti:
                 problemi.append(
@@ -69,7 +89,7 @@ def verifica(decisioni: dict[str, set[str]], fonti: dict[str, Fonte]) -> list[st
 
     citata_da: dict[str, set[str]] = {}
     for adr, riferimenti in decisioni.items():
-        for riferimento in riferimenti:
+        for riferimento in riferimenti or ():
             citata_da.setdefault(riferimento, set()).add(adr)
 
     for identificatore, fonte in sorted(fonti.items()):
@@ -78,8 +98,8 @@ def verifica(decisioni: dict[str, set[str]], fonti: dict[str, Fonte]) -> list[st
             problemi.append(f"{identificatore} è orfana: nessun ADR la cita")
             continue
         if fonte.usata_da != effettivi:
-            mancanti = sorted(effettivi - set(fonte.usata_da))
-            eccedenti = sorted(set(fonte.usata_da) - effettivi)
+            mancanti = sorted(effettivi - fonte.usata_da)
+            eccedenti = sorted(fonte.usata_da - effettivi)
             problemi.append(
                 f"{identificatore}: «Usata da» non corrisponde — "
                 f"mancano {mancanti or '—'}, sono di troppo {eccedenti or '—'}"

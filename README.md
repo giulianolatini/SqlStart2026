@@ -20,12 +20,15 @@ approfondire trova qui proprio le parti che dal vivo sono state saltate.
 
 ## Cosa contiene
 
-| Cartella | Contenuto |
-|---|---|
-| [`docs/`](docs/README.md) | tutta la documentazione: architetture, installazione, amministrazione, `mongosh`, decisioni e fonti |
-| `docker/` | i tre stack Compose, uno per architettura |
-| `app/` | l'applicazione dimostrativa in Python |
-| `tools/` | strumenti di repository: preflight, pre-scaricamento delle immagini, verifica delle citazioni |
+| Cartella | Contenuto | Stato |
+|---|---|---|
+| [`docs/`](docs/README.md) | tutta la documentazione: architetture, installazione, amministrazione, `mongosh`, decisioni e fonti | presente, con le sezioni mancanti dichiarate nell'[indice](docs/README.md) |
+| `docker/` | i tre stack Compose, uno per architettura | **non ancora nel repository** — vedi [Stato di avanzamento](#stato-di-avanzamento) |
+| `app/` | l'applicazione dimostrativa in Python | **non ancora nel repository** — vedi [Stato di avanzamento](#stato-di-avanzamento) |
+| `tools/` | strumenti di repository: preflight, pre-scaricamento delle immagini, verifica delle citazioni | presente |
+
+La tabella dice cosa il repository conterrà: due righe su quattro sono ancora una promessa,
+e lo dicono invece di lasciarlo scoprire a chi clona.
 
 Due file meritano una menzione a parte, perché sono il modo in cui questo materiale prova
 quello che afferma:

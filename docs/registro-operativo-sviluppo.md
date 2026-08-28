@@ -276,3 +276,96 @@ E tre note di metodo che questo branch ha pagato per imparare.
     stato un criterio di completamento scritto in anticipo e riletto voce per voce invece che
     a memoria: «lo spike ha risposto» e «lo spike ha risposto **e l'ADR lo registra**» sono
     due criteri diversi, e solo il secondo era scritto.
+
+---
+
+## 2026-08-28 — Una review esterna su PR #1
+
+**Fatto:** PR #1 è stata sottoposta a una review automatica esterna, per avere addosso uno
+sguardo che non avesse partecipato a scriverla. Cinque rilievi puntuali. Quattro erano
+fondati e sono stati corretti; il quinto prediceva un guasto che non esiste, e sotto la
+predizione sbagliata aveva però un'osservazione vera.
+
+I quattro accolti, in ordine di gravità.
+
+1. **`tools/pull-images.sh` affermava ciò che il repository aveva già ritirato.**
+   L'intestazione diceva «il talk gira senza rete: il digest è ciò che lo garantisce», e più
+   sotto «se quel contenuto è già nella cache locale Compose non ha motivo di uscire». È
+   esattamente la motivazione che la nota di revisione di [ADR-0009](Decision.md#adr-0009)
+   ritira — il digest stabilisce *quale* immagine, non *se* si va in rete — e che il punto 2
+   dei [limiti noti](00-progetto/limiti-noti.md) ripete. Anche il messaggio finale del
+   comando, «il lab parte senza rete», affermava più di quanto avesse misurato: aveva
+   guardato la cache, non il comportamento di Compose. Riscritti entrambi. La garanzia
+   offline sta dove è documentata, in `pull_policy: never` ([ADR-0018](Decision.md#adr-0018),
+   [ADR-0027](Decision.md#adr-0027)) più il pre-scaricamento; lo script prepara la cache e
+   dice di aver preparato la cache.
+2. **`Fonte` si dichiarava immutabile e non lo era.** La dataclass è `frozen=True` ma il
+   campo `usata_da` arrivava come `set`: `frozen` congela i campi, non ciò che contengono.
+   Verificato eseguendo — `hash(fonte)` solleva `TypeError: unhashable type: 'set'`, e
+   `fonte.usata_da.add(...)` muta l'oggetto «immutabile». Ora il valore viene congelato in
+   `__post_init__`, una volta sola, all'ingresso.
+3. **Il controllo delle citazioni non vedeva una riga cancellata.** `parse_decisions`
+   restituiva l'insieme vuoto sia per un ADR con `**Fonti:** nessuna (decisione
+   organizzativa)` sia per un ADR a cui la riga fosse semplicemente caduta: due situazioni
+   diverse, una scelta dichiarata e una svista, appiattite sullo stesso valore. Oggi i
+   ventotto ADR hanno tutti la riga e due usano il marcatore, quindi il marcatore è una
+   convenzione viva e l'assenza è un difetto. Ora l'assenza è `None` e produce un messaggio
+   suo. La prova sta nel caso peggiore: togliendo la riga a [ADR-0015](Decision.md#adr-0015)
+   — organizzativa, quindi senza collegamenti inversi da rompere — prima non se ne accorgeva
+   nessuno, adesso il controllo esce `1`.
+4. **Il `README.md` prometteva cartelle che non esistono.** La tabella «Cosa contiene»
+   elencava `docker/` e `app/` accanto a `docs/` e `tools/`, senza distinguere. Le due
+   sezioni successive lo dicevano, ma la tabella andava letta fino in fondo per scoprirlo.
+   Ora ha una colonna «Stato». È lo stesso principio già applicato all'indice della
+   documentazione, che ammette le proprie sezioni mancanti invece di far scoprire il buco a
+   chi cerca: non era stato applicato all'indice della radice.
+
+Il rilievo respinto riguardava l'`awk` del `Makefile`, dove `FS = ":.*?## "` avrebbe fatto
+cercare un `?` letterale e «rischiava di rompere l'output di `make help`». La predizione era
+falsificabile in un comando ed è falsa: se `FS` non trovasse mai corrispondenza, `$2` sarebbe
+vuoto e le descrizioni sparirebbero: `make help` le stampa, ed esce `0`. Sotto, però, il
+rilievo aveva ragione. `awk` usa gli ERE — «The `awk` utility shall make use of the extended
+regular expression notation» — e negli ERE il non-greedy non esiste: quella `?` è solo un
+secondo quantificatore attaccato al primo, e «The behavior of multiple adjacent duplication
+symbols produces undefined results» (XBD §9.4.6). La modifica è stata fatta lo stesso, con
+l'output verificato identico byte per byte prima e dopo, e la ragione con i due URL sta nel
+commento sopra il target.
+
+**Fallito.**
+
+1. La correzione sul digest, il 25 agosto, ha attraversato tre documenti — la nota di
+   revisione di [ADR-0009](Decision.md#adr-0009), il punto 2 dei limiti noti, una
+   [citazione da slide](citazioni-riportare-slide.md) — e si è fermata prima del codice. Lo
+   strumento che quella decisione la mette in pratica ha continuato per tre giorni ad
+   affermare la tesi ritirata, in testa al file, dove la legge chi apre lo script per
+   capirlo. Nessun controllo del repository confronta la prosa di `tools/` con gli ADR. È la
+   seconda classe di errore in due giorni che nessuna verifica automatica vede, dopo i
+   rimandi relativi, e le due si somigliano: entrambe riguardano il testo, che è il prodotto
+   principale di questo repository e la sola parte senza rete di sicurezza.
+2. `check_citations.py` è stato scritto in TDD con nove test, e nessuno dei nove chiedeva se
+   `frozen=True` fosse vero. I test coprivano quello che la classe fa, non quello che
+   dichiara di essere. Il difetto era latente — `hash()` su una `Fonte` non è mai servito a
+   nessuno — ma la parola «frozen» nel sorgente era falsa, e chi legge il sorgente le crede.
+   Il TDD garantisce che il comportamento provato funzioni, non che le promesse non provate
+   siano mantenute.
+
+E tre note di metodo.
+
+25. Una review esterna trova cose che un criterio di completamento non può trovare. I dodici
+    task e i sei criteri, riletti voce per voce, avevano scovato due difetti chiudendo il
+    branch; un lettore che non aveva scritto niente ne ha trovati altri quattro in pochi
+    minuti, e nessuno dei quattro cadeva nel perimetro di un criterio. Un criterio verifica
+    ciò che sapevi già di dover verificare — è il suo pregio e il suo soffitto.
+26. Un revisore che sbaglia la diagnosi può avere ragione sull'osservazione, e le due cose
+    vanno separate eseguendo. Il rilievo sull'`awk` prediceva un guasto inesistente e
+    l'osservazione sotto era corretta: respingerlo in blocco avrebbe buttato via la parte
+    buona, accoglierlo in blocco avrebbe messo a registro un guasto che non c'è. Nessuna delle
+    due si decide leggendo, si decidono lanciando il comando e aprendo lo standard.
+27. La disciplina delle fonti ha un attrito che conviene nominare adesso che si è visto: ogni
+    voce di [`Sources.md`](Sources.md) deve essere citata da un ADR, altrimenti il controllo
+    la dichiara orfana — giustamente. Il testo POSIX che giustifica la modifica all'`awk`
+    sarebbe una fonte legittima, ma promuoverlo avrebbe richiesto di aprire un ADR per una
+    correzione da un carattere. La citazione è rimasta nel commento del `Makefile`, con i due
+    URL, fuori da `docs/`, dove la regola non vincola. È una scelta di proporzione e non una
+    scorciatoia, ma va rivista se casi del genere si moltiplicano: la via d'uscita pulita
+    sarebbe un ADR sugli strumenti di repository, che oggi non esiste.
