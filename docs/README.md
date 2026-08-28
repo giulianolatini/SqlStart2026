@@ -58,7 +58,7 @@ pagine rispondono con le procedure ufficiali.
 
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
-| `02-architetture/standalone.md` | istanza singola: quando basta, cosa non garantisce | `feature/01-stack-standalone` |
+| [`02-architetture/standalone.md`](02-architetture/standalone.md) | istanza singola: i quattro limiti con la fonte che li sostiene, quando basta davvero, il file Compose riga per riga | già nel repository |
 | `02-architetture/replica-set.md` | topologia, elezioni, read preference, write concern, ritardo di replica | `feature/02-stack-replicaset` |
 | `02-architetture/sharded-cluster.md` | mongos, config server, shard key, bilanciamento; i due profili dello stack | `feature/03-stack-sharded` |
 | `02-architetture/trappole-mongodb-in-docker.md` | i punti in cui MongoDB e Docker si fraintendono: nomi host, scoperta della topologia, permessi del keyfile, volumi già popolati | `feature/01-stack-standalone`, ampliata da `02` e `03` |

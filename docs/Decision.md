@@ -1332,3 +1332,87 @@ velocizzare l'avvio (1,7 secondi non sono un problema, e con poche centinaia di 
 differenza fra scansione e indice non si vede).
 
 **Fonti:** [S-021](Sources.md#s-021), [S-034](Sources.md#s-034), [V-013](Sources.md#v-013), [V-014](Sources.md#v-014)
+
+---
+
+<a id="adr-0032"></a>
+## ADR-0032 — L'istanza singola si presenta con quattro limiti citabili, non con un aggettivo
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** il talk apre con l'istanza singola e dura sessanta minuti perché quell'istanza non
+basta. La frase che regge tutto il resto — «un nodo solo non basta» — è però anche la più facile
+da dire male: si può dire in modo vago («non è affidabile»), in modo apocalittico («si perdono i
+dati»), o in modo sbagliato («non va mai bene in produzione»). Le prime due non si possono
+verificare, la terza è falsa, e un pubblico di professionisti se ne accorge in tutti e tre i casi.
+
+C'è poi un rischio specifico del formato. Chi presenta tre architetture in fila ha un incentivo a
+far sembrare la prima peggiore di quanto sia, perché rende più interessanti le altre due. È
+esattamente il tipo di scorciatoia che [ADR-0024](#adr-0024) esiste per impedire: quella gerarchia
+distingue ciò che è documentato da ciò che è stato verificato da ciò che è opinione, e «lo standalone
+è fragile» non appartiene a nessuna delle tre categorie.
+
+Nel corso del Task 7 sono emerse due cose che la sola lettura del manuale non avrebbe dato.
+
+La prima è che i limiti dell'istanza singola non si comportano allo stesso modo. Tre su quattro
+sono **rumorosi**: si chiede un change stream e arriva `Location40573`, si chiede `rs.status()` e
+arriva `NoReplicationEnabled`, si chiede `w: 2` e arriva `BadValue`. Il quarto è **silenzioso**:
+`w: "majority"` su un'istanza singola riesce, restituisce `acknowledged: true`, e non dà nulla in
+più di `w: 1` [V-015](Sources.md#v-015). Un'applicazione scritta per un replica set, diligentemente
+piena di `w: "majority"`, puntata su un nodo solo continua a funzionare con una garanzia in meno di
+quella che il suo codice crede di avere. Nessun messaggio la avverte.
+
+La seconda è che la perdita di dati si può misurare invece di evocarla. Con `w: 1` e `j` non
+specificato — il caso predefinito — [S-035](Sources.md#s-035) dice che l'acknowledgement è «In
+memory», e [S-036](Sources.md#s-036) dice che il journal tocca il disco «At every 100
+milliseconds» e che «updates can be lost following a hard shutdown». Messe insieme, le due frasi
+descrivono una finestra. Aprirla è bastato un `SIGKILL`: il client aveva ricevuto conferma fino al
+documento 41.558, ne sono sopravvissuti 41.458, **cento scritture confermate e perdute**
+[V-016](Sources.md#v-016).
+
+**Decisione:** `docs/02-architetture/standalone.md` dichiara i limiti dell'istanza singola in
+quattro affermazioni, e ciascuna porta la fonte primaria che la sostiene.
+
+1. **Nessuna ridondanza e nessun failover.** Il processo che muore è il servizio che finisce. Non
+   c'è nulla da eleggere: `rs.status()` risponde `NoReplicationEnabled` perché non c'è replica set
+   [V-015](Sources.md#v-015).
+2. **`w: 1` è tutto ciò che si può chiedere, e `w: "majority"` è la stessa cosa travestita.**
+   `w > 1` viene rifiutato [S-035](Sources.md#s-035); `w: "majority"` viene accettato in silenzio.
+   La pagina spiega che l'ack di `w: 1` è la memoria e mostra i cento documenti persi
+   [V-016](Sources.md#v-016).
+3. **Nessun oplog, quindi nessun change stream e nessun backup a caldo coerente.** `local` contiene
+   la sola `startup_log` [V-015](Sources.md#v-015); i change stream «are available for replica sets
+   and sharded clusters» [S-038](Sources.md#s-038); `mongodump --oplog` fallisce, e fallisce con un
+   messaggio che parla d'altro. Il seguito è in [ADR-0022](#adr-0022).
+4. **La manutenzione richiede una finestra di fermo.** Aggiornare la versione, cambiare
+   configurazione, spostare i dati: ogni operazione che ferma il processo ferma il servizio, perché
+   non c'è nessun altro a rispondere.
+
+Alle quattro si affianca, **nella stessa pagina e con lo stesso peso tipografico**, la sezione su
+quando un'istanza singola basta davvero. Non è una cortesia: è la parte che rende credibile il
+resto.
+
+**Conseguenze:** la pagina è più lunga e più lenta da scrivere di un elenco puntato di paure, e in
+compenso regge una domanda dal pubblico. Ogni affermazione ha un comando che la riproduce, il che
+la rende utilizzabile anche come materiale di demo: le quattro righe di [V-015](Sources.md#v-015)
+si eseguono in venti secondi davanti a chiunque.
+
+La misura di [V-016](Sources.md#v-016) porta con sé un debito onesto: non abbiamo provato lo stesso
+esperimento con `j: true`, che dovrebbe azzerare la perdita al prezzo della velocità. È scritto
+nella riserva della verifica e va fatto quando l'applicazione Python potrà generare carico
+controllato (`feature/04`).
+
+Resta un rischio da sorvegliare: le tre risposte «rumorose» dipendono da messaggi d'errore, e i
+messaggi cambiano fra versioni più facilmente dei comportamenti. La pagina cita i codici
+(`40573`, `76`, `2`) accanto ai testi, perché i codici sono la parte stabile.
+
+**Alternative scartate:** presentare i limiti solo a parole, senza comandi (più breve, ma
+indistinguibile dal marketing al contrario, e non riproducibile da chi legge); dedurre tutto dal
+manuale senza eseguire (avremmo scritto che i change stream «non sono disponibili» senza sapere che
+l'errore è `Location40573`, e soprattutto **non avremmo mai trovato** il caso di `w: "majority"`
+accettato in silenzio, che è il più interessante dei quattro); rimandare la dimostrazione della
+perdita a `feature/02`, dove ci sarà un replica set con cui confrontarla (il confronto sarà più
+bello lì, ma la pagina dell'istanza singola sarebbe rimasta senza la sua prova, e un'affermazione
+senza prova in questo repository ha una scadenza breve).
+
+**Fonti:** [S-035](Sources.md#s-035), [S-036](Sources.md#s-036), [S-037](Sources.md#s-037), [S-038](Sources.md#s-038), [V-015](Sources.md#v-015), [V-016](Sources.md#v-016)

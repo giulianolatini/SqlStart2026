@@ -925,6 +925,123 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 
 ---
 
+<a id="s-035"></a>
+### S-035 — MongoDB Manual 7.0: Write Concern
+
+- **URL:** https://www.mongodb.com/docs/v7.0/reference/write-concern/ (consultata nella variante
+  `write-concern.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0, cioè la versione che il lab esegue ([ADR-0028](Decision.md#adr-0028))
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — che cosa promette l'ack su un'istanza singola.** «A standalone
+  `mongod` acknowledges a write operation after applying the write in memory **or** after writing
+  to the on-disk journal.» Quale delle due lo decide la tabella che segue, ed è la riga che
+  riguarda il lab:
+
+  | | `j` non specificato | `j:true` | `j:false` |
+  |---|---|---|---|
+  | `w: 1` | In memory | On-disk journal | In memory |
+
+  Con `w: 1` e `j` non specificato — il caso predefinito, quello che scrive chiunque non abbia
+  letto questa tabella — **l'acknowledgement è la memoria**. Il disco non c'entra.
+- **Cosa afferma, secondo punto — il limite superiore su un nodo solo.** «`w` greater than 1
+  requires acknowledgment from the primary and as many data-bearing secondaries as needed to meet
+  the specified write concern». Su un'istanza singola i secondari non esistono, e il server
+  rifiuta: misurato in [V-015](#v-015).
+- **Cosa non afferma:** che `w: "majority"` su un'istanza singola sia un errore. Non lo è, e la
+  pagina non lo dice in nessuna direzione — la maggioranza di un nodo è quel nodo. Chiedere
+  «maggioranza» a uno standalone riesce, e riesce senza dare niente in più di `w: 1`. Misurato in
+  [V-015](#v-015).
+- **Riserve:** la tabella dello standalone descrive il momento dell'*acknowledgement*, non la
+  durabilità. Quanto dura la finestra fra l'ack in memoria e il disco non sta qui: sta in
+  [S-036](#s-036), ed è il numero che rende la finestra misurabile.
+- **Usata da:** ADR-0032
+
+---
+
+<a id="s-036"></a>
+### S-036 — MongoDB Manual 7.0: Journaling
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/journaling/ (consultata nella variante
+  `journaling.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — il journal non si può spegnere.** «Starting in MongoDB 6.1,
+  journaling is always enabled. As a result, MongoDB removes the `storage.journal.enabled` option
+  and the corresponding `--journal` and `--nojournal` command-line options.» Sulla 7.0 la domanda
+  «e se lo disattivo?» non ha più risposta: l'opzione non esiste.
+- **Cosa afferma, secondo punto — ogni quanto il journal tocca il disco.** WiredTiger sincronizza
+  «At every 100 milliseconds (See `storage.journal.commitIntervalMs`)», oltre che a ogni scrittura
+  con `j: true` e quando crea un nuovo file di journal (limite di 100 MB per file).
+- **Cosa afferma, terzo punto — e quindi che cosa si perde.** In grassetto, come Importante:
+  «In between write operations, while the journal records remain in the WiredTiger buffers,
+  updates can be lost following a hard shutdown of `mongod`.» È la frase che autorizza a dire
+  «l'ack non è il disco» senza aggettivi: lo dice il manuale.
+- **Cosa afferma, quarto punto — a cosa serve il journal alla ripartenza.** «if MongoDB exits
+  unexpectedly in between checkpoints, journaling is required to recover information that occurred
+  after the last checkpoint».
+- **Riserve:** la pagina dà l'intervallo (100 ms) ma non dice **quanti** documenti stiano in quella
+  finestra, perché dipende dal ritmo delle scritture. Il numero per il lab è misurato in
+  [V-016](#v-016): cento documenti confermati e perduti, su un `SIGKILL` durante un inserimento
+  uno alla volta.
+- **Usata da:** ADR-0032
+
+---
+
+<a id="s-037"></a>
+### S-037 — MongoDB Manual 7.0: Replica Set Oplog
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/replica-set-oplog/ (consultata nella variante
+  `replica-set-oplog.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma:** «The oplog (operations log) is a special capped collection that keeps a rolling
+  record of all operations that modify the data stored in your databases»; e su dove vive: «All
+  replica set members contain a copy of the oplog, in the `local.oplog.rs` collection, which allows
+  them to maintain the current state of the database.»
+- **Cosa non afferma:** che un'istanza singola non abbia l'oplog. Non c'è una frase che lo dica —
+  c'è il titolo della pagina, «**Replica Set** Oplog», e il fatto che ogni frase parli di membri di
+  un replica set. La conferma diretta è nostra: su `mongo-standalone` il database `local` contiene
+  la sola `startup_log`, e `local.oplog.rs` non esiste ([V-015](#v-015)).
+- **Riserve:** questa è una fonte che si cita per ciò che *implica*, ed è il tipo di citazione da
+  maneggiare con cura. L'affermazione «un'istanza singola non ha oplog» qui non è scritta: è
+  dedotta dalla pagina e **verificata eseguendo**, come impone la gerarchia di
+  [ADR-0024](Decision.md#adr-0024). Chi ripete l'affermazione senza la verifica sta citando un
+  titolo.
+- **Usata da:** ADR-0032
+
+---
+
+<a id="s-038"></a>
+### S-038 — MongoDB Manual 7.0: Change Streams
+
+- **URL:** https://www.mongodb.com/docs/v7.0/changeStreams/ (consultata nella variante
+  `changeStreams.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma:** in apertura della sezione *Availability*, senza giri di parole: «Change streams
+  are available for **replica sets** and **sharded clusters**». E sul perché uno se ne accorga solo
+  quando serve: «Change streams allow applications to access real-time data changes without the
+  prior complexity and risk of manually tailing the oplog» — cioè poggiano sull'oplog
+  ([S-037](#s-037)), che su un'istanza singola non c'è.
+- **Cosa non afferma:** con quale errore fallisce chi ci prova comunque. La pagina elenca dove i
+  change stream *sono* disponibili e tace su cosa succede altrove. Il messaggio esatto — `Location
+  40573`, «The $changeStream stage is only supported on replica sets» — è misurato in
+  [V-015](#v-015), ed è quello che si legge in produzione quando qualcuno sposta un'applicazione da
+  un replica set a un'istanza singola per «semplificare».
+- **Riserve:** la pagina è scritta per chi ha già un replica set. Non contiene una sezione
+  «migrazione da standalone», che è invece il percorso reale di chi incontra il limite.
+- **Usata da:** ADR-0032
+
+---
+
 ## Verifiche empiriche
 
 <a id="v-001"></a>
@@ -1463,3 +1580,136 @@ succedendo è «la mia modifica non è stata nemmeno letta».
   perché il lab non usa bind mount per i dati.
 - **Data:** 2026-08-28
 - **Usata da:** ADR-0031
+
+---
+
+<a id="v-015"></a>
+### V-015 — Cosa un'istanza singola rifiuta, e cosa accetta senza dare niente in cambio
+
+- **Comandi:** `db.getSiblingDB("local").getCollectionNames()` · `db.ordini.watch()` ·
+  `rs.status()` · `insertOne(…, {writeConcern: {w: 2}})` ·
+  `insertOne(…, {writeConcern: {w: "majority"}})` · `mongodump --oplog --out=…`
+- **Ambiente:** stack `docker/01-standalone` avviato e `healthy`, `mongo` 7.0.40 pinnata per
+  digest, `mongodump` 100.18.0 (dentro l'immagine), 2026-08-28
+
+**1. L'oplog non c'è, e si vede da dentro.**
+
+```
+collezioni in local: startup_log
+```
+
+Una sola collezione. Nessuna `oplog.rs`. È la verifica diretta di ciò che [S-037](#s-037) lascia
+solo intendere.
+
+**2. Le quattro risposte, affiancate.** La colonna che conta è l'ultima.
+
+| Richiesta | Esito | Messaggio | Chi se ne accorge |
+|---|---|---|---|
+| `db.ordini.watch()` | errore | `Location40573` · «The $changeStream stage is only supported on replica sets» | subito, ed è chiarissimo |
+| `rs.status()` | errore | `NoReplicationEnabled` (76) · «not running with --replSet» | subito, ed è chiarissimo |
+| `w: 2` | errore | `BadValue` (2) · «cannot use 'w' > 1 when a host is not replicated» | subito, ed è chiarissimo |
+| `w: "majority"` | **riesce**, `acknowledged: true` | nessuno | **nessuno** |
+
+Le prime tre sono buone notizie: il server dice di no, dice perché, e lo dice al primo tentativo.
+La quarta è la sola che vale la pena raccontare dal palco. Un'applicazione scritta per un replica
+set, che chiede diligentemente `w: "majority"` a ogni scrittura importante, puntata su
+un'istanza singola **continua a funzionare**: nessun errore, nessun avviso, e una garanzia in meno
+di quella che il codice crede di avere. La maggioranza di un nodo è quel nodo.
+
+**3. `mongodump --oplog`, e il messaggio che manda fuori strada.** Due tentativi, due errori
+diversi, nessuno dei quali nomina il problema vero:
+
+```
+$ mongodump --oplog --db=lab --out=/tmp/dump-prova
+Failed: bad option: --oplog mode only supported on full dumps
+
+$ mongodump --oplog --out=/tmp/dump-prova
+Failed: error getting oplog start: error getting recent oplog entry: mongo: no documents in result
+```
+
+Il primo messaggio è corretto e utile. Il secondo è corretto e inutile: «no documents in result»
+descrive il sintomo — la collezione interrogata è vuota, perché non esiste — e non la causa, che è
+«questa istanza non è un membro di un replica set, quindi un backup a caldo coerente non è
+ottenibile qui». Chi legge quella riga alle due di notte cerca il documento mancante. Nessuna
+cartella viene creata: il comando fallisce prima di scrivere.
+
+- **Riserve:** provato su `mongodump` 100.18.0, quello che viaggia dentro l'immagine `mongo` 7.0.40.
+  Il testo dei messaggi appartiene ai Database Tools e ha una numerazione di versione propria
+  ([S-011](#s-011)): può cambiare senza che cambi MongoDB. Il comportamento — fallire — è la parte
+  stabile; le parole no.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0032
+
+---
+
+<a id="v-016"></a>
+### V-016 — Cento documenti confermati all'applicazione e persi: la finestra di `w: 1`, misurata
+
+- **Comandi:** `mongosh --eval 'for (let i = 1; i <= 500000; i++) { db.prova_durabilita.insertOne({_id: i}); print(i); }'`
+  (uscita rediretta su file) · `docker kill -s KILL mongo-standalone` · `docker inspect` ·
+  `docker compose up -d --wait` · `db.prova_durabilita.countDocuments()`
+- **Ambiente:** stack `docker/01-standalone`, `mongo` 7.0.40 pinnata per digest, collezione
+  `lab.prova_durabilita` separata dal dataset di demo, 2026-08-28
+
+**1. La misura.** Uno scrittore inserisce documenti **uno alla volta**, con la write concern
+predefinita (`w: 1`, `j` non specificato), e stampa l'`_id` di ogni inserimento **dopo** che il
+server lo ha confermato. A metà corsa, `SIGKILL` al container: nessuna chiusura pulita, nessun
+flush di cortesia.
+
+| Grandezza | Valore |
+|---|---:|
+| ultimo `_id` confermato al client | 41.558 |
+| documenti sopravvissuti al riavvio | 41.458 |
+| `_id` massimo sopravvissuto | 41.458 |
+| **documenti confermati e perduti** | **100** |
+
+Cento scritture per cui l'applicazione aveva ricevuto un `acknowledged: true` non esistono più.
+Non è un difetto di MongoDB: è esattamente ciò che [S-035](#s-035) descrive («In memory») e
+[S-036](#s-036) quantifica («At every 100 milliseconds»), letto su un'installazione vera invece
+che su una tabella.
+
+**La prova è a senso unico, ed è giusto dirlo.** L'uscita dello scrittore passa per una pipe, che
+può essere bufferizzata: il file potrebbe contenere **meno** ack di quanti il client ne abbia
+davvero ricevuti, mai di più. Quindi la perdita misurata è un **minimo**: sono almeno cento. Se il
+conteggio dei sopravvissuti fosse risultato maggiore dell'ultimo ack registrato, la prova sarebbe
+stata inconcludente e andava dichiarata tale.
+
+**2. Cosa dice il log alla ripartenza.** Il nodo riparte da solo, e la riga che denuncia la
+chiusura sporca è una sola, di severità `W`:
+
+```json
+{"t":{"$date":"2026-08-28T11:32:59.268+00:00"},"s":"W","c":"STORAGE","id":22302,
+ "ctx":"initandlisten","msg":"Recovering data from the last clean checkpoint."}
+```
+
+Seguono le righe del componente `WTRECOV`, fra cui «recovery log replay has successfully finished
+and ran for 173 milliseconds». Da `Recovering data…` a «Waiting for connections» (`id` 23016)
+passano **1,1 secondi**: il recovery di WiredTiger su questo dataset non è la parte lenta di
+niente.
+
+**3. Il dataset di demo attraversa il kill intatto.** Dopo la ripartenza, `make smoke-01` dà dodici
+controlli verdi e l'impronta invariata — `50000 124861860.70 150281`. I 50.000 ordini erano in un
+checkpoint da tempo; a cadere è solo ciò che stava nella finestra. La differenza fra i due esiti
+sulla stessa macchina, nello stesso istante, è tutta lì.
+
+**4. Lo stato del container dopo il kill.**
+
+```
+Status=exited OOMKilled=false ExitCode=137 RestartCount=0
+```
+
+`OOMKilled=false` con `ExitCode=137` è la conferma, arrivata per un'altra strada, di ciò che
+[V-009](#v-009) dichiarava già: il 137 da solo non dice chi ha ucciso il processo. Il
+`RestartCount=0` su un container con `restart: unless-stopped` è un fatto separato e più
+sorprendente, misurato nella stessa sessione e registrato dove gli compete, in
+[V-017](#v-017).
+
+- **Riserve:** un solo tentativo, su una sola macchina, con inserimenti uno alla volta. Il numero
+  «cento» non è una costante di MongoDB: è quanti inserimenti stavano nella finestra **su questo
+  hardware, a questo ritmo**. Con inserimenti in lotto, con `j: true`, o su un disco diverso il
+  numero cambia; quello che non cambia è che la finestra esista. Non è stato provato lo stesso
+  esperimento con `j: true`, che secondo [S-035](#s-035) dovrebbe azzerare la perdita al prezzo
+  della velocità: è la misura naturale da aggiungere quando l'applicazione Python
+  (`feature/04`) potrà farla sotto carico controllato.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0032

@@ -59,7 +59,7 @@ services:
       - dati:/data/db
       # L'entrypoint ufficiale esegue questi script SOLO se /data/db è vuota. Su un
       # volume già popolato non succede niente, e non lo dice nessuno: nessun
-      # avviso, nessuna riga di log. Vedi V-013 e
+      # avviso, nessuna riga di log. Vedi V-014 e
       # docs/02-architetture/trappole-mongodb-in-docker.md.
       - ./init:/docker-entrypoint-initdb.d:ro
 
