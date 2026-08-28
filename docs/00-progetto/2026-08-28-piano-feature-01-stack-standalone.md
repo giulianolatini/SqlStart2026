@@ -627,8 +627,9 @@ Si raccolgono adesso, non a fine progetto.
 
 - [ ] **Passo 5 — PR #2**
 
-Corpo che racconta cosa c'è, cosa manca e come si verifica, con la tabella dei criteri di
-completamento.
+Base **`develop`**, non `main`: il 2026-08-28 `develop` ha ricevuto l'intero
+`feature/00-fondamenta` e questo branch parte da lì. Corpo che racconta cosa c'è, cosa manca e
+come si verifica, con la tabella dei criteri di completamento.
 
 ---
 
