@@ -573,7 +573,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 - **Riserve:** le unità sono **MiB**, non MB: scrivere «100 MB» in slide è impreciso ed è
   esattamente il dettaglio che viene fatto notare. I valori valgono per GitHub.com; su
   GitHub Enterprise Server «a site administrator can configure a different limit».
-- **Usata da:** ADR-0016
+- **Usata da:** ADR-0016, ADR-0031
 
 <a id="s-022"></a>
 ### S-022 — `docker-library/mongo`: `8.0/docker-entrypoint.sh`
@@ -884,6 +884,44 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 - **Riserve:** «il predefinito è illimitato, quindi non ruota» è una deduzione, e qui una
   deduzione non sostituisce una misura che costa un comando. Misurata in [V-011](#v-011).
 - **Usata da:** ADR-0030
+
+---
+
+<a id="s-034"></a>
+### S-034 — `docker-library/mongo`: `7.0/docker-entrypoint.sh`
+
+- **URL:** https://github.com/docker-library/mongo/blob/master/7.0/docker-entrypoint.sh
+- **Editore:** docker-library — Docker Official Images
+- **Versione documentata:** la copia che sta in `/usr/local/bin/docker-entrypoint.sh` dentro
+  l'immagine `mongo` 7.0.40 pinnata per digest. Le righe citate sotto sono lette lì, dentro
+  l'immagine che il lab esegue davvero, non dal repository.
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — quando gli script di inizializzazione si saltano, e su quale
+  criterio.** Il commento è esplicito: «check for a few known paths (to determine whether we've
+  already initialized and should thus skip our initdb scripts)». Segue un ciclo su quattro
+  percorsi — `$dbPath/WiredTiger`, `$dbPath/journal`, `$dbPath/local.0`, `$dbPath/storage.bson` —
+  e se anche uno solo esiste, `shouldPerformInitdb` viene azzerato. La regola non è «se la
+  cartella è vuota»: è «se non trovo traccia di un'inizializzazione precedente», e le tracce sono
+  un elenco scritto a mano.
+- **Cosa afferma, secondo punto — il `mongod` temporaneo della fase di init forka.** L'ultima
+  riga della sua invocazione è `"${mongodHackedArgs[@]}" --fork`, e `--fork` obbliga a dichiarare
+  un `--logpath`.
+- **Cosa afferma, terzo punto — e per non perdere quei log, li manda su un descrittore.**
+  `if stat "/proc/$$/fd/1" > /dev/null && [ -w "/proc/$$/fd/1" ]; then` →
+  `--logpath "/proc/$$/fd/1"`, con ripiego su un file dentro `dbPath` e avviso esplicito:
+  «warning: initdb logs cannot write to '/proc/$$/fd/1', so they are in '$initdbLogPath'
+  instead». Chi ha scritto l'entrypoint sapeva perfettamente che `--logpath` porta via i log da
+  stdout, e ha dovuto aggirarlo — corrobora [S-032](#s-032) e [V-010](#v-010) dal lato di chi
+  costruisce l'immagine.
+- **Cosa non afferma:** quando decide di saltare gli script di init, **non stampa niente**. Il
+  ramo che azzera `shouldPerformInitdb` non ha un `echo`, non ha un `warning`, non lascia una
+  riga di log. Il salto è muto. Verificato in [V-014](#v-014).
+- **Riserve:** [S-022](#s-022) documenta lo stesso file per la 8.0. Il lab gira sulla 7.0
+  [ADR-0028](Decision.md#adr-0028), quindi per gli stack vale questa voce e non quella. I due
+  file si somigliano molto, ed è esattamente il motivo per cui citare quello sbagliato non si
+  noterebbe fino al giorno in cui cambia.
+- **Usata da:** ADR-0030, ADR-0031
 
 ---
 
@@ -1302,3 +1340,126 @@ di 3 secondi, a container sano.
   `timeout: 5s`.
 - **Data:** 2026-08-28
 - **Usata da:** ADR-0030
+
+---
+
+<a id="v-013"></a>
+### V-013 — Il dataset di demo è deterministico; e il generatore che sembrava buono non lo era
+
+- **Comandi:** `docker compose … down -v` seguito da `up -d`, due volte ·
+  `db.ordini.aggregate([{$group:{_id:"$citta", n:{$sum:1}}}])` ·
+  `$group` su `null` con `$sum` di `importo` e `righe` · `db.ordini.findOne({_id: 0})`
+- **Ambiente:** stack `docker/01-standalone`, immagine `mongo` 7.0.40 pinnata per digest,
+  `mongosh` 2.10.0, host macOS 26.6.2 arm64, 2026-08-28
+
+**1. Il primo generatore distribuiva malissimo, e si vedeva solo contando.** La prima versione di
+`10-dati-demo.js` usava il congruenziale lineare che si scrive a memoria,
+`seme = (seme * 1103515245 + 12345) % 2147483648`, e sceglieva la città con `seme % 10`. Su
+50.000 ordini e dieci città:
+
+| Città | LCG, `% 10` | xorshift 32 bit |
+|---|---:|---:|
+| Ancona | 9.862 | 4.992 |
+| Bologna | **20** | 4.977 |
+| Cagliari | 9.956 | 5.068 |
+| Firenze | **57** | 4.899 |
+| Genova | 10.076 | 5.038 |
+| Milano | **28** | 5.090 |
+| Napoli | 9.592 | 5.045 |
+| Palermo | **49** | 4.904 |
+| Roma | 10.285 | 4.968 |
+| Torino | **75** | 5.019 |
+
+Cinque città con diecimila ordini e cinque con qualche decina. Sono due difetti sovrapposti. Il
+noto: in un LCG i **bit bassi hanno periodo cortissimo**, e `% 10` guarda proprio quelli. Il meno
+noto, e specifico di JavaScript: `seme * 1103515245` arriva a 2,4·10^18 e **sfonda i 2^53 interi
+rappresentabili in modo esatto** in un `Number`, quindi il modulo viene applicato a un valore già
+arrotondato. Il generatore non era quello che il codice sembrava dire.
+
+Lo xorshift a 32 bit usa solo operatori bit a bit, che JavaScript definisce su interi a 32 bit
+con segno: nessun arrotondamento è possibile, e i bit bassi valgono quanto gli altri. La
+distribuzione risultante sta fra 4.899 e 5.090 contro 5.000 attesi. Sui cinque stati, fra 9.882 e
+10.178 contro 10.000.
+
+Perché conta per una demo e non solo per l'eleganza: la demo confronta la stessa interrogazione
+con e senza indice. Con la prima distribuzione, `{citta: "Bologna"}` avrebbe restituito venti
+documenti e `{citta: "Roma"}` diecimila — la differenza fra le due misure sarebbe stata la
+selettività, non l'indice.
+
+**2. Due caricamenti da volume vuoto danno lo stesso dataset, byte per byte.** Ciclo completo
+`down -v` → `up -d` eseguito due volte di fila, e ogni volta:
+
+| Impronta | Valore |
+|---|---|
+| documenti | 50.000 |
+| somma di `importo` | 124.861.860,70 |
+| somma di `righe` | 150.281 |
+| `_id: 0` | `cliente-1279`, Torino, in lavorazione, 4121.44, 2026-05-24 |
+
+Identiche. È la proprietà che serve davvero: se la demo dal vivo va storta e si passa alla
+registrazione di riserva, i numeri sullo schermo devono essere gli stessi, altrimenti il pubblico
+vede il salto.
+
+**3. Il caricamento non pesa sull'avvio.** 50.000 documenti in **1.745 ms**, in dieci `insertMany`
+da 5.000. Lo `start_period: 20s` dell'healthcheck copre il caricamento con un margine ampio: la
+fase di init avviene prima che `mongod` accetti connessioni TCP, quindi un seed lento si
+presenterebbe come un nodo che tarda a diventare sano.
+
+- **Riserve:** l'uguaglianza è verificata su tre aggregati e un documento, non confrontando i
+  50.000 documenti uno per uno. Tre somme indipendenti che coincidono sono una prova forte, non
+  una dimostrazione. La riproducibilità è garantita dalla semantica di JavaScript sugli interi a
+  32 bit, che è specificata: non dipende dalla macchina, ma dipende dal fatto che il motore sia
+  conforme, e qui è stato provato solo su `mongosh` 2.10.0.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0031
+
+---
+
+<a id="v-014"></a>
+### V-014 — L'entrypoint salta gli script di inizializzazione su un volume popolato, e non lo dice
+
+- **Comandi:** `db.ordini.deleteMany({})` · `docker compose … down` (**senza** `-v`) ·
+  `docker compose … up -d` · `db.ordini.countDocuments()` ·
+  `docker logs … | grep -ciE 'initdb|Carico|Caricati'`
+- **Ambiente:** stack `docker/01-standalone` con `./init` montata su
+  `/docker-entrypoint-initdb.d`, immagine `mongo` 7.0.40 pinnata per digest, 2026-08-28
+
+**1. La sequenza.** Volume popolato dai 50.000 ordini del seed. Si svuota la collezione, si ferma
+lo stack **conservando il volume**, si riavvia:
+
+| Momento | `lab.ordini.countDocuments()` |
+|---|---:|
+| dopo il seed iniziale | 50.000 |
+| dopo `deleteMany({})` | 0 |
+| dopo `down` e `up -d` | **0** |
+
+I dati non tornano. Lo script è nel container, montato, leggibile, e non viene eseguito.
+
+**2. E il log non ne parla.** Sul container riavviato:
+
+```
+docker logs mongo-standalone | grep -ciE 'initdb|Carico|Caricati'   →  0
+```
+
+Zero occorrenze. Non «script saltato», non un avviso: **niente**. Il container ha comunque
+prodotto 130 righe di log ed è arrivato a `healthy`, quindi il silenzio non è un log mancante: è
+un silenzio scelto. Il ramo dell'entrypoint che decide di saltare non stampa nulla
+[S-034](#s-034).
+
+**3. Il criterio non è «la cartella è vuota».** L'entrypoint cerca quattro percorsi noti dentro
+`dbPath` — `WiredTiger`, `journal`, `local.0`, `storage.bson` — e se ne trova uno considera il
+volume già inizializzato [S-034](#s-034). Il modo di riportare il volume allo stato iniziale è
+quindi `docker compose down -v`, che rimuove il volume, non `docker compose restart` e nemmeno
+cancellare le collezioni.
+
+Vale la pena dire perché la trappola morde forte proprio qui: chi lavora al lab modifica il file
+del seed, riavvia, e non vede cambiare niente. Il ciclo di lavoro naturale — modifica, riavvia,
+guarda — dà un esito che sembra dire «la mia modifica non funziona», mentre quello che sta
+succedendo è «la mia modifica non è stata nemmeno letta».
+
+- **Riserve:** provato sullo stack 01 con volume nominato. Con un bind mount di `/data/db` il
+  criterio è lo stesso — sono gli stessi quattro percorsi — ma `down -v` non basta a ripulire,
+  perché il volume non è di Docker: bisogna cancellare la cartella sull'host. Non provato qui,
+  perché il lab non usa bind mount per i dati.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0031

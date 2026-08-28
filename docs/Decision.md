@@ -1246,4 +1246,89 @@ disco pieno); `max-size` più generoso (dieci MiB di JSON sono decine di migliai
 limite non si incontra in una demo, si incontra in un ciclo impazzito, che è appunto il caso da
 contenere).
 
-**Fonti:** [S-032](Sources.md#s-032), [S-033](Sources.md#s-033), [V-010](Sources.md#v-010), [V-011](Sources.md#v-011), [V-012](Sources.md#v-012)
+**Una nota su un'apparente contraddizione.** Fra le alternative appena scartate c'è `--logpath`
+puntato su un descrittore invece che su un file — e l'entrypoint ufficiale fa esattamente questo:
+`--logpath "/proc/$$/fd/1"` per il `mongod` temporaneo della fase di inizializzazione
+[S-034](Sources.md#s-034). Non è una smentita, è un caso diverso, e vale la pena dirlo prima che
+lo dica una review. Quel `mongod` è avviato con `--fork`, e `--fork` **obbliga** a dichiarare un
+`--logpath`: l'entrypoint non sta scegliendo fra file e stdout, sta scegliendo fra un file e un
+descrittore, perché la terza possibilità gli è preclusa. E lo fa su un processo che vive qualche
+secondo, su cui nessuno chiamerà mai `logRotate`. Il nostro `mongod` non forka, quindi la scelta
+ce l'ha; e vive quanto dura il talk, quindi la rotazione lo riguarda davvero.
+
+Resta però l'osservazione che conta di più: per far uscire su stdout i log di un `mongod` con
+`--logpath`, chi costruisce l'immagine ufficiale ha dovuto ricorrere a un espediente, corredato
+di due link di giustificazione nel codice. È la conferma, dal lato di chi l'immagine la scrive,
+che il canale doppio non esiste.
+
+**Fonti:** [S-032](Sources.md#s-032), [S-033](Sources.md#s-033), [S-034](Sources.md#s-034), [V-010](Sources.md#v-010), [V-011](Sources.md#v-011), [V-012](Sources.md#v-012)
+
+---
+
+<a id="adr-0031"></a>
+## ADR-0031 — Il dataset di demo è deterministico, e chi decide se esiste è il volume
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** tutte le demo hanno bisogno di dati, e tre vincoli decidono che dati.
+
+Il primo viene dal palco. Le demo sono dal vivo con una registrazione di riserva
+[ADR-0016](#adr-0016): se qualcosa va storto e si passa al filmato, i numeri sullo schermo devono
+essere gli stessi di prima, altrimenti il salto lo vede il pubblico. Un dataset che cambia a ogni
+avvio rende la riserva inutilizzabile proprio nel momento in cui serve.
+
+Il secondo viene dal riuso. Gli stessi dati serviranno agli stack 02 e 03 e all'applicazione
+Python: nascere in una forma copiabile costa poco adesso e molto dopo.
+
+Il terzo viene dal meccanismo. In Docker il caricamento iniziale passa da
+`/docker-entrypoint-initdb.d`, e quel meccanismo ha un comportamento che nessuno si aspetta: gli
+script vengono eseguiti **solo** se il volume non è già inizializzato, e quando non lo sono
+l'entrypoint **non stampa niente** — verificato eseguendo, con i dati cancellati che non tornano
+e zero righe di log a dirlo [V-014](Sources.md#v-014). Il criterio non è nemmeno «la cartella è
+vuota»: è la presenza di uno fra quattro percorsi noti dentro `dbPath`
+[S-034](Sources.md#s-034). Chi sviluppa il lab incontrerà questa trappola il primo giorno,
+modificando il seed e non vedendo cambiare niente.
+
+**Decisione:** cinque clausole.
+
+1. **Il dataset è uno script JavaScript versionato, non un dump binario.** Si legge in una
+   review, si confronta con un `diff`, non pesa sul repository [S-021](Sources.md#s-021) e non
+   va rigenerato quando cambia la versione di MongoDB.
+2. **Ogni sorgente di variabilità è bandita.** Nessun `Math.random()`, nessun `new Date()` senza
+   argomento, `_id` espliciti e sequenziali, epoca fissa dichiarata come costante. Il generatore
+   è uno **xorshift a 32 bit** con seme fisso, e non un congruenziale lineare: in JavaScript il
+   prodotto di un LCG sfonda i 2^53 interi esatti, e i suoi bit bassi hanno periodo cortissimo.
+   La prima versione di questo file sbagliava su entrambi i fronti e produceva cinque città con
+   diecimila ordini e cinque con qualche decina [V-013](Sources.md#v-013).
+3. **Il seed non crea indici.** Il confronto fra la stessa interrogazione con e senza indice è
+   una delle demo: crearlo qui toglierebbe il «prima».
+4. **Il file vive in un posto solo** e gli stack successivi lo riusano invece di copiarlo.
+5. **La semantica dell'entrypoint si accetta e si documenta, non si aggira.** Il modo di
+   ricaricare da zero è `docker compose down -v`; e perché non sia l'unico modo, il `Makefile`
+   espone `make seed-01`, che esegue lo stesso file su uno stack già in piedi. Due strade
+   esplicite sono meglio di una implicita che ogni tanto non parte.
+
+**Conseguenze:** la riserva registrata diventa davvero intercambiabile con la demo dal vivo, che
+era il punto. La distribuzione uniforme rende onesto il confronto con e senza indice: con la
+prima versione del generatore, la differenza fra due misure sarebbe stata la selettività della
+città e non l'indice, e sarebbe passata per un risultato. Il caricamento costa 1,7 secondi e sta
+comodamente dentro lo `start_period` dell'healthcheck [V-013](Sources.md#v-013).
+
+Il prezzo è una trappola che resta nel prodotto e che quindi va insegnata invece che nascosta:
+finisce in `docs/02-architetture/trappole-mongodb-in-docker.md` e in un commento dentro il file
+Compose, accanto alla riga del montaggio. Questa è la forma che qui prende il principio secondo
+cui un comportamento sorprendente documentato vale più di un comportamento sorprendente
+aggirato — chi copia il file si porta dietro anche la spiegazione.
+
+**Alternative scartate:** un dump con `mongorestore` (binario, illeggibile in review, pesante nel
+repository, e da rigenerare a ogni cambio di versione); un servizio «seeder» separato che attende
+`service_healthy` e carica (più parti mobili, e dovrebbe decidere da sé se i dati ci sono già,
+cioè reimplementare male il controllo che l'entrypoint fa già); `Math.random()` con un seme
+(JavaScript non permette di seminare `Math.random`: non è una preferenza, non si può);
+sostituire l'entrypoint con uno script nostro per forzare il seed a ogni avvio (si perde
+l'allineamento con l'immagine ufficiale e si guadagna un file da mantenere, per un problema che
+si risolve con un target del `Makefile`); ridurre il dataset a poche centinaia di documenti per
+velocizzare l'avvio (1,7 secondi non sono un problema, e con poche centinaia di documenti la
+differenza fra scansione e indice non si vede).
+
+**Fonti:** [S-021](Sources.md#s-021), [S-034](Sources.md#s-034), [V-013](Sources.md#v-013), [V-014](Sources.md#v-014)
