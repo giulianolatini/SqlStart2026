@@ -179,7 +179,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   «Use keyfiles only for testing and development environments because of their limited
   manageability and cryptographic strength. For production environments, use X.509
   certificates».
-- **Usata da:** ADR-0005, ADR-0014
+- **Usata da:** ADR-0005, ADR-0014, ADR-0037
 
 <a id="s-006"></a>
 ### S-006 — MongoDB Manual: Localhost Exception in Self-Managed Deployments
@@ -1361,6 +1361,218 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 
 ---
 
+<a id="s-048"></a>
+### S-048 — MongoDB Manual: Install MongoDB Community Edition on Ubuntu
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/install-mongodb-on-ubuntu/
+- **Editore:** MongoDB, Inc. — MongoDB Manual v7.0
+- **Versione documentata:** MongoDB 7.0 Community Edition, la stessa riga di versione del lab
+  ([ADR-0028](Decision.md#adr-0028))
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — il pacchetto della distribuzione non va usato.** In evidenza:
+  «The `mongodb` package provided by Ubuntu is **not** maintained by MongoDB Inc. and conflicts
+  with the official `mongodb-org` package. If you already installed the `mongodb` package on your
+  Ubuntu system, you **must** first uninstall the `mongodb` package before proceeding with these
+  instructions.» Le piattaforme dichiarate per la 7.0 sono Ubuntu 22.04 LTS «Jammy» e 20.04 LTS
+  «Focal», solo a 64 bit.
+- **Cosa afferma, secondo punto — la procedura, in quattro passi.** Importare la chiave GPG
+  pubblica (`curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | sudo gpg -o
+  /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor`); creare il file di elenco
+  `/etc/apt/sources.list.d/mongodb-org-7.0.list`; `sudo apt-get update`; `sudo apt-get install -y
+  mongodb-org`.
+- **Cosa afferma, terzo punto — che cosa crea l'installazione.** «If you installed through the
+  package manager, the data directory `/var/lib/mongodb` and the log directory `/var/log/mongodb`
+  are created during the installation», e «By default, MongoDB runs using the `mongodb` user
+  account. If you change the user that runs the MongoDB process, you **must** also modify the
+  permission to the data and log directories to give this user access to these directories.» Il
+  file di configurazione è `/etc/mongod.conf`, e «if you change the configuration file while the
+  MongoDB instance is running, you must restart the instance for the changes to take effect».
+- **Cosa afferma, quarto punto — il servizio.** L'avvio passa dall'init system; per riconoscerlo,
+  `ps --no-headers -o comm 1`. Con `systemd`: `sudo systemctl start mongod`,
+  `sudo systemctl status mongod`, `sudo systemctl enable mongod` per l'avvio al riavvio,
+  `stop` e `restart`. «You can follow the state of the process for errors or important messages by
+  watching the output in the `/var/log/mongodb/mongod.log` file.»
+- **Cosa afferma, quinto punto — `ulimit` e il `bindIp`.** «If the `ulimit` value for number of
+  open files is under `64000`, MongoDB generates a startup warning.» E: «By default, MongoDB
+  launches with `bindIp` set to `127.0.0.1`, which binds to the localhost network interface. This
+  means that the `mongod` can only accept connections from clients that are running on the same
+  machine.» Da cui il fatto che un `mongod` appena installato **non** può nemmeno inizializzare un
+  replica set finché non gli si cambia quel valore.
+- **Cosa non afferma:** niente su come si mette in sicurezza l'istanza dopo l'installazione, se
+  non un rimando. La procedura si ferma a un server che parte, senza autenticazione, in ascolto
+  su localhost.
+- **Riserve:** **questa procedura non è stata eseguita.** La macchina di sviluppo è macOS con
+  Docker Desktop ([V-020](#v-020)); l'unico Ubuntu 22.04 disponibile qui è quello **dentro**
+  l'immagine `mongo:7.0.40`, che è installata dallo stesso repository apt ma senza `systemd`, senza
+  `/etc/mongod.conf` e con percorsi diversi ([V-021](#v-021)). La pagina di installazione dichiara
+  la riserva in testa ([ADR-0037](Decision.md#adr-0037)).
+- **Usata da:** ADR-0037
+
+---
+
+<a id="s-049"></a>
+### S-049 — MongoDB Manual: Install MongoDB Community Edition on Windows
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/install-mongodb-on-windows/
+- **Editore:** MongoDB, Inc. — MongoDB Manual v7.0
+- **Versione documentata:** MongoDB 7.0 Community Edition
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — la shell non è inclusa, e va detto due volte.** «The MongoDB Shell
+  (`mongosh`) is not installed with MongoDB Server. You need to follow the `mongosh` installation
+  instructions to download and install `mongosh` separately», e più avanti, per non lasciare
+  scampo: «The `.msi` installer does not include `mongosh`.»
+- **Cosa afferma, secondo punto — le piattaforme, e una esclusione netta.** Windows Server 2022,
+  Windows Server 2019 e Windows 11, solo a 64 bit su x86\_64. E: «MongoDB is not supported on
+  Windows Subsystem for Linux (WSL). To run MongoDB on Linux, use a supported Linux system.»
+- **Cosa afferma, terzo punto — l'installazione è una procedura guidata.** Il `.msi` installa
+  binari e file di configurazione predefinito; «The configuration file is located in the
+  installation directory at `bin\mongod.cfg`». Il tipo di installazione è *Complete* o *Custom*.
+  Nella schermata *Service Configuration* si sceglie se installare MongoDB come servizio di
+  Windows: nome del servizio (predefinito `MongoDB`), utente con cui gira, *Data Directory* che
+  corrisponde a `--dbpath` e *Log Directory* che corrisponde a `--logpath`; se le directory non
+  esistono, «the installer will create the directory and sets the directory access to the service
+  user».
+- **Cosa afferma, quarto punto — il servizio si governa dalla console dei servizi.** Avvio e
+  arresto passano da lì; per personalizzare la configurazione «you must stop the service» e poi
+  modificare `<install directory>\bin\mongod.cfg`. Fuori dal servizio si può lanciare a mano:
+  `"C:\Program Files\MongoDB\Server\7.0\bin\mongod.exe" --dbpath="c:\data\db"`, dopo aver creato
+  la directory dei dati, e con l'avvertenza «You must open the command interpreter as an
+  Administrator». Il segnale che tutto va bene è la riga `[initandlisten] waiting for
+  connections`.
+- **Cosa afferma, quinto punto — il firewall e gli aggiornamenti.** Windows Defender Firewall può
+  mostrare un avviso di sicurezza e bloccare «some features» di `mongod.exe`. E sugli
+  aggiornamenti: «If you installed MongoDB with the Windows installer (`.msi`), the `.msi`
+  automatically upgrades within its release series (e.g. 7.2.1 to 7.2.2). Upgrading a full release
+  series (e.g. 6.0 to 7.0) requires a new installation.»
+- **Cosa non afferma:** non contiene alcuna sezione `ulimit` — non esiste su Windows — né alcuna
+  raccomandazione su THP, che è un meccanismo del kernel Linux. Le due mezze pagine di messa a
+  punto che valgono su Ubuntu qui semplicemente non ci sono, e questo va detto invece di lasciarlo
+  intuire.
+- **Riserve:** **questa procedura non è stata eseguita.** Nessuna macchina Windows in questo
+  progetto. Ogni affermazione della pagina di installazione su Windows viene da qui e da
+  [S-005](#s-005), e la riserva è dichiarata in testa ([ADR-0037](Decision.md#adr-0037)).
+- **Usata da:** ADR-0037
+
+---
+
+<a id="s-050"></a>
+### S-050 — MongoDB Manual: Production Notes (Self-Managed Deployments)
+
+- **URL:** https://www.mongodb.com/docs/v7.0/administration/production-notes/
+- **Editore:** MongoDB, Inc. — MongoDB Manual v7.0
+- **Versione documentata:** MongoDB 7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — il filesystem.** «When running MongoDB in production on Linux, you
+  should use Linux kernel version 2.6.36 or later, with either the XFS or EXT4 filesystem. If
+  possible, use XFS as it generally performs better with MongoDB.» E con più forza: «With the
+  WiredTiger storage engine, using XFS is **strongly recommended** for data bearing nodes to avoid
+  performance issues that may occur when using EXT4 with WiredTiger.» È la raccomandazione che il
+  server ripete a ogni avvio con l'`id` 22297 ([V-019](#v-019)).
+- **Cosa afferma, secondo punto — RAM e CPU.** «At a minimum, ensure that each `mongod` or
+  `mongos` instance has access to two real cores or one multi-core physical CPU.» Su WiredTiger:
+  «Throughput *increases* as the number of concurrent active operations increases up to the number
+  of CPUs», e diminuisce oltre una soglia che dipende dall'applicazione.
+- **Cosa afferma, terzo punto — lo swap, con due strategie e nessuna terza.** «MongoDB performs
+  best where swapping can be avoided or kept to a minimum… However, if the system hosting MongoDB
+  runs out of RAM, swapping can prevent the Linux OOM Killer from terminating the `mongod`
+  process.» Le due strategie ammesse: assegnare spazio di swap e configurare il kernel perché lo
+  usi solo sotto forte pressione, oppure non assegnarne affatto e disabilitare del tutto lo
+  scambio.
+- **Cosa afferma, quarto punto — NUMA.** «Running MongoDB on a system with Non-Uniform Memory
+  Access (NUMA) can cause a number of operational problems, including slow performance for periods
+  of time and high system process usage.» Il rimedio è una politica di *memory interleave*: su
+  Linux `sudo sysctl -w vm.zone_reclaim_mode=0` e l'avvio tramite `numactl`, sotto `systemd` da
+  configurare nel file di servizio; su Windows «memory interleaving must be enabled through the
+  machine's BIOS». «MongoDB checks NUMA settings on start up… If the NUMA configuration may degrade
+  performance, MongoDB prints a warning.»
+- **Cosa afferma, quinto punto — la rete è la prima difesa.** «Always run MongoDB in a *trusted
+  environment*, with network rules that prevent access from *all* unknown computers, systems, and
+  networks», e in evidenza: «By default, authorization is not enabled.»
+- **Cosa non afferma:** non dà soglie numeriche per la maggior parte delle raccomandazioni — non
+  dice quanto swap, non dice quanta RAM oltre il minimo di due core. Sono indicazioni di direzione,
+  non un dimensionamento.
+- **Riserve:** nessuna di queste messe a punto è stata applicata **né misurata su una macchina di
+  produzione**. Ciò che è stato misurato è l'opposto ed è istruttivo: il container del lab viola
+  tre di queste raccomandazioni e il server lo dichiara all'avvio ([V-021](#v-021)).
+- **Usata da:** ADR-0037
+
+---
+
+<a id="s-051"></a>
+### S-051 — MongoDB Manual: Disable Transparent Huge Pages (THP)
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/transparent-huge-pages/
+- **Editore:** MongoDB, Inc. — MongoDB Manual v7.0
+- **Versione documentata:** MongoDB 7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — che cos'è e perché disturba.** «Transparent Huge Pages (THP) is a
+  Linux memory management system that reduces the overhead of Translation Lookaside Buffer (TLB)
+  lookups on machines with large amounts of memory by using larger memory pages.» E poi la
+  ragione: «However, database workloads often perform poorly with THP enabled, because they tend to
+  have sparse rather than contiguous memory access patterns. When running MongoDB on Linux, THP
+  should be disabled for best performance.»
+- **Cosa afferma, secondo punto — si disabilita prima che `mongod` parta.** Il modo raccomandato è
+  un servizio dell'init system. Sotto `systemd`, il file
+  `/etc/systemd/system/disable-transparent-huge-pages.service` con `Before=mongod.service`,
+  `Type=oneshot` e
+  `ExecStart=/bin/sh -c 'echo never | tee /sys/kernel/mm/transparent_hugepage/enabled > /dev/null
+  && echo never | tee /sys/kernel/mm/transparent_hugepage/defrag > /dev/null'`.
+- **Cosa afferma, terzo punto — il percorso non è sempre lo stesso.** «Some versions of Red Hat
+  Enterprise Linux, and potentially other Red Hat-based derivatives, use a different path for the
+  THP `enabled` file: `/sys/kernel/mm/redhat_transparent_hugepage/enabled`. Verify which path is in
+  use on your system and update the `disable-transparent-huge-pages.service` file accordingly.» Su
+  RHEL/CentOS con `tuned` o `ktune` serve in più un profilo personalizzato.
+- **Cosa non afferma:** quanto si perde tenendo THP acceso. Non c'è un numero, né un intervallo:
+  la pagina raccomanda e non quantifica, e questo è esattamente il motivo per cui in questo
+  repository la raccomandazione viene riportata e **non** trasformata in una promessa di
+  prestazioni.
+- **Riserve:** non applicabile a un container. Il valore di THP appartiene al kernel dell'host —
+  qui la macchina virtuale Linux di Docker Desktop, dove risulta `[always] madvise never`, cioè
+  acceso, e non modificabile da dentro il container ([V-021](#v-021)). È la ragione per cui il
+  `mongod` del lab emette l'avviso `9068900` a ogni avvio e non c'è niente da fare, se non saperlo.
+- **Usata da:** ADR-0037
+
+---
+
+<a id="s-052"></a>
+### S-052 — MongoDB Manual: UNIX `ulimit` Settings for Self-Managed Deployments
+
+- **URL:** https://www.mongodb.com/docs/v7.0/reference/ulimit/
+- **Editore:** MongoDB, Inc. — MongoDB Manual v7.0
+- **Versione documentata:** MongoDB 7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — i sette valori raccomandati.** «The following settings are
+  particularly important for `mongod` and `mongos` deployments»: `-f` (file size) `unlimited`,
+  `-t` (cpu time) `unlimited`, `-v` (virtual memory) `unlimited`, `-l` (locked-in-memory size)
+  `unlimited`, `-n` (open files) **`64000`**, `-m` (memory size) `unlimited`, `-u`
+  (processes/threads) **`64000`**. E: «Restart your `mongod` and `mongos` instances after changing
+  the `ulimit` settings to apply the changes.»
+- **Cosa afferma, secondo punto — perché i descrittori si consumano a due a due.** «Incoming
+  connections to a `mongod` or `mongos` instance require **two** file descriptors.» Il numero da
+  reggere non è quello delle connessioni: è il doppio.
+- **Cosa afferma, terzo punto — sotto `systemd` non si usa `ulimit`.** «If you start a `mongod` or
+  `mongos` instance as a `systemd` service, you can specify limits within the `[Service]` section
+  of its service file», con `LimitFSIZE=infinity`, `LimitCPU=infinity`, `LimitAS=infinity`,
+  `LimitMEMLOCK=infinity`, `LimitNOFILE=64000`, `LimitNPROC=64000`. E l'avvertenza che evita un
+  errore comune: «Each `systemd` limit directive sets both the "hard" and "soft" limits to the
+  value specified.»
+- **Cosa afferma, quarto punto — macOS è un caso a parte.** «For the macOS platform, the
+  recommended process limit is `2500`, which is the maximum configurable value for this platform.»
+  Su RHEL/CentOS 7 il limite predefinito dei processi è 4096 e sta in
+  `/etc/security/limits.d/20-nproc.conf`.
+- **Cosa non afferma:** che cosa succede in un container. La pagina presuppone un sistema
+  operativo intero con il suo init system; sotto Docker i limiti li fissa il runtime, e nel lab
+  risultano già ampiamente oltre il raccomandato senza che nessuno li abbia scritti
+  ([V-021](#v-021)).
+- **Usata da:** ADR-0037
+
+---
+
 ## Verifiche empiriche
 
 <a id="v-001"></a>
@@ -2446,5 +2658,112 @@ e non costa niente.
   deterministico di [ADR-0031](Decision.md#adr-0031) ha ripagato il proprio costo.
 - **Data:** 2026-08-28
 - **Usata da:** ADR-0036
+
+---
+
+<a id="v-021"></a>
+### V-021 — Il container del lab è un'installazione Ubuntu con tre note di produzione disattese, e il server lo dice all'avvio
+
+- **Domanda:** le pagine di installazione e le note di produzione descrivono un `mongod` installato
+  su un sistema operativo. Quanto di quel mondo sopravvive dentro un container, e dove il lab si
+  discosta da quello che il manuale raccomanda?
+- **Ambiente:** stack `01-standalone`, immagine `mongo:7.0.40`, macchina di sviluppo macOS 26.6.2
+  (Darwin 25.6.0) con Docker Desktop. Data: 2026-08-28.
+- **Comandi:** ispezione del container con `sh -c`, più
+  `db.adminCommand({getLog: "startupWarnings"})`.
+
+**Primo risultato — l'immagine *è* l'installazione descritta da [S-048](#s-048).**
+
+```console
+$ cat /etc/os-release | head -2
+PRETTY_NAME="Ubuntu 22.04.5 LTS"
+NAME="Ubuntu"
+$ cat /etc/apt/sources.list.d/mongodb-org.list
+deb [ signed-by=/etc/apt/keyrings/mongodb.asc ] http://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse
+```
+
+Ubuntu 22.04 «Jammy», e il file di elenco `apt` che punta allo stesso repository ufficiale del
+tutorial — solo con il portachiavi in `/etc/apt/keyrings/mongodb.asc` invece che in
+`/usr/share/keyrings/`. Chi impara la procedura di [S-048](#s-048) sta imparando come è stata
+costruita l'immagine che usa.
+
+**Secondo risultato — quello che l'immagine ha buttato via.**
+
+| elemento di [S-048](#s-048) | nel container |
+| --- | --- |
+| `/etc/mongod.conf` | **assente**: `ls: cannot access '/etc/mongod.conf': No such file or directory` |
+| `systemd` e `systemctl` | assenti: il processo 1 **è** `mongod` |
+| `/var/lib/mongodb`, `/var/log/mongodb` | sostituiti da `/data/db` e da `stdout` ([ADR-0030](Decision.md#adr-0030)) |
+| utente `mongodb` | **conservato**: `ps -o user,pid,comm -p 1` risponde `mongodb 1 mongod` |
+
+L'ultima riga merita attenzione perché è controintuitiva: `docker compose exec` entra come `root`
+(`uid=0(root)`), ma il **server** gira come `mongodb`, esattamente come dopo un
+`apt-get install mongodb-org`. La shell che si apre non ha i privilegi del processo che osserva, e
+viceversa.
+
+**Terzo risultato — tre note di produzione disattese, tutte dichiarate dal server.**
+
+```console
+$ mongosh --quiet --eval 'db.adminCommand({getLog: "startupWarnings"}).log
+    .forEach(r => { const o = JSON.parse(r); print(o.id + "  " + o.msg.substring(0, 78)) })'
+22297   Using the XFS filesystem is strongly recommended with the WiredTiger storage
+22120   Access control is not enabled for the database. Read and write access to dat
+9068900 For customers running MongoDB 7.0, we suggest changing the contents of the f
+```
+
+Tre avvisi, tre raccomandazioni, e per ognuna la misura che la conferma:
+
+| avviso | raccomandazione | misurato qui |
+| --- | --- | --- |
+| `22297` | XFS «strongly recommended» ([S-050](#s-050)) | `/data/db` sta su **ext4**: `/dev/vda1 /data/db ext4` |
+| `9068900` | THP disabilitato ([S-051](#s-051)) | `/sys/kernel/mm/transparent_hugepage/enabled` → `[always] madvise never` |
+| `22120` | autorizzazione abilitata ([S-050](#s-050)) | scelta deliberata del lab ([ADR-0005](Decision.md#adr-0005)) |
+
+Le prime due **non si possono correggere da dentro il container**. Il filesystem è quello del
+volume creato da Docker Desktop; THP appartiene al kernel della macchina virtuale Linux, non al
+container e tantomeno al Mac. È la differenza fra un avviso da risolvere e un avviso da
+riconoscere, e sapere in quale dei due casi ci si trova vale più che saperlo far sparire.
+
+**Quarto risultato — i `ulimit` sono già oltre il raccomandato, senza che nessuno li abbia
+scritti.**
+
+```console
+$ grep -E 'Max open files|Max processes' /proc/1/limits
+Max processes             unlimited            unlimited            processes
+Max open files            1048576              1048576              files
+```
+
+[S-052](#s-052) raccomanda `-n 64000` e `-u 64000`; qui i descrittori aperti sono **1 048 576**,
+sedici volte tanto, e i processi sono illimitati. È il runtime dei container a fissarli, e per
+questo il `mongod` del lab non emette l'avviso d'avvio sui file aperti che [S-048](#s-048)
+promette sotto i 64000. Una prova che avesse voluto mostrare quell'avviso avrebbe dovuto
+abbassarli apposta.
+
+**Quinto risultato — lo swap c'è, e non è quello del Mac.**
+
+```console
+$ free -m | tail -2
+Mem:           11946        1001       10126           0         818       10775
+Swap:           2047           0        2047
+```
+
+Due gigabyte di swap, zero usati: sono della macchina virtuale Linux, come gli 11 946 MiB di
+memoria che `hostInfo` riporta ([V-020](#v-020)). Delle due strategie di [S-050](#s-050) — swap
+assegnato e usato solo sotto pressione, oppure nessuno swap — Docker Desktop ha scelto la prima
+per conto nostro.
+
+- **Interpretazione:** un container non è una scorciatoia per saltare le note di produzione: è un
+  posto dove **metà** di quelle note non si applicano e l'altra metà si applica a un livello
+  diverso — l'host, o la macchina virtuale, o il runtime. La conseguenza pratica per il talk è che
+  gli avvisi d'avvio non vanno nascosti né «risolti»: vanno letti, e per ciascuno si deve saper
+  dire se è un difetto del lab o una proprietà del posto in cui il lab gira. Delle tre righe qui
+  sopra, due sono proprietà del posto e una sola è una scelta nostra.
+- **Riserve:** i valori dei `ulimit`, la dimensione dello swap e il tipo di filesystem dipendono da
+  Docker Desktop per macOS e dalla sua macchina virtuale; su Docker Engine nativo su Linux
+  cambiano, e su un `mongod` installato con `apt` cambiano ancora. Nessuna delle procedure di
+  [S-048](#s-048), [S-049](#s-049), [S-051](#s-051) e [S-052](#s-052) è stata eseguita: questa
+  verifica misura il **contrasto** con quelle pagine, non le pagine stesse.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0037
 
 ---

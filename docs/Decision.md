@@ -1696,3 +1696,82 @@ esisterà l'applicazione Python (la shell serve prima, ed è ciò che si proiett
 inceppa).
 
 **Fonti:** [S-044](Sources.md#s-044), [S-045](Sources.md#s-045), [S-046](Sources.md#s-046), [S-047](Sources.md#s-047), [V-018](Sources.md#v-018), [V-020](Sources.md#v-020)
+
+---
+
+<a id="adr-0037"></a>
+## ADR-0037 — Le pagine di installazione sul sistema operativo si scrivono da fonte e si dichiarano non eseguite
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** buona parte del pubblico di SqlStart non tornerà in ufficio a scrivere un file
+Compose. Tornerà a installare MongoDB su una macchina Linux o su un server Windows, perché è così
+che sta il database in azienda. Le due pagine di `01-installazione` sono le uniche del branch che
+non parlano di Docker, e sono quelle che verranno riaperte più spesso dopo il talk.
+
+Il problema è che **non si possono eseguire qui**. La macchina di sviluppo è un Mac; non esiste un
+Ubuntu su cui provare `apt-get install mongodb-org`, non esiste una macchina Windows su cui
+lanciare il `.msi`. Le tre strade possibili erano: non scrivere le pagine; scriverle presentandole
+come verificate; scriverle dichiarando che non lo sono.
+
+La prima strada lascia scoperta la domanda più frequente che il talk riceverà. La seconda è il
+primo posto in cui questo repository mentirebbe, e mentirebbe in un punto controllabile: chiunque
+segua le istruzioni e trovi una differenza scoprirebbe che «verificato» qui non vuol dire niente,
+e da quel momento non varrebbe niente nemmeno dove è vero. [ADR-0024](#adr-0024) esiste per
+distinguere ciò che è stato osservato da ciò che è stato letto, e non ammette eccezioni comode.
+
+C'è però un fatto che rende le pagine meno teoriche di quanto sembri. L'immagine del lab **è**
+un'installazione Ubuntu: `PRETTY_NAME="Ubuntu 22.04.5 LTS"`, e dentro c'è
+`/etc/apt/sources.list.d/mongodb-org.list` che punta allo stesso repository ufficiale del tutorial
+([V-021](Sources.md#v-021)). Quello che l'immagine ha tolto — `systemd`, `/etc/mongod.conf`,
+`/var/log/mongodb` — è esattamente l'elenco di ciò che le pagine devono spiegare. E gli avvisi che
+il server emette a ogni avvio (`22297` sul filesystem, `9068900` su THP) sono le note di produzione
+che si presentano da sole.
+
+**Decisione.**
+
+1. **Le due pagine si scrivono, complete, e portano una riserva in testa.** Un riquadro in
+   apertura dichiara: la procedura non è stata eseguita, la fonte è la documentazione ufficiale
+   MongoDB per la 7.0, e il lettore è il primo a provarla davvero. Nessun avverbio che ammorbidisca
+   («dovrebbe funzionare», «in genere»): la riserva è un fatto, non un'attenuante.
+2. **Ogni comando riportato viene da una fonte primaria, e la fonte è citata accanto.** Niente
+   comandi ricostruiti a memoria, niente varianti «più comode» inventate qui. Dove la fonte dà una
+   forma sola, si riporta quella; dove ne dà due, si riportano entrambe.
+3. **Ciò che è stato misurato viene marcato come tale, e tenuto separato.** Le misure di
+   [V-021](Sources.md#v-021) — il filesystem `ext4`, THP acceso, i `ulimit` a 1 048 576, l'utente
+   `mongodb` del processo 1 — stanno nelle pagine in blocchi riconoscibili, che dicono «questo è
+   stato eseguito, ma dentro un container, e per questo vale come contrasto e non come conferma».
+4. **La messa a punto del sistema operativo sta nella pagina Linux, non altrove.** `ulimit`, THP,
+   swap, NUMA, filesystem: sono cinque argomenti che un amministratore incontra il primo giorno e
+   che nessuna pagina su Docker gli darà mai. Vanno insieme alla procedura che li rende necessari.
+5. **Le differenze di Windows si dicono per intero, comprese quelle che riguardano la sicurezza.**
+   La più concreta è sul keyfile: «On UNIX systems, the keyfile must not have group or world
+   permissions. On Windows systems, keyfile permissions are not checked»
+   ([S-005](Sources.md#s-005)). Un controllo che su un sistema esiste e sull'altro no non è un
+   dettaglio da nota a piè di pagina.
+6. **Il debito è scritto.** Se in futuro il progetto disporrà di una macchina Ubuntu o Windows, le
+   pagine vanno rieseguite e la riserva sostituita con una verifica. Fino ad allora la riserva
+   resta, e nessuna revisione può toglierla senza aver eseguito la procedura.
+
+**Conseguenze:** il repository guadagna le due pagine che il pubblico userà di più, e le guadagna
+senza spendere la propria credibilità. Il lettore sa esattamente su che cosa poggia ogni riga: la
+documentazione ufficiale, che è la fonte migliore disponibile, ma non un'esecuzione. La riserva ha
+anche un effetto collaterale utile — rende evidente che il resto del repository, dove la riserva
+non c'è, è stato invece eseguito.
+
+Il costo è che le pagine sono meno autorevoli di quelle che le circondano, e si nota. Va bene
+così: l'alternativa era essere autorevoli senza averne diritto.
+
+**Alternative scartate:** avviare una macchina virtuale Ubuntu sul Mac e provare davvero
+(possibile, e fuori tempo: la sola messa a punto di NUMA, THP e `ulimit` in una VM non
+rappresentativa avrebbe prodotto misure che non valgono per nessun server reale — un costo alto per
+una verifica finta); limitarsi a un rimando alla documentazione MongoDB (è la risposta che il
+pubblico può darsi da solo, e lascia fuori proprio le cinque messe a punto che nessuno legge finché
+non fanno male); scrivere una pagina sola «installazione su sistema operativo» con due colonne
+(Linux e Windows divergono su percorsi, init system, sicurezza e messa a punto: una tabella a due
+colonne sarebbe più corta da leggere e più facile da sbagliare); usare il container come prova
+sostitutiva, dichiarando le procedure verificate «in sostanza» (è la scorciatoia che
+[ADR-0024](#adr-0024) esclude, e [V-021](Sources.md#v-021) mostra quanto sarebbe stata sbagliata:
+metà delle note di produzione, dentro un container, non si applicano affatto).
+
+**Fonti:** [S-005](Sources.md#s-005), [S-048](Sources.md#s-048), [S-049](Sources.md#s-049), [S-050](Sources.md#s-050), [S-051](Sources.md#s-051), [S-052](Sources.md#s-052), [V-021](Sources.md#v-021)

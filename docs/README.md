@@ -47,12 +47,14 @@ produrrà. Un indice che promette senza datare invecchia male.
 ## 01-installazione — istanza singola, fuori da Docker
 
 Il lab gira in container, ma la domanda «e su una macchina vera?» arriva sempre. Queste due
-pagine rispondono con le procedure ufficiali.
+pagine rispondono con le procedure ufficiali, e portano entrambe una riserva in testa: non
+sono state eseguite qui, perché qui non c'è né un Ubuntu né un Windows
+([ADR-0037](Decision.md#adr-0037)).
 
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
-| `01-installazione/linux.md` | installazione di un'istanza singola su Linux, servizio, percorsi, configurazione iniziale | `feature/01-stack-standalone` |
-| `01-installazione/windows.md` | installazione di un'istanza singola su Windows, servizio, differenze rispetto a Linux | `feature/01-stack-standalone` |
+| [`01-installazione/linux.md`](01-installazione/linux.md) | installazione su Ubuntu dal repository ufficiale, che cosa compare sul sistema, il servizio `systemd`, e la messa a punto che nessuno fa — `bindIp`, `ulimit`, THP, filesystem, swap, NUMA; in coda il contrasto misurato con il container del lab, che è la stessa installazione senza `systemd` | già nel repository |
+| [`01-installazione/windows.md`](01-installazione/windows.md) | installazione con il `.msi`, il servizio di Windows, la shell che va installata a parte, e le differenze che contano — WSL non supportato, `ulimit` e THP che non esistono, i permessi del keyfile che su Windows non vengono controllati | già nel repository |
 
 ## 02-architetture — le tre modalità
 
