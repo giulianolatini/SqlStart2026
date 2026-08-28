@@ -1536,3 +1536,78 @@ arresto pulito, che è un terzo scenario ancora diverso); tacere e lasciare che 
 una conclusione sbagliata (funziona finché in sala non c'è nessuno che conosce Docker).
 
 **Fonti:** [S-039](Sources.md#s-039), [S-040](Sources.md#s-040), [S-041](Sources.md#s-041), [V-017](Sources.md#v-017)
+
+---
+
+<a id="adr-0035"></a>
+## ADR-0035 — Le righe di log si citano per `id`, e la pagina distingue ciò che è stato letto da ciò che sarà letto
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** il talk mostra dal vivo un nodo che cade e un cluster che se ne accorge. L'unica
+prova che l'ha notato è il log, e sarà proiettato. Serve una pagina che insegni a leggerlo prima
+che serva, perché sul palco non c'è tempo per imparare.
+
+Il primo problema è che il log non è fatto per essere letto dall'alto. Misurandolo su questo
+stack — novemilanovecentotrentuno righe, nessun carico applicativo — il **91,9 %** appartiene a
+`NETWORK` e `ACCESS`, e il **99,3 %** di quanto viene scritto al minuto è l'healthcheck che
+apre cinque connessioni ogni dieci secondi ([V-019](Sources.md#v-019)). Le righe che
+interessano un amministratore sono trenta su novemilanovecentoventidue, e quindici delle trenta
+sono lo stesso avviso d'avvio ripetuto. Chi scorre, non trova.
+
+Il secondo problema è la citabilità. [S-042](Sources.md#s-042) descrive `id` come «Unique
+identifier for the log statement» e dedica un esempio al filtro per `id`; del testo di `msg` non
+promette niente. Una pagina didattica che dicesse «cerca la riga *Connection accepted*» invecchia
+alla prima versione che riformula il messaggio, e invecchia in silenzio: il lettore cerca, non
+trova, e conclude che il server non ha fatto quella cosa.
+
+Il terzo problema è che metà della materia qui non è verificabile. Le righe di un'elezione
+esistono solo dove c'è un replica set, e su questo branch non c'è. [S-044](Sources.md#s-044)
+descrive il meccanismo — battiti ogni due secondi, nodo dato per irraggiungibile dopo dieci,
+«The median time before a cluster elects a new primary should not typically exceed 12 seconds» —
+ma non nomina una sola riga di log. Scrivere quella sezione adesso significa scrivere qualcosa
+che non è stato visto.
+
+**Decisione:** quattro regole per `docs/03-amministrazione/log.md` e per ogni altra pagina che
+citi un log.
+
+1. **Il riferimento è l'`id`.** Ogni riga citata nel repository porta il suo numero. Il testo di
+   `msg` compare come illustrazione, mai come chiave di ricerca: si cerca `"id":22943`, non
+   «Connection accepted». Dove il lettore deve filtrare, il repository mostra il filtro sull'`id`.
+2. **La pagina dichiara riga per riga cosa è stato misurato e cosa no.** Le sezioni sul formato e
+   su `logRotate` poggiano su misure fatte qui e le citano ([V-010](Sources.md#v-010),
+   [V-019](Sources.md#v-019)). La sezione sull'elezione poggia solo su
+   [S-044](Sources.md#s-044) e si apre con una riserva esplicita: **gli `id` verranno inseriti in
+   `feature/02`, dopo averne vista una**. Nessuna riga inventata per rendere la pagina completa.
+3. **Gli avvisi d'avvio si mostrano con `getLog`, non scorrendo.**
+   `db.adminCommand({getLog: "startupWarnings"})` restituisce tre righe invece di
+   novemilanovecento ([V-019](Sources.md#v-019)), ed è il gesto che va sullo schermo. Fra le tre
+   c'è `22120`, «Access control is not enabled for the database»: il lab senza autenticazione
+   ([ADR-0005](Decision.md#adr-0005)) **è** avvisato dal server, e la pagina lo dice invece di
+   lasciarlo scoprire a un revisore.
+4. **Su `logRotate` la pagina riporta il limite documentato e la misura che lo contraddice.**
+   [S-043](Sources.md#s-043) scrive che «Your `mongod` instance needs to be running with the
+   `--logpath [file]` option in order to use `logRotate`»; il server, senza `--logpath`, risponde
+   comunque `{ok: 1}` senza ruotare niente ([V-010](Sources.md#v-010)). Le due frasi stanno
+   accanto, e la pagina conclude che in container la rotazione è affare del runtime
+   ([ADR-0030](Decision.md#adr-0030)), non del database.
+
+**Conseguenze:** la pagina resiste a un cambio di versione, perché ciò che cita è stabile per
+dichiarazione della fonte. Chi la legge impara a filtrare, che è l'unico modo di usare un log
+in cui il 92 % delle righe parla di connessioni. La sezione sull'elezione resta con un debito
+scritto in chiaro, e `feature/02` non può chiudersi senza saldarlo: è il prezzo di non scrivere
+righe mai viste.
+
+Il costo è di leggibilità. Una riga citata come `id 22943` è meno evocativa di «Connection
+accepted», e la pagina deve quindi riportarle entrambe, allungandosi. Va accettato: la seconda
+serve a capire, la prima a ritrovare.
+
+**Alternative scartate:** citare i messaggi per testo (leggibile, e fragile in modo silenzioso —
+la fonte non promette stabilità); rimandare tutta la pagina a `feature/02`, quando ci sarà un
+replica set (ma il formato del log serve prima, e su un'istanza singola è già interamente
+osservabile); alzare la verbosità a `D1` per la demo, così «si vede di più» (si vede di più del
+rumore: le righe interessanti annegano, e [S-042](Sources.md#s-042) ricorda che le severità
+superiori sono mostrate comunque); togliere l'healthcheck per avere un log pulito (si baratta la
+leggibilità del log con la diagnosi di uno stack che non parte, che è il problema più frequente).
+
+**Fonti:** [S-042](Sources.md#s-042), [S-043](Sources.md#s-043), [S-044](Sources.md#s-044), [V-010](Sources.md#v-010), [V-019](Sources.md#v-019)

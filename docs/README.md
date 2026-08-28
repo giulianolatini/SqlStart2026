@@ -70,7 +70,7 @@ pagine rispondono con le procedure ufficiali.
 | `03-amministrazione/backup-restore.md` | `mongodump`/`mongorestore`, backup a caldo con `--oplog` e i suoi limiti, restore verificato | `feature/02-stack-replicaset` |
 | `03-amministrazione/sicurezza-keyfile-x509.md` | autenticazione interna: perché il lab usa il keyfile, perché MongoDB lo riserva a test e sviluppo, e come si passa a X.509 in produzione | `feature/02-stack-replicaset` |
 | `03-amministrazione/statistiche-monitoraggio.md` | `serverStatus`, `dbStats`, metriche di replica, cosa guardare sotto carico | `feature/04-app-python` |
-| `03-amministrazione/log.md` | formato dei log, livelli, cosa cercare durante un'elezione | `feature/01-stack-standalone` |
+| [`03-amministrazione/log.md`](03-amministrazione/log.md) | il formato JSON campo per campo, le severità e i componenti misurati, `logRotate` in container, cosa cercare durante un'elezione (mappa scritta qui, `id` verificati in `02`) | già nel repository |
 
 ## 04-mongosh — la shell
 

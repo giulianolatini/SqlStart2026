@@ -286,6 +286,12 @@ filesystem non è cambiato assolutamente niente.
 ruotare, e il comando non ha modo di dirlo: riporta comunque `ok: 1`. L'unico indizio è dentro la
 riga di log stessa, dove `"logType"` vale `null`.
 
+Il limite **è documentato**, e questo rende la trappola più insidiosa, non meno: sotto
+*Limitations* il manuale scrive che «Your `mongod` instance needs to be running with the
+`--logpath [file]` option in order to use `logRotate`» ([S-043](../Sources.md#s-043)). Dichiara
+il prerequisito e non lo fa rispettare. Chi ha letto la pagina sa che serve un `--logpath`; chi
+guarda la risposta del server legge `ok: 1` e conclude il contrario.
+
 Il confronto rende la cosa netta ([V-010](../Sources.md#v-010)):
 
 | Destinazione del log | Risposta | Nel log | Effetto sul filesystem |
@@ -298,7 +304,7 @@ la fa il driver di log del runtime, e va configurata lì (voce [10](#t-10)). Se 
 script di manutenzione, non trattare `ok: 1` come prova che qualcosa sia successo: controllare il
 filesystem.
 
-**Fonte.** [V-010](../Sources.md#v-010), [ADR-0030](../Decision.md#adr-0030).
+**Fonte.** [S-043](../Sources.md#s-043), [V-010](../Sources.md#v-010), [ADR-0030](../Decision.md#adr-0030), [ADR-0035](../Decision.md#adr-0035).
 
 ---
 

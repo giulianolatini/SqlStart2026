@@ -1128,6 +1128,126 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 
 ---
 
+<a id="s-042"></a>
+### S-042 — MongoDB Manual 7.0: Log Messages
+
+- **URL:** https://www.mongodb.com/docs/v7.0/reference/log-messages/ (consultata nella variante
+  `log-messages.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — il formato è JSON, ovunque.** «All log output is in JSON format
+  including output sent to: Log file · Syslog · Stdout (standard out)». Ogni voce è «a
+  self-contained JSON object which follows the Relaxed Extended JSON v2.0 specification», con
+  ordine dei campi fissato:
+
+  ```javascript
+  {
+    "t": <Datetime>, // timestamp
+    "s": <String>, // severity
+    "c": <String>, // component
+    "id": <Integer>, // unique identifier
+    "ctx": <String>, // context
+    "msg": <String>, // message body
+    "attr": <Object> // additional attributes (optional)
+    "tags": <Array of strings> // tags (optional)
+    "truncated": <Object> // truncation info (if truncated)
+    "size": <Object> // original size of entry (if truncated)
+  }
+  ```
+
+- **Cosa afferma, secondo punto — `id` è un identificatore univoco.** La tabella dei campi lo
+  descrive come «Unique identifier for the log statement», e la pagina dedica un esempio al
+  «Filtering by Known Log ID». È il campo su cui si filtra: il `msg` è testo, l'`id` è una
+  chiave.
+- **Cosa afferma, terzo punto — le severità.** «Severity levels range from "Fatal" (most severe)
+  to "Debug" (least severe)»: `F` Fatal, `E` Error, `W` Warning, `I` Informational (verbosità
+  `0`), `D1`–`D5` Debug (verbosità > `0`). E sulla verbosità: «Severity categories above these
+  levels are always shown.»
+- **Cosa afferma, quarto punto — i componenti hanno una gerarchia.** `REPL` è il componente
+  genitore di `ELECTION`, `INITSYNC`, `REPL_HB` e `ROLLBACK`; `STORAGE` lo è di `JOURNAL` e
+  `RECOVERY`. Se la verbosità del figlio non è impostata, MongoDB usa quella del genitore. Sui
+  due che servono al talk: `ELECTION` raccoglie i «messages related specifically to replica set
+  elections», `REPL_HB` quelli «related specifically to replica set heartbeats».
+- **Cosa afferma, quinto punto — c'è un tag per gli avvisi d'avvio.** Fra gli esempi di `tags`,
+  testuale: `["startupWarnings"]`.
+- **Cosa non afferma:** quali `id` compaiano in quale situazione. Non esiste nella pagina un
+  catalogo degli identificatori: si scoprono leggendo il log di un'installazione vera. Quelli di
+  questo stack sono censiti in [V-019](#v-019).
+- **Riserve:** la pagina descrive il formato, non il contenuto. Dice che `id` è univoco, e non
+  promette da nessuna parte che il testo di `msg` sia stabile fra versioni — che è esattamente
+  la ragione per cui in questo repository si cita l'`id` ([ADR-0035](Decision.md#adr-0035)).
+- **Usata da:** ADR-0035
+
+---
+
+<a id="s-043"></a>
+### S-043 — MongoDB Manual 7.0: `logRotate` (database command)
+
+- **URL:** https://www.mongodb.com/docs/v7.0/reference/command/logRotate/ (consultata nella
+  variante `logRotate.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma parziale
+- **Cosa afferma, primo punto — a cosa serve e come si invoca.** Il comando «allows you to rotate
+  the MongoDB server log and/or audit log to prevent a single logfile from consuming too much
+  disk space», e va emesso sul database `admin`. L'argomento `1` ruota entrambi i log,
+  `"server"` solo quello del server, `"audit"` solo quello di audit.
+- **Cosa afferma, secondo punto — c'è anche la via del segnale.** «You may also rotate the logs
+  by sending a `SIGUSR1` signal to the `mongod` process.»
+- **Cosa afferma, terzo punto — e questa è la riga che conta.** Sotto *Limitations*, testuale:
+  «Your `mongod` instance needs to be running with the `--logpath [file]` option in order to use
+  `logRotate`». Il limite **è documentato**.
+- **Cosa afferma, quarto punto — le due modalità.** Con `systemLog.logRotate` a `rename` il file
+  esistente viene rinominato aggiungendo un timestamp nella forma
+  `<YYYY>-<mm>-<DD>T<HH>-<MM>-<SS>` e ne viene creato uno nuovo; con `reopen` il file viene
+  chiuso e riaperto con lo stesso nome, lasciando a un altro processo il compito di rinominarlo.
+- **Cosa non afferma:** che cosa succeda se si invoca il comando **senza** `--logpath`. La
+  sezione *Limitations* dice che serve, e non dice che il comando fallisca. Non fallisce:
+  risponde `{ok: 1}` e non fa niente ([V-010](#v-010)). Fra «documentato come limite» e
+  «applicato dal server» c'è la distanza che rende utile questo repository.
+- **Riserve:** il limite riguarda il file di log, non il log in sé. In container, dove il log va
+  su stdout per scelta ([ADR-0030](Decision.md#adr-0030)), il comando non ha semplicemente
+  nulla su cui agire, e la rotazione è affare del runtime.
+- **Usata da:** ADR-0035
+
+---
+
+<a id="s-044"></a>
+### S-044 — MongoDB Manual 7.0: Replica Set Elections
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/replica-set-elections/ (consultata nella
+  variante `replica-set-elections.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — quando parte un'elezione.** Fra gli eventi elencati: l'aggiunta
+  di un nodo, `rs.initiate()`, la manutenzione con `rs.stepDown()` o `rs.reconfig()`, e «the
+  secondary members losing connectivity to the primary for more than the configured timeout (10
+  seconds by default)».
+- **Cosa afferma, secondo punto — i battiti e la soglia.** «Replica set members send heartbeats
+  (pings) to each other every two seconds. If a heartbeat does not return within 10 seconds, the
+  other members mark the delinquent member as inaccessible.»
+- **Cosa afferma, terzo punto — quanto dura, e cosa si ferma nel frattempo.** «The median time
+  before a cluster elects a new primary should not typically exceed 12 seconds, assuming default
+  replica configuration settings.» E, prima: «The replica set cannot process write operations
+  until the election completes successfully», mentre le letture possono continuare se sono
+  configurate per andare sui secondari.
+- **Cosa non afferma:** quali righe di log accompagnino un'elezione. La pagina descrive il
+  meccanismo, mai il suo tracciato nel log. I componenti in cui guardare si ricavano da
+  [S-042](#s-042) — `ELECTION` e `REPL_HB` — ma gli `id` delle righe si conoscono solo dopo
+  averne vista una.
+- **Riserve:** è la fonte su cui poggia la sezione «cosa cercare durante un'elezione» di
+  `docs/03-amministrazione/log.md`, che per questa ragione è **dichiarata non verificata** su
+  questo branch: qui non esiste un replica set. La verifica è dovuta a `feature/02`
+  ([ADR-0035](Decision.md#adr-0035)).
+- **Usata da:** ADR-0035
+
+---
+
 ## Verifiche empiriche
 
 <a id="v-001"></a>
@@ -1411,7 +1531,7 @@ successo apparente che si scopre mesi dopo, quando serve il log vecchio e non c'
   «entrambi i canali» non si ripresenta nemmeno lì. Non è stato provato `--syslog`: nel container
   non c'è un demone syslog a cui scrivere.
 - **Data:** 2026-08-28
-- **Usata da:** ADR-0030
+- **Usata da:** ADR-0030, ADR-0035
 
 ---
 
@@ -1914,3 +2034,127 @@ scambiano gli indirizzi con cui sono stati configurati e un client che riceve `l
   alias di rete il quadro si arricchisce e non è stato esplorato.
 - **Data:** 2026-08-28
 - **Usata da:** ADR-0033
+
+---
+
+<a id="v-019"></a>
+### V-019 — Novemilanovecentotrentuno righe, e il 92 % dice «sto bene»
+
+- **Domanda:** che cosa c'è davvero nel log di un'istanza singola che non sta facendo niente, e
+  quanto ne cresce al minuto?
+- **Ambiente:** stack `01-standalone` di questo repository, immagine `mongo:7.0.40`, container
+  `mongo-standalone` avviato il 2026-08-28 alle 11:53:25 UTC con `RestartCount=1`. Scatto preso
+  alle **12:19:02 UTC**, dopo gli esperimenti di [V-017](#v-017) e [V-018](#v-018). Analisi con
+  uno script Python che legge `docker logs mongo-standalone` e conta.
+- **Comandi:** `docker logs mongo-standalone`, più `db.adminCommand({getLog: "startupWarnings"})`
+  attraverso `docker compose exec -T mongo-standalone mongosh --quiet --eval`.
+
+**Primo risultato — la composizione.** Nove­mila­nove­cento­trentuno righe: **9922 JSON e 9 non-JSON**.
+Centotredici `id` distinti. Nessuna severità oltre `I` e `W`:
+
+| severità | righe | quota |
+| --- | ---: | ---: |
+| `I` (informativa) | 9892 | 99,70 % |
+| `W` (avviso) | 30 | 0,30 % |
+| `E` (errore) | 0 | — |
+| `F` (fatale) | 0 | — |
+
+**Secondo risultato — i componenti, e chi domina.** `NETWORK` e `ACCESS` insieme fanno **9117
+righe, il 91,9 %** del log:
+
+| componente | righe | quota |
+| --- | ---: | ---: |
+| `NETWORK` | 7146 | 72,0 % |
+| `ACCESS` | 1971 | 19,9 % |
+| `STORAGE` | 388 | 3,9 % |
+| `CONTROL` | 89 | 0,9 % |
+| `EXECUTOR` | 88 | 0,9 % |
+| `WTCHKPT` | 61 | 0,6 % |
+
+**Terzo risultato — una connessione costa quattro righe, e `mongosh` ne apre cinque.** Gli `id`
+più frequenti sono sempre gli stessi quattro, nello stesso ordine, per ogni connessione:
+
+| `id` | componente | `msg` | occorrenze |
+| --- | --- | --- | ---: |
+| `22943` | `NETWORK` | `Connection accepted` | 1982 |
+| `51800` | `NETWORK` | `client metadata` | 1971 |
+| `10483900` | `ACCESS` | `Connection not authenticating` | 1971 |
+| `22944` | `NETWORK` | `Connection ended` | 1971 |
+| `6788700` | `NETWORK` | `Received first command on ingress connection since session start or auth handshake` | 1170 |
+
+Una singola invocazione di `mongosh --quiet --eval "db.adminCommand('ping').ok"` apre **cinque**
+connessioni, non una: `connectionId` da 804 a 808 in 99 millisecondi
+(`12:18:17.803` → `12:18:17.902`), tutte chiuse insieme all'uscita, `12:18:17.909`. Sono venti
+righe di connessione più tre `6788700`, ventitré righe per un `ping`.
+
+**Quarto risultato — la crescita a riposo.** Fra due letture distanti **60,1 secondi**, senza
+alcun carico applicativo, sono comparse **139 righe**. Scomposte per `id`:
+
+| `id` | righe nell'intervallo | origine |
+| --- | ---: | --- |
+| `22943`, `51800`, `10483900`, `22944` | 30 ciascuno = **120** | 6 healthcheck × 5 connessioni × 4 righe |
+| `6788700` | 18 | 3 per healthcheck |
+| `22430` (`WTCHKPT`) | 1 | checkpoint periodico di WiredTiger |
+
+L'aritmetica chiude: l'healthcheck del file Compose gira ogni dieci secondi
+([V-012](#v-012)), sei volte al minuto, e produce **138 delle 139 righe**. Il **99,3 %** di ciò
+che un'istanza a riposo scrive nel log è la risposta alla domanda «stai bene?».
+
+**Quinto risultato — le nove righe non-JSON sono tutte e sole quelle che non scrive `mongod`.**
+In un log che [S-042](#s-042) dichiara interamente JSON, le nove eccezioni sono l'entrypoint
+dell'immagine e lo script di inizializzazione di questo repository:
+
+```text
+about to fork child process, waiting until server is ready for connections.
+forked process: 28
+child process started successfully, parent exiting
+/usr/local/bin/docker-entrypoint.sh: running /docker-entrypoint-initdb.d/10-dati-demo.js
+Carico 50000 ordini in lab.ordini...
+Caricati 50000 ordini in 1711 ms.
+Nessun indice creato: il confronto con e senza indice è parte della demo.
+Killing process with pid: 28
+MongoDB init process complete; ready for start up.
+```
+
+Sono la ricevuta dell'inizializzazione: la loro assenza è il sintomo della
+[trappola 1](02-architetture/trappole-mongodb-in-docker.md#t-01).
+
+**Sesto risultato — cinque avvii nello stesso log, e quindici avvisi d'avvio.** L'`id` `4615611`
+(`MongoDB starting`) compare **cinque** volte: `docker logs` conserva l'intera vita del
+container, riavvii compresi, e il `mongod` temporaneo dell'entrypoint conta come uno. Le righe
+con `tags: ["startupWarnings"]` sono **quindici**: tre per avvio, sempre le stesse.
+`db.adminCommand({getLog: "startupWarnings"})` risponde `totalLinesWritten: 3` e restituisce
+solo quelle dell'avvio corrente:
+
+| severità | `id` | messaggio |
+| --- | --- | --- |
+| `I` | `22297` | `Using the XFS filesystem is strongly recommended with the WiredTiger storage engine.` |
+| `W` | `22120` | `Access control is not enabled for the database. Read and write access to data and configuration is unrestricted` |
+| `W` | `9068900` | `For customers running MongoDB 7.0, we suggest changing the contents of the following sysfsFile` |
+
+L'ultima porta in `attr` il dettaglio: `{"sysfsFile": "/sys/kernel/mm/transparent_hugepage",
+"currentValue": "always", "desiredValue": "never"}` — è la VM Linux di Docker Desktop, non il
+Mac. La seconda è la prova che il server **avvisa** di essere senza autenticazione
+([ADR-0005](Decision.md#adr-0005)): l'avviso c'è, in trentamila righe non lo legge nessuno.
+
+**Settimo risultato — `REPL` esiste anche su un'istanza singola.** Il componente compare 42
+volte pur non essendoci alcun replica set: sono le inizializzazioni dei sottosistemi di
+replicazione, che `mongod` costruisce comunque. La presenza di righe `REPL` non prova che il
+nodo replichi qualcosa.
+
+- **Interpretazione:** il log di MongoDB non è un diario degli eventi interessanti, è un
+  tracciato del traffico. Chi lo legge scorrendo dall'alto legge per il 92 % le connessioni di un
+  controllo di salute. Le trenta righe che contano — le `W` — sono lo 0,3 %, e nove volte su dieci
+  sono le stesse tre ripetute a ogni avvio. Le due domande che rendono il log leggibile sono
+  quindi: *quale componente* e *quale `id`*.
+- **Riserve:** i numeri assoluti dipendono da quanto è vissuto il container e da quanti
+  esperimenti ha subito; sono validi come proporzioni, non come costanti. La quota del 91,9 % è
+  quella di un'istanza **senza carico applicativo**: sotto carico `COMMAND` e `WRITE` crescono e
+  la proporzione cambia. Le 139 righe al minuto valgono per l'healthcheck di questo repository —
+  chi lo togliesse, o lo portasse a `interval: 60s`, otterrebbe un log molto più magro e una
+  diagnosi di guasto molto più lenta. L'assenza di `E` e `F` non è una proprietà di MongoDB: è il
+  resoconto di un'istanza che, in questa finestra, non ha mai sbagliato niente.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0035
+
+---
