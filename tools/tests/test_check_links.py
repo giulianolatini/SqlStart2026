@@ -1,0 +1,175 @@
+from check_links import ancore, collegamenti, main, slug, verifica
+
+
+def test_slug_riproduce_la_forma_di_github():
+    assert slug("## 1. Prima di cominciare") == "1-prima-di-cominciare"
+
+
+def test_slug_toglie_codice_ed_enfasi_ma_non_le_parole():
+    assert slug("### 5.1 `bindIp`, e la **stessa** avvertenza") == (
+        "51-bindip-e-la-stessa-avvertenza"
+    )
+
+
+def test_slug_conserva_le_lettere_accentate():
+    # GitHub non traslittera: «perché» resta «perché», e un'ancora scritta
+    # «perche» porterebbe a un collegamento rotto che nessuno nota rileggendo.
+    assert slug("## Perché così e non altrimenti") == "perché-così-e-non-altrimenti"
+
+
+def test_slug_toglie_gli_spazi_bianchi_che_non_sono_spazi():
+    # «Spaces are replaced by hyphens. Any other whitespace or punctuation
+    # characters are removed»: il tab sparisce, non diventa un trattino.
+    assert slug("## Uno\tdue tre") == "unodue-tre"
+
+
+def test_slug_ignora_unancora_esplicita_scritta_in_linea():
+    assert slug('## <a id="x"></a>Titolo') == "titolo"
+
+
+def test_ancore_raccoglie_esplicite_e_intestazioni():
+    testo = '<a id="s-001"></a>\n### S-001 — WiredTiger\n'
+    assert ancore(testo) == {"s-001", "s-001--wiredtiger"}
+
+
+def test_ancore_ignora_i_blocchi_di_codice():
+    # `# commento` dentro un blocco shell non è un'intestazione: contarlo
+    # creerebbe un'ancora che su GitHub non esiste, e il controllo tacerebbe
+    # proprio dove il rimando è rotto.
+    testo = "```bash\n# non un titolo\n```\n## Un titolo\n"
+    assert ancore(testo) == {"un-titolo"}
+
+
+def test_collegamenti_scarta_gli_indirizzi_assoluti():
+    testo = "[a](https://esempio.it/x#y) e [b](mailto:tizio@esempio.it)"
+    assert collegamenti(testo) == []
+
+
+def test_collegamenti_distingue_percorso_e_ancora():
+    testo = "[a](../Sources.md#s-048), [b](#adr-0037), [c](linux.md)"
+    assert collegamenti(testo) == [
+        ("../Sources.md", "s-048"),
+        ("", "adr-0037"),
+        ("linux.md", ""),
+    ]
+
+
+def test_collegamenti_ignora_i_blocchi_di_codice():
+    testo = "```markdown\n[finto](inesistente.md)\n```\n[vero](reale.md)"
+    assert collegamenti(testo) == [("reale.md", "")]
+
+
+def test_collegamenti_ignora_il_codice_in_linea():
+    # Una pagina che spiega la sintassi Markdown scrive `[testo](url)` fra
+    # apici inversi: è un esempio, non un rimando, e segnalarlo insegnerebbe a
+    # ignorare i messaggi dello strumento.
+    testo = "si scrive `[testo](url)`, e qui c'è [davvero](reale.md)"
+    assert collegamenti(testo) == [("reale.md", "")]
+
+
+def test_collegamenti_conserva_i_rimandi_con_il_titolo_in_codice():
+    # La forma più usata nel repository: il testo del link è un nome di file
+    # fra apici inversi. Togliere l'apice non deve togliere il collegamento.
+    testo = "[`linux.md`](01-installazione/linux.md#2-installare)"
+    assert collegamenti(testo) == [("01-installazione/linux.md", "2-installare")]
+
+
+def test_ancore_conserva_il_codice_nei_titoli():
+    # Il titolo «### 5.1 `bindIp`» produce l'ancora «51-bindip»: gli apici
+    # spariscono, la parola no.
+    assert ancore("### 5.1 `bindIp`, e l'avvertenza\n") == {"51-bindip-e-lavvertenza"}
+
+
+def scrivi(cartella, nome, testo):
+    percorso = cartella / nome
+    percorso.parent.mkdir(parents=True, exist_ok=True)
+    percorso.write_text(testo, encoding="utf-8")
+    return percorso
+
+
+def test_verifica_tace_su_un_insieme_coerente(tmp_path):
+    scrivi(tmp_path, "a.md", "## Un titolo\n[vai](b.md#altro-titolo)\n")
+    scrivi(tmp_path, "b.md", "## Altro titolo\n[torna](a.md)\n")
+    assert verifica([tmp_path]) == []
+
+
+def test_verifica_segnala_un_file_mancante(tmp_path):
+    scrivi(tmp_path, "a.md", "[vai](assente.md)\n")
+    problemi = verifica([tmp_path])
+    assert any("assente.md" in p and "non esiste" in p for p in problemi)
+
+
+def test_verifica_segnala_unancora_assente(tmp_path):
+    scrivi(tmp_path, "a.md", "[vai](b.md#titolo-sbagliato)\n")
+    scrivi(tmp_path, "b.md", "## Titolo giusto\n")
+    problemi = verifica([tmp_path])
+    assert any("titolo-sbagliato" in p and "ancora" in p for p in problemi)
+
+
+def test_verifica_segue_i_rimandi_alla_stessa_pagina(tmp_path):
+    scrivi(tmp_path, "a.md", "## Titolo\n[su](#titolo) e [giù](#assente)\n")
+    problemi = verifica([tmp_path])
+    assert len(problemi) == 1
+    assert "assente" in problemi[0]
+
+
+def test_verifica_guarda_anche_fuori_dalla_cartella_esaminata(tmp_path):
+    # I rimandi a `../README.md` sono la norma in `docs/`: il bersaglio sta
+    # fuori dall'albero esaminato, ma il collegamento è rotto lo stesso.
+    scrivi(tmp_path, "fuori.md", "## C'è\n")
+    scrivi(tmp_path, "docs/a.md", "[c'è](../fuori.md#cè)\n[non c'è](../manca.md)\n")
+    problemi = verifica([tmp_path / "docs"])
+    assert len(problemi) == 1
+    assert "manca.md" in problemi[0]
+
+
+def test_verifica_accetta_un_singolo_file(tmp_path):
+    # Il README di radice sta fuori da `docs/` ed è la porta d'ingresso del
+    # repository: i suoi collegamenti vanno controllati come gli altri.
+    scrivi(tmp_path, "README.md", "[vai](docs/assente.md)\n")
+    problemi = verifica([tmp_path / "README.md"])
+    assert len(problemi) == 1
+    assert "assente.md" in problemi[0]
+
+
+def test_verifica_esamina_piu_percorsi_insieme(tmp_path):
+    scrivi(tmp_path, "README.md", "[a](manca-qui.md)\n")
+    scrivi(tmp_path, "docs/a.md", "[b](manca-là.md)\n")
+    problemi = verifica([tmp_path / "docs", tmp_path / "README.md"])
+    assert len(problemi) == 2
+
+
+def test_verifica_non_esamina_due_volte_la_stessa_pagina(tmp_path):
+    scrivi(tmp_path, "docs/a.md", "[a](assente.md)\n")
+    problemi = verifica([tmp_path / "docs", tmp_path / "docs/a.md"])
+    assert len(problemi) == 1
+
+
+def test_main_restituisce_zero_e_lo_dice(tmp_path, capsys):
+    scrivi(tmp_path, "a.md", "## Titolo\n[su](#titolo)\n")
+    codice = main([str(tmp_path)])
+    assert codice == 0
+    assert "coerenti" in capsys.readouterr().out
+
+
+def test_main_restituisce_uno_quando_ci_sono_problemi(tmp_path, capsys):
+    scrivi(tmp_path, "a.md", "[vai](assente.md)\n")
+    codice = main([str(tmp_path)])
+    assert codice == 1
+    assert "assente.md" in capsys.readouterr().err
+
+
+def test_main_esamina_piu_argomenti(tmp_path, capsys):
+    scrivi(tmp_path, "README.md", "[a](manca-qui.md)\n")
+    scrivi(tmp_path, "docs/a.md", "[b](manca-là.md)\n")
+    codice = main([str(tmp_path / "docs"), str(tmp_path / "README.md")])
+    assert codice == 1
+    assert "2 collegamenti rotti" in capsys.readouterr().err
+
+
+def test_main_segnala_un_percorso_inesistente_senza_traceback(tmp_path, capsys):
+    codice = main([str(tmp_path / "nemmeno")])
+    catturato = capsys.readouterr()
+    assert codice == 2
+    assert "nemmeno" in catturato.err
+    assert "Traceback" not in catturato.err

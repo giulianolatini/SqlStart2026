@@ -23,8 +23,9 @@ help: ## Elenca i target disponibili
 tools-test: ## Esegue la suite degli strumenti di repository
 	uv run --directory tools pytest -q
 
-docs-check: ## Verifica il legame fra ADR e fonti
+docs-check: ## Verifica il legame fra ADR e fonti, e i collegamenti fra le pagine
 	uv run --project tools python tools/check_citations.py docs/Decision.md docs/Sources.md
+	uv run --project tools python tools/check_links.py docs README.md
 
 images-pull: ## Scarica le immagini e le pinna per digest (richiede rete)
 	./tools/pull-images.sh --pull

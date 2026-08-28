@@ -1775,3 +1775,103 @@ sostitutiva, dichiarando le procedure verificate «in sostanza» (è la scorciat
 metà delle note di produzione, dentro un container, non si applicano affatto).
 
 **Fonti:** [S-005](Sources.md#s-005), [S-048](Sources.md#s-048), [S-049](Sources.md#s-049), [S-050](Sources.md#s-050), [S-051](Sources.md#s-051), [S-052](Sources.md#s-052), [V-021](Sources.md#v-021)
+
+---
+
+<a id="adr-0038"></a>
+## ADR-0038 — Le decisioni che una macchina può controllare le controlla una macchina
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** [ADR-0029](#adr-0029) ha aperto la sede che mancava — una decisione che governa
+`tools/` e il `Makefile` — ma ha risolto una domanda sola: come devono essere scritti gli
+strumenti. Resta l'altra, che in questo branch si è presentata due volte: **quando** una
+decisione merita uno strumento che la faccia rispettare.
+
+Il caso che l'ha posta per primo è quello delle risorse. [ADR-0004](#adr-0004) dice che il
+limite di memoria e la cache di WiredTiger vanno dichiarati entrambi e che la seconda è un
+quarto del primo; [ADR-0009](#adr-0009) dice che le immagini si pinnano per digest;
+[ADR-0018](#adr-0018) dice che il vincolo offline dipende da una variabile sola;
+[ADR-0023](#adr-0023) dice che `depends_on` usa la forma lunga con `condition`. Sono quattro
+frasi in un documento e quattro righe in un file YAML, e fino al 2026-08-28 niente le teneva
+nella stessa stanza. Un `mem_limit` cambiato in fretta durante una prova, e la decisione resta
+scritta mentre l'artefatto racconta un'altra cosa — senza che nessuno se ne accorga, perché lo
+stack parte lo stesso.
+
+Il secondo caso è più piccolo e più istruttivo. Un collegamento relativo rotto **non rompe
+niente**: la pagina si apre, il link porta a un 404 o in cima al documento invece che al punto
+giusto, e i test passano tutti. Il 2026-08-28 uno script scritto per l'occasione ha trovato
+quattro collegamenti rotti nel piano di `feature/00` ([`8af49a0`](https://github.com/giulianolatini/SqlStart2026/commit/8af49a0)):
+un documento riletto più volte, in un repository dove la disciplina delle citazioni è
+automatica. Nessuno li aveva visti perché non c'era niente da vedere. Quel commit ha preso un
+impegno esplicito — «diventerà un tool del repository nel giro di chiusura di feature/01» — ed
+è l'impegno che questa decisione salda.
+
+C'è un dettaglio tecnico che merita di essere registrato, perché è il punto in cui un
+controllore fatto male direbbe bugie. I rimandi interni di questo repository si scrivono nella
+forma naturale `#1-prima-di-cominciare`, e quell'ancora **nessuno l'ha dichiarata**: la genera
+GitHub dal testo del titolo. Chi vuole verificarli deve riprodurre la stessa trasformazione,
+comprese le regole che nessuno indovina: «Spaces are replaced by hyphens ( - ). Any other
+whitespace or punctuation characters are removed» ([S-053](Sources.md#s-053)) — ogni singolo
+spazio, senza accorpare, il che significa che «S-001 — WiredTiger» produce `s-001--wiredtiger`
+con **due** trattini, perché il trattino lungo sparisce e lascia due spazi. Il codice
+dell'emulazione ufficiosa lo conferma in una riga: `value.replace(regex, '').replace(/ /g, '-')`
+([S-054](Sources.md#s-054)). Un controllore che accorpasse gli spazi segnalerebbe come rotti
+proprio i rimandi scritti bene, e verrebbe spento dopo tre falsi allarmi.
+
+**Decisione.**
+
+1. **Un ADR il cui vincolo si può esprimere come predicato su un file riceve un controllore in
+   `tools/`.** Il criterio è meccanico quanto il controllo: se la decisione si può violare
+   modificando un file, e la violazione si può riconoscere leggendo quel file, allora la
+   rilettura umana non è lo strumento giusto. Gli ADR che riguardano il metodo, il taglio o il
+   contenuto restano fuori: nessuna macchina sa se una pagina dice il vero.
+2. **Il controllore nasce prima dell'artefatto che controlla, con i propri test.**
+   `check_stack.py` è stato scritto prima del file Compose dello stack 01: il file è nato già
+   conforme, invece di essere corretto dopo. È la stessa disciplina TDD che vale per
+   l'applicazione, applicata al repository.
+3. **Ogni messaggio di errore cita l'ADR che si sta violando.** Un controllo che dice «non
+   conforme» senza dire a quale decisione è un ostacolo; uno che dice «il digest manca, e la
+   ragione è ADR-0009» è documentazione che si presenta al momento giusto.
+4. **Ogni controllore entra in un target `make`, e nel target che si esegue senza sapere che
+   esiste.** `make docs-check` ora ne lancia due, `check_citations.py` e `check_links.py`;
+   `make stack-check` lancia `check_stack.py`. Uno strumento che va invocato a mano è uno
+   strumento che dopo tre settimane nessuno invoca.
+5. **Il controllore riproduce il comportamento del sistema che verifica, non un'approssimazione
+   comoda, e cita la fonte accanto alla riga.** È [ADR-0029](#adr-0029) applicato al caso
+   nuovo: la funzione `slug()` di `check_links.py` implementa le cinque regole di
+   [S-053](Sources.md#s-053), e il commento accanto spiega perché non accorpa gli spazi.
+6. **Quello che i controllori non fanno si dichiara.** Nessuno di loro tocca la rete: gli
+   indirizzi `https:` non vengono verificati, perché il repository deve restare controllabile
+   con il Wi-Fi spento — è lo stesso vincolo di [ADR-0018](#adr-0018), e vale anche per i
+   propri strumenti. `check_links.py` non verifica l'unicità delle ancore generate, che GitHub
+   risolve appendendo `-1` e `-2` ([S-053](Sources.md#s-053)): qui non è mai servito, e il
+   giorno che servisse si vedrebbe subito. Nessuno guarda dentro i blocchi recintati da ```` ``` ````,
+   dove un `# commento` non è un titolo e un `[testo](url)` è un esempio.
+
+**Conseguenze:** il repository ha tre controllori e sessanta test che li tengono onesti. Il
+guadagno vero non è aver trovato quattro link rotti: è che d'ora in poi le decisioni sulle
+risorse e i rimandi fra le pagine non possono divergere in silenzio dall'artefatto. La classe
+di errore che questo branch ha incontrato — vero quando è stato scritto, falso tre commit dopo,
+e nessuno se ne accorge — è la stessa che rende inutili le documentazioni vecchie.
+
+Il costo è codice da mantenere, e un controllore sbagliato è peggio di nessun controllore:
+insegna a ignorare i suoi messaggi. È il motivo del punto 2, ed è il motivo per cui la regola
+dello slug è stata verificata contro il codice dell'emulazione e non contro l'intuizione. Resta
+il limite di fondo, che va detto: questi strumenti vedono la forma. Che una pagina sia vera lo
+decide chi la legge, e per quello esistono la [gerarchia delle fonti](#adr-0024) e le riserve
+dichiarate.
+
+**Alternative scartate:** adottare un linter Markdown generico (`markdownlint` e simili
+controllano lo stile — righe lunghe, spazi doppi, livelli di titolo saltati — non le decisioni
+di *questo* repository, e porterebbero una dipendenza Node in un progetto che ha scelto Python e
+`uv`; il controllo che serviva qui, «l'ancora esiste nel file di destinazione», nessuno di loro
+lo fa fra file diversi); verificare i collegamenti con una richiesta HTTP (trasformerebbe un
+controllo deterministico in un test di rete, che fallisce per motivi che non riguardano il
+repository, e violerebbe il vincolo offline proprio nello strumento che dovrebbe difenderlo);
+delegare i controlli a GitHub Actions (girerebbero dopo il commit e non prima, e il giorno del
+talk, in una sala senza rete garantita, non girerebbero affatto); continuare a rileggere
+(misurato: quattro collegamenti rotti sono sopravvissuti alle riletture, e sono stati trovati in
+un secondo da venti righe di Python).
+
+**Fonti:** [S-053](Sources.md#s-053), [S-054](Sources.md#s-054)

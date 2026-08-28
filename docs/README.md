@@ -20,7 +20,11 @@ verdetto su cosa la pagina afferma davvero e le **riserve**, cioè il punto in c
 smette di coprirci. La gerarchia con cui le fonti si pesano è
 [ADR-0024](Decision.md#adr-0024). Il legame fra decisioni e fonti è verificato da un
 controllo automatico, `tools/check_citations.py`, che fallisce se un ADR cita una fonte
-inesistente o se una fonte non è citata da nessun ADR.
+inesistente o se una fonte non è citata da nessun ADR. Accanto gira
+`tools/check_links.py`, che riapre ogni collegamento relativo di queste pagine e verifica
+che il file esista e che l'ancora ci sia davvero — comprese quelle che nessuno ha
+dichiarato, perché le genera GitHub dal titolo. I due controlli stanno in `make docs-check`,
+e la ragione per cui esistono è [ADR-0038](Decision.md#adr-0038).
 
 Le pagine non ancora scritte compaiono comunque in questo indice, con la feature che le
 produrrà. Un indice che promette senza datare invecchia male.
@@ -101,4 +105,4 @@ sono state eseguite qui, perché qui non c'è né un Ubuntu né un Windows
 |---|---|
 | `docker/` | i tre stack Compose: `01-standalone`, `02-replicaset`, `03-sharded` |
 | `app/` | l'applicazione dimostrativa in Python |
-| `tools/` | strumenti di repository: preflight, pre-scaricamento delle immagini, verifica delle citazioni |
+| `tools/` | strumenti di repository: preflight, pre-scaricamento delle immagini, e i tre controllori che tengono gli artefatti allineati alle decisioni — citazioni, file Compose, collegamenti ([ADR-0038](Decision.md#adr-0038)) |
