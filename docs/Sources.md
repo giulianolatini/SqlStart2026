@@ -831,6 +831,62 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 
 ---
 
+<a id="s-032"></a>
+### S-032 — MongoDB Manual: Configuration File Options — `systemLog`
+
+- **URL:** https://www.mongodb.com/docs/v7.0/reference/configuration-options/
+- **Editore:** MongoDB, Inc. — MongoDB Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** smentita — di un assunto del design, non di un'altra fonte
+- **Cosa afferma, primo punto — le destinazioni sono alternative, non cumulative.** «The
+  destination to which MongoDB sends all log output. Specify either `file` or `syslog`. If you
+  specify `file`, you must also specify `systemLog.path`.» *Either*: una, non due.
+- **Cosa afferma, secondo punto — stdout non è un canale, è il ripiego.** «If you do not specify
+  `systemLog.destination`, MongoDB sends all log output to standard output.» Standard output è
+  dove finisce il log quando non si è scelto niente, e smette di esserlo appena si sceglie.
+- **Cosa afferma, terzo punto — `systemLog.path` è definito per sottrazione.** «The path of the
+  log file to which `mongod` or `mongos` should send all diagnostic logging information,
+  **rather than the standard output** or the host's syslog.» `--logpath` è la forma da riga di
+  comando della stessa impostazione.
+- **Cosa non afferma:** non esiste, in nessun punto della pagina, un'opzione per scrivere su due
+  destinazioni contemporaneamente. Non è nascosta: non c'è.
+- **Riserve:** la pagina del riferimento di `mongod`, che è dove si arriva cercando `--logpath`,
+  dice la stessa cosa in modo molto meno netto. Chi parte da lì fatica a trovare la risposta —
+  ed è il motivo per cui l'assunto sbagliato è entrato nel design senza che nessuno lo notasse.
+  Il comportamento è comunque verificato eseguendo, [V-010](#v-010), e confermato dall'aiuto del
+  binario dentro l'immagine del lab.
+- **Usata da:** ADR-0030
+
+---
+
+<a id="s-033"></a>
+### S-033 — Docker Docs: JSON File logging driver
+
+- **URL:** https://docs.docker.com/engine/logging/drivers/json-file/
+- **Editore:** Docker, Inc. — Docker Docs
+- **Versione documentata:** pagina viva, consultata contro Docker Engine 29.7.2
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma parziale
+- **Cosa afferma, primo punto — `max-size` non ha limite.** «The maximum size of the log before
+  it is rolled», con valore predefinito dichiarato in tabella: «Defaults to -1 (unlimited)».
+- **Cosa afferma, secondo punto — `max-file` da solo non serve a niente.** «The maximum number
+  of log files that can be present. If rolling the logs creates excess files, the oldest file is
+  removed», predefinito `1`, e nella stessa tabella, in grassetto: «Only effective when
+  `max-size` is also set». Sono due opzioni che funzionano solo in coppia.
+- **Cosa afferma, terzo punto — la rotazione è una cosa da accendere.** L'esempio che imposta i
+  due parametri è introdotto come il modo «to enable automatic log-rotation».
+- **Cosa non afferma:** in nessun punto della pagina c'è una frase che dica che senza
+  configurazione la rotazione non avviene. Lo si ricava da un valore predefinito in una cella di
+  tabella e dal verbo «enable» in una didascalia. Non c'è nemmeno un avviso sullo spazio disco:
+  l'unico riquadro di avvertimento della pagina riguarda l'accesso ai file da parte di strumenti
+  esterni, non il disco che si riempie.
+- **Riserve:** «il predefinito è illimitato, quindi non ruota» è una deduzione, e qui una
+  deduzione non sostituisce una misura che costa un comando. Misurata in [V-011](#v-011).
+- **Usata da:** ADR-0030
+
+---
+
 ## Verifiche empiriche
 
 <a id="v-001"></a>
@@ -1060,3 +1116,189 @@ quello libero: è la lettura più leggibile su un proiettore.
   della cache e il pavimento potrebbero differire su altre versioni.
 - **Data:** 2026-08-25
 - **Usata da:** ADR-0004, ADR-0013, ADR-0025
+
+---
+
+<a id="v-010"></a>
+### V-010 — `--logpath` redirige, non duplica; e `logRotate` su stdout dice «ok» senza fare niente
+
+- **Comandi:** `docker run -d mongo@sha256:… mongod` · lo stesso con
+  `mongod --logpath /tmp/mongod.log` · `docker logs` · `docker exec … wc -l /tmp/mongod.log` ·
+  `mongod --help` · `db.adminCommand({logRotate: 1})` · `ls -la /tmp/`
+- **Ambiente:** Docker 29.7.2, immagine `mongo` 7.0.40 pinnata per digest, host macOS 26.6.2
+  arm64, 2026-08-28
+
+**1. Le stesse righe, in un posto o nell'altro, mai in tutti e due.** Due container dalla stessa
+immagine, avviati a un minuto di distanza, con una sola differenza nel comando:
+
+| Comando | righe in `docker logs` | righe nel file |
+|---|---|---|
+| `mongod` | **65** | nessun file |
+| `mongod --logpath /tmp/mongod.log` | **0** | **65** |
+
+Sessantacinque righe in entrambi i casi. La somma non cambia, cambia solo dove finiscono. Il
+container con `--logpath` è vivo e servente — risponde a `ping` e scrive nel file — ma
+`docker logs` su di lui non restituisce nemmeno una riga.
+
+**2. Lo dice il binario stesso, non solo il manuale.** `mongod --help` dentro l'immagine del lab:
+
+> `--logpath arg` — «Log file to send write to instead of stdout - has to be a file, not
+> directory»
+
+*Instead of*. È la stessa parola del manuale [S-032](#s-032), ma detta dall'eseguibile che
+gireremo davvero, alla versione che gireremo davvero: la fonte più difficile da contestare.
+
+**3. Quindi l'assunto del design è falso.** Il design §5.3 prevedeva un «doppio canale di log
+deliberato: stdout (per `docker compose logs`) **e** file `--logpath`». Quel canale doppio non
+esiste, e non si tratta di un'opzione da trovare: le destinazioni sono tre — stdout, file,
+syslog — e sono mutuamente esclusive. Deciso in [ADR-0030](Decision.md#adr-0030).
+
+**4. `logRotate` riporta successo anche quando non ha niente da ruotare.** Stesso comando sui due
+container:
+
+| Destinazione del log | Risposta | Nel log | Effetto sul filesystem |
+|---|---|---|---|
+| stdout | `{"ok":1}` | `"msg":"Log rotation initiated"`, `"logType":null` | **nessuno** |
+| file | `{"ok":1}` | idem | `mongod.log` rinominato in `mongod.log.2026-08-28T10-53-19`, nuovo `mongod.log` da 2.667 byte |
+
+Le due risposte sono indistinguibili. Un amministratore che ruota i log di un container e
+controlla il valore di ritorno riceve conferma di un'operazione che non è avvenuta. È il tipo di
+successo apparente che si scopre mesi dopo, quando serve il log vecchio e non c'è.
+
+- **Riserve:** misurato senza `--fork`, che nel container non si usa mai perché `mongod` deve
+  restare in primo piano come PID 1. Con `--fork` il manuale richiede `--logpath`, quindi il caso
+  «entrambi i canali» non si ripresenta nemmeno lì. Non è stato provato `--syslog`: nel container
+  non c'è un demone syslog a cui scrivere.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0030
+
+---
+
+<a id="v-011"></a>
+### V-011 — Il driver `json-file` non ruota niente se non glielo si chiede
+
+- **Comandi:** `docker info --format '{{.LoggingDriver}}'` ·
+  `docker inspect --format '{{json .HostConfig.LogConfig}}'` · `docker logs … | wc -l` ·
+  `docker logs … | wc -c` · `docker logs … | grep -c 'Connection ended'`
+- **Ambiente:** Docker 29.7.2, host macOS 26.6.2 arm64, 2026-08-28
+
+**1. Il driver predefinito è `json-file` e nasce senza configurazione.**
+
+```
+docker info --format '{{.LoggingDriver}}'   →  json-file
+docker inspect … '{{json .HostConfig.LogConfig}}'  →  {"Type":"json-file","Config":{}}
+```
+
+`Config` vuoto significa nessun `max-size` e nessun `max-file`. Con `max-size` predefinito a
+`-1 (unlimited)` [S-033](#s-033), il file di log del container cresce finché c'è disco. Il
+manuale non lo dice in una frase: lo si mette insieme da una cella di tabella e da un oggetto
+JSON vuoto.
+
+**2. Un nodo che non fa niente scrive comunque, e non poco.** Lo stack 01 lasciato acceso senza
+alcun carico, misurato dopo 10 minuti e 33 secondi di funzionamento:
+
+| Grandezza | Valore |
+|---|---|
+| righe in `docker logs` | **1.498** |
+| byte in `docker logs` | **551.856** |
+| di cui `"Connection ended"` | **305** |
+| ritmo | ≈ 142 righe/minuto, ≈ 52 KiB/minuto |
+
+Non c'era nessun client collegato. Le 305 connessioni sono l'**healthcheck**: sessantatré
+esecuzioni di `mongosh` a dieci secondi l'una dall'altra, cinque connessioni per esecuzione. Il
+controllo che serve a sapere se il nodo sta bene è, a nodo fermo, la sorgente pressoché unica del
+suo log. Estrapolando: un'ora di talk con lo stack acceso e inoperoso fa circa 3 MiB.
+
+**3. E sotto carico è la demo stessa a scrivere.** `mongod` registra una riga all'apertura e una
+alla chiusura di ogni connessione. La demo sulle prestazioni apre e chiude connessioni a raffica,
+per definizione — è quello che misura. Il canale di log scelto in
+[ADR-0030](Decision.md#adr-0030) è stdout, e su stdout `logRotate` risponde `ok` senza fare
+niente [V-010](#v-010). Sommate le tre cose — nessun limite predefinito, un flusso che non si
+ferma nemmeno a vuoto, e il comando di rotazione che non morde — la demo che dimostra le
+prestazioni è anche quella che riempie il disco. Con `max-size: 10m` e `max-file: 3` il tetto è
+30 MiB e la questione non si pone.
+
+- **Riserve:** `docker info` riporta il driver predefinito di *questo* daemon. Su un host che ha
+  già configurato `log-driver` in `/etc/docker/daemon.json` il valore è un altro, e i due limiti
+  scritti nel file Compose potrebbero non applicarsi allo stesso modo. È il motivo per cui il
+  file Compose dichiara anche `driver: json-file` invece di limitarsi alle opzioni.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0030
+
+---
+
+<a id="v-012"></a>
+### V-012 — Lo stack 01 alla prima accensione: salute, cache, limiti, e un'opzione che non abbiamo scritto
+
+- **Comandi:** `docker compose --env-file tools/images.env -f docker/01-standalone/compose.yaml up -d` ·
+  `docker inspect --format '{{json .State.Health}}'` · `db.serverStatus()` · `db.hostInfo()` ·
+  `cat /proc/1/cmdline` · connessione TCP alla 27017 dall'host
+- **Ambiente:** Docker 29.7.2, Compose v5.4.0, immagine `mongo` 7.0.40 pinnata per digest, host
+  macOS 26.6.2 arm64, 2026-08-28
+
+**1. Sano in 5,46 secondi.** Container avviato alle `10:55:05.631`, primo controllo di salute
+concluso con esito `0` alle `10:55:11.093`. Il `start_period: 20s` dichiarato nel file non è
+stato consumato nemmeno per un terzo — ed è giusto così: serve al caso peggiore, non al caso
+normale.
+
+Un dettaglio inatteso: il primo controllo è partito a **+5,07 s**, non a +10 s come farebbe
+supporre `interval: 10s`. Il secondo è partito a +15,4 s, cioè dieci secondi dopo il primo. La
+spiegazione più probabile è che durante lo `start_period` Docker sondi a un ritmo più fitto, ma
+questo è un comportamento osservato e non una lettura del manuale: qui è registrato come
+osservazione, non come regola.
+
+**2. I limiti dichiarati sono quelli che `mongod` vede.** Conferma di [V-009](#v-009) sullo stack
+vero invece che su un banco di prova:
+
+| Grandezza | Dichiarato nel Compose | Letto da dentro |
+|---|---|---|
+| memoria | `mem_limit: 1024m` | `hostInfo().system.memLimitMB` = **1024** |
+| cache | `--wiredTigerCacheSizeGB 0.25` | `maximum bytes configured` = **268435456** = 256 MiB esatti |
+| versione | digest `sha256:b6421fd…` | `serverStatus().version` = **7.0.40** |
+
+`0.25` GiB fa 256 MiB tondi. È la cifra che [V-009](#v-009) aveva già isolato smontando il
+`0.256` del manuale, e che qui si conferma sul file che andrà in scena.
+
+**3. Il costo dell'healthcheck.** `mongosh --quiet --eval "db.adminCommand('ping').ok"`:
+
+| Condizione | Durata |
+|---|---|
+| container senza limiti di CPU | 317 ms |
+| dentro `cpus: 1.0` | 392 ms e 385 ms |
+
+Circa quattro decimi di secondo ogni dieci, cioè il 4% di una CPU che è tutta la CPU che il nodo
+ha. Non è gratis, ed è il motivo per cui `interval` resta a 10 secondi e non scende. `mongosh` è
+un processo Node: il costo è quasi tutto avvio dell'interprete, non lavoro del database.
+
+C'è un secondo costo, meno ovvio, che si vede solo guardando il log: ogni esecuzione apre cinque
+connessioni, e ciascuna lascia due righe. A nodo fermo l'healthcheck è la sorgente pressoché
+unica del log, 142 righe al minuto [V-011](#v-011). Il controllo che dice se il nodo sta bene è
+anche la cosa che scrive di più quando il nodo non fa nient'altro.
+
+**4. L'immagine aggiunge un'opzione che non abbiamo scritto.** Il comando dichiarato nel Compose
+è `mongod --wiredTigerCacheSizeGB 0.25`. Quello che gira è:
+
+```
+mongod --wiredTigerCacheSizeGB 0.25 --bind_ip_all
+```
+
+`--bind_ip_all` lo mette l'entrypoint ufficiale [S-022](#s-022), non noi. Fuori da un container
+sarebbe una decisione da prendere con attenzione: qui è ragionevole, perché l'unica strada verso
+il processo è la porta che `ports:` pubblica. Ma va detto ad alta voce, perché lo stack 01 gira
+**anche senza autenticazione**: le due cose insieme fanno un `mongod` che accetta chiunque
+raggiunga la porta, e il solo motivo per cui non è un problema è che la porta è mappata su
+`localhost`. Cambiare quella riga senza accorgersene apre il database alla rete.
+
+`mongod` è **PID 1**: riceve direttamente il `SIGTERM` di `docker stop`, quindi chiude in modo
+pulito senza bisogno di un init intermedio.
+
+**5. La porta risponde dall'host.** Connessione TCP a `127.0.0.1:27017` riuscita entro il timeout
+di 3 secondi, a container sano.
+
+- **Riserve:** il tempo di salute è misurato con l'immagine già in cache locale e con il volume
+  `dati` appena creato, cioè vuoto. Al primo avvio con dati dentro e cache WiredTiger da
+  ricostruire il numero sarà più alto; il `start_period` esiste per quello. Il costo di `mongosh`
+  è misurato su questo host arm64: su una macchina più lenta cresce, e con esso la pressione sul
+  `timeout: 5s`.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0030

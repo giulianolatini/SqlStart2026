@@ -1165,3 +1165,85 @@ regola qui è più modesta e riguarda i costrutti che lo standard applicabile di
 indefiniti, non l'adesione integrale a un profilo).
 
 **Fonti:** [S-030](Sources.md#s-030), [S-031](Sources.md#s-031)
+
+---
+
+<a id="adr-0030"></a>
+## ADR-0030 — Il log del lab sta su stdout, e a ruotarlo pensa il runtime
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** il design del 24 agosto, al §5.3, dava per acquisito un «doppio canale di log
+deliberato: stdout (per `docker compose logs`) **e** file `--logpath`». L'idea era comoda: il
+comando che tutti conoscono per guardare i log di un container, e insieme un file dentro il
+container su cui mostrare le procedure amministrative. Il piano di `feature/01` ha messo questo
+assunto in cima al task invece che in fondo, con la formula «questo task comincia con una misura,
+non con del codice». Ha fatto bene: l'assunto è falso.
+
+`--logpath` è una **redirezione**, non una duplicazione. Due container identici salvo quel flag
+producono le stesse sessantacinque righe di avvio, ma o in `docker logs` o nel file, mai in
+entrambi [V-010](Sources.md#v-010). Non è una sottigliezza da scoprire eseguendo: lo dice
+l'aiuto del binario dentro l'immagine del lab — «Log file to send write to **instead of**
+stdout» — e lo dice il manuale, che tratta le tre destinazioni come alternative esplicite,
+«Specify **either** `file` or `syslog`», con stdout come ripiego di chi non sceglie
+[S-032](Sources.md#s-032). Il canale doppio non esiste e non c'è un'opzione per costruirlo.
+
+Bisogna quindi scegliere, e la scelta ha una conseguenza che va guardata prima di deciderla.
+`logRotate`, il comando che il capitolo di amministrazione deve insegnare, su un `mongod` che
+scrive su stdout risponde `{"ok":1}`, scrive a log «Log rotation initiated» e **non fa
+assolutamente niente**. La risposta è indistinguibile da quella del caso in cui il file c'è ed è
+stato davvero rinominato [V-010](Sources.md#v-010). Rinunciare al file non toglie un comando
+dall'insegnamento: lo trasforma in un comando che mente.
+
+C'è poi un secondo fatto, che scegliere stdout tira dentro per forza. Il driver `json-file`, che
+è il predefinito, nasce con `LogConfig` vuoto: nessun `max-size`, nessun `max-file`, e `max-size`
+vale `-1 (unlimited)` [S-033](Sources.md#s-033), [V-011](Sources.md#v-011). `mongod` scrive una
+riga per ogni connessione aperta e una per ogni connessione chiusa, e la demo sulle prestazioni
+apre e chiude connessioni a raffica perché è precisamente ciò che misura. Su stdout, senza
+limiti, la demo che dimostra le prestazioni è anche quella che riempie il disco.
+
+**Decisione:** tre clausole, che sono la stessa decisione vista da tre lati.
+
+1. **Nessuno stack del lab dichiara `--logpath`.** Il log di ogni `mongod` e di ogni `mongos` va
+   su stdout, e si guarda con `docker compose logs`. Dal palco «adesso vi mostro i log» deve
+   essere un comando solo, quello che il pubblico ha già visto mille volte.
+2. **Ogni servizio dichiara `logging:` con `driver: json-file`, `max-size: "10m"` e
+   `max-file: "3"`.** Trenta MiB per container: molto più di quanto qualunque demo produca, e
+   molto meno di un disco pieno a metà talk. Il driver è dichiarato per esteso e non solo le
+   opzioni, perché su un host che ha già cambiato `log-driver` nel proprio `daemon.json` le sole
+   opzioni potrebbero applicarsi a un driver diverso.
+3. **La rotazione con `logRotate` si insegna dove ha senso, cioè sull'installazione su ferro.**
+   Il capitolo `docs/03-amministrazione/log.md` mostra le due situazioni una accanto all'altra e
+   dice qual è la differenza: dentro un container il log lo possiede il runtime e lo ruota il
+   runtime; su una macchina dove `mongod` è un servizio di sistema, il log lo possiede `mongod` e
+   lo ruota `logRotate`, in coppia con `logrotate(8)` e `--logRotate reopen`. La dimostrazione di
+   `logRotate` si fa su un container avviato apposta con `--logpath`, fuori dagli stack.
+
+**Conseguenze:** `docker compose logs -f` funziona su tutti e tre gli stack, il che è la
+proprietà che serve dal palco e che si sarebbe persa in silenzio. Il capitolo sui log ci guadagna
+la distinzione che vale davvero la pena portare a casa — dove sta il log dipende da come hai
+avviato il processo, chi lo ruota dipende da chi lo possiede — e la porta con una misura sotto
+invece che come opinione. Nel conto ci va anche l'onestà di aver corretto il design: il §5.3
+resta come sta, perché i documenti storici non si riscrivono, e questo ADR è il posto dove è
+scritto che quella riga descriveva una cosa che non esiste.
+
+Il costo è un container in più da avviare quando si dimostra la rotazione, e una tentazione da
+disinnescare: chi copia un file Compose del lab e ci aggiunge `--logpath` perde
+`docker compose logs` senza capire perché. Per questo il commento accanto al comando, dentro il
+file, dice che l'assenza di `--logpath` è deliberata e rimanda alla misura.
+
+**Alternative scartate:** tenere `--logpath` e guardare i log con `docker exec … tail -f` (si
+ottiene il file, si perde il comando che tutti conoscono; e in una demo il comando familiare vale
+più del file); usare `mongod … | tee /var/log/mongod.log` come comando del container (metterebbe
+una shell come PID 1, e il `SIGTERM` di `docker stop` arriverebbe alla shell invece che a
+`mongod`: chiusura sporca, e i dieci secondi di grazia prima del `SIGKILL`. Su un lab che
+dimostra il guasto di un nodo, rovinare la chiusura pulita è l'esatto contrario di ciò che
+serve); `--logpath /dev/stdout` (si ottiene l'output su stdout dichiarando però a `mongod` che
+esiste un file, con `logRotate` che proverebbe a rinominare `/dev/stdout`: un modo elaborato di
+ottenere il comportamento predefinito, più un modo nuovo di rompersi); non dichiarare `logging:`
+e fidarsi del daemon (il predefinito è nessun limite, misurato, e due righe costano meno di un
+disco pieno); `max-size` più generoso (dieci MiB di JSON sono decine di migliaia di righe: il
+limite non si incontra in una demo, si incontra in un ciclo impazzito, che è appunto il caso da
+contenere).
+
+**Fonti:** [S-032](Sources.md#s-032), [S-033](Sources.md#s-033), [V-010](Sources.md#v-010), [V-011](Sources.md#v-011), [V-012](Sources.md#v-012)

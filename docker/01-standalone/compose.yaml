@@ -33,6 +33,12 @@ services:
 
     command:
       - mongod
+      # NESSUN --logpath, ed è una scelta misurata, non una dimenticanza.
+      # L'aiuto del binario dice «Log file to send write to INSTEAD OF stdout»:
+      # è una redirezione, non una duplicazione. Misurato in V-010 — con
+      # --logpath il file ha 65 righe e `docker logs` ne ha zero. Attivarlo
+      # spegnerebbe `docker compose logs`, cioè il modo più naturale di mostrare
+      # i log dal palco. Il design §5.3 ipotizzava un doppio canale: non esiste.
       # 0.25 GiB = 256 MiB di cache dentro 1024 MiB di limite. Il valore è dichiarato
       # a mano non perché mongod non sappia leggere il proprio cgroup — lo legge, ed
       # è misurato in V-009 — ma perché questo file è materiale didattico e il calcolo
@@ -51,6 +57,31 @@ services:
       # filesystem condiviso a ogni scrittura, e la demo sulle prestazioni misurerebbe
       # VirtioFS invece di WiredTiger.
       - dati:/data/db
+
+    # Se i log stanno su stdout, ruotarli non è più affare di mongod: è affare
+    # del runtime. Il driver json-file NON ruota niente per impostazione
+    # predefinita — misurato in V-011, LogConfig vuoto — e la demo sulle
+    # prestazioni scrive una riga per ogni connessione aperta e una per ogni
+    # connessione chiusa. Senza questi due limiti il file cresce finché c'è
+    # disco. 10 MiB per tre file: 30 MiB al massimo, più di quanto serva a
+    # qualunque demo e molto meno di un disco pieno a metà talk.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      # `mongosh` è nell'immagine (2.10.0) e un ping è l'unica prova onesta che
+      # il nodo serva: una porta in ascolto non vuol dire pronta a rispondere.
+      # Costa circa 300 ms a esecuzione (V-012), ogni 10 secondi, dentro 1 CPU.
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # Senza `start_period` i primi tentativi falliti contano come guasti e il
+      # container risulta «unhealthy» mentre sta semplicemente ancora partendo.
+      start_period: 20s
 
 volumes:
   dati:
