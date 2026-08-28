@@ -12,7 +12,8 @@ di questo file; ogni voce di questo file è citata da almeno un ADR di
 
 ## Come sono state verificate
 
-Ogni URL è stato aperto e letto integralmente il **2026-08-25**. Per ciascuna fonte è
+Ogni URL è stato aperto e letto integralmente il **2026-08-25**, salvo le voci aggiunte in
+seguito, che portano la propria data nel campo **Consultata**. Per ciascuna fonte è
 registrato un **verdetto** su ciò che la pagina afferma davvero, confrontato con
 l'assunzione che avevamo dato per buona in fase di progettazione:
 
@@ -764,6 +765,69 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   non esiste una pagina che affermi «7.0 e 8.0 si comportano allo stesso modo». La lettura
   copre inoltre la sola 8.0; per la 8.2 e la 8.3 esistono pagine analoghe non consultate.
 - **Usata da:** ADR-0028
+
+---
+
+<a id="s-030"></a>
+### S-030 — POSIX, Base Definitions capitolo 9: Regular Expressions
+
+- **URL:** https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap09.html
+- **Editore:** IEEE e The Open Group — The Open Group Base Specifications Issue 7, 2018 edition
+- **Versione documentata:** Issue 7, edizione 2018 (IEEE Std 1003.1-2017, revisione di IEEE
+  Std 1003.1-2008)
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — due quantificatori attaccati sono indefiniti.** Sezione
+  **9.4.6**, *EREs Matching Multiple Characters*, in chiusura di sottosezione: «The behavior of
+  multiple adjacent duplication symbols ( '+', '\*', '?', and intervals) produces undefined
+  results.» Una frase gemella sta in **9.3.6** per le BRE, con l'elenco ridotto a `*` e agli
+  intervalli. È la regola sotto cui cade `.*?`: negli ERE il non-greedy non esiste, quindi
+  quella `?` non è un modificatore ma un secondo quantificatore attaccato al primo.
+- **Cosa afferma, secondo punto — e qui «indefinito» viene definito.** Sezione **9.1**, voce
+  *invalid*: «When invalid is not used, violations of the specified syntax or semantics for REs
+  produce undefined results: this may entail an error, enabling an extended syntax for that RE,
+  or using the construct in error as literal characters to be matched.» Tre esiti, tutti
+  leciti: errore, estensione, oppure trattamento come caratteri letterali. Nessuno è
+  prescritto, e un programma portabile non può contare su nessuno dei tre.
+- **Cosa afferma, terzo punto — il permesso di estendere è esplicito.** Dopo l'elenco dei
+  costrutti che la grammatica ERE accetta ma lascia indefiniti: «Implementations are permitted
+  to extend the language to allow these. Strictly Conforming applications cannot use such
+  constructs.»
+- **Cosa non afferma:** che `*?` sia un errore, o che rompa qualcosa. Nel capitolo non compare
+  alcun quantificatore non-greedy, né la nozione di corrispondenza minima: la semantica
+  descritta è quella più a sinistra e più lunga.
+- **Riserve:** lo standard descrive gli ERE, non una particolare implementazione. Proprio le
+  frasi citate al secondo e al terzo punto rendono la pagina inservibile per **prevedere** cosa
+  faccia un `awk` reale: un'implementazione può definire `*?` come estensione e restare
+  conforme. Serve a stabilire cosa **non è garantito**, non cosa succede — quello va misurato.
+  Consultata l'edizione 2018; la pagina segnala l'esistenza di un'edizione più recente, non
+  aperta.
+- **Usata da:** ADR-0029
+
+---
+
+<a id="s-031"></a>
+### S-031 — POSIX, Shell and Utilities: `awk`
+
+- **URL:** https://pubs.opengroup.org/onlinepubs/9699919799/utilities/awk.html
+- **Editore:** IEEE e The Open Group — The Open Group Base Specifications Issue 7, 2018 edition
+- **Versione documentata:** Issue 7, edizione 2018 (IEEE Std 1003.1-2017)
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — quale dialetto parla `awk`.** «The `awk` utility shall make use
+  of the extended regular expression notation (see XBD *Extended Regular Expressions*)», con
+  un'eccezione dichiarata per le sequenze di escape in stile C. È il collegamento che porta il
+  capitolo 9 [S-030](#s-030) a valere anche dentro un `FS`.
+- **Cosa afferma, secondo punto — ma è un soprainsieme.** La *RATIONALE* dichiara l'intento di
+  «make them a pure superset of extended regular expressions, as defined by POSIX.1-2017»,
+  indicando nell'internazionalizzazione e nelle interval expressions le aggiunte principali.
+- **Cosa non afferma:** non nomina il non-greedy né `*?`, in nessuna sezione.
+- **Riserve:** «pure superset» è esattamente il motivo per cui il capitolo 9 non basta a
+  prevedere il comportamento di un `awk` installato: sopra gli ERE un'implementazione può
+  aggiungere ciò che vuole e restare conforme. La conseguenza pratica è quella registrata in
+  [ADR-0029](Decision.md#adr-0029): un costrutto indefinito non è rotto, è soltanto non
+  garantito, e la differenza fra le due cose si stabilisce eseguendo.
+- **Usata da:** ADR-0029
 
 ---
 

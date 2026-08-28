@@ -364,8 +364,14 @@ E tre note di metodo.
 27. La disciplina delle fonti ha un attrito che conviene nominare adesso che si è visto: ogni
     voce di [`Sources.md`](Sources.md) deve essere citata da un ADR, altrimenti il controllo
     la dichiara orfana — giustamente. Il testo POSIX che giustifica la modifica all'`awk`
-    sarebbe una fonte legittima, ma promuoverlo avrebbe richiesto di aprire un ADR per una
-    correzione da un carattere. La citazione è rimasta nel commento del `Makefile`, con i due
-    URL, fuori da `docs/`, dove la regola non vincola. È una scelta di proporzione e non una
-    scorciatoia, ma va rivista se casi del genere si moltiplicano: la via d'uscita pulita
-    sarebbe un ADR sugli strumenti di repository, che oggi non esiste.
+    sarebbe una fonte legittima, ma promuoverlo sembrava richiedere l'apertura di un ADR per
+    una correzione da un carattere, e la citazione era rimasta nel commento del `Makefile`,
+    fuori da `docs/`, dove la regola non vincola. **Giuliano ha ribaltato la scelta il giorno
+    stesso, e aveva ragione:** l'ADR mancava non perché la decisione fosse troppo piccola, ma
+    perché in undici giorni nessuno aveva scritto una riga su `tools/` e sul `Makefile`, che
+    pure sono la prima cosa che esegue chi clona. La proporzione andava misurata sulla sede
+    mancante, non sul carattere corretto. [ADR-0029](Decision.md#adr-0029) governa adesso gli
+    strumenti di repository, [S-030](Sources.md#s-030) e [S-031](Sources.md#s-031) hanno una
+    casa, e la regola anti-orfane torna a fare quello per cui esiste — impedire la bibliografia
+    decorativa — invece di impedire una fonte vera. La lezione è che una regola che ostacola è
+    più spesso il sintomo di un buco altrove che un difetto della regola.

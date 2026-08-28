@@ -4,17 +4,11 @@
 .DEFAULT_GOAL := help
 .PHONY: help docs-check tools-test images-pull images-verify preflight
 
-# `FS` usa `.*` e non il `.*?` dell'idioma che gira in rete. POSIX: «The awk utility
-# shall make use of the extended regular expression notation», e negli ERE il
-# non-greedy non esiste — quella `?` è solo un secondo quantificatore attaccato al
-# primo, di cui «The behavior of multiple adjacent duplication symbols ('+', '*', '?',
-# and intervals) produces undefined results» (XBD §9.4.6).
-#   https://pubs.opengroup.org/onlinepubs/9699919799/utilities/awk.html
-#   https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap09.html
-# In pratica qui non cambia niente, ed è stato misurato: nessuna descrizione contiene
-# un secondo `## `, e l'output delle due forme è identico byte per byte. Ma `help` è
-# anche il target predefinito, e non vale la pena farlo poggiare su un costrutto che
-# lo standard dichiara indefinito quando la forma definita costa un carattere in meno.
+# `FS` usa `.*` e non il `.*?` dell'idioma che gira in rete: `awk` parla ERE, dove il
+# non-greedy non esiste, e POSIX dichiara indefinito il comportamento di due
+# quantificatori adiacenti (XBD §9.4.6). Indefinito non vuol dire rotto — qui l'output
+# delle due forme è identico byte per byte, misurato — vuol dire non garantito, ed è
+# il motivo per cui la forma definita entra comunque: ADR-0029, fonti S-030 e S-031.
 help: ## Elenca i target disponibili
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'

@@ -1102,3 +1102,66 @@ del ragionamento: una pagina di *compatibility changes* elenca ciò che rompe, n
 resta uguale, e l'assenza di una voce è un indizio forte, non una prova.
 
 **Fonti:** [S-027](Sources.md#s-027), [S-028](Sources.md#s-028), [S-029](Sources.md#s-029), [V-007](Sources.md#v-007), [V-008](Sources.md#v-008)
+
+---
+
+<a id="adr-0029"></a>
+## ADR-0029 — Gli strumenti di repository non poggiano su comportamenti indefiniti
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** il `Makefile`, `tools/pull-images.sh`, `tools/preflight.sh` e
+`tools/check_citations.py` sono la prima cosa che esegue chi clona, e la eseguono su una
+macchina che non abbiamo mai visto. Fino a oggi nessuna decisione li governava: il criterio in
+vigore era implicito, ed era «funziona sulla macchina di sviluppo».
+
+La review esterna di PR #1 ne ha mostrato il limite su un caso minuscolo e istruttivo. Il
+target `help`, che è anche quello predefinito, separava i campi con `FS = ":.*?## "` — l'idioma
+che circola in migliaia di Makefile. Il rilievo prediceva che `awk` cercasse un `?` letterale e
+che `make help` fosse rotto. Non è così, ed è falsificabile in un comando: le descrizioni si
+stampano e l'uscita è `0`. Ma sotto la diagnosi sbagliata c'era un'osservazione giusta. `awk`
+usa gli ERE — «The `awk` utility shall make use of the extended regular expression notation»
+[S-031](Sources.md#s-031) — e negli ERE il non-greedy non esiste: quella `?` non è un
+modificatore, è un secondo quantificatore attaccato al primo, e «The behavior of multiple
+adjacent duplication symbols ( '+', '\*', '?', and intervals) produces undefined results»
+[S-030](Sources.md#s-030).
+
+Il punto interessante non è che sia indefinito, è che lo standard dice **cosa può succedere**:
+«this may entail an error, enabling an extended syntax for that RE, or using the construct in
+error as literal characters to be matched» [S-030](Sources.md#s-030). Tre esiti, tutti leciti.
+La previsione del rilievo era il terzo; quello che accade davvero sull'`awk` della macchina di
+sviluppo è il secondo. Entrambi sono ammessi — ed è esattamente il punto: il comportamento non
+è sbagliato, è **non garantito**. POSIX lo dice anche in positivo: «Strictly Conforming
+applications cannot use such constructs.»
+
+**Decisione:** gli strumenti di repository si attengono al comportamento definito dallo
+standard che li governa, anche quando il costrutto indefinito funziona qui. Dove esiste una
+forma definita ed equivalente si usa quella; la ragione si scrive nell'artefatto, accanto alla
+riga, con il rimando alla fonte, perché è lì che la legge chi si chiede perché il codice non
+somigli all'idioma diffuso. Prima applicazione: `FS = ":.*## "`, con l'output verificato
+identico byte per byte prima e dopo la modifica.
+
+**Conseguenze:** la regola costa quasi niente da applicare e compra la sola proprietà che
+serve, cioè che lo strumento si comporti allo stesso modo sulla macchina di chi clona. Non
+promette portabilità: toglie una classe di sorpresa, non tutte. Introduce invece un obbligo di
+prova — chi afferma che un costrutto è indefinito deve citare dove sta scritto — e apre la
+sede che mancava. Questo è il primo ADR che governa `tools/` e il `Makefile`, ed è il posto
+naturale per le fonti future sullo stesso argomento.
+
+C'è un effetto collaterale che vale la pena registrare, perché riguarda il metodo e non il
+codice. Il 2026-08-28 la fonte POSIX era rimasta fuori da [`Sources.md`](Sources.md) per una
+ragione puramente strutturale: ogni voce dev'essere citata da un ADR, altrimenti il controllo
+la dichiara orfana, e nessun ADR copriva gli strumenti. La regola anti-orfane, che esiste per
+impedire la bibliografia decorativa, stava impedendo di registrare una fonte legittima solo
+perché troppo piccola. Questo ADR scioglie il nodo: le due voci hanno una casa.
+
+**Alternative scartate:** lasciare `*?` e annotarne l'innocuità (documenterebbe che un
+costrutto non garantito oggi funziona, cioè la premessa che invecchia peggio); verificare
+l'espressione su più implementazioni di `awk` invece di cambiarla (sposta il costo su chi
+rilegge e non copre comunque l'implementazione che non abbiamo provato); imporre agli
+strumenti la conformità stretta a POSIX (nessuno degli script lo è né vuole esserlo: usano
+`bash` con array, `local` e `[[ ]]`, per scelta consapevole e dichiarata nello shebang. La
+regola qui è più modesta e riguarda i costrutti che lo standard applicabile dichiara
+indefiniti, non l'adesione integrale a un profilo).
+
+**Fonti:** [S-030](Sources.md#s-030), [S-031](Sources.md#s-031)
