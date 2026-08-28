@@ -375,3 +375,89 @@ E tre note di metodo.
     casa, e la regola anti-orfane torna a fare quello per cui esiste — impedire la bibliografia
     decorativa — invece di impedire una fonte vera. La lezione è che una regola che ostacola è
     più spesso il sintomo di un buco altrove che un difetto della regola.
+
+---
+
+## 2026-08-28 — Chiusura di `feature/01-stack-standalone`
+
+**Fatto:** tredici task, quindici commit, ventidue file rispetto a `develop`. Il branch
+consegna il primo stack e le pagine che lo spiegano: `docker/01-standalone/compose.yaml` con
+le risorse dichiarate e l'immagine pinnata per digest, il seed deterministico in
+`init/10-dati-demo.js`, sei target `make` per governarlo, `tools/smoke-standalone.sh` con
+dodici controlli, e `tools/check_stack.py` che verifica il file Compose contro gli ADR sulle
+risorse. Sul lato documentazione: l'[istanza singola](02-architetture/standalone.md), le
+[trappole di MongoDB in Docker](02-architetture/trappole-mongodb-in-docker.md), i
+[log](03-amministrazione/log.md), la [guida a `mongosh`](04-mongosh/guida-mongosh.md) e le due
+pagine di installazione su [Linux](01-installazione/linux.md) e
+[Windows](01-installazione/windows.md). Nove ADR nuovi — da [ADR-0030](Decision.md#adr-0030) a
+[ADR-0038](Decision.md#adr-0038) — ventitré fonti primarie e dodici verifiche empiriche, che
+portano [`Sources.md`](Sources.md) a cinquantaquattro voci e ventuno misure.
+
+L'ultimo commit salda un debito lasciato aperto alla chiusura di `feature/00`:
+`tools/check_links.py` riapre ogni collegamento relativo di `docs/` e del
+[`README.md`](../README.md) di radice, verifica che il file esista e che l'ancora ci sia — e
+salta i blocchi recintati, che era la condizione esplicita posta allora. La suite degli
+strumenti passa da trentotto a sessantatré test.
+
+Verifica finale nell'ordine prescritto dal piano, su albero pulito: `make tools-test` esce `0`
+con sessantatré test, `make docs-check` esce `0` su entrambi i controlli, `make stack-check`
+esce `0`, `make images-verify` esce `0`, `make preflight` esce `0` con `Superati: 8 · Avvisi:
+1 · Errori: 0`. Il ciclo completo dello stack — `make up-01`, `make smoke-01`, `make down-01`
+— esce `0`, con il container sano e i dodici controlli superati. L'avvio è stato eseguito con
+`PULL_POLICY=never`, cioè con il meccanismo su cui poggia la garanzia offline
+([ADR-0018](Decision.md#adr-0018)): Compose non ha contattato nessun registry e il container è
+diventato `healthy` in pochi secondi. L'unico avviso resta la cartella dei filmati di riserva,
+che dal 2026-09-18 il preflight promuove da sé a errore bloccante.
+
+**Fallito:** cinque cose, e quattro le ha trovate una macchina.
+
+1. **La prova con il Wi-Fi spento non è stata eseguita.** Il piano la chiedeva alla lettera, e
+   il suo surrogato — `PULL_POLICY=never` con l'immagine già in cache — copre il meccanismo ma
+   non l'ambiente. Non è stata fatta perché spegnere la rete della macchina di sviluppo mentre
+   il lavoro è in corso è un gesto che va deciso da chi la sta usando, non da chi ci sta
+   lavorando sopra in background. Resta un comando solo, e va eseguito prima del 18 settembre:
+   `PULL_POLICY=never make up-01` con la rete staccata. Finché non è stato fatto, la garanzia
+   offline di questo branch è documentata e verosimile, non verificata nell'ambiente in cui
+   conta.
+2. **Il dataset di demo è stato corrotto durante la stesura della guida a `mongosh`.** Le prove
+   sui comandi di scrittura sono state eseguite sulla collezione `lab.ordini`, cioè sui dati
+   che lo smoke test usa come impronta. Il controllo se n'è accorto subito, perché l'impronta
+   di `lab.ordini` non tornava più, e `make seed-01` ha rimesso tutto a posto. Che sia costato
+   poco è merito del seed deterministico, non della prudenza di chi eseguiva: la lezione è che
+   una guida che mostra comandi di scrittura ha
+   bisogno di una collezione propria, e nel branch successivo l'avrà.
+3. **Due affermazioni inventate in `01-installazione/linux.md`, corrette prima del commit.** La
+   prima attribuiva a una sola pagina un'avvertenza che sta identica in entrambi i tutorial di
+   installazione; la seconda descriveva una forma di pinning dei pacchetti — cinque nomi con
+   la versione esatta più `apt-mark hold` — che la variante di pagina consultata **non
+   riporta**. La fonte dice soltanto «You can install either the latest stable version of
+   MongoDB or a specific version of MongoDB» ([S-048](Sources.md#s-048)), e i comandi stanno in
+   una scheda che non è stata aperta. Il testo ora riporta quello che la fonte dice e manda il
+   lettore alla scheda giusta. È il tipo di errore che la
+   [gerarchia delle fonti](Decision.md#adr-0024) esiste per impedire, e che si commette
+   comunque quando si scrive da memoria una pagina che si è appena letta.
+4. **Tre blocchi di console della guida a `mongosh` contenevano numeri vecchi.** Erano stati
+   presi durante la stesura e non rieseguiti: `db.stats` senza tre campi, un `uptime` di
+   3127 secondi diventato 3471, un `totalCreated` di 1875 diventato 2118. Trovati rieseguendo
+   i comandi esatti che la pagina stampa, e questa è la sola verifica che valga: una pagina che
+   mostra output deve mostrare l'output che quei comandi producono oggi, non quello che
+   producevano tre ore fa.
+5. **Il primo giro di `check_links.py` ha segnalato un errore dentro l'ADR che lo giustificava.**
+   [ADR-0038](Decision.md#adr-0038), spiegando che i blocchi di codice vanno saltati, conteneva
+   un `[testo](url)` scritto fra apici inversi come esempio — e lo strumento, che saltava le
+   recinzioni ma non il codice in linea, lo ha preso per un rimando rotto. Corretto lo
+   strumento, non il testo. È il caso di scuola del punto 2 di quella stessa decisione: un
+   controllore che ha ragione tre volte su quattro viene spento dopo il quarto falso allarme, e
+   la prima occasione per sbagliarlo si presenta sempre nel documento che lo introduce.
+
+**Note di metodo, per la prossima volta.**
+
+- I task 2 e 3 del piano sono stati chiusi in un commit solo. Il piano li separava — il file
+  Compose, poi l'healthcheck — ma l'healthcheck era la sola parte del file che ancora non era
+  scritta, e due commit avrebbero raccontato un lavoro che non è avvenuto in due tempi. La
+  granularità dei commit segue il lavoro, non il piano; quando divergono si scrive perché.
+- La riga `**Fonti:**` degli ADR deve stare su **una riga fisica**, altrimenti
+  `check_citations.py` ne legge solo la prima parte e dichiara orfane le fonti che seguono. È
+  un vincolo di formato che nessun documento dichiarava e che si scopre solo sbagliandolo. Ora
+  è scritto qui; se tornerà a costare tempo, diventerà un messaggio di errore dello strumento
+  invece di una nota nel registro.
