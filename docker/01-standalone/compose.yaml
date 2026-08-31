@@ -23,9 +23,11 @@ services:
     # Nome host esplicito, mai indirizzi IP: ADR-0021. Qui non serve ancora a
     # nessuno, ma la buona abitudine si prende sullo stack in cui non costa nulla.
     hostname: mongo-standalone
-    # `missing` durante lo sviluppo, `never` sul palco: una variabile sola,
-    # controllata dal preflight. ADR-0018.
-    pull_policy: ${PULL_POLICY:-missing}
+    # `never` fisso, non parametrico: l'immagine non viene mai scaricata, e se
+    # manca dalla cache locale l'avvio fallisce subito invece di aprire una
+    # connessione che in sala non c'è. Il prezzo è che `make images-pull` va
+    # eseguito una volta, a casa, con la rete. ADR-0039.
+    pull_policy: never
     restart: unless-stopped
 
     mem_limit: 1024m

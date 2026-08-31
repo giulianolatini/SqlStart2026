@@ -11,7 +11,7 @@ def conforme(**modifiche):
     """
     servizio = {
         "image": "mongo@sha256:aaa",
-        "pull_policy": "missing",
+        "pull_policy": "never",
         "mem_limit": "1024m",
         "cpus": 1.0,
         "command": ["mongod", "--wiredTigerCacheSizeGB", "0.25"],
@@ -64,6 +64,24 @@ def test_il_tag_latest_e_vietato():
     documento = conforme(image="mongo:latest")
     problemi = verifica(documento, digest_noti={"sha256:aaa"})
     assert any("latest" in problema for problema in problemi), problemi
+
+
+def test_pull_policy_diversa_da_never_e_un_problema():
+    # `missing` scarica ciò che manca. In sala non c'è rete da cui scaricare, e
+    # il tentativo è un minuto perso davanti al pubblico (ADR-0039).
+    documento = conforme(pull_policy="missing")
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any("never" in problema for problema in problemi), problemi
+
+
+def test_pull_policy_non_puo_dipendere_da_una_variabile():
+    # Risolta vale «never», e non basta: la garanzia starebbe in un file
+    # d'ambiente che si può dimenticare di passare, invece che nell'artefatto.
+    # Chi apre il file Compose deve leggere lì che cosa succederà.
+    risolto = conforme(pull_policy="never")
+    grezzo = conforme(pull_policy="${PULL_POLICY:-never}")
+    problemi = verifica(risolto, digest_noti={"sha256:aaa"}, grezzo=grezzo)
+    assert any("variabile" in problema for problema in problemi), problemi
 
 
 def test_pull_policy_assente_e_un_problema():
@@ -128,7 +146,7 @@ def test_depends_on_senza_condition_e_un_problema():
     documento["services"]["mongo"]["depends_on"] = ["init"]
     documento["services"]["init"] = {
         "image": "mongo@sha256:aaa",
-        "pull_policy": "missing",
+        "pull_policy": "never",
         "mem_limit": "128m",
         "cpus": 0.5,
         "healthcheck": {"test": ["CMD", "true"]},
@@ -144,7 +162,7 @@ def test_attendere_un_servizio_privo_di_healthcheck_e_un_problema():
     }
     documento["services"]["init"] = {
         "image": "mongo@sha256:aaa",
-        "pull_policy": "missing",
+        "pull_policy": "never",
         "mem_limit": "128m",
         "cpus": 0.5,
     }
@@ -161,7 +179,7 @@ def test_attendere_il_completamento_non_richiede_healthcheck():
     }
     documento["services"]["init"] = {
         "image": "mongo@sha256:aaa",
-        "pull_policy": "missing",
+        "pull_policy": "never",
         "mem_limit": "128m",
         "cpus": 0.5,
     }
@@ -235,8 +253,8 @@ name: prova
 services:
   mongo:
     image: ${MONGO_IMAGE}
-    pull_policy: ${PULL_POLICY:-missing}
-    mem_limit: 1024m
+    pull_policy: never
+    mem_limit: ${MEMORIA:-1024m}
     cpus: 1.0
     command: [mongod, --wiredTigerCacheSizeGB, "0.25"]
 """
@@ -248,7 +266,7 @@ def test_carica_risolve_le_variabili_dentro_il_documento(tmp_path):
     documento = carica(percorso, {"MONGO_IMAGE": "mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b"})
     servizio = documento["services"]["mongo"]
     assert servizio["image"] == "mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b"
-    assert servizio["pull_policy"] == "missing"
+    assert servizio["mem_limit"] == "1024m"
 
 
 def test_main_esce_zero_su_un_file_conforme(tmp_path, capsys):
@@ -264,7 +282,7 @@ def test_main_esce_uno_e_nomina_il_file_che_non_va(tmp_path, capsys):
     ambiente.write_text("MONGO_IMAGE=mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b\n", encoding="utf-8")
     compose = tmp_path / "compose.yaml"
     compose.write_text(
-        COMPOSE_CONFORME.replace("    mem_limit: 1024m\n", ""), encoding="utf-8"
+        COMPOSE_CONFORME.replace("    mem_limit: ${MEMORIA:-1024m}\n", ""), encoding="utf-8"
     )
     assert main(["--ambiente", str(ambiente), str(compose)]) == 1
     assert "compose.yaml" in capsys.readouterr().err

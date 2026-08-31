@@ -89,6 +89,18 @@ def _risolvi_ovunque(nodo, ambiente: dict[str, str]):
     return nodo
 
 
+def leggi_documento(percorso) -> dict:
+    """Legge un file Compose senza toccarne le variabili.
+
+    Serve alla regola sul `pull_policy`, che deve giudicare ciò che è scritto nel
+    file e non ciò che ne esce dopo l'interpolazione: le due cose coincidono solo
+    finché qualcuno non passa un ambiente diverso.
+    """
+    import yaml
+
+    return yaml.safe_load(percorso.read_text(encoding="utf-8")) or {}
+
+
 def carica(percorso, ambiente: dict[str, str]) -> dict:
     """Legge un file Compose e ne risolve le variabili.
 
@@ -96,10 +108,7 @@ def carica(percorso, ambiente: dict[str, str]) -> dict:
     valore che contenesse due punti o virgolette cambierebbe la struttura del
     documento invece del proprio contenuto.
     """
-    import yaml
-
-    documento = yaml.safe_load(percorso.read_text(encoding="utf-8")) or {}
-    return _risolvi_ovunque(documento, ambiente)
+    return _risolvi_ovunque(leggi_documento(percorso), ambiente)
 
 
 def in_mib(valore: str | int) -> float | None:
@@ -164,9 +173,18 @@ def avvia_mongod(comando: object) -> bool:
     return bool(pezzi) and pezzi[0].rsplit("/", 1)[-1] == "mongod"
 
 
-def verifica(documento: dict, digest_noti: set[str]) -> list[str]:
-    """Restituisce l'elenco dei problemi. Lista vuota significa conformità."""
+def verifica(
+    documento: dict, digest_noti: set[str], grezzo: dict | None = None
+) -> list[str]:
+    """Restituisce l'elenco dei problemi. Lista vuota significa conformità.
+
+    `documento` è il file dopo l'interpolazione, `grezzo` prima. Quasi tutte le
+    regole guardano il primo, perché giudicano lo stack che si avvia. Quella sul
+    `pull_policy` guarda il secondo, perché giudica ciò che il file promette a
+    chi lo apre. Se `grezzo` manca si assume che i due coincidano.
+    """
     problemi: list[str] = []
+    servizi_grezzi = (grezzo or documento).get("services", {})
 
     if "version" in documento:
         problemi.append(
@@ -199,11 +217,24 @@ def verifica(documento: dict, digest_noti: set[str]) -> list[str]:
                     "avrà il giorno del talk (ADR-0009)"
                 )
 
-        if "pull_policy" not in servizio:
+        politica = servizio.get("pull_policy")
+        scritta = servizi_grezzi.get(nome, {}).get("pull_policy")
+        if politica is None:
             problemi.append(
-                f"{nome}: manca «pull_policy». Il lab dichiara "
-                "«${PULL_POLICY:-missing}», così il profilo di palco può imporre "
-                "«never» da una sola variabile (ADR-0018)"
+                f"{nome}: manca «pull_policy: never». Senza, Compose scarica ciò "
+                "che manca, e in sala non c'è rete da cui scaricare (ADR-0039)"
+            )
+        elif politica != "never":
+            problemi.append(
+                f"{nome}: «pull_policy: {politica}». L'unico valore ammesso è "
+                "«never», che è anche l'unico con una frase documentale esplicita "
+                "sul non contattare il registro (ADR-0039)"
+            )
+        elif isinstance(scritta, str) and VARIABILE.search(scritta):
+            problemi.append(
+                f"{nome}: «pull_policy: {scritta}» vale «never» solo grazie "
+                "all'ambiente passato adesso. Una variabile si dimentica, un file "
+                "no: la garanzia va scritta nell'artefatto (ADR-0039)"
             )
 
         for chiave in ("mem_limit", "cpus"):
@@ -332,7 +363,8 @@ def main(argv: list[str] | None = None) -> int:
     totale = 0
     for percorso in argomenti.compose:
         try:
-            documento = carica(percorso, ambiente)
+            grezzo = leggi_documento(percorso)
+            documento = _risolvi_ovunque(grezzo, ambiente)
         except OSError as errore:
             # Chi esegue lo strumento sbaglia il percorso prima di sbagliare lo
             # stack: un traceback qui non aiuterebbe nessuno.
@@ -346,7 +378,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"«{percorso}»: variabile obbligatoria assente — {errore.args[0]}", file=sys.stderr)
             return 2
 
-        problemi = verifica(documento, digest)
+        problemi = verifica(documento, digest, grezzo)
         for problema in problemi:
             print(f"  ✗ {percorso}: {problema}", file=sys.stderr)
         totale += len(problemi)
