@@ -16,8 +16,11 @@ from collections.abc import Iterable
 ANCORA_ESPLICITA = re.compile(r'<a id="([^"]+)"></a>')
 INTESTAZIONE = re.compile(r"^#{1,6}\s+(.*)$", re.MULTILINE)
 # Un blocco recintato da ``` non è prosa: quello che c'è dentro non è né
-# un'intestazione né un collegamento, anche quando ne ha la forma.
-RECINTO = re.compile(r"^```.*?^```", re.MULTILINE | re.DOTALL)
+# un'intestazione né un collegamento, anche quando ne ha la forma. Il rientro
+# è ammesso perché un recinto dentro un elenco puntato rientra insieme al suo
+# punto, e di quanto lo decide l'elenco: in `Sources.md` gli esempi di codice
+# stanno quasi tutti lì dentro.
+RECINTO = re.compile(r"^[ \t]*```.*?^[ \t]*```", re.MULTILINE | re.DOTALL)
 APICI = re.compile(r"`+[^`\n]*`+")
 COLLEGAMENTO = re.compile(r"\]\(([^)\s]+)\)")
 SCHEMA = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")

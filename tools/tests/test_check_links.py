@@ -40,6 +40,13 @@ def test_ancore_ignora_i_blocchi_di_codice():
     assert ancore(testo) == {"un-titolo"}
 
 
+def test_ancore_ignora_le_ancore_dentro_un_recinto_indentato():
+    # Il caso peggiore dei due: un'ancora raccolta da un esempio non fa
+    # rumore, fa tacere. Il rimando rotto che la cita passerebbe il controllo.
+    testo = '- come si dichiara:\n\n  ```html\n  <a id="finta"></a>\n  ```\n\n## Un titolo\n'
+    assert ancore(testo) == {"un-titolo"}
+
+
 def test_collegamenti_scarta_gli_indirizzi_assoluti():
     testo = "[a](https://esempio.it/x#y) e [b](mailto:tizio@esempio.it)"
     assert collegamenti(testo) == []
@@ -56,6 +63,13 @@ def test_collegamenti_distingue_percorso_e_ancora():
 
 def test_collegamenti_ignora_i_blocchi_di_codice():
     testo = "```markdown\n[finto](inesistente.md)\n```\n[vero](reale.md)"
+    assert collegamenti(testo) == [("reale.md", "")]
+
+
+def test_collegamenti_ignora_i_recinti_indentati():
+    # Dentro un elenco puntato il recinto rientra insieme al testo del punto,
+    # ed è la forma che prende ogni esempio di codice in `Sources.md`.
+    testo = "- il formato:\n\n  ```markdown\n  [finto](inesistente.md)\n  ```\n\n[vero](reale.md)"
     assert collegamenti(testo) == [("reale.md", "")]
 
 
