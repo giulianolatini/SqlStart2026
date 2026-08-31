@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 
 ADR_TITOLO = re.compile(r"^## (ADR-\d{4}) ", re.MULTILINE)
@@ -28,6 +29,20 @@ class Fonte:
         # qui resterebbe mutabile dall'esterno e renderebbe la Fonte non hashabile,
         # cioè inutilizzabile come chiave. Lo si congela una volta, all'ingresso.
         object.__setattr__(self, "usata_da", frozenset(self.usata_da))
+
+
+def ripetuti(titolo: re.Pattern[str], testo: str) -> list[str]:
+    """Gli identificatori dichiarati più di una volta, in ordine di comparsa.
+
+    I due lettori qui sotto tengono un dizionario per identificatore, e un
+    dizionario non sa dire «ce n'erano due»: il secondo blocco sovrascrive il
+    primo, che sparisce senza rumore. È il modo peggiore di sbagliare per un
+    controllo, perché i due documenti restano coerenti ai suoi occhi proprio
+    mentre hanno perso un pezzo — e il numero riusato per sbaglio è l'errore
+    tipico di una revisione che aggiunge tre ADR in fondo al file.
+    """
+    conteggio = Counter(trovato.group(1) for trovato in titolo.finditer(testo))
+    return [voce for voce, quante in conteggio.items() if quante > 1]
 
 
 def parse_decisions(testo: str) -> dict[str, set[str] | None]:
@@ -138,7 +153,16 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
 
-    problemi = verifica(parse_decisions(testi[0]), parse_sources(testi[1]))
+    problemi = [
+        f"{voce} è dichiarato più di una volta in «{percorso}»: "
+        "il secondo blocco nasconde il primo"
+        for percorso, testo, titolo in (
+            (argomenti.decision, testi[0], ADR_TITOLO),
+            (argomenti.sources, testi[1], FONTE_TITOLO),
+        )
+        for voce in ripetuti(titolo, testo)
+    ]
+    problemi += verifica(parse_decisions(testi[0]), parse_sources(testi[1]))
     for problema in problemi:
         print(f"  ✗ {problema}", file=sys.stderr)
     if problemi:
