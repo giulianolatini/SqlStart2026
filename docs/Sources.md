@@ -530,7 +530,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   due soli valori. Infine: nessuna pagina ufficiale dice se `compose up` contatti il registry
   per un'immagine **pinnata a digest e già presente in locale**. La deduzione è ragionevole
   ma non è una citazione: **il digest garantisce *quale* immagine, non *se* si va in rete**.
-- **Usata da:** ADR-0009, ADR-0018
+- **Usata da:** ADR-0009, ADR-0018, ADR-0039
 
 <a id="s-020"></a>
 ### S-020 — MongoDB Manual: Change Hostnames in a Self-Managed Replica Set
@@ -1742,7 +1742,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   quel profilo — dove infatti non ce n'è.
 - **Verbale completo:** [`00-progetto/2026-08-25-spike-sharded.md`](00-progetto/2026-08-25-spike-sharded.md)
 - **Data:** 2026-08-25
-- **Usata da:** ADR-0025, ADR-0026, ADR-0027, ADR-0033
+- **Usata da:** ADR-0025, ADR-0026, ADR-0027, ADR-0033, ADR-0039
 
 <a id="v-007"></a>
 ### V-007 — Quali versioni di MongoDB si avviano sul kernel della VM Docker
@@ -2834,5 +2834,71 @@ per conto nostro.
   verifica misura il **contrasto** con quelle pagine, non le pagine stesse.
 - **Data:** 2026-08-28
 - **Usata da:** ADR-0037
+
+---
+
+<a id="v-022"></a>
+### V-022 — La politica di pull scritta nel file: lo stack parte, e senza cache fallisce in un decimo di secondo
+
+- **Domanda:** tre domande, nate da una review esterna della PR #2. Che cosa fa Compose quando una
+  variabile è dichiarata ma **vuota**? Con `pull_policy: never` scritto fisso, lo stack del lab si
+  avvia ancora? E quando l'immagine non è in cache, il fallimento è immediato o passa dalla rete?
+- **Ambiente:** macchina di sviluppo macOS 26.6.2 (Darwin 25.6.0), Docker Desktop, server Docker
+  29.7.2, `docker compose version` **v5.4.0**. Stack `01-standalone`, immagine `mongo:7.0.40`
+  pinnata per digest. Data: 2026-08-31.
+
+**Primo risultato — nelle forme con i due punti, una variabile vuota vale quanto una assente.**
+
+```console
+$ cat vuota.env
+PULL_POLICY=
+$ docker compose -f prova.yaml --env-file vuota.env config
+services:
+  prova:
+    image: busybox
+    pull_policy: missing
+
+$ MONGO_IMAGE= docker compose -f obbligatoria.yaml config
+error while interpolating services.prova.image: required variable MONGO_IMAGE is missing a value:
+assente — eseguire «make images-pull»
+```
+
+`${PULL_POLICY:-missing}` con `PULL_POLICY=` non dà la stringa vuota: dà `missing`. E
+`${MONGO_IMAGE:?…}` con `MONGO_IMAGE=` non passa: fallisce come se la variabile non ci fosse. Sono
+le due forme che i file Compose del lab usano, ed è la ragione per cui `tools/check_stack.py` le
+modella così e non altrimenti.
+
+**Secondo risultato — con `never` fisso lo stack si avvia e la prova di fumo passa intera.**
+
+```console
+$ make up-01
+ Container mongo-standalone  Healthy
+$ make smoke-01
+Superati: 12 · Errori: 0
+Lo stack 01 fa quello che il file Compose promette.
+```
+
+**Terzo risultato — senza l'immagine in cache il fallimento è immediato.**
+
+```console
+$ time docker compose --env-file finta.env -f docker/01-standalone/compose.yaml up -d
+ Container mongo-standalone  Creating
+Error response from daemon: No such image:
+mongo@sha256:0000000000000000000000000000000000000000000000000000000000000000
+docker compose ... up -d  0,06s user  0,03s system  82% cpu  0,113 total
+```
+
+Centotredici millesimi di secondo. Non è un tentativo di rete andato male: è un tentativo mai
+iniziato, e conferma su questo file quello che [V-006](#v-006) aveva misurato sullo spike.
+
+- **Conseguenza:** la politica di pull smette di dipendere da una variabile d'ambiente che si può
+  dimenticare di passare e diventa una proprietà del file Compose, leggibile da chi lo apre. Il
+  costo — `make images-pull` obbligatorio prima del primo avvio — è pagato a casa, con la rete, non
+  in sala.
+- **Riserve:** le misure di tempo vengono da una macchina sola e da una sola esecuzione; servono a
+  distinguere un ordine di grandezza (decimi di secondo) da un altro (secondi di attesa di rete),
+  non a essere confrontate fra loro. La prova con la rete fisicamente staccata resta da fare.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0039
 
 ---

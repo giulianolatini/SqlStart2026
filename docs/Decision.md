@@ -624,7 +624,7 @@ tenere allineati, e nessuno dei due completo).
 <a id="adr-0018"></a>
 ## ADR-0018 — `pull_policy` parametrico, `never` sul profilo di palco
 
-**Data:** 2026-08-25 · **Stato:** Accettata
+**Data:** 2026-08-25 · **Stato:** **Superata da [ADR-0039](#adr-0039)** il 2026-08-31
 
 **Contesto:** [ADR-0009](#adr-0009) impone il funzionamento offline, ma la verifica ha
 mostrato che Compose non ha una modalità offline documentata. L'unico meccanismo con una frase
@@ -648,6 +648,16 @@ mancanti si scaricano da sole. Sul palco lo stack è blindato: se qualcosa manca
 chi clona il repository, che è il momento in cui la rete serve davvero); passare `--pull never`
 da riga di comando (si dimentica, e soprattutto non è scritto nel file: l'artefatto non
 documenterebbe più il proprio comportamento).
+
+**Motivo del superamento:** non il fine, ma il mezzo. L'obiettivo — nessun accesso al registro il
+giorno del talk — è rimasto ed è quello di [ADR-0039](#adr-0039). A cadere è la forma parametrica.
+Due ragioni. La prima è che [ADR-0027](#adr-0027), preso lo stesso giorno e più tardi, prescrive
+`never` fisso e scarta `missing` per nome: due decisioni Accettata e opposte sono peggio di
+entrambe, perché chi legge ne applica una a caso. La seconda è che l'ultima riga delle alternative
+scartate qui sopra — «non è scritto nel file: l'artefatto non documenterebbe più il proprio
+comportamento» — è l'argomento che smonta la decisione presa. Vale contro `--pull never` da riga di
+comando e vale, identico, contro una variabile d'ambiente. Nemmeno la promessa «il preflight la
+controlla» è stata mantenuta.
 
 **Fonti:** [S-003](Sources.md#s-003), [S-019](Sources.md#s-019)
 
@@ -1875,3 +1885,56 @@ talk, in una sala senza rete garantita, non girerebbero affatto); continuare a r
 un secondo da venti righe di Python).
 
 **Fonti:** [S-053](Sources.md#s-053), [S-054](Sources.md#s-054)
+
+<a id="adr-0039"></a>
+## ADR-0039 — `pull_policy: never` scritto nel file, non dedotto dall'ambiente
+
+**Data:** 2026-08-31 · **Stato:** Accettata — sostituisce [ADR-0018](#adr-0018)
+
+**Contesto:** una review esterna della PR #2 ha segnalato che
+`docker/01-standalone/compose.yaml` non rispetta [ADR-0027](#adr-0027). Verificando il rilievo è
+emerso che il conflitto sta a monte dell'artefatto: [ADR-0018](#adr-0018) prescrive
+`pull_policy: ${PULL_POLICY:-missing}` con `never` esportato dal profilo di palco, ADR-0027
+prescrive `never` fisso in ogni servizio di ogni stack e scarta `missing` per nome — «esattamente
+ciò che non deve accadere il 18 settembre». **Erano entrambe Accettata, e nessuna superava
+l'altra.** L'artefatto implementava la prima; `tools/check_stack.py` la faceva rispettare come
+regola, e quindi difendeva attivamente la decisione sbagliata. In più, la promessa di ADR-0018 «il
+preflight la controlla» non è mai stata implementata: il preflight verifica che l'immagine sia in
+cache, non che la variabile valga `never`.
+
+Sul merito, la ragione che ADR-0018 dava per la forma parametrica — non rendere scomodo il primo
+avvio a chi clona il repository — è stata smontata da ADR-0027 stesso: `make images-pull` esiste,
+è un passo solo, e l'errore che riceve chi lo salta arriva a casa propria, con la rete, non in
+sala.
+
+**Decisione:** ogni servizio di ogni stack porta `pull_policy: never` **scritto letteralmente nel
+file Compose**. La variabile `PULL_POLICY` non esiste più: né in `docker/*/.env.example`, né in
+`tools/images.env`, né in un profilo di palco. `tools/check_stack.py` rovescia la propria regola e
+ne aggiunge una seconda: il valore deve essere `never`, e non deve provenire da un'interpolazione.
+Per poterlo fare lo strumento legge il file **due volte**, prima e dopo la sostituzione delle
+variabili: le altre regole giudicano lo stack che si avvia, questa giudica ciò che il file promette
+a chi lo apre.
+
+**Conseguenze:** la garanzia offline diventa una proprietà leggibile dell'artefatto invece di una
+proprietà dell'ambiente in cui l'artefatto viene lanciato. È la differenza che conta in sala: un
+file si proietta, una variabile d'ambiente dimenticata no. Misurato dopo la modifica
+([V-022](Sources.md#v-022)): `make up-01` porta il container a `Healthy` e `make smoke-01` passa
+dodici prove su dodici; con un digest che non è in cache, `up` fallisce in **0,113 s** con `No
+such image`, che conferma su questo file la misura di [V-006](Sources.md#v-006). Il costo resta
+quello che ADR-0027 aveva già accettato: `make images-pull` è obbligatorio prima del primo avvio.
+
+Una conseguenza minore ma didattica: `.env.example` non elenca più `PULL_POLICY` e spiega al suo
+posto perché non c'è. Un parametro tolto lascia un buco, e il buco va spiegato dove qualcuno
+andrebbe a cercarlo.
+
+**Alternative scartate:** lasciare i due ADR in conflitto e allineare solo l'artefatto (il
+repository sarebbe rimasto con due regole scritte e opposte, e il prossimo che legge `Decision.md`
+avrebbe applicato quella sbagliata a caso); riscrivere ADR-0018 invece di superarlo (il repository
+non riscrive le decisioni: [ADR-0008](#adr-0008) e [ADR-0028](#adr-0028) sono il precedente);
+tenere la forma parametrica e implementare finalmente il controllo del preflight promesso da
+ADR-0018 (aggiunge un controllo per difendere una variabile che non serve — la stessa garanzia
+costa zero controlli se è scritta nel file); controllare il valore solo dopo l'interpolazione
+(passa un file parametrico purché l'ambiente del momento sia quello giusto, cioè verifica proprio
+la cosa che si è deciso di non dover più verificare).
+
+**Fonti:** [S-019](Sources.md#s-019), [V-006](Sources.md#v-006), [V-022](Sources.md#v-022)
