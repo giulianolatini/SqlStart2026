@@ -601,7 +601,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   `--keyFile`. **`rs.initiate()` non viene mai eseguito dall'immagine: resta a nostro
   carico.** Trattandosi di sorgente, l'API non ha garanzie di stabilità fra versioni: la
   citazione deve indicare commit e riga.
-- **Usata da:** ADR-0005, ADR-0026, ADR-0040
+- **Usata da:** ADR-0005, ADR-0026, ADR-0040, ADR-0042
 
 <a id="s-023"></a>
 ### S-023 — `docker-library/mongo`: `8.0/Dockerfile`
@@ -1713,7 +1713,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   arrivare alla conseguenza che serve qui, cioè che passando `--env-file` sparisce anche il `.env`
   che sta **accanto al file indicato con `-f`**. Sono due frasi distanti sulla stessa pagina, e la
   conclusione è una deduzione: la misura diretta è in [V-025](#v-025).
-- **Usata da:** ADR-0041
+- **Usata da:** ADR-0041, ADR-0042
 
 <a id="s-057"></a>
 ### S-057 — `docker compose wait` e `docker compose up --wait`: che cosa dichiarano di attendere
@@ -3358,5 +3358,79 @@ set appena costruito. Questa è però una **spiegazione**, non una misura: vedi 
   al Task 7, dove quel codice diventa il verdetto di un bersaglio del Makefile.
 - **Data:** 2026-08-31
 - **Usata da:** ADR-0041
+
+---
+
+<a id="v-026"></a>
+### V-026 — Sei mutazioni sul file vero: un controllo che non si è visto fallire lì dove serve non è un controllo
+
+- **Comandi:** `uv run --project tools python tools/check_stack.py --variabile
+  PASSWORD_AMMINISTRATORE=… <copia mutata di docker/02-replicaset/compose.yaml>`, ripetuto su sei
+  copie, ognuna con un solo difetto introdotto
+- **Ambiente:** macOS 26.6.2 arm64, Python 3.13 via `uv`, `tools/check_stack.py` dopo il Task 6 di
+  `feature/02`, `tools/images.env` come file d'ambiente predefinito
+- **Che cosa restava da dimostrare:** le quattro regole nuove del Task 6 erano rosse sui campioni
+  costruiti nei test, e verdi sui due file veri. Verde su un campione costruito prova che la regola
+  esiste; verde sul file vero **non prova niente**, perché non distingue «la regola ha guardato e ha
+  approvato» da «la regola non è mai entrata in funzione». Le regole 2 e 4 si autolimitano leggendo
+  il file — la 2 si accende solo se qualcuno dichiara `--replSet`, la 4 solo se qualcuno dichiara
+  `depends_on` — e una guardia scritta male le spegne in silenzio proprio sul file che contava.
+- **Metodo:** si prende il file vero, se ne fa una copia, si introduce **un solo** difetto, si passa
+  la copia allo strumento. Se il messaggio giusto compare, la regola era accesa su quel file. Il
+  difetto viene introdotto con `sed` o con una sostituzione che verifica prima quante occorrenze
+  esistono, così una modifica che non ha attecchito si presenta come un errore invece che come un
+  verde.
+- **Esito, sei difetti e sei messaggi distinti:**
+
+```
+regola 1 — keyfile da bind mount
+  ✗ mongo-rs-1: il keyfile «/keyfile/mongo-keyfile» arriva da «./keyfile», che è un
+    percorso dell'host. […] serve un volume nominato (ADR-0014)
+
+regola 2 — membro senza --keyFile
+  ✗ mongo-rs-1: avvia un membro di replica set senza «--keyFile». Parte lo stesso e resta
+    fuori dalla replica: gli altri lo rifiutano all'handshake […] (ADR-0014)
+
+regola 3 — one-shot con restart che lo rialza
+  ✗ keyfile-init: «mongo-rs-1» lo attende come completato, ma «keyfile-init» non dichiara
+    «restart: "no"». Compose lo rialza appena esce […] (ADR-0023)
+
+regola 4 — service_started verso un mongod
+  ✗ rs-init attende «mongo-rs-1» con «service_started», ma «mongo-rs-1» avvia un mongod:
+    la condizione scatta quando il container esiste, non quando il server risponde […]
+
+regola 4 — service_started verso un one-shot
+  ✗ mongo-rs-1 attende «keyfile-init» con «service_started», ma «keyfile-init» è un
+    one-shot […]: riesce sulla macchina veloce e fallisce in sala […]
+
+difetto vecchio — forma abbreviata senza cache
+  ✗ mongo-rs-1: avvia mongod senza «--wiredTigerCacheSizeGB» […] (ADR-0004)
+```
+
+- **Esito, il file intatto:**
+
+```
+Stack conformi: 1.
+uscita: 0
+```
+
+L'ultima delle sei merita una riga a parte, perché non è una regola nuova: è una regola vecchia che
+non poteva fallire. `avvia_mongod()` riconosceva solo i comandi che cominciano con la parola
+`mongod`; l'entrypoint ufficiale dell'immagine antepone `mongod` da sé quando il primo argomento
+comincia per trattino ([S-022](#s-022)), e nella forma abbreviata — quella che gira in metà degli
+esempi in rete — lo strumento non vedeva un mongod, quindi non pretendeva né la cache né il keyfile.
+Una regola che dorme è peggio di una regola assente: dà la ricevuta senza aver guardato.
+
+- **Conseguenza:** `make stack-check` passa ora entrambi i file Compose e non solo il primo; le
+  quattro regole nuove e la correzione della forma abbreviata sono registrate in
+  [ADR-0042](Decision.md#adr-0042).
+- **Riserve:** sei difetti non sono tutti i difetti. Questa prova stabilisce che ogni regola nuova
+  è **accesa** sul file vero, non che l'insieme delle regole sia completo: un file Compose può
+  restare conforme a tutte e sei e non funzionare comunque, e infatti la conformità statica non ha
+  mai sostituito l'avvio dello stack, che resta il verdetto di [V-024](#v-024) e [V-025](#v-025).
+  Le mutazioni sono state introdotte a mano, una volta sola, e non da un generatore sistematico:
+  non c'è un numero di copertura da citare, c'è un elenco di sei casi che si possono rileggere.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0042
 
 ---

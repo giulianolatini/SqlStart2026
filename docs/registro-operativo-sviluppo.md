@@ -1161,3 +1161,104 @@ due `--env-file`; una voce in [`citazioni-riportare-slide.md`](citazioni-riporta
     legittimo; deciderlo senza dirlo non lo è. La riserva scritta è ciò che ha fatto sì che, sei
     ore dopo, qualcuno sapesse ancora che cosa andava misurato. Se non fosse stata scritta, oggi
     non ci sarebbe un errore: ci sarebbe una cosa che tutti danno per provata.
+
+---
+
+## 2026-08-31 — `feature/02`, Task 6: quattro regole nuove, e una vecchia che dormiva
+
+**Il debito che il Task 5 aveva lasciato scritto.** Tre righe, in fondo alla sezione precedente:
+`make stack-check` non conosce il file 02, `--ambiente` accetta un file solo, `avvia_mongod` non
+riconosce la forma di comando che comincia per trattino. Il Task 6 le chiude tutte e tre, ed è
+interessante che la terza — la più piccola — sia quella che ha insegnato qualcosa.
+
+**Che cosa doveva imparare lo strumento.** Lo stack 02 porta tre modi di sbagliare che lo stack 01
+non aveva, e sono i tre errori che questa feature ha commesso davvero, uno per Task: un membro senza
+`--keyFile` che resta fuori dalla replica facendo sembrare la cosa un problema di rete (Task 2), un
+keyfile montato da un percorso dell'host che `mongod` rifiuta per i permessi (Task 2), un
+`depends_on` con la condizione sbagliata che riesce sulla macchina veloce e fallisce altrove
+(Task 1). Ognuno era costato una misura. Le quattro regole nuove di `check_stack.py` sono quelle
+misure trasformate in qualcosa che fallisce prima di avviare i container:
+[ADR-0042](Decision.md#adr-0042) le elenca.
+
+**La guardia, che è la parte che si sbaglia.** Il problema di una regola nuova, in un repository che
+avrà tre stack, non è scriverla: è impedirle di scattare dove non deve. Lo stack 01 gira senza
+autenticazione per scelta didattica, e pretendere un keyfile da lui sarebbe una regola che sbaglia
+mira. La strada breve è un elenco di servizi esenti; la strada scelta è che **ogni regola legga il
+file per decidere se la riguarda** — la regola sul keyfile si accende solo se qualcuno dichiara
+`--replSet`, quella sulle condizioni solo se qualcuno dichiara `depends_on`. Un elenco di eccezioni
+è un pezzo di configurazione che invecchia, e invecchia in silenzio: nessuno se ne accorge finché
+non serve. Una guardia che legge il file invecchia insieme al file.
+
+**Il difetto vecchio, che è il vero risultato del Task.** `avvia_mongod()` riconosceva un `mongod`
+solo quando il comando cominciava con quella parola. L'entrypoint ufficiale antepone `mongod` da sé
+quando il primo argomento comincia per trattino ([S-022](Sources.md#s-022)): per Docker `["mongod",
+"--replSet", "rs0"]` e `["--replSet", "rs0"]` avviano lo stesso processo, e la seconda forma è
+quella che gira in metà degli esempi in rete. Sulla seconda forma lo strumento non vedeva un
+`mongod`, quindi non pretendeva la cache, quindi passava. Il file era conforme; la regola non aveva
+guardato. Per mesi il bersaglio `stack-check` avrebbe potuto dare il verde a uno stack sbagliato, e
+il verde sarebbe stato indistinguibile da quello di oggi.
+
+**La prova che il verde valga qualcosa.** Da qui è nata la cosa che questo Task lascia in eredità.
+Le quattro regole erano rosse sui campioni costruiti nei test e verdi sui due file veri — e verde su
+un file vero **non prova niente**, perché non distingue «la regola ha guardato e ha approvato» da
+«la regola non è mai entrata in funzione». Sono state fatte sei copie dello stack 02, ognuna con un
+solo difetto introdotto, e passate allo strumento: sei messaggi distinti, ognuno quello giusto, e il
+file intatto verde. È [V-026](Sources.md#v-026). Le mutazioni si introducono verificando prima
+quante occorrenze esistono, così una modifica che non attecchisce si presenta come un errore invece
+che come un verde — che è lo stesso genere di trappola, un livello più su.
+
+**La password che non poteva stare da nessuna parte.** Un vincolo non ovvio: `make stack-check` deve
+girare su un clone appena fatto, dove `docker/02-replicaset/.env` non esiste perché sta fuori dal
+repository per [ADR-0014](Decision.md#adr-0014). Lo stack dichiara la password come
+`${PASSWORD_AMMINISTRATORE:?…}`, e quella forma — la stessa che al Task 4 aveva reso rumoroso
+l'errore — qui si rifiuta di risolversi e ferma il controllo prima della prima regola. La soluzione
+diffusa, un `.env.esempio` committato, è stata scartata: mette nel repository un file che *ha la
+forma* di un file di credenziali, e in un materiale didattico l'esempio pesa più dell'avvertenza che
+lo accompagna. È entrata invece una flag `--variabile NOME=valore`, e il `Makefile` le passa un
+valore che dice a voce alta di essere finto. `--ambiente` è diventata ripetibile con la stessa
+semantica di `--env-file` di Compose ([S-056](Sources.md#s-056)) — gli ultimi vincono sui primi —
+perché due strumenti che si usano nello stesso comando non devono avere due regole diverse per la
+stessa cosa.
+
+**Due test che passavano per il motivo sbagliato.** I primi due test scritti sull'ambiente ripetibile
+erano verdi *anche senza la funzionalità*: con `--ambiente` non ripetibile `argparse` tiene l'ultimo
+valore, e per caso l'esito coincideva. Sono stati resi discriminanti — uno guarda quale messaggio
+d'errore esce, non solo il codice; l'altro mette una variabile obbligatoria **solo nel primo file**,
+così tenere l'ultimo produrrebbe 2 invece di 0. E un test preesistente è diventato rosso quando è
+entrata la regola sul `restart`: la diagnosi è stata che il campione era incompleto, non che la
+regola fosse sbagliata, e si è corretto il campione.
+
+**Controlli.** 14 rossi confermati prima di implementare, 95 verdi dopo (erano 76);
+`make stack-check` → `Stack conformi: 2.`; `make docs-check` verde; le sei mutazioni di
+[V-026](Sources.md#v-026).
+
+**Documentazione prodotta.** [V-026](Sources.md#v-026) fra le verifiche empiriche;
+[ADR-0042](Decision.md#adr-0042), che la cita insieme a [S-022](Sources.md#s-022) e
+[S-056](Sources.md#s-056). **Nessuna citazione da slide**, ed è una scelta: la nota 50 è la frase
+più riportabile uscita da questo Task, ma parla di come si scrivono i controlli, non di MongoDB, e
+in un'ora davanti a chi arriva da SQL Server non c'è il posto per una digressione sul metodo di
+test. Resta nel registro, dove serve a chi legge il repository.
+
+**Note di metodo.**
+
+50. **Una regola che non può fallire è peggio di una regola che manca.** Chi legge un controllo
+    assente sa di non essere coperto; chi legge un verde crede di esserlo. `avvia_mongod` non ha
+    mai sbagliato una risposta: non gli è mai stata posta la domanda, perché non riconosceva la
+    forma in cui arrivava. Il modo di scoprirlo non è rileggere la regola — chi l'ha scritta la
+    rilegge come l'ha pensata — ma **rompere il caso vero e pretendere il rosso**. Vale per ogni
+    controllo che passa al primo colpo su materiale che non è stato costruito per farlo passare.
+
+51. **Le guardie si scrivono leggendo, non elencando.** Una regola che vale per alcuni stack ha
+    bisogno di sapere quando tacere, e ci sono due modi: un elenco di esenzioni, che è un secondo
+    documento da tenere allineato al primo, o una condizione letta dal file stesso. Il primo modo
+    è più veloce da scrivere e sbaglia in silenzio al primo stack aggiunto — l'errore non è che la
+    regola scatti dove non deve, è che smetta di scattare dove deve. Il secondo costa una riga in
+    più oggi e nessuna manutenzione poi.
+
+52. **Un vincolo che sembra un ostacolo di solito difende qualcosa.** La password fuori dal
+    repository ha impedito al controllo di girare, e la reazione naturale era ammorbidire il
+    vincolo: un `.env.esempio`, o un `:?` in meno. Entrambe avrebbero funzionato, e entrambe
+    avrebbero insegnato la cosa sbagliata a chi clona. La domanda giusta non è *come tolgo il
+    vincolo*, è *di che cosa ha bisogno lo strumento che il vincolo non gli dà* — qui, un valore
+    che esista senza somigliare a una credenziale — e la risposta è quasi sempre più piccola della
+    deroga che si stava per concedere.

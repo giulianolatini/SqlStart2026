@@ -2115,3 +2115,86 @@ codice di uscita — `docker logs` va interrogato al momento giusto, che è il p
 cercando di risolvere.
 
 **Fonti:** [S-056](Sources.md#s-056), [S-057](Sources.md#s-057), [V-024](Sources.md#v-024), [V-025](Sources.md#v-025)
+
+<a id="adr-0042"></a>
+## ADR-0042 — Che cosa `check_stack.py` deve saper bocciare quando lo stack ha un replica set
+
+**Data:** 2026-08-31 · **Stato:** Accettata
+
+**Contesto.** `tools/check_stack.py` nasce con lo stack 01 e conosce il mondo di quello stack: una
+sola istanza, nessuna autenticazione, nessuna catena di avvio. Lo stack 02 introduce tre cose che il
+primo non aveva — un replica set, un keyfile condiviso e una catena di dipendenze fra quattro
+servizi — e ognuna delle tre porta un modo di sbagliare che non produce un errore leggibile ma un
+sintomo spostato: un membro che resta fuori dalla replica e nei log sembra un problema di rete, un
+`mongod` che rifiuta un keyfile con i permessi larghi e muore all'avvio, un `depends_on` con la
+condizione sbagliata che riesce sulla macchina di chi scrive e fallisce in sala. Sono esattamente i
+tre errori che questa feature ha commesso davvero, uno per Task, e che sono costati misure.
+
+C'è poi un vincolo che rende il problema meno banale di quanto sembri: **il controllo deve girare su
+un clone appena fatto**, dove il file `docker/02-replicaset/.env` non esiste, perché contiene la
+password ed è fuori dal repository per decisione di [ADR-0014](#adr-0014). Lo stack 02 dichiara
+quella variabile nella forma `${PASSWORD_AMMINISTRATORE:?…}`, che è una forma che **si rifiuta di
+risolversi** quando la variabile manca — è la stessa qualità che al Task 4 ha reso rumoroso
+l'errore, e qui diventa un ostacolo: senza un valore, `check_stack.py` si ferma prima di guardare una
+sola regola.
+
+**Decisione.** Quattro regole nuove, una correzione a una regola vecchia, e due modi di passare le
+variabili.
+
+*Le quattro regole.* Sono descritte dai messaggi che stampano, che restano la loro documentazione
+vera:
+
+1. dove c'è `--keyFile`, il percorso indicato deve essere coperto da un **volume nominato** e non da
+   un percorso dell'host;
+2. dove c'è `--replSet`, ci deve essere anche `--keyFile`;
+3. un servizio atteso con `service_completed_successfully` deve dichiarare `restart: "no"`;
+4. la condizione deve corrispondere al genere di servizio atteso — `service_healthy` verso un
+   `mongod`, `service_completed_successfully` verso un one-shot, mai `service_started` verso nessuno
+   dei due.
+
+Ogni regola **si autolimita leggendo il file**, non un elenco di nomi da tenere aggiornato a mano:
+la 2 si accende solo se qualcuno nel file dichiara `--replSet`, la 4 solo se qualcuno dichiara
+`depends_on`. È così che lo stack 01, che gira senza autenticazione per scelta didattica
+([ADR-0005](#adr-0005)), resta verde senza comparire in nessuna lista di eccezioni. Le liste di
+eccezioni invecchiano in silenzio; una guardia che legge il file no.
+
+*La correzione.* `avvia_mongod()` riconosceva un `mongod` solo quando il comando comincia con quella
+parola. L'entrypoint ufficiale dell'immagine antepone `mongod` da sé quando il primo argomento
+comincia per trattino ([S-022](Sources.md#s-022)), e la forma abbreviata — `command: ["--replSet",
+"rs0"]` — è quella che gira in metà degli esempi in rete. Su quella forma lo strumento non vedeva un
+`mongod`, quindi non pretendeva né la cache né il keyfile: dava la ricevuta senza aver guardato. Da
+ora il riconoscimento accetta entrambe le scritture, e ignora il percorso davanti al nome.
+
+*I due modi di passare le variabili.* `--ambiente` diventa **ripetibile**, con gli ultimi file che
+vincono sui primi, e ha `tools/images.env` come valore predefinito. La semantica non è stata
+inventata qui: è la stessa di `--env-file` di Compose ([S-056](Sources.md#s-056)), e la coincidenza
+è voluta — chi impara una delle due impara l'altra, e chi le confonde non sbaglia. Accanto arriva
+`--variabile NOME=valore`, ripetibile, che vince su tutti i file. È il posto della password nel
+bersaglio `stack-check` del `Makefile`: un valore che dichiara di essere finto, che non raggiunge mai
+un `mongod` perché lo strumento legge i file e non avvia niente.
+
+**Conseguenze.** `make stack-check` passa ora entrambi i file Compose. Le regole sono state provate
+sul file vero, non solo sui campioni dei test: sei copie dello stack 02, un difetto ciascuna, sei
+messaggi distinti, e il file intatto verde — [V-026](Sources.md#v-026). La prova serviva perché
+verde su un file vero non distingue «la regola ha guardato e ha approvato» da «la regola non è mai
+entrata in funzione», ed è precisamente l'ambiguità in cui la regola sulla cache è rimasta finché
+nessuno l'ha messa alla prova sulla forma abbreviata.
+
+Resta un limite da non nascondere: sei difetti non sono tutti i difetti, e la conformità statica non
+ha mai sostituito l'avvio dello stack. `check_stack.py` risparmia il tempo di scoprire in sala un
+errore che si vedeva nel file; non dice che lo stack funziona, dice che non contiene gli errori che
+questa feature ha già pagato.
+
+**Alternative scartate:** committare un `docker/02-replicaset/.env.esempio` con una password
+segnaposto, e leggerlo nel `Makefile` — funziona, ed è la soluzione più diffusa, ma mette nel
+repository un file che *ha la forma* di un file di credenziali, e la prima cosa che fa chi clona è
+copiarlo e usarlo così com'è: è l'abitudine che [ADR-0014](#adr-0014) e [ADR-0040](#adr-0040)
+cercano di non insegnare, e in un materiale didattico l'esempio pesa più dell'avvertenza che lo
+accompagna; togliere il `:?` dalla password per far girare il controllo — sarebbe piegare la
+sostanza dello stack alla comodità di uno strumento, e riporterebbe la password vuota che al Task 4
+era stata evitata per un soffio; tenere un elenco dei servizi esenti dalle regole nuove — invecchia
+al primo stack aggiunto, e invecchia in silenzio; lasciare `stack-check` sul solo stack 01 e
+verificare il 02 a mano — è lo stato da cui si parte, ed è il motivo per cui i tre errori sono stati
+scoperti eseguendo invece che leggendo.
+
+**Fonti:** [S-022](Sources.md#s-022), [S-056](Sources.md#s-056), [V-026](Sources.md#v-026)

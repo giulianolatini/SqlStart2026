@@ -182,6 +182,11 @@ def test_attendere_il_completamento_non_richiede_healthcheck():
         "pull_policy": "never",
         "mem_limit": "128m",
         "cpus": 0.5,
+        # Aggiunto al Task 6, quando la regola sul `restart` dei one-shot ha
+        # fatto diventare rosso questo test: il campione era incompleto, non la
+        # regola sbagliata. Un servizio atteso come completato che Compose
+        # rialzerebbe è un problema vero, e questo test non parla di quello.
+        "restart": "no",
     }
     assert verifica(documento, digest_noti={"sha256:aaa"}) == []
 
@@ -293,3 +298,306 @@ def test_main_esce_due_con_un_messaggio_se_il_file_non_esiste(tmp_path, capsys):
     ambiente.write_text("MONGO_IMAGE=mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b\n", encoding="utf-8")
     assert main(["--ambiente", str(ambiente), str(tmp_path / "assente.yaml")]) == 2
     assert "assente.yaml" in capsys.readouterr().err
+
+
+# --- Task 6: le regole che nascono con il replica set -----------------------
+#
+# Quattro regole nuove più un difetto vecchio. Tutte hanno in comune un vincolo
+# che vale la pena scrivere: NON DEVONO SCATTARE SULLO STACK 01, che non ha né
+# replica né catena. Ognuna si autolimita guardando il file, non un elenco di
+# nomi: se il file non parla di replica set, la regola tace.
+
+
+def replica(**modifiche):
+    """Due membri di un replica set, conformi, da rompere uno alla volta."""
+    membro = {
+        "image": "mongo@sha256:aaa",
+        "pull_policy": "never",
+        "mem_limit": "1024m",
+        "cpus": 1.0,
+        "command": [
+            "mongod",
+            "--replSet",
+            "rs0",
+            "--keyFile",
+            "/keyfile/mongo-keyfile",
+            "--wiredTigerCacheSizeGB",
+            "0.25",
+        ],
+        "volumes": ["keyfile:/keyfile:ro"],
+    }
+    primo = dict(membro)
+    primo.update(modifiche)
+    return {"services": {"mongo-rs-1": primo, "mongo-rs-2": dict(membro)}}
+
+
+def test_il_campione_di_replica_non_produce_problemi():
+    assert verifica(replica(), digest_noti={"sha256:aaa"}) == []
+
+
+# Regola 1 — il keyfile arriva da un volume nominato, non dall'host.
+
+
+def test_un_keyfile_montato_da_un_percorso_dell_host_e_un_problema():
+    # ADR-0014 esiste perché su macOS un bind mount non conserva i permessi del
+    # file, e mongod rifiuta un keyfile leggibile da altri. Il sintomo è un
+    # membro che non parte, e la causa è a due file di distanza.
+    documento = replica(volumes=["./keyfile:/keyfile:ro"])
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any(
+        "keyfile" in problema.lower() and "ADR-0014" in problema
+        for problema in problemi
+    ), problemi
+
+
+def test_un_keyfile_da_volume_nominato_non_e_un_problema():
+    problemi = verifica(replica(), digest_noti={"sha256:aaa"})
+    assert not any("ADR-0014" in problema for problema in problemi), problemi
+
+
+def test_un_keyfile_dichiarato_e_non_montato_da_nessuna_parte_e_un_problema():
+    # Il caso peggiore: mongod riceve --keyFile e il percorso non esiste. Parte
+    # e muore, e il file Compose sembra a posto perché la riga c'è.
+    documento = replica(volumes=["dati:/data/db"])
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any("keyfile" in problema.lower() for problema in problemi), problemi
+
+
+# Regola 2 — dove c'è `--replSet` ci deve essere `--keyFile`.
+
+
+def test_un_membro_con_replset_e_senza_keyfile_e_un_problema():
+    # Parte lo stesso e resta fuori dalla replica senza dirlo: gli altri due lo
+    # rifiutano all'handshake, e nei log compare come un problema di rete.
+    documento = replica(
+        command=["mongod", "--replSet", "rs0", "--wiredTigerCacheSizeGB", "0.25"]
+    )
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any("--keyFile" in problema for problema in problemi), problemi
+
+
+def test_uno_stack_senza_replica_non_pretende_il_keyfile():
+    # La guardia che tiene verde lo stack 01, che gira senza autenticazione per
+    # scelta didattica (ADR-0005). La regola si accende solo se QUALCUNO nel
+    # file dichiara --replSet.
+    problemi = verifica(conforme(), digest_noti={"sha256:aaa"})
+    assert not any("--keyFile" in problema for problema in problemi), problemi
+
+
+# Regola 3 — un servizio atteso «completato» deve poter morire.
+
+
+def catena(**modifiche):
+    """Un one-shot e un membro che lo attende, conformi."""
+    uno_shot = {
+        "image": "mongo@sha256:aaa",
+        "pull_policy": "never",
+        "mem_limit": "128m",
+        "cpus": 0.25,
+        "restart": "no",
+        "command": ["sh", "-c", "echo fatto"],
+    }
+    uno_shot.update(modifiche)
+    membro = {
+        "image": "mongo@sha256:aaa",
+        "pull_policy": "never",
+        "mem_limit": "1024m",
+        "cpus": 1.0,
+        "command": ["mongod", "--wiredTigerCacheSizeGB", "0.25"],
+        "depends_on": {"init": {"condition": "service_completed_successfully"}},
+    }
+    return {"services": {"init": uno_shot, "mongo": membro}}
+
+
+def test_il_campione_di_catena_non_produce_problemi():
+    assert verifica(catena(), digest_noti={"sha256:aaa"}) == []
+
+
+def test_un_one_shot_atteso_come_completato_senza_restart_no_e_un_problema():
+    # Con `unless-stopped` Compose rialza il container appena esce, la
+    # condizione `service_completed_successfully` non diventa mai vera, e lo
+    # stack resta fermo a metà senza un errore che lo dica.
+    documento = catena(restart="unless-stopped")
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any("restart" in problema for problema in problemi), problemi
+
+
+def test_un_one_shot_atteso_come_completato_senza_chiave_restart_e_un_problema():
+    documento = catena()
+    del documento["services"]["init"]["restart"]
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any("restart" in problema for problema in problemi), problemi
+
+
+# Regola 4 — la condizione deve corrispondere al genere di servizio atteso.
+
+
+def test_attendere_un_mongod_con_service_started_e_un_problema():
+    # `service_started` scatta mentre l'entrypoint è ancora nella fase del
+    # mongod temporaneo: misurato al Task 1, ECONNREFUSED al primo colpo.
+    documento = replica()
+    documento["services"]["mongo-rs-2"]["depends_on"] = {
+        "mongo-rs-1": {"condition": "service_started"}
+    }
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any("service_healthy" in problema for problema in problemi), problemi
+
+
+def test_attendere_un_one_shot_con_service_started_e_un_problema():
+    documento = catena()
+    documento["services"]["mongo"]["depends_on"] = {
+        "init": {"condition": "service_started"}
+    }
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any(
+        "service_completed_successfully" in problema for problema in problemi
+    ), problemi
+
+
+# Il difetto vecchio: due scritture equivalenti, una sola riconosciuta.
+
+
+def test_un_comando_che_comincia_per_trattino_avvia_comunque_mongod():
+    # L'entrypoint ufficiale antepone `mongod` da sé quando il primo argomento
+    # comincia per trattino (S-022): per Docker le due forme avviano lo stesso
+    # processo. Finché lo strumento ne riconosceva una sola, la regola sulla
+    # cache non poteva fallire sull'altra — misurato al Task 3.
+    documento = conforme(command=["--replSet", "rs0", "--bind_ip_all"])
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any("wiredTigerCacheSizeGB" in problema for problema in problemi), problemi
+
+
+def test_una_stringa_che_comincia_per_trattino_avvia_comunque_mongod():
+    documento = conforme(command="--replSet rs0 --bind_ip_all")
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any("wiredTigerCacheSizeGB" in problema for problema in problemi), problemi
+
+
+def test_un_comando_che_non_e_mongod_resta_fuori_dalla_regola():
+    # Il bersaglio della regola sono i processi che hanno storage: pretendere
+    # una cache da `mongos` o da una shell sarebbe una regola che sbaglia mira.
+    documento = conforme(command=["sh", "-c", "echo fatto"])
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert not any("wiredTigerCacheSizeGB" in problema for problema in problemi), problemi
+
+
+# --- Task 6: l'ambiente si passa come lo passa Compose ----------------------
+
+DIGEST_PINNATO = (
+    "mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b"
+)
+
+
+def test_il_secondo_file_di_ambiente_viene_davvero_letto(tmp_path, capsys):
+    # Lo stack 02 si avvia con due `--env-file` (ADR-0041): lo strumento che lo
+    # controlla deve poter ricevere gli stessi due file, o controlla un file
+    # diverso da quello che verrà avviato. La prova che il secondo sia letto non
+    # può essere un verde — un verde lo darebbe anche ignorandolo. È un rosso:
+    # il secondo file stringe la memoria sotto la cache, e la regola scatta.
+    immagini = tmp_path / "images.env"
+    immagini.write_text(f"MONGO_IMAGE={DIGEST_PINNATO}\n", encoding="utf-8")
+    stack = tmp_path / "stack.env"
+    stack.write_text("MEMORIA=128m\n", encoding="utf-8")
+    compose = tmp_path / "compose.yaml"
+    compose.write_text(COMPOSE_CONFORME, encoding="utf-8")
+
+    assert main(["--ambiente", str(immagini), str(compose)]) == 0
+
+    # Non basta guardare il codice di uscita: tenendo solo l'ultimo file lo
+    # strumento uscirebbe 1 lo stesso, ma per «manca image». Il messaggio
+    # distingue «ho letto tutti e due i file» da «ne ho letto uno».
+    assert (
+        main(["--ambiente", str(immagini), "--ambiente", str(stack), str(compose)]) == 1
+    )
+    errori = capsys.readouterr().err
+    assert "wiredTigerCacheSizeGB" in errori, errori
+    assert "image" not in errori, errori
+
+
+def test_l_ultimo_file_di_ambiente_vince_sul_primo(tmp_path):
+    # «Later files can override variables from earlier files» (S-056): lo
+    # strumento fonde nello stesso ordine, o direbbe una cosa e Compose un'altra.
+    # Il primo file porta due variabili, il secondo ne corregge una sola: se lo
+    # strumento tenesse solo l'ultimo file, la variabile obbligatoria che sta
+    # nel primo sparirebbe e l'esito sarebbe 2, non 0.
+    primo = tmp_path / "primo.env"
+    primo.write_text(
+        "MONGO_IMAGE=mongo:7.0.40\nMEMORIA_OBBLIGATORIA=1024m\n", encoding="utf-8"
+    )
+    secondo = tmp_path / "secondo.env"
+    secondo.write_text(f"MONGO_IMAGE={DIGEST_PINNATO}\n", encoding="utf-8")
+    compose = tmp_path / "compose.yaml"
+    compose.write_text(
+        COMPOSE_CONFORME.replace(
+            "    mem_limit: ${MEMORIA:-1024m}\n",
+            "    mem_limit: ${MEMORIA_OBBLIGATORIA:?assente}\n",
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["--ambiente", str(primo), str(compose)]) == 1
+    assert main(["--ambiente", str(primo), "--ambiente", str(secondo), str(compose)]) == 0
+
+
+def test_main_accetta_una_variabile_da_riga_di_comando(tmp_path):
+    # Serve a controllare un file che dichiara `${NOME:?…}` senza avere il `.env`
+    # vero: il `.env` dello stack 02 è ignorato da git, e `make stack-check` deve
+    # funzionare su un clone appena fatto. Il valore passato qui non avvia
+    # niente, serve solo a far interpolare il documento.
+    immagini = tmp_path / "images.env"
+    immagini.write_text(f"MONGO_IMAGE={DIGEST_PINNATO}\n", encoding="utf-8")
+    compose = tmp_path / "compose.yaml"
+    compose.write_text(
+        COMPOSE_CONFORME.replace(
+            "    mem_limit: ${MEMORIA:-1024m}\n",
+            "    mem_limit: ${MEMORIA_OBBLIGATORIA:?assente}\n",
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["--ambiente", str(immagini), str(compose)]) == 2
+    assert (
+        main(
+            [
+                "--ambiente",
+                str(immagini),
+                "--variabile",
+                "MEMORIA_OBBLIGATORIA=1024m",
+                str(compose),
+            ]
+        )
+        == 0
+    )
+
+
+def test_una_variabile_da_riga_di_comando_vince_sui_file(tmp_path):
+    immagini = tmp_path / "images.env"
+    immagini.write_text("MONGO_IMAGE=mongo:7.0.40\n", encoding="utf-8")
+    compose = tmp_path / "compose.yaml"
+    compose.write_text(COMPOSE_CONFORME, encoding="utf-8")
+
+    assert (
+        main(
+            [
+                "--ambiente",
+                str(immagini),
+                "--variabile",
+                f"MONGO_IMAGE={DIGEST_PINNATO}",
+                str(compose),
+            ]
+        )
+        == 0
+    )
+
+
+def test_una_variabile_scritta_male_e_un_errore_d_uso(tmp_path, capsys):
+    immagini = tmp_path / "images.env"
+    immagini.write_text(f"MONGO_IMAGE={DIGEST_PINNATO}\n", encoding="utf-8")
+    compose = tmp_path / "compose.yaml"
+    compose.write_text(COMPOSE_CONFORME, encoding="utf-8")
+
+    assert (
+        main(["--ambiente", str(immagini), "--variabile", "SENZA_UGUALE", str(compose)])
+        == 2
+    )
+    assert "SENZA_UGUALE" in capsys.readouterr().err

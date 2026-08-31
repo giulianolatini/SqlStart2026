@@ -10,6 +10,7 @@
 # invece di avviare un container con un'immagine vuota.
 COMPOSE_01 := docker compose --env-file tools/images.env -f docker/01-standalone/compose.yaml
 STACK_01   := docker/01-standalone/compose.yaml
+STACK_02   := docker/02-replicaset/compose.yaml
 
 # `FS` usa `.*` e non il `.*?` dell'idioma che gira in rete: `awk` parla ERE, dove il
 # non-greedy non esiste, e POSIX dichiara indefinito il comportamento di due
@@ -36,8 +37,16 @@ images-verify: ## Verifica che le immagini pinnate siano presenti in locale (off
 preflight: ## Controlli della mattina del talk
 	./tools/preflight.sh
 
+# `--variabile` non è una scorciatoia: lo stack 02 dichiara la password nella forma
+# `${PASSWORD_AMMINISTRATORE:?...}`, e il file che la porta è fuori dal repository per
+# scelta (ADR-0014). Su un clone appena fatto quel file non esiste, e senza un valore
+# qui il controllo si fermerebbe prima di guardare una sola regola. Il valore che segue
+# non è una password: dice a voce alta di essere finto, e non raggiunge mai un mongod
+# perché `check_stack.py` legge i file e non avvia niente (ADR-0042).
 stack-check: ## Verifica i file Compose contro le decisioni degli ADR
-	uv run --project tools python tools/check_stack.py $(STACK_01)
+	uv run --project tools python tools/check_stack.py \
+		--variabile PASSWORD_AMMINISTRATORE=valore-finto-il-controllo-non-si-collega \
+		$(STACK_01) $(STACK_02)
 
 # --- Stack 01 — istanza singola -------------------------------------------------------
 
