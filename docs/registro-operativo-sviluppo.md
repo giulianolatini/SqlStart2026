@@ -660,3 +660,98 @@ eseguiti.
 **Quello che resta aperto** non appartiene a questo branch e va scritto perché non si perda: la
 prova con la rete fisicamente staccata. Dopo [ADR-0039](Decision.md#adr-0039) il comando non ha
 più una variabile davanti — è `make up-01` con il Wi-Fi spento, e basta.
+
+## 2026-08-31 — `feature/02`, Task 1: due documenti in contraddizione, tre strade provate, una che non era scritta
+
+Il Task 1 del piano di `feature/02` esisteva per una ragione sola: il design (§5.4) e
+[ADR-0026](Decision.md#adr-0026) prescrivono due catene di inizializzazione diverse per lo stesso
+replica set, e la differenza non è di stile. In una, `MONGO_INITDB_ROOT_USERNAME` e
+`MONGO_INITDB_ROOT_PASSWORD` stanno sul primo membro e una password di laboratorio finisce in
+`.env.example`; nell'altra i `mongod` partono nudi e l'utente nasce sotto eccezione localhost. Il
+piano aveva scritto, prima di sapere come sarebbe andata, che la contraddizione **non** si sarebbe
+sciolta rileggendo i due testi: si sarebbero montate entrambe le strade e si sarebbe guardato.
+
+Sono stati montati tre stack usa-e-getta fuori dal repository, nella cartella temporanea della
+sessione, e smontati con `down -v` a misura presa. Il verbale integrale — comandi, risposte,
+ambiente, riserve — è in [V-023](Sources.md#v-023). Qui sta quello che le misure hanno insegnato.
+
+**Funzionano tutte e tre.** Era il risultato meno comodo e il più utile. La strada di ADR-0026
+funziona anche su un replica set, non solo sullo sharded cluster per cui era stata scritta:
+`rs.initiate()` passa, `createUser` passa, e la scrittura successiva riceve `Unauthorized code=13`
+— che non è un fallimento ma la ricevuta che l'eccezione si è chiusa da sé, nel punto esatto in cui
+[S-055](Sources.md#s-055) dice che si chiude. Funziona anche la strada del design, e con essa cade
+un'idea che circolava nel repository da sei giorni: si era letto ADR-0026 come se dicesse che
+l'entrypoint dell'immagine non sa creare l'utente su un nodo di replica set. Non lo dice. Il caso
+che rompeva era `--configsvr`, che l'entrypoint non toglie e che da solo non esiste; `--replSet` lo
+toglie eccome, e l'utente nasce. Una frase vera su un caso era stata applicata a un caso vicino
+senza verificarla, ed è bastato provarla per accorgersene.
+
+**La terza prova doveva chiudere una domanda e ne ha aperta una migliore.** Il design afferma che un
+sidecar non gode dell'eccezione localhost. È vero, misurato: `Command replSetInitiate requires
+authentication`. A quel punto il task era finito — c'era la risposta, si poteva scrivere l'ADR. È
+stata invece fatta la domanda in più: *perché* fallisce? Non per la rete, perché il sidecar il
+`mongod` lo raggiunge. Fallisce per l'indirizzo da cui arriva. E se il problema è l'indirizzo di
+provenienza, si cambia l'indirizzo di provenienza: un container con `network_mode:
+"service:mongo-rs-1"` non ha un'interfaccia di rete propria, usa quella del membro, e il suo
+`localhost` è il `localhost` del `mongod`. Provato:
+
+```console
+NAMESPACE_CONDIVISO_OK {"ok":1}
+UTENTE_CREATO da sidecar in namespace condiviso
+CHIUSA_DOPO_IL_PRIMO_UTENTE codeName=Unauthorized code=13
+```
+
+Tre righe che tengono insieme il vantaggio di ADR-0026 (nessuna password nel repository) e quello
+del design (tutto dentro Compose, `docker compose up -d` che basta da solo). Questa via non sta né
+nel design né in ADR-0026: è saltata fuori da una domanda che il piano non prevedeva.
+
+**Una riserva aperta il 25 agosto è stata riscossa.** [S-006](Sources.md#s-006) aveva dichiarato,
+sei giorni fa, che il vincolo che tutti danno per ovvio — l'eccezione localhost vale solo da
+loopback — **non è enunciato da nessuna fonte primaria**. La pagina è stata riletta sulla variante
+v7.0, che è la serie che il lab pinna davvero ([S-055](Sources.md#s-055)): le stringhe `127.0.0.1`,
+`::1`, «loopback» e «same host» non ci sono neanche lì; la formulazione più vicina è «connect to the
+localhost interface», che nomina un'interfaccia senza dire quale. La fonte, cioè, chiama
+l'eccezione «localhost» e non definisce «localhost». Adesso però c'è la misura: la prova C dimostra
+che il vincolo esiste e che il prodotto lo applica. La riserva cambia stato — da «vero per
+convenzione» a «vero, misurato qui, e ancora non scritto dalla fonte» — e diventa esattamente il
+genere di cosa che vale la pena raccontare da un palco.
+
+**Una misura di contorno ha risolto in anticipo il Task 5.** Il piano prevedeva un uovo e una
+gallina: l'healthcheck dei membri non può chiedere «sei primario o secondario?», perché resterebbe
+rosso fino a `rs.initiate()` e bloccherebbe il servizio che dovrebbe eseguirlo. La via d'uscita
+andava misurata, non supposta, e la misura c'è: su un `mongod` con `--keyFile` non ancora
+inizializzato, `hello()` risponde senza credenziali (`isWritablePrimary=false secondary=true`). Un
+healthcheck che chiede «`hello()` risponde?» diventa verde prima dell'inizializzazione, e il nodo si
+scioglie.
+
+L'esito è in [ADR-0040](Decision.md#adr-0040), che propone la terza via. È il primo ADR del
+repository in stato **Proposta**: gli altri trentanove registrano scelte che un vincolo tecnico
+aveva già preso: qui le misure dicono che tutte le strade funzionano, e quindi non decidono niente.
+Quel che resta da scegliere è il prezzo, e il prezzo lo sceglie chi presenta.
+
+**Note di metodo.**
+
+38. **Una contraddizione fra due documenti non si scioglie rileggendoli.** Rileggere produce
+    un'opinione su chi dei due sia più autorevole; montare entrambe le strade produce una misura. Ed
+    è servito: la rilettura avrebbe dato ragione ad ADR-0026 (è più recente e nasce da uno spike),
+    e avrebbe portato con sé l'errore che ADR-0026 non conteneva ma che gli era stato attribuito —
+    che l'entrypoint non sappia creare l'utente con `--replSet`.
+
+39. **Quando una prova fallisce, chiedersi *perché* e non solo *se*.** La prova C aveva già dato la
+    risposta che serviva al task, e il task poteva chiudersi lì. La domanda in più — perché quel
+    sidecar non è ammesso? — è costata dieci minuti e ha prodotto la strada che è stata poi
+    proposta. Una prova che fallisce sa sempre più cose di quelle che le sono state chieste.
+
+40. **Una riserva dichiarata è un debito, non un disclaimer.** [S-006](Sources.md#s-006) aveva
+    scritto il 25 agosto che il vincolo loopback non era documentato. Scriverlo è servito a due
+    cose: a non affermarlo come citazione, e a lasciare in chiaro dove si sarebbe potuto misurare.
+    Sei giorni dopo il debito è stato riscosso da una prova che non era stata pianificata per
+    riscuoterlo. Le riserve si scrivono perché qualcuno, prima o poi, ci inciampi apposta.
+
+41. **Un ADR può nascere non deciso.** Fin qui ogni ADR verbalizzava una scelta che un vincolo
+    tecnico aveva già preso, e lo stato `Accettata` era l'unico che servisse. Quando le misure
+    dicono che tutte le strade funzionano, il documento che le raccoglie non è una decisione: è una
+    proposta, e chiamarla `Accettata` significherebbe far firmare a chi implementa una scelta che
+    spetta a chi presenta. Da qui in poi lo stato `Proposta` esiste, e la modifica del corpo che lo
+    porta ad `Accettata` è l'unica eccezione ammessa alla regola secondo cui un ADR si supera e non
+    si riscrive — perché una proposta, finché è tale, non è ancora una decisione da proteggere.

@@ -937,6 +937,12 @@ cambiare è soltanto la cifra.
 
 **Data:** 2026-08-25 · **Stato:** Accettata
 
+> **Nota di allineamento, 2026-08-31.** La *decisione* di questo ADR regge intatta. Una sua
+> *conseguenza* è stata misurata falsa: la frase «l'inizializzazione non può stare tutta in
+> `docker-compose.yml`: serve un passo esterno» non vale, e [ADR-0040](#adr-0040) mostra come farla
+> stare dentro Compose senza rinunciare a niente di quanto deciso qui. Il corpo non viene toccato:
+> si legge com'era, con questo rimando davanti.
+
 **Contesto:** il design descriveva lo sharded cluster come una topologia — un config server,
 due shard, un router — senza dire come i pezzi arrivano a conoscersi sotto autenticazione a
 keyfile. Lo spike del 2026-08-25 ha provato a montarlo davvero
@@ -1938,3 +1944,84 @@ costa zero controlli se è scritta nel file); controllare il valore solo dopo l'
 la cosa che si è deciso di non dover più verificare).
 
 **Fonti:** [S-019](Sources.md#s-019), [V-006](Sources.md#v-006), [V-022](Sources.md#v-022)
+
+<a id="adr-0040"></a>
+## ADR-0040 — Chi crea l'utente amministratore del replica set, e dove gira l'inizializzazione
+
+**Data:** 2026-08-31 · **Stato:** Proposta — in attesa della scelta del Product Owner
+
+**Perché uno stato nuovo.** È il primo ADR di questo repository che non nasce già deciso. Gli altri
+trentanove registrano scelte prese da un vincolo tecnico: una misura le imponeva, e l'ADR le
+verbalizzava. Qui le misure dicono che **tutte** le strade funzionano ([V-023](Sources.md#v-023)),
+e quindi non decidono niente: quello che resta da scegliere è quale prezzo pagare, e il prezzo lo
+sceglie chi presenta, non chi implementa. Lo stato `Proposta` dura fino a quella risposta, poi
+diventa `Accettata` con la data della scelta. Questo passaggio è l'unico caso in cui il corpo di un
+ADR viene modificato invece che superato, e vale solo perché una proposta non è ancora una
+decisione: quando lo diventa, la regola normale — si supera, non si riscrive — torna a valere piena.
+
+**Contesto:** il design (§5.4) e [ADR-0026](#adr-0026) prescrivono due catene di inizializzazione
+diverse per lo stesso problema. Il design mette `MONGO_INITDB_ROOT_USERNAME` e
+`MONGO_INITDB_ROOT_PASSWORD` sul primo membro e affida `rs.initiate()` a un sidecar già
+autenticato. ADR-0026 vuole i `mongod` **senza** variabili di root e l'utente creato sotto eccezione
+localhost, e aggiunge che il replica set di `feature/02` «è la stessa catena senza gli shard». Le
+due prescrizioni non sono conciliabili, e la differenza non è di stile: da una parte una password di
+laboratorio finisce in `.env.example`, dall'altra no.
+
+Il Task 1 del piano di `feature/02` ha rifiutato di scegliere leggendo e ha montato tre stack
+usa-e-getta fuori dal repository. Il verbale completo, con i comandi e le risposte, è in
+[V-023](Sources.md#v-023). In breve: la strada di ADR-0026 funziona anche su un replica set;
+la strada del design funziona, perché l'entrypoint dell'immagine crea l'utente anche con `--replSet`
+e `--keyFile` addosso — il caso che rompeva in ADR-0026 era `--configsvr`, che è un'altra cosa
+([S-022](Sources.md#s-022)); e l'affermazione del design secondo cui un sidecar non gode
+dell'eccezione localhost è vera, misurata (`Command replSetInitiate requires authentication`).
+
+Provando a capire **perché** quel sidecar fallisse è emersa una terza via che non sta in nessuno dei
+due documenti. Se l'eccezione dipende dall'indirizzo di provenienza, si cambia l'indirizzo di
+provenienza: un container avviato con `network_mode: "service:mongo-rs-1"` non ha un'interfaccia di
+rete propria, usa quella del membro, e il suo `localhost` è il `localhost` del `mongod`. Provata,
+concede `replSetInitiate` e `createUser`, e si richiude subito dopo come la fonte prescrive
+([S-055](Sources.md#s-055)).
+
+**Decisione proposta:** lo stack `02-replicaset` usa la terza via. Nessun `mongod` riceve
+`MONGO_INITDB_ROOT_*`. Un servizio one-shot `rs-init`, dichiarato in `compose.yaml` con
+`network_mode: "service:mongo-rs-1"`, esegue `rs.initiate()` con i tre membri elencati per nome di
+servizio, attende l'elezione del primario — che [S-055](Sources.md#s-055) impone di attendere prima
+di creare il primo utente — e crea l'amministratore sotto eccezione localhost. Le credenziali
+arrivano al servizio da `.env`, non da `.env.example`, che porta solo un segnaposto.
+
+**Conseguenze:** `docker compose up -d` da solo produce un replica set completo e autenticato,
+senza passi manuali e senza alcuna password nel repository. Il che smentisce, misura alla mano, una
+**conseguenza** di [ADR-0026](#adr-0026): «l'inizializzazione non può stare tutta in
+`docker-compose.yml`: serve un passo esterno». Non serve. La *decisione* di ADR-0026 invece regge
+intatta — niente variabili di root, utente creato sotto eccezione, membri elencati per nome — e
+questa proposta la conferma per una via che allora non era stata considerata. ADR-0026 non viene
+superato: gli si mette in testa una nota di allineamento che rimanda qui, perché chi lo legge fra sei
+mesi non prenda per buona una conseguenza che è stata misurata falsa.
+
+Due conseguenze minori, entrambe già utili ai task successivi. La prima: l'healthcheck dei membri
+deve chiedere «`hello()` risponde?» e non «sei primario o secondario?», altrimenti resta rosso fino
+a `rs.initiate()` e blocca il servizio che dovrebbe eseguirlo — l'uovo e la gallina che il Task 5
+aveva previsto. La misura che lo consente è in [V-023](Sources.md#v-023): su un `mongod` con
+`--keyFile` non ancora inizializzato, `hello()` risponde senza credenziali. La seconda: `rs-init`
+condivide il namespace di rete del membro 1, quindi non è raggiungibile per nome sulla rete Compose
+e non può pubblicare porte. Non gli serve nessuna delle due cose, ma va scritto nel file, perché è
+il genere di vincolo che qualcuno tenterà di violare.
+
+Resta un costo, ed è didattico prima che tecnico: `network_mode: "service:…"` è un costrutto che
+la maggior parte di chi usa Compose non ha mai scritto. Va spiegato in
+`02-architetture/trappole-mongodb-in-docker.md`, non lasciato nel file come un trucco.
+
+**Alternative scartate:** seguire il design (`MONGO_INITDB_ROOT_*` sul membro 1) — funziona, ed è la
+strada che chiunque riconosce a colpo d'occhio, ma mette una password nel repository e obbliga il
+sidecar a un'attesa che nella prova è fallita al primo colpo con `ECONNREFUSED`, perché
+`service_started` scatta mentre l'entrypoint è ancora nella fase del `mongod` temporaneo; seguire
+ADR-0026 alla lettera (`rs.initiate()` con `docker exec` dentro il membro) — funziona, non costa
+password, ma l'inizializzazione esce da Compose e `docker compose up -d` smette di bastare, che in
+sala è un passo in più da ricordare mentre si parla; creare l'utente con uno script in
+`/docker-entrypoint-initdb.d` — l'entrypoint esegue quegli script sul `mongod` temporaneo, cioè
+prima che il set esista, e [S-055](Sources.md#s-055) impone l'ordine opposto: prima il primario,
+poi il primo utente; lasciare i due documenti in conflitto e decidere nel file Compose — è
+esattamente l'errore che [ADR-0039](#adr-0039) ha appena finito di correggere su `pull_policy`, sei
+giorni fa e nello stesso repository.
+
+**Fonti:** [S-006](Sources.md#s-006), [S-022](Sources.md#s-022), [S-055](Sources.md#s-055), [V-023](Sources.md#v-023)

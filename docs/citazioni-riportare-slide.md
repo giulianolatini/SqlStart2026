@@ -237,6 +237,41 @@ parte standalone e senza autenticazione, e `rs.initiate()` non lo esegue nessuno
 nostro. Comportamento controintuitivo, condizionale e non documentato: sapere dove sta scritto
 vale più che saperlo e basta.
 
+### L'eccezione si chiama «localhost» e la fonte non definisce «localhost»
+
+> «The localhost exception allows you to create the first user or role in the system after
+> enabling access control. You can also use it to initiate a replica set.»
+
+> «You must wait until the replica set elects a primary before you can add the first user.»
+
+Fonte: [S-055](Sources.md#s-055) — MongoDB Manual v7.0, Localhost Exception. Misura in
+[V-023](Sources.md#v-023).
+
+**Perché una slide:** perché quello che la pagina **non** dice pesa quanto quello che dice. Le
+stringhe `127.0.0.1`, `::1`, «loopback» e «same host» non compaiono da nessuna parte, né sulla v7.0
+né sulla 8.3; la formulazione più vicina è «connect to the localhost interface», che nomina
+un'interfaccia senza dire quale sia. Eppure il vincolo esiste: un sidecar sulla rete Compose si
+prende `Command replSetInitiate requires authentication`. È il caso più pulito del talk di una
+regola che il prodotto applica e la documentazione non scrive — e la diapositiva può mostrare
+insieme la pagina e il messaggio d'errore.
+
+### Se il problema è l'indirizzo di provenienza, si cambia l'indirizzo di provenienza
+
+> ```
+> NAMESPACE_CONDIVISO_OK {"ok":1}
+> UTENTE_CREATO da sidecar in namespace condiviso
+> CHIUSA_DOPO_IL_PRIMO_UTENTE codeName=Unauthorized code=13
+> ```
+
+Fonte: [V-023](Sources.md#v-023) — misura del 2026-08-31, decisione in
+[ADR-0040](Decision.md#adr-0040).
+
+**Perché una slide:** tre righe raccontano l'eccezione localhost per intero — si apre, concede
+`replSetInitiate` e `createUser`, si richiude — e insieme mostrano il trucco che le fa da cornice:
+un container avviato con `network_mode: "service:mongo-rs-1"` non ha un'interfaccia di rete propria,
+usa quella del membro, e il suo `localhost` è il `localhost` del `mongod`. È il momento in cui la
+platea capisce che «localhost» in Docker è una proprietà del namespace, non della macchina.
+
 ---
 
 ## Blocco 3 — Sharded cluster

@@ -206,7 +206,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   all'assunzione di progetto: l'eccezione decade anche con `createRole`, e non si attiva
   affatto se esiste già un ruolo — perimetro più stretto di quello che avevamo scritto. I
   config server non sono menzionati.
-- **Usata da:** ADR-0005
+- **Usata da:** ADR-0005, ADR-0040
 
 <a id="s-007"></a>
 ### S-007 — MongoDB Manual: Connection String Options
@@ -601,7 +601,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   `--keyFile`. **`rs.initiate()` non viene mai eseguito dall'immagine: resta a nostro
   carico.** Trattandosi di sorgente, l'API non ha garanzie di stabilità fra versioni: la
   citazione deve indicare commit e riga.
-- **Usata da:** ADR-0005, ADR-0026
+- **Usata da:** ADR-0005, ADR-0026, ADR-0040
 
 <a id="s-023"></a>
 ### S-023 — `docker-library/mongo`: `8.0/Dockerfile`
@@ -1639,6 +1639,47 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   terzi; qui vale come conferma di dettaglio su ciò che [S-053](#s-053) afferma in prosa, non come
   sostituto della documentazione di GitHub.
 - **Usata da:** ADR-0038
+
+<a id="s-055"></a>
+### S-055 — MongoDB Manual v7.0: Localhost Exception (la variante della versione pinnata)
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/localhost-exception/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0 — la stessa serie dell'immagine che il lab pinna (`mongo:7.0.40`)
+- **Consultata:** 2026-08-31
+- **Verdetto:** conferma parziale
+- **Perché una voce separata da [S-006](#s-006):** S-006 è stata letta il 2026-08-25 sulla pagina
+  `manual/`, che serve la versione **8.3 (Current)**. Gli stack del lab girano su 7.0.40
+  ([ADR-0028](Decision.md#adr-0028)), e una regola di autenticazione è esattamente il genere di
+  cosa che può cambiare fra due major. La pagina è stata quindi riletta sulla variante `v7.0/`
+  prima di fondarci sopra la catena di inizializzazione del replica set.
+- **Cosa afferma:** la definizione è identica a quella di 8.3 — «On a `mongod` instance, the
+  localhost exception only applies when there are **no users or roles** created in the MongoDB
+  instance» — e così l'elenco delle operazioni ammesse, che comprende `createUser` e `createRole`
+  («This ends the localhost exception» per entrambi), `grantRole` verso sistemi esterni,
+  **`replSetInitiate` «to initiate a new replica set»**, `replSetGetStatus`, `replSetReconfig` sul
+  primario, e su `mongos` `addShard` «if the cluster is hosted on `localhost`». La frase di
+  apertura dichiara i due usi insieme: «The localhost exception allows you to create the first user
+  or role in the system after enabling access control. **You can also use it to initiate a replica
+  set.**»
+- **Cosa afferma in più rispetto a [S-006](#s-006), ed è operativamente decisivo:** «You can use
+  the localhost exception to initiate a replica set, following the steps in Deploy a Self-Managed
+  Replica Set. **You must wait until the replica set elects a primary before you can add the first
+  user.**» È l'ordine dei passi, enunciato dalla fonte: prima `rs.initiate()`, poi l'attesa
+  dell'elezione, poi `createUser` — e non un ordine qualsiasi. Il riquadro di avvertimento stringe
+  ancora: «Connections using the localhost exception have access to create *only* the **first user
+  OR role**. Only create a role first if you are authorizing users with LDAP.»
+- **Come si spegne:** «Disable the localhost exception at startup. To disable the localhost
+  exception, set the `enableLocalhostAuthBypass` parameter to `0`.» Il che dice, per complemento,
+  che a `1` — cioè acceso — ci sta di suo.
+- **Riserve:** la riserva che [S-006](#s-006) aveva dichiarato il 2026-08-25 **vale identica sulla
+  v7.0**. Le stringhe `127.0.0.1`, `::1`, «loopback» e «same host» non compaiono da nessuna parte
+  nella pagina; la formulazione più vicina al vincolo che tutti danno per ovvio è «connect to the
+  localhost interface», che nomina un'interfaccia senza dire quale sia né da dove debba arrivare la
+  connessione. La fonte, insomma, chiama l'eccezione «localhost» e non definisce «localhost». Non è
+  una lacuna accademica: è la differenza fra un sidecar che riesce a inizializzare il replica set e
+  uno che non ci riesce, e la misura sta in [V-023](#v-023).
+- **Usata da:** ADR-0040
 
 ---
 
@@ -2900,5 +2941,150 @@ iniziato, e conferma su questo file quello che [V-006](#v-006) aveva misurato su
   non a essere confrontate fra loro. La prova con la rete fisicamente staccata resta da fare.
 - **Data:** 2026-08-31
 - **Usata da:** ADR-0039
+
+---
+
+<a id="v-023"></a>
+### V-023 — Chi inizializza il replica set: tre strade provate, e una terza che non era scritta da nessuna parte
+
+- **Domanda:** il design (§5.4) e [ADR-0026](Decision.md#adr-0026) dicono due cose diverse su chi
+  crea l'utente amministratore di uno stack a replica set sotto keyfile. Il design mette
+  `MONGO_INITDB_ROOT_USERNAME`/`_PASSWORD` sul primo membro e fa inizializzare il set a un sidecar
+  già autenticato; ADR-0026 vuole i `mongod` **senza** variabili di root e l'utente creato sotto
+  eccezione localhost. Non è una sfumatura: cambia se nel repository finisce una password. Il
+  Task 1 del piano di `feature/02` ha rifiutato di scegliere a tavolino e ha montato entrambe le
+  strade. Tre domande: la strada di ADR-0026 funziona su un replica set (e non solo su uno sharded
+  cluster)? La strada del design funziona, cioè l'entrypoint crea davvero l'utente anche con
+  `--replSet` e `--keyFile` addosso? E l'affermazione del design secondo cui «l'eccezione localhost
+  non copre un container sidecar» è vera?
+- **Ambiente:** macchina di sviluppo macOS 26.6.2 (Darwin 25.6.0), Docker Desktop, server Docker
+  29.7.2, `docker compose version` v5.4.0. Immagine `mongo:7.0.40` pinnata per digest
+  `sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b`. Tre stack usa-e-getta
+  (`spike-rs-a`, `spike-rs-b`, `spike-rs-c`) montati **fuori dal repository**, nella cartella
+  temporanea della sessione, e smontati con `down -v` a misura presa. Nessuna porta pubblicata.
+  Data: 2026-08-31.
+
+**Prima strada — ADR-0026: nessuna variabile di root, `rs.initiate()` dentro il container.**
+
+Tre `mongod` con `--replSet rs0 --keyFile /keyfile/mongo-keyfile --bind_ip_all`, il keyfile
+generato da un servizio one-shot, e l'inizializzazione eseguita con `docker exec` **dentro** il
+membro 1, senza passare credenziali:
+
+```console
+$ docker exec spike-a-rs-1 mongosh --quiet --eval 'rs.initiate({_id:"rs0", members:[...]})'
+{"ok":1}
+$ docker exec spike-a-rs-1 mongosh --quiet --eval 'db.getSiblingDB("admin").createUser({user:"lab-admin", pwd:"...", roles:["root"]})'
+{ ok: 1 }
+$ docker exec spike-a-rs-1 mongosh --quiet --eval 'db.getSiblingDB("prova").c.insertOne({x:1})'
+MongoServerError[Unauthorized]: command insert requires authentication
+```
+
+Funziona, e funziona nell'ordine che [S-055](#s-055) prescrive: `replSetInitiate` passa,
+`createUser` passa, e il primo comando successivo **non** passa più. L'ultima riga non è un
+fallimento: è la ricevuta che l'eccezione si è chiusa da sé, esattamente dove la fonte dice che si
+chiude. Il costo è tutto architetturale: `docker exec` non è un servizio Compose, quindi
+`docker compose up -d` da solo **non** produce un replica set funzionante. Serve un passo fuori dal
+file — uno script, un `make`, o le dita di chi presenta.
+
+**Seconda strada — il design §5.4: variabili di root sul membro 1, sidecar autenticato.**
+
+Prima domanda da sciogliere: l'entrypoint dell'immagine ufficiale, che per creare l'utente avvia un
+`mongod` temporaneo togliendo `--replSet` ([S-022](#s-022)), sopravvive alla presenza di
+`--keyFile`? Sì — nei log del membro compare `Successfully added user: { "user" : "lab-admin",
+"roles" : [ "root" ] }`. Il caso che ADR-0026 aveva incontrato era `--configsvr`, che l'entrypoint
+**non** toglie e che da solo non esiste: è quello a rompersi, non `--replSet`. La differenza fra i
+due casi non era scritta da nessuna parte, e per sei giorni ADR-0026 è stato letto come se valesse
+per entrambi.
+
+Poi il sidecar, al primo colpo, è fallito:
+
+```console
+$ docker logs spike-b-rs-init
+MongoNetworkError: connect ECONNREFUSED 172.20.0.3:27017
+```
+
+`depends_on` con `condition: service_started` è arrivato mentre il membro era ancora nella fase del
+`mongod` temporaneo, che ascolta solo su loopback. È esattamente la corsa che il Task 5 del piano
+aveva previsto, misurata prima di scrivere il file definitivo. Ripetuta l'inizializzazione a membri
+avviati, la strada regge:
+
+```console
+$ mongosh --host mongo-rs-1 -u lab-admin -p ... --eval 'rs.initiate({...})'
+{"ok":1}
+$ mongosh ... --eval 'rs.status().members.map(m => m.stateStr).join(",")'
+PRIMARY,SECONDARY,SECONDARY
+```
+
+E i membri 2 e 3, partiti **vuoti** e senza alcuna variabile di root, accettano le credenziali di
+`lab-admin`: la sincronizzazione iniziale porta con sé anche la collezione `admin.system.users`.
+Un utente creato su un membro solo diventa, senza altri passi, l'utente di tutto il set.
+
+**Terza prova — l'affermazione del design sul sidecar è vera.**
+
+Uno stack con un membro non inizializzato e un sidecar sulla rete Compose, che prova
+`rs.initiate()` dall'esterno del container:
+
+```console
+$ docker logs spike-c-rs-init
+ERRORE codeName=Unauthorized code=13
+Command replSetInitiate requires authentication
+```
+
+L'affermazione del design regge. Il sidecar raggiunge il `mongod` — non è un problema di rete — ma
+arriva da un altro indirizzo, e l'eccezione non lo riconosce. Ed è qui che si chiude una riserva
+aperta da sei giorni: [S-006](#s-006) aveva dichiarato il 2026-08-25 che il vincolo «solo da
+loopback» **non è enunciato da nessuna fonte primaria**, e [S-055](#s-055) ha confermato che
+neppure la pagina della v7.0 lo enuncia. Adesso c'è la misura. Il vincolo esiste, il prodotto lo
+applica, la documentazione non lo scrive: la riserva passa da «vero per convenzione» a «vero,
+misurato qui, e ancora non scritto dalla fonte».
+
+**Quarta prova — la terza via: un sidecar che condivide il namespace di rete del membro.**
+
+Se il problema è l'indirizzo di provenienza, si può cambiare l'indirizzo di provenienza invece di
+rinunciare all'eccezione. Un container avviato con `--network container:<membro>` — in Compose
+`network_mode: "service:mongo-rs-1"` — non ha una propria interfaccia di rete: **usa quella del
+membro**, e `localhost` dentro il sidecar è lo stesso `localhost` del `mongod`.
+
+```console
+$ docker run --rm --network container:spike-c-rs-1 mongo@sha256:b642... \
+    mongosh --quiet --host localhost --eval '...'
+NAMESPACE_CONDIVISO_OK {"ok":1}
+UTENTE_CREATO da sidecar in namespace condiviso
+CHIUSA_DOPO_IL_PRIMO_UTENTE codeName=Unauthorized code=13
+```
+
+Le tre righe sono la strada intera in tre battute: l'eccezione si apre a un container che non è il
+membro, concede `replSetInitiate` e poi `createUser`, e si chiude subito dopo. Questa via non sta
+né nel design né in ADR-0026: è saltata fuori chiedendosi *perché* la prova C fallisse, invece di
+prendere atto che falliva.
+
+**Misura di contorno, raccolta di passaggio e utile al Task 5.** Su un `mongod` avviato con
+`--keyFile` e non ancora inizializzato, `hello()` risponde **senza credenziali**:
+
+```console
+$ docker exec spike-c-rs-1 mongosh --quiet --eval 'const h = hello(); print("isWritablePrimary=" + h.isWritablePrimary + " secondary=" + h.secondary)'
+isWritablePrimary=false secondary=true
+```
+
+Serve a disinnescare l'uovo e la gallina dell'healthcheck: un controllo che chiede «`hello()`
+risponde?» diventa verde **prima** dell'inizializzazione, e quindi un servizio di inizializzazione
+può dipendere da `service_healthy` senza aspettare qualcosa che solo lui può produrre. Un controllo
+che chiedesse «sei primario o secondario?» resterebbe rosso fino a `rs.initiate()`, e
+l'inizializzazione non partirebbe mai.
+
+- **Conseguenza:** le tre strade funzionano tutte, quindi la scelta non è tecnica ma di prezzo.
+  ADR-0026 costa un passo fuori da Compose; il design costa una password nel repository; la terza
+  via non costa nessuno dei due e paga con un costrutto Docker che va spiegato. La decisione è
+  registrata in [ADR-0040](Decision.md#adr-0040).
+- **Riserve:** tutto su una macchina sola, su Docker Desktop, con una sola ripetizione per strada;
+  le prove dicono *che* una strada funziona, non quanto sia stabile sotto ripetizione o su Linux
+  nativo. La corsa del sidecar della strada B è stata osservata una volta e aggirata a mano: non è
+  stato misurato dopo quanto tempo il membro smette di rifiutare la connessione, perché la
+  soluzione scelta non passa da un'attesa a tempo. Il comportamento di `network_mode:` con
+  `service:` è stato provato nella forma equivalente da riga di comando (`docker run --network
+  container:…`), e non ancora dentro un file Compose del repository: la conferma nella forma
+  definitiva spetta al Task 2.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0040
 
 ---
