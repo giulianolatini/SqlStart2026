@@ -462,3 +462,53 @@ che dal 2026-09-18 il preflight promuove da sé a errore bloccante.
   un vincolo di formato che nessun documento dichiarava e che si scopre solo sbagliandolo. Ora
   è scritto qui; se tornerà a costare tempo, diventerà un messaggio di errore dello strumento
   invece di una nota nel registro.
+
+---
+
+## 2026-08-31 — Una review esterna su PR #2
+
+**Fatto:** PR #2 è stata sottoposta alla stessa review automatica esterna di PR #1. Un solo
+rilievo puntuale, ed era fondato. I numeri della voce qui sopra — sedici commit, venticinque
+file — restano quelli del branch alla chiusura: i commit di questo giro si contano a parte.
+
+Il rilievo riguarda `RECINTO`, in `tools/check_links.py`: pretendeva i tre apici in colonna
+zero, e in `docs/Sources.md` esistono recinti rientrati. La riga citata, la 1145, è esatta.
+Un recinto dentro un elenco puntato rientra insieme al suo punto, e in `Sources.md` gli
+esempi di codice stanno quasi tutti lì dentro.
+
+Verificato prima di correggere, su una pagina costruita apposta, e il difetto è risultato più
+largo di come il revisore lo descriveva. Il revisore prevedeva un falso positivo: un
+`[testo](url)` scritto in un esempio rientrato viene preso per un rimando vero e segnalato
+come rotto. Confermato. Ma la stessa svista produce anche il caso opposto, che il revisore
+non nomina: un `<a id="...">` scritto in un esempio rientrato viene raccolto fra le ancore
+buone, e allora un rimando rotto che citi quell'ancora **passa il controllo senza una
+parola**. Un falso positivo lo vedi e ti arrabbi; un falso negativo non lo vedi.
+
+Corretto ammettendo il rientro su apertura e chiusura, con i due test scritti rossi prima. La
+suite passa da sessantatré a sessantacinque test. `make docs-check` restava a `0` anche
+prima, e continua a restarci: dentro quel recinto oggi non c'è né un rimando né un'ancora,
+quindi il difetto era latente e non attivo. È il motivo per cui né i sei criteri di
+completamento né la verifica finale potevano scovarlo — nessuno dei due guarda ciò che uno
+strumento *non* segnala.
+
+`check_citations.py` è stato controllato per la stessa classe di errore e non ce l'ha: i suoi
+punti d'ingresso sono ancorati a inizio riga con prefissi propri — `## ADR-`, `### S-`,
+`- **URL:**` — e un blocco rientrato non li produce.
+
+**Note di metodo.**
+
+28. Un analizzatore va provato sul materiale che dovrà leggere, non su materiale costruito per
+    provarlo. I venticinque test di `check_links.py` giravano su testi scritti a mano, tutti
+    con i recinti in colonna zero, perché è così che li scrive chi li scrive apposta.
+    `Sources.md`, che è la pagina più lunga del repository, li ha quasi tutti rientrati. Il
+    caso che mancava non era un caso limite: era la forma normale del corpus vero.
+29. Lo stesso strumento ha sbagliato due volte nello stesso punto — prima il codice in linea,
+    ora il rientro — e le due volte per la stessa ragione: «che cosa non è prosa» è un'ipotesi
+    sul Markdown, e un'ipotesi non provata contro un file vero è un falso allarme in attesa di
+    turno. Le due volte la correzione è andata allo strumento e non al testo, ed è la sola
+    direzione ammessa: un controllore che si adatta ai documenti che non sa leggere smette di
+    controllarli.
+30. Una review esterna che produce un rilievo solo non ha lavorato meno di una che ne produce
+    cinque. Quel rilievo indicava il file, la riga e la conseguenza, e sotto ce n'era una
+    seconda che il revisore non aveva visto. Il valore non stava nella diagnosi completa: era
+    nell'aver guardato una riga che chi l'aveva scritta considerava chiusa.
