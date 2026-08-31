@@ -182,6 +182,24 @@ def test_il_valore_predefinito_cede_alla_variabile_presente():
     assert risolvi("${PULL_POLICY:-missing}", {"PULL_POLICY": "never"}) == "never"
 
 
+def test_la_variabile_vuota_vale_come_assente():
+    # Compose tratta la stringa vuota come «non impostata» nelle forme che
+    # portano i due punti: `${VAR:-x}` dà `x`, non «». Un file d'ambiente con
+    # `PULL_POLICY=` è la forma in cui questo capita davvero.
+    assert risolvi("${PULL_POLICY:-missing}", {"PULL_POLICY": ""}) == "missing"
+
+
+def test_la_variabile_vuota_non_soddisfa_la_forma_obbligatoria():
+    with pytest.raises(KeyError, match="MONGO_IMAGE"):
+        risolvi("${MONGO_IMAGE:?eseguire make images-pull}", {"MONGO_IMAGE": ""})
+
+
+def test_la_forma_senza_operatore_lascia_passare_il_vuoto():
+    # Senza i due punti non c'è alternativa da scegliere: `${VAR}` di una
+    # variabile vuota è una stringa vuota, e va restituita tale.
+    assert risolvi("prefisso-${VUOTA}", {"VUOTA": ""}) == "prefisso-"
+
+
 def test_la_forma_obbligatoria_fallisce_dicendo_cosa_manca():
     # `${VAR:?messaggio}` esiste per far fallire Compose subito e con una spiegazione.
     # Lo strumento deve fallire nello stesso punto, non sorvolare.
@@ -194,15 +212,22 @@ def test_legge_le_variabili_ignorando_commenti_e_righe_vuote(tmp_path):
     percorso.write_text(
         "# Immagini del lab, pinnate per digest.\n"
         "\n"
-        "MONGO_IMAGE=mongo@sha256:abc\n",
+        "MONGO_IMAGE=mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b\n",
         encoding="utf-8",
     )
-    assert leggi_ambiente(percorso) == {"MONGO_IMAGE": "mongo@sha256:abc"}
+    assert leggi_ambiente(percorso) == {"MONGO_IMAGE": "mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b"}
+
+
+def test_un_digest_troppo_corto_non_conta_come_digest():
+    # `sha256:abc` non è un riferimento che Docker accetti: un digest SHA-256 ha
+    # sessantaquattro cifre esadecimali. Riconoscerlo come pin valido farebbe
+    # approvare uno stack che non si avvia.
+    assert digest_noti_da({"MONGO_IMAGE": "mongo@sha256:abc"}) == set()
 
 
 def test_estrae_i_digest_dalle_variabili_di_ambiente():
-    ambiente = {"MONGO_IMAGE": "mongo@sha256:abc", "PULL_POLICY": "never"}
-    assert digest_noti_da(ambiente) == {"sha256:abc"}
+    ambiente = {"MONGO_IMAGE": "mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b", "PULL_POLICY": "never"}
+    assert digest_noti_da(ambiente) == {"sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b"}
 
 
 COMPOSE_CONFORME = """
@@ -220,15 +245,15 @@ services:
 def test_carica_risolve_le_variabili_dentro_il_documento(tmp_path):
     percorso = tmp_path / "compose.yaml"
     percorso.write_text(COMPOSE_CONFORME, encoding="utf-8")
-    documento = carica(percorso, {"MONGO_IMAGE": "mongo@sha256:abc"})
+    documento = carica(percorso, {"MONGO_IMAGE": "mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b"})
     servizio = documento["services"]["mongo"]
-    assert servizio["image"] == "mongo@sha256:abc"
+    assert servizio["image"] == "mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b"
     assert servizio["pull_policy"] == "missing"
 
 
 def test_main_esce_zero_su_un_file_conforme(tmp_path, capsys):
     ambiente = tmp_path / "images.env"
-    ambiente.write_text("MONGO_IMAGE=mongo@sha256:abc\n", encoding="utf-8")
+    ambiente.write_text("MONGO_IMAGE=mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b\n", encoding="utf-8")
     compose = tmp_path / "compose.yaml"
     compose.write_text(COMPOSE_CONFORME, encoding="utf-8")
     assert main(["--ambiente", str(ambiente), str(compose)]) == 0
@@ -236,7 +261,7 @@ def test_main_esce_zero_su_un_file_conforme(tmp_path, capsys):
 
 def test_main_esce_uno_e_nomina_il_file_che_non_va(tmp_path, capsys):
     ambiente = tmp_path / "images.env"
-    ambiente.write_text("MONGO_IMAGE=mongo@sha256:abc\n", encoding="utf-8")
+    ambiente.write_text("MONGO_IMAGE=mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b\n", encoding="utf-8")
     compose = tmp_path / "compose.yaml"
     compose.write_text(
         COMPOSE_CONFORME.replace("    mem_limit: 1024m\n", ""), encoding="utf-8"
@@ -247,6 +272,6 @@ def test_main_esce_uno_e_nomina_il_file_che_non_va(tmp_path, capsys):
 
 def test_main_esce_due_con_un_messaggio_se_il_file_non_esiste(tmp_path, capsys):
     ambiente = tmp_path / "images.env"
-    ambiente.write_text("MONGO_IMAGE=mongo@sha256:abc\n", encoding="utf-8")
+    ambiente.write_text("MONGO_IMAGE=mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b\n", encoding="utf-8")
     assert main(["--ambiente", str(ambiente), str(tmp_path / "assente.yaml")]) == 2
     assert "assente.yaml" in capsys.readouterr().err

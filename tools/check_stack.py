@@ -9,7 +9,10 @@ IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 # `${NOME}`, `${NOME:-predefinito}`, `${NOME:?spiegazione}`.
 VARIABILE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::([-?])([^}]*))?\}")
 
-DIGEST = re.compile(r"\bsha256:[0-9a-f]{3,64}\b")
+# Sessantaquattro cifre, non «da tre a sessantaquattro»: un digest SHA-256 più
+# corto Docker lo rifiuta, e accettarlo qui vorrebbe dire approvare uno stack
+# che non si avvia.
+DIGEST = re.compile(r"\bsha256:[0-9a-f]{64}\b")
 
 # `0.0.0.0` e `127.0.0.1` dicono su quali interfacce ascoltare, non dove trovare un
 # altro nodo. La regola sui nomi host colpisce la topologia, non l'ascolto.
@@ -35,17 +38,21 @@ def risolvi(testo: str, ambiente: dict[str, str]) -> str:
     messaggio invece di partire con un valore vuoto. Lo strumento fallisce nello
     stesso punto: sorvolare qui vorrebbe dire verificare un file diverso da quello
     che Docker leggerà.
+
+    I due punti contano. In `${NOME:-x}` e `${NOME:?x}` una variabile **vuota**
+    vale quanto una assente, e Compose prende l'alternativa; in `${NOME}` il
+    vuoto è un valore e va restituito tale. Sono le sole tre forme modellate,
+    perché sono le sole che i file Compose del lab usano.
     """
 
     def sostituisci(trovato: re.Match[str]) -> str:
         nome, operatore, argomento = trovato.groups()
-        if nome in ambiente:
-            return ambiente[nome]
+        valore = ambiente.get(nome, "")
+        if operatore is None or valore:
+            return valore
         if operatore == "-":
             return argomento
-        if operatore == "?":
-            raise KeyError(f"{nome}: {argomento}")
-        return ""
+        raise KeyError(f"{nome}: {argomento}")
 
     return VARIABILE.sub(sostituisci, testo)
 
