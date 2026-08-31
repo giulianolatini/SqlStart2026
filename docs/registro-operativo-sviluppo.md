@@ -767,3 +767,65 @@ Quel che resta da scegliere è il prezzo, e il prezzo lo sceglie chi presenta.
     tace. La seconda: dopo una pulizia si guarda che cosa resta, perché è l'unica verifica che
     non passa per la parola del comando che ha pulito. (Chiuso con `docker compose -p <nome>
     down -v`, che non ha bisogno del file e quindi non interpola niente.)
+
+## 2026-08-31 — `feature/02`, Task 2: il keyfile, e il messaggio d'errore che non ha la severità che dovrebbe
+
+Scelta la strada C ([ADR-0040](Decision.md#adr-0040)), il Task 2 posa il primo anello:
+`docker/02-replicaset/compose.yaml` con il solo servizio `keyfile-init`, e
+`docker/02-replicaset/init/01-keyfile.sh` che genera il segreto condiviso dentro un volume
+nominato. Il keyfile non entra nel repository ([ADR-0014](Decision.md#adr-0014)): nasce al primo
+avvio, sulla macchina di chi esegue.
+
+**Il caso dritto, misurato.** Prima esecuzione:
+
+```console
+$ docker compose --env-file tools/images.env -f docker/02-replicaset/compose.yaml run --rm keyfile-init
+keyfile generato
+-r-------- 1 999 999 1024 Aug 31 13:27 /keyfile/mongo-keyfile
+```
+
+Permessi `400`, proprietario `999:999`, 1024 byte. Seconda esecuzione, a volume già popolato:
+
+```console
+keyfile già presente: non lo rigenero
+-r-------- 1 999 999 1024 Aug 31 13:27 /keyfile/mongo-keyfile
+```
+
+Stessa ora sul file: non è stato rigenerato. L'idempotenza qui non è pulizia formale — un keyfile
+rigenerato al secondo `make up-02` significherebbe tre membri che smettono di riconoscersi, con un
+errore di autenticazione che sembra tutt'altro.
+
+**Il caso storto, che è quello che si incontra davvero.** Il piano chiedeva di montare di proposito
+un keyfile con `chmod 644` e di prendere il messaggio d'errore *esatto*. Preso, ed è più
+interessante del previsto:
+
+```console
+{"s":"I",  "c":"ACCESS",  "id":20254, "msg":"Read security file failed",
+ "attr":{"error":{"code":30,"codeName":"InvalidPath",
+                  "errmsg":"permissions on /keyfile/mongo-keyfile are too open"}}}
+{"s":"F",  "c":"CONTROL", "id":20575, "msg":"Error creating service context",
+ "attr":{"error":"Location5579201: Unable to acquire security key[s]"}}
+```
+
+`mongod` esce con codice `1`. Con lo stesso file riportato a `400` parte e arriva a
+`Waiting for connections`, quindi la variabile isolata è il permesso e nient'altro.
+
+La trappola non è che fallisca: è **quale delle due righe porta l'informazione**. La riga che dice
+il perché — «permissions on … are too open» — ha severità `"s":"I"`, informativa. La riga fatale,
+`"s":"F"`, dice soltanto «Unable to acquire security key[s]» e non nomina né i permessi né il file.
+Chi filtra i log per severità, che è la prima cosa che si fa davanti a un container che muore
+all'avvio, trova la riga inutile e perde quella utile. I due identificativi da cercare sono stabili
+e valgono più del testo: **`id: 20254`** per la causa, **`id: 20575`** per l'effetto.
+
+Materiale per il **Task 12**, dove la trappola va scritta con il suo sintomo testuale: una trappola
+senza il messaggio che la annuncia non è ritrovabile da chi la sta subendo. La voce di
+[`Sources.md`](Sources.md) che ospiterà questa misura nasce lì, insieme alla pagina che la spiega;
+qui resta il verbale.
+
+**Note di metodo.**
+
+43. **Di un errore si prende il testo, non il riassunto.** «Fallisce se i permessi sono larghi» è
+    vero e inservibile: nessuno lo ritrova cercando. `permissions on … are too open` e `id: 20254`
+    si ritrovano. È la ragione per cui il piano chiedeva di provocare il guasto invece di
+    descriverlo, e la ragione per cui è valsa la pena: descrivendolo non sarebbe emerso che la riga
+    diagnostica è informativa e quella fatale è muta.

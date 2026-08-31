@@ -1,0 +1,50 @@
+# Stack 02 — replica set a tre membri.
+#
+# È il primo stack del lab che si autentica. Lo stack 01 gira deliberatamente senza
+# autenticazione come esempio negativo (ADR-0005); qui i membri si riconoscono fra
+# loro con un keyfile condiviso, e quel keyfile NON entra nel repository: lo genera
+# un servizio one-shot al primo avvio, dentro un volume nominato (ADR-0014).
+#
+# La catena di inizializzazione segue ADR-0040, scelta dopo aver montato e misurato
+# tre strade diverse (V-023). In sintesi: nessun mongod riceve MONGO_INITDB_ROOT_*,
+# e l'utente amministratore nasce sotto eccezione localhost da un servizio che
+# condivide il namespace di rete del primo membro. Il risultato è che
+# `docker compose up -d` da solo produce un replica set completo e autenticato,
+# senza passi manuali e senza una password scritta nel repository.
+#
+# Questo file è in costruzione: il Task 2 del piano di feature/02 posa il primo
+# anello — il keyfile — e i task successivi aggiungono i membri, rs-init e gli
+# healthcheck.
+
+name: sqlstart-02-replicaset
+
+services:
+  # Primo anello della catena. Gira una volta sola, prima di chiunque altro, e
+  # lascia dietro di sé un keyfile che i tre mongod monteranno in sola lettura.
+  keyfile-init:
+    # La STESSA immagine dei mongod, non un'immagine di utilità: una in meno da
+    # scaricare, e il vincolo offline ringrazia. Contiene già `openssl`.
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: rs-keyfile-init
+    # `never` fisso, non parametrico: ADR-0039. Se l'immagine manca dalla cache
+    # l'avvio fallisce subito, invece di aprire una connessione che in sala non c'è.
+    pull_policy: never
+    # Obbligatorio su un one-shot. Con `unless-stopped` Compose rialzerebbe il
+    # servizio ogni volta che esce — e un servizio che ha finito esce sempre —
+    # quindi la catena non completerebbe mai e `service_completed_successfully`
+    # non scatterebbe per nessuno.
+    restart: "no"
+    command: ["bash", "/init/01-keyfile.sh"]
+    volumes:
+      # Volume NOMINATO, non bind mount, ed è la decisione di ADR-0014: su macOS
+      # un file montato dall'host non conserva i permessi che gli si danno, e
+      # mongod rifiuta di partire con un keyfile che considera «too open».
+      # Generarlo dentro il volume è l'unico modo di garantire il 400 ovunque.
+      - keyfile:/keyfile
+      # Lo script invece arriva dall'host, in sola lettura. Qui il bind mount va
+      # bene: il file viene passato a `bash` come argomento, quindi non gli serve
+      # il bit di esecuzione, che è appunto la cosa che macOS non garantisce.
+      - ./init/01-keyfile.sh:/init/01-keyfile.sh:ro
+
+volumes:
+  keyfile:

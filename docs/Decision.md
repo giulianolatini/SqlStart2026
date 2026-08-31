@@ -1948,16 +1948,18 @@ la cosa che si è deciso di non dover più verificare).
 <a id="adr-0040"></a>
 ## ADR-0040 — Chi crea l'utente amministratore del replica set, e dove gira l'inizializzazione
 
-**Data:** 2026-08-31 · **Stato:** Proposta — in attesa della scelta del Product Owner
+**Data:** 2026-08-31 · **Stato:** Accettata il 2026-08-31 — nata `Proposta`, scelta dal Product
+Owner lo stesso giorno
 
-**Perché uno stato nuovo.** È il primo ADR di questo repository che non nasce già deciso. Gli altri
-trentanove registrano scelte prese da un vincolo tecnico: una misura le imponeva, e l'ADR le
-verbalizzava. Qui le misure dicono che **tutte** le strade funzionano ([V-023](Sources.md#v-023)),
-e quindi non decidono niente: quello che resta da scegliere è quale prezzo pagare, e il prezzo lo
-sceglie chi presenta, non chi implementa. Lo stato `Proposta` dura fino a quella risposta, poi
-diventa `Accettata` con la data della scelta. Questo passaggio è l'unico caso in cui il corpo di un
-ADR viene modificato invece che superato, e vale solo perché una proposta non è ancora una
-decisione: quando lo diventa, la regola normale — si supera, non si riscrive — torna a valere piena.
+**Perché è nato con uno stato nuovo.** È il primo ADR di questo repository che non è nato già
+deciso. Gli altri trentanove registrano scelte prese da un vincolo tecnico: una misura le imponeva,
+e l'ADR le verbalizzava. Qui le misure dicono che **tutte** le strade funzionano
+([V-023](Sources.md#v-023)), e quindi non decidono niente: quello che restava da scegliere era
+quale prezzo pagare, e il prezzo lo sceglie chi presenta, non chi implementa. Lo stato `Proposta` è
+durato fino alla risposta — arrivata il 2026-08-31, strada C — e questo passaggio da `Proposta` ad
+`Accettata` è l'unico caso in cui il corpo di un ADR viene modificato invece che superato: vale solo
+perché una proposta non è ancora una decisione. Da qui in avanti su questo ADR torna a valere piena
+la regola normale, si supera e non si riscrive.
 
 **Contesto:** il design (§5.4) e [ADR-0026](#adr-0026) prescrivono due catene di inizializzazione
 diverse per lo stesso problema. Il design mette `MONGO_INITDB_ROOT_USERNAME` e
@@ -1982,7 +1984,7 @@ rete propria, usa quella del membro, e il suo `localhost` è il `localhost` del 
 concede `replSetInitiate` e `createUser`, e si richiude subito dopo come la fonte prescrive
 ([S-055](Sources.md#s-055)).
 
-**Decisione proposta:** lo stack `02-replicaset` usa la terza via. Nessun `mongod` riceve
+**Decisione:** lo stack `02-replicaset` usa la terza via. Nessun `mongod` riceve
 `MONGO_INITDB_ROOT_*`. Un servizio one-shot `rs-init`, dichiarato in `compose.yaml` con
 `network_mode: "service:mongo-rs-1"`, esegue `rs.initiate()` con i tre membri elencati per nome di
 servizio, attende l'elezione del primario — che [S-055](Sources.md#s-055) impone di attendere prima
