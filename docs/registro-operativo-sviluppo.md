@@ -755,3 +755,15 @@ Quel che resta da scegliere è il prezzo, e il prezzo lo sceglie chi presenta.
     spetta a chi presenta. Da qui in poi lo stato `Proposta` esiste, e la modifica del corpo che lo
     porta ad `Accettata` è l'unica eccezione ammessa alla regola secondo cui un ADR si supera e non
     si riscrive — perché una proposta, finché è tale, non è ancora una decisione da proteggere.
+
+42. **Una conferma che non può fallire non è una conferma.** Gli stack usa-e-getta sono stati
+    smontati con `docker compose down -v > /dev/null 2>&1; echo "smontato"`, e il registro ha
+    letto «smontato» tre volte. Non era vero: i file Compose usano `${MONGO_IMAGE:?…}`, la
+    variabile non era nell'ambiente di quella shell, l'interpolazione falliva e `down` non
+    rimuoveva niente — undici container, dieci volumi e tre reti sono rimasti in piedi finché non
+    li ha trovati un `docker ps -a --filter name=spike` fatto per scrupolo. L'errore non è stato
+    il comando sbagliato: è stato mettere accanto a un comando che poteva fallire un `echo` che
+    non poteva. Due regole, adesso scritte. La prima: la riga che dichiara l'esito legge `$?`, o
+    tace. La seconda: dopo una pulizia si guarda che cosa resta, perché è l'unica verifica che
+    non passa per la parola del comando che ha pulito. (Chiuso con `docker compose -p <nome>
+    down -v`, che non ha bisogno del file e quindi non interpola niente.)
