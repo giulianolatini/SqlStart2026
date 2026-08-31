@@ -207,10 +207,16 @@ Una regola che sorprende chi arriva da `apt` ([S-049](../Sources.md#s-049)):
 > within its release series (e.g. 7.2.1 to 7.2.2). Upgrading a full release series (e.g. 6.0 to
 > 7.0) requires a new installation.»
 
-Cioè: le correzioni dentro la stessa riga di versione arrivano da sole, il salto di riga di versione
-no. È un comportamento diverso da quello di Ubuntu, dove `apt-get upgrade` fa passare avanti tutto
-quello che il repository configurato offre, ed è un motivo in più per sapere quale riga di versione
-sta girando prima di programmare un aggiornamento.
+Cioè: dentro la stessa riga di versione un `.msi` più recente si installa sopra quello che c'è già,
+senza disinstallare prima; il salto di riga di versione vuole «a new installation». Attenzione a cosa
+la frase *non* dice: descrive come si comporta l'installatore quando lo si esegue, non che Windows
+vada a cercarlo. Il `.msi` nuovo lo scarica una persona, ogni volta.
+
+È qui la differenza con Ubuntu, dove il repository configurato è quello di una riga di versione e
+`apt-get upgrade` sposta avanti da solo l'ultima disponibile dentro quella riga
+([pagina Linux](linux.md#2-installare)). Su Windows nessun automatismo tiene il conto al posto tuo,
+ed è un motivo in più per sapere quale riga di versione sta girando prima di programmare un
+aggiornamento.
 
 ---
 
