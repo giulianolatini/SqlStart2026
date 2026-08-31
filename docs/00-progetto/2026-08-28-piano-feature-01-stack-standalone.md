@@ -4,6 +4,15 @@
 > termina con un deliverable verificabile e un commit. Leggere anche la specifica
 > collegata: questo piano attua decisioni prese lì, non le rimette in discussione.
 
+> **Nota di allineamento, 2026-08-31.** Dove questo piano dice
+> `pull_policy: ${PULL_POLICY:-missing}` e `PULL_POLICY=never`, leggere **`pull_policy: never`
+> scritto fisso nel file Compose**, senza variabile. Il cambio nasce da una review esterna della
+> PR #2, che ha fatto emergere un conflitto fra [ADR-0018](../Decision.md#adr-0018) e
+> [ADR-0027](../Decision.md#adr-0027), entrambe Accettata: lo scioglie
+> [ADR-0039](../Decision.md#adr-0039), che supera la prima. Il criterio di completamento 2 — «`make
+> up-01` funziona con la rete disattivata» — non cambia di merito: cambia il modo in cui la
+> garanzia è scritta. Il testo qui sotto **non** è stato riscritto.
+
 ---
 
 **Obiettivo:** produrre il primo dei tre stack Compose — l'istanza singola — e la

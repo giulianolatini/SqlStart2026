@@ -13,6 +13,12 @@
 > fotografia di ciò che si sapeva quando è stato scritto, e il repository non riscrive le
 > decisioni, le supera.
 
+> **Nota di allineamento, 2026-08-31.** Dove questo piano dice
+> `pull_policy: ${PULL_POLICY:-missing}` con `PULL_POLICY=never` sul profilo di palco, leggere
+> **`pull_policy: never` scritto fisso nel file Compose**, senza variabile:
+> [ADR-0039](../Decision.md#adr-0039) supera [ADR-0018](../Decision.md#adr-0018). Anche qui il
+> testo non è stato riscritto.
+
 ---
 
 **Obiettivo:** dotare il repository di igiene, impianto documentale verificabile e

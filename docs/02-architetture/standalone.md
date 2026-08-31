@@ -221,16 +221,16 @@ Il nome esplicito del progetto evita che Compose lo deduca dal nome della cartel
 ([ADR-0003](../Decision.md#adr-0003)), così i tre stack convivono senza pestarsi i piedi.
 
 L'immagine arriva per **digest**, non per tag, da `tools/images.env` generato da `make images-pull`
-([ADR-0018](../Decision.md#adr-0018)). La forma `${VAR:?messaggio}` fa fallire Compose subito e
+([ADR-0028](../Decision.md#adr-0028)). La forma `${VAR:?messaggio}` fa fallire Compose subito e
 dicendo cosa manca, invece di avviare un container con un'immagine vuota. La versione è 7.0.40 e non
-una 8.x, per una ragione che è costata uno spike intero: [ADR-0028](../Decision.md#adr-0028).
+una 8.x, per una ragione che è costata uno spike intero: è scritta nello stesso ADR.
 
 ### Nome host e politica di pull
 
 ```yaml
     container_name: mongo-standalone
     hostname: mongo-standalone
-    pull_policy: ${PULL_POLICY:-missing}
+    pull_policy: never
     restart: unless-stopped
 ```
 
@@ -238,8 +238,13 @@ Il nome host esplicito qui non serve a nessuno — c'è un nodo solo — e c'è 
 abitudine si prende sullo stack dove non costa niente. Sugli altri due gli indirizzi IP sono un
 guasto in attesa ([ADR-0021](../Decision.md#adr-0021)).
 
-`pull_policy` è `missing` in sviluppo e `never` sul palco, dove non c'è rete e un tentativo di pull
-è un minuto perso davanti al pubblico. Una variabile sola, controllata dal preflight.
+`pull_policy: never` significa che l'immagine non viene **mai** scaricata: se non è nella cache
+locale l'avvio fallisce subito, e in sala è esattamente ciò che si vuole — un errore in un decimo di
+secondo invece di un minuto di attesa di rete davanti al pubblico
+([V-022](../Sources.md#v-022)). Il valore è scritto fisso e non arriva da una variabile: una
+variabile si dimentica di passare, un file no, e questo file va proiettato
+([ADR-0039](../Decision.md#adr-0039), che supera [ADR-0018](../Decision.md#adr-0018)). Il prezzo è
+`make images-pull` una volta, a casa, con la rete.
 
 ### Memoria e CPU
 

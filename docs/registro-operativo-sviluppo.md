@@ -584,3 +584,60 @@ questione da ADR, non da correzione: aspetta la decisione del Product Owner.
     codice; tutti e tre lo sono in trenta secondi eseguendo. La regola che ne esce è la stessa
     per lo strumento e per la pagina di documentazione: **un'affermazione su un sistema che
     non è tuo va provata contro quel sistema**, e la prova va scritta.
+
+---
+
+## 2026-08-31 — `pull_policy: never`, e due ADR che non potevano stare insieme
+
+**Fatto:** il Product Owner ha sciolto il conflitto emerso dalla review: governa
+[ADR-0027](Decision.md#adr-0027), quindi `never` fisso e regola di `check_stack.py` rovesciata,
+registrato in [ADR-0039](Decision.md#adr-0039) che **supera** [ADR-0018](Decision.md#adr-0018).
+ADR-0018 non è stata riscritta: le è stato aggiornato lo stato e aggiunto il motivo del
+superamento, come già per [ADR-0008](Decision.md#adr-0008).
+
+Il motivo per cui ADR-0018 cade merita di essere scritto, perché non l'ha smontata un fatto nuovo:
+l'ha smontata una sua riga. Fra le alternative scartate ADR-0018 respingeva `--pull never` da riga
+di comando perché «si dimentica, e soprattutto non è scritto nel file: l'artefatto non
+documenterebbe più il proprio comportamento». È l'argomento esatto che vale contro una variabile
+d'ambiente. **La decisione conteneva la propria confutazione, e ci sono voluti sei giorni e due
+revisori esterni perché qualcuno la leggesse.**
+
+**Cos'è cambiato.** `docker/01-standalone/compose.yaml` porta `pull_policy: never` letterale;
+`PULL_POLICY` sparisce da `.env.example`, che al suo posto spiega perché non c'è più. In
+`tools/check_stack.py` la regola non chiede più che `pull_policy` esista: chiede che valga `never`
+**e** che non provenga da un'interpolazione. Per poterlo chiedere lo strumento legge il file due
+volte, prima e dopo la sostituzione delle variabili: le altre regole giudicano lo stack che si
+avvia, questa giudica ciò che il file promette a chi lo apre. Due test rossi prima, suite da
+settantaquattro a settantasei.
+
+**Provato, non dedotto** ([V-022](Sources.md#v-022)): `make up-01` porta il container a `Healthy`,
+`make smoke-01` passa dodici prove su dodici, e con un digest che non è in cache `up` fallisce in
+**0,113 s** con `No such image` — lo stesso ordine di grandezza misurato dallo spike in
+[V-006](Sources.md#v-006). Prima di correggere ho fatto girare `make stack-check` sul file vecchio
+e la regola nuova: fallisce nominando il servizio. Un controllo che non si vede fallire non è un
+controllo.
+
+Le due pagine di piano hanno ricevuto una **nota di allineamento in testa**, non una riscrittura.
+Restano da rifare i filmati? No: nessun filmato mostra quella riga.
+
+**Una correzione a margine.** [ADR-0038](Decision.md#adr-0038) scrive che la numerazione delle
+ancore ripetute «qui non è mai servita, e il giorno che servisse si vedrebbe subito». La seconda
+metà è falsa, e il giro di review l'ha dimostrato: non si sarebbe vista affatto — si sarebbe vista
+la segnalazione di un rimando rotto che rotto non è, cioè il contrario di ciò che è. L'ADR non si riscrive; la correzione sta qui
+e nel codice, che ora la regola la implementa.
+
+**Note di metodo.**
+
+34. Due decisioni accettate e opposte sono peggio di nessuna delle due. Finché convivono, chi legge
+    ne applica una a caso e ha ragione comunque — e lo strumento di controllo, che ne conosce una
+    sola, difende attivamente quella sbagliata. `check_stack.py` ha passato sei giorni a far
+    rispettare ADR-0018 contro ADR-0027. **Un controllo automatico amplifica la decisione che
+    conosce: se è quella superata, amplifica l'errore** e gli dà l'autorevolezza di un test verde.
+35. Il posto dove cercare l'errore di una decisione è la sua sezione «alternative scartate». È lì
+    che chi decide scrive gli argomenti nella loro forma più nuda, ed è lì che si vede se ne ha
+    applicato uno a metà. Vale la pena rileggere le alternative scartate degli ADR vecchi con gli
+    occhi di oggi: costa dieci minuti e non richiede fonti nuove.
+36. La differenza fra `${PULL_POLICY:-never}` e `never` è invisibile a chi esegue e decisiva per
+    chi guarda. Il primo si comporta bene su questa macchina, oggi, con questo file d'ambiente. Il
+    secondo **dice** come si comporta, a chiunque lo apra, per sempre. In un repository che è
+    materiale didattico prima che infrastruttura, la seconda proprietà vale più della prima.
