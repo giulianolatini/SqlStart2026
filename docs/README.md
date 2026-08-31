@@ -20,7 +20,11 @@ verdetto su cosa la pagina afferma davvero e le **riserve**, cioè il punto in c
 smette di coprirci. La gerarchia con cui le fonti si pesano è
 [ADR-0024](Decision.md#adr-0024). Il legame fra decisioni e fonti è verificato da un
 controllo automatico, `tools/check_citations.py`, che fallisce se un ADR cita una fonte
-inesistente o se una fonte non è citata da nessun ADR.
+inesistente o se una fonte non è citata da nessun ADR. Accanto gira
+`tools/check_links.py`, che riapre ogni collegamento relativo di queste pagine e verifica
+che il file esista e che l'ancora ci sia davvero — comprese quelle che nessuno ha
+dichiarato, perché le genera GitHub dal titolo. I due controlli stanno in `make docs-check`,
+e la ragione per cui esistono è [ADR-0038](Decision.md#adr-0038).
 
 Le pagine non ancora scritte compaiono comunque in questo indice, con la feature che le
 produrrà. Un indice che promette senza datare invecchia male.
@@ -40,27 +44,30 @@ produrrà. Un indice che promette senza datare invecchia male.
 |---|---|---|
 | [`2026-08-24-design.md`](00-progetto/2026-08-24-design.md) | il documento di design: vincoli, architetture, applicazione, impianto documentale, piano di lavoro | già nel repository |
 | [`2026-08-25-piano-feature-00-fondamenta.md`](00-progetto/2026-08-25-piano-feature-00-fondamenta.md) | il piano di implementazione della prima feature, passo per passo | già nel repository |
+| [`2026-08-28-piano-feature-01-stack-standalone.md`](00-progetto/2026-08-28-piano-feature-01-stack-standalone.md) | il piano della seconda feature: lo stack a istanza singola, la verifica eseguibile sui file Compose e le sei pagine di documentazione dovute | già nel repository |
 | [`2026-08-25-spike-sharded.md`](00-progetto/2026-08-25-spike-sharded.md) | il verbale dello spike: il file Compose che ha funzionato, la memoria misurata sugli undici container, i tre punti in cui il design si era sbagliato, e la versione di MongoDB che su Docker Desktop non parte | già nel repository |
 | [`limiti-noti.md`](00-progetto/limiti-noti.md) | i confini dichiarati: dove il lab semplifica, dove la documentazione ufficiale non copre, quali affermazioni diffuse non risultano scritte | già nel repository |
 
 ## 01-installazione — istanza singola, fuori da Docker
 
 Il lab gira in container, ma la domanda «e su una macchina vera?» arriva sempre. Queste due
-pagine rispondono con le procedure ufficiali.
+pagine rispondono con le procedure ufficiali, e portano entrambe una riserva in testa: non
+sono state eseguite qui, perché qui non c'è né un Ubuntu né un Windows
+([ADR-0037](Decision.md#adr-0037)).
 
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
-| `01-installazione/linux.md` | installazione di un'istanza singola su Linux, servizio, percorsi, configurazione iniziale | `feature/01-stack-standalone` |
-| `01-installazione/windows.md` | installazione di un'istanza singola su Windows, servizio, differenze rispetto a Linux | `feature/01-stack-standalone` |
+| [`01-installazione/linux.md`](01-installazione/linux.md) | installazione su Ubuntu dal repository ufficiale, che cosa compare sul sistema, il servizio `systemd`, e la messa a punto che nessuno fa — `bindIp`, `ulimit`, THP, filesystem, swap, NUMA; in coda il contrasto misurato con il container del lab, che è la stessa installazione senza `systemd` | già nel repository |
+| [`01-installazione/windows.md`](01-installazione/windows.md) | installazione con il `.msi`, il servizio di Windows, la shell che va installata a parte, e le differenze che contano — WSL non supportato, `ulimit` e THP che non esistono, i permessi del keyfile che su Windows non vengono controllati | già nel repository |
 
 ## 02-architetture — le tre modalità
 
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
-| `02-architetture/standalone.md` | istanza singola: quando basta, cosa non garantisce | `feature/01-stack-standalone` |
+| [`02-architetture/standalone.md`](02-architetture/standalone.md) | istanza singola: i quattro limiti con la fonte che li sostiene, quando basta davvero, il file Compose riga per riga | già nel repository |
 | `02-architetture/replica-set.md` | topologia, elezioni, read preference, write concern, ritardo di replica | `feature/02-stack-replicaset` |
 | `02-architetture/sharded-cluster.md` | mongos, config server, shard key, bilanciamento; i due profili dello stack | `feature/03-stack-sharded` |
-| `02-architetture/trappole-mongodb-in-docker.md` | i punti in cui MongoDB e Docker si fraintendono: nomi host, scoperta della topologia, permessi del keyfile, volumi già popolati | `feature/01-stack-standalone`, ampliata da `02` e `03` |
+| [`02-architetture/trappole-mongodb-in-docker.md`](02-architetture/trappole-mongodb-in-docker.md) | i punti in cui MongoDB e Docker si fraintendono, una voce per sintomo: undici alla nascita, ampliata da `02` e `03` | già nel repository |
 
 ## 03-amministrazione — le procedure
 
@@ -69,13 +76,13 @@ pagine rispondono con le procedure ufficiali.
 | `03-amministrazione/backup-restore.md` | `mongodump`/`mongorestore`, backup a caldo con `--oplog` e i suoi limiti, restore verificato | `feature/02-stack-replicaset` |
 | `03-amministrazione/sicurezza-keyfile-x509.md` | autenticazione interna: perché il lab usa il keyfile, perché MongoDB lo riserva a test e sviluppo, e come si passa a X.509 in produzione | `feature/02-stack-replicaset` |
 | `03-amministrazione/statistiche-monitoraggio.md` | `serverStatus`, `dbStats`, metriche di replica, cosa guardare sotto carico | `feature/04-app-python` |
-| `03-amministrazione/log.md` | formato dei log, livelli, cosa cercare durante un'elezione | `feature/01-stack-standalone` |
+| [`03-amministrazione/log.md`](03-amministrazione/log.md) | il formato JSON campo per campo, le severità e i componenti misurati, `logRotate` in container, cosa cercare durante un'elezione (mappa scritta qui, `id` verificati in `02`) | già nel repository |
 
 ## 04-mongosh — la shell
 
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
-| `04-mongosh/guida-mongosh.md` | connessione, comandi di uso quotidiano, comandi di amministrazione del replica set e dello sharded cluster, script non interattivi | `feature/01-stack-standalone` |
+| [`04-mongosh/guida-mongosh.md`](04-mongosh/guida-mongosh.md) | connettersi da dentro il container e i tre parametri che `mongosh` sceglie da sé, comandi di uso quotidiano, comandi di amministrazione di replica set e sharded cluster (scritti qui, eseguiti in `02` e `03`), script non interattivi e la tabella dei codici di uscita | già nel repository |
 
 ## 05-talk — il palco
 
@@ -98,4 +105,4 @@ pagine rispondono con le procedure ufficiali.
 |---|---|
 | `docker/` | i tre stack Compose: `01-standalone`, `02-replicaset`, `03-sharded` |
 | `app/` | l'applicazione dimostrativa in Python |
-| `tools/` | strumenti di repository: preflight, pre-scaricamento delle immagini, verifica delle citazioni |
+| `tools/` | strumenti di repository: preflight, pre-scaricamento delle immagini, e i tre controllori che tengono gli artefatti allineati alle decisioni — citazioni, file Compose, collegamenti ([ADR-0038](Decision.md#adr-0038)) |

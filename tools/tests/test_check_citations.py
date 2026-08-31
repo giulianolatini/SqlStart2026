@@ -1,4 +1,13 @@
-from check_citations import Fonte, main, parse_decisions, parse_sources, verifica
+from check_citations import (
+    ADR_TITOLO,
+    FONTE_TITOLO,
+    Fonte,
+    main,
+    parse_decisions,
+    parse_sources,
+    ripetuti,
+    verifica,
+)
 
 
 def test_estrae_un_adr_con_le_sue_fonti():
@@ -91,3 +100,52 @@ def test_una_fonte_e_immutabile_e_utilizzabile_come_chiave():
     fonte = Fonte("S-001", "https://esempio", {"ADR-0001"}, "s-001")
     assert isinstance(fonte.usata_da, frozenset)
     assert hash(fonte) == hash(Fonte("S-001", "https://esempio", {"ADR-0001"}, "s-001"))
+
+
+def test_ripetuti_trova_un_identificatore_dichiarato_due_volte():
+    # Il caso reale: un numero riusato per sbaglio in una PR che ne aggiunge
+    # tre in fondo al file. Nessuna fonte resta orfana, nessun collegamento
+    # inverso salta, e il controllo tace su un ADR che non esiste più.
+    testo = "## ADR-0001 — La prima\n\n## ADR-0001 — La seconda\n\n## ADR-0002 — Un'altra\n"
+    assert ripetuti(ADR_TITOLO, testo) == ["ADR-0001"]
+
+
+def test_ripetuti_tace_su_identificatori_distinti():
+    testo = "### S-001 — Una\n\n### S-002 — Due\n"
+    assert ripetuti(FONTE_TITOLO, testo) == []
+
+
+def scrivi_coppia(cartella, decisione, fonti):
+    (cartella / "Decision.md").write_text(decisione, encoding="utf-8")
+    (cartella / "Sources.md").write_text(fonti, encoding="utf-8")
+    return [str(cartella / "Decision.md"), str(cartella / "Sources.md")]
+
+
+def test_main_segnala_un_adr_dichiarato_due_volte(tmp_path, capsys):
+    argomenti = scrivi_coppia(
+        tmp_path,
+        '<a id="adr-0001"></a>\n## ADR-0001 — La prima\n\n'
+        "**Fonti:** [S-001](Sources.md#s-001)\n\n"
+        '<a id="adr-0001"></a>\n## ADR-0001 — La seconda, con lo stesso numero\n\n'
+        "**Fonti:** [S-001](Sources.md#s-001)\n",
+        '<a id="s-001"></a>\n### S-001 — La fonte\n\n'
+        "- **URL:** https://esempio.it/1\n- **Usata da:** ADR-0001\n",
+    )
+    codice = main(argomenti)
+    assert codice == 1
+    assert "ADR-0001" in capsys.readouterr().err
+
+
+def test_main_segnala_una_fonte_dichiarata_due_volte(tmp_path, capsys):
+    argomenti = scrivi_coppia(
+        tmp_path,
+        '<a id="adr-0001"></a>\n## ADR-0001 — Una decisione\n\n'
+        "**Fonti:** [S-001](Sources.md#s-001)\n",
+        '<a id="s-001"></a>\n### S-001 — La fonte giusta\n\n'
+        "- **URL:** https://esempio.it/giusta\n- **Usata da:** ADR-0001\n\n"
+        '<a id="s-001"></a>\n### S-001 — Una fonte diversa con lo stesso numero\n\n'
+        "- **URL:** https://esempio.it/sbagliata\n- **Usata da:** ADR-0001\n",
+    )
+    codice = main(argomenti)
+    assert codice == 1
+    assert "S-001" in capsys.readouterr().err

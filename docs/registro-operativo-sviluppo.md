@@ -375,3 +375,288 @@ E tre note di metodo.
     casa, e la regola anti-orfane torna a fare quello per cui esiste — impedire la bibliografia
     decorativa — invece di impedire una fonte vera. La lezione è che una regola che ostacola è
     più spesso il sintomo di un buco altrove che un difetto della regola.
+
+---
+
+## 2026-08-28 — Chiusura di `feature/01-stack-standalone`
+
+**Fatto:** tredici task, sedici commit, venticinque file rispetto a `develop` — quindici
+nuovi e dieci modificati. Il branch
+consegna il primo stack e le pagine che lo spiegano: `docker/01-standalone/compose.yaml` con
+le risorse dichiarate e l'immagine pinnata per digest, il seed deterministico in
+`init/10-dati-demo.js`, sei target `make` per governarlo, `tools/smoke-standalone.sh` con
+dodici controlli, e `tools/check_stack.py` che verifica il file Compose contro gli ADR sulle
+risorse. Sul lato documentazione: l'[istanza singola](02-architetture/standalone.md), le
+[trappole di MongoDB in Docker](02-architetture/trappole-mongodb-in-docker.md), i
+[log](03-amministrazione/log.md), la [guida a `mongosh`](04-mongosh/guida-mongosh.md) e le due
+pagine di installazione su [Linux](01-installazione/linux.md) e
+[Windows](01-installazione/windows.md). Nove ADR nuovi — da [ADR-0030](Decision.md#adr-0030) a
+[ADR-0038](Decision.md#adr-0038) — ventitré fonti primarie e dodici verifiche empiriche, che
+portano [`Sources.md`](Sources.md) a cinquantaquattro voci e ventuno misure.
+
+L'ultimo commit salda un debito lasciato aperto alla chiusura di `feature/00`:
+`tools/check_links.py` riapre ogni collegamento relativo di `docs/` e del
+[`README.md`](../README.md) di radice, verifica che il file esista e che l'ancora ci sia — e
+salta i blocchi recintati, che era la condizione esplicita posta allora. La suite degli
+strumenti passa da trentotto a sessantatré test.
+
+Verifica finale nell'ordine prescritto dal piano, su albero pulito: `make tools-test` esce `0`
+con sessantatré test, `make docs-check` esce `0` su entrambi i controlli, `make stack-check`
+esce `0`, `make images-verify` esce `0`, `make preflight` esce `0` con `Superati: 8 · Avvisi:
+1 · Errori: 0`. Il ciclo completo dello stack — `make up-01`, `make smoke-01`, `make down-01`
+— esce `0`, con il container sano e i dodici controlli superati. L'avvio è stato eseguito con
+`PULL_POLICY=never`, cioè con il meccanismo su cui poggia la garanzia offline
+([ADR-0018](Decision.md#adr-0018)): Compose non ha contattato nessun registry e il container è
+diventato `healthy` in pochi secondi. L'unico avviso resta la cartella dei filmati di riserva,
+che dal 2026-09-18 il preflight promuove da sé a errore bloccante.
+
+**Fallito:** cinque cose, e quattro le ha trovate una macchina.
+
+1. **La prova con il Wi-Fi spento non è stata eseguita.** Il piano la chiedeva alla lettera, e
+   il suo surrogato — `PULL_POLICY=never` con l'immagine già in cache — copre il meccanismo ma
+   non l'ambiente. Non è stata fatta perché spegnere la rete della macchina di sviluppo mentre
+   il lavoro è in corso è un gesto che va deciso da chi la sta usando, non da chi ci sta
+   lavorando sopra in background. Resta un comando solo, e va eseguito prima del 18 settembre:
+   `PULL_POLICY=never make up-01` con la rete staccata. Finché non è stato fatto, la garanzia
+   offline di questo branch è documentata e verosimile, non verificata nell'ambiente in cui
+   conta.
+2. **Il dataset di demo è stato corrotto durante la stesura della guida a `mongosh`.** Le prove
+   sui comandi di scrittura sono state eseguite sulla collezione `lab.ordini`, cioè sui dati
+   che lo smoke test usa come impronta. Il controllo se n'è accorto subito, perché l'impronta
+   di `lab.ordini` non tornava più, e `make seed-01` ha rimesso tutto a posto. Che sia costato
+   poco è merito del seed deterministico, non della prudenza di chi eseguiva: la lezione è che
+   una guida che mostra comandi di scrittura ha
+   bisogno di una collezione propria, e nel branch successivo l'avrà.
+3. **Due affermazioni inventate in `01-installazione/linux.md`, corrette prima del commit.** La
+   prima attribuiva a una sola pagina un'avvertenza che sta identica in entrambi i tutorial di
+   installazione; la seconda descriveva una forma di pinning dei pacchetti — cinque nomi con
+   la versione esatta più `apt-mark hold` — che la variante di pagina consultata **non
+   riporta**. La fonte dice soltanto «You can install either the latest stable version of
+   MongoDB or a specific version of MongoDB» ([S-048](Sources.md#s-048)), e i comandi stanno in
+   una scheda che non è stata aperta. Il testo ora riporta quello che la fonte dice e manda il
+   lettore alla scheda giusta. È il tipo di errore che la
+   [gerarchia delle fonti](Decision.md#adr-0024) esiste per impedire, e che si commette
+   comunque quando si scrive da memoria una pagina che si è appena letta.
+4. **Tre blocchi di console della guida a `mongosh` contenevano numeri vecchi.** Erano stati
+   presi durante la stesura e non rieseguiti: `db.stats` senza tre campi, un `uptime` di
+   3127 secondi diventato 3471, un `totalCreated` di 1875 diventato 2118. Trovati rieseguendo
+   i comandi esatti che la pagina stampa, e questa è la sola verifica che valga: una pagina che
+   mostra output deve mostrare l'output che quei comandi producono oggi, non quello che
+   producevano tre ore fa.
+5. **Il primo giro di `check_links.py` ha segnalato un errore dentro l'ADR che lo giustificava.**
+   [ADR-0038](Decision.md#adr-0038), spiegando che i blocchi di codice vanno saltati, conteneva
+   un `[testo](url)` scritto fra apici inversi come esempio — e lo strumento, che saltava le
+   recinzioni ma non il codice in linea, lo ha preso per un rimando rotto. Corretto lo
+   strumento, non il testo. È il caso di scuola del punto 2 di quella stessa decisione: un
+   controllore che ha ragione tre volte su quattro viene spento dopo il quarto falso allarme, e
+   la prima occasione per sbagliarlo si presenta sempre nel documento che lo introduce.
+
+**Note di metodo, per la prossima volta.**
+
+- I task 2 e 3 del piano sono stati chiusi in un commit solo. Il piano li separava — il file
+  Compose, poi l'healthcheck — ma l'healthcheck era la sola parte del file che ancora non era
+  scritta, e due commit avrebbero raccontato un lavoro che non è avvenuto in due tempi. La
+  granularità dei commit segue il lavoro, non il piano; quando divergono si scrive perché.
+- La riga `**Fonti:**` degli ADR deve stare su **una riga fisica**, altrimenti
+  `check_citations.py` ne legge solo la prima parte e dichiara orfane le fonti che seguono. È
+  un vincolo di formato che nessun documento dichiarava e che si scopre solo sbagliandolo. Ora
+  è scritto qui; se tornerà a costare tempo, diventerà un messaggio di errore dello strumento
+  invece di una nota nel registro.
+
+---
+
+## 2026-08-31 — Una review esterna su PR #2
+
+**Fatto:** PR #2 è stata sottoposta alla stessa review automatica esterna di PR #1. Un solo
+rilievo puntuale, ed era fondato. I numeri della voce qui sopra — sedici commit, venticinque
+file — restano quelli del branch alla chiusura: i commit di questo giro si contano a parte.
+
+Il rilievo riguarda `RECINTO`, in `tools/check_links.py`: pretendeva i tre apici in colonna
+zero, e in `docs/Sources.md` esistono recinti rientrati. La riga citata, la 1145, è esatta.
+Un recinto dentro un elenco puntato rientra insieme al suo punto, e in `Sources.md` gli
+esempi di codice stanno quasi tutti lì dentro.
+
+Verificato prima di correggere, su una pagina costruita apposta, e il difetto è risultato più
+largo di come il revisore lo descriveva. Il revisore prevedeva un falso positivo: un
+`[testo](url)` scritto in un esempio rientrato viene preso per un rimando vero e segnalato
+come rotto. Confermato. Ma la stessa svista produce anche il caso opposto, che il revisore
+non nomina: un `<a id="...">` scritto in un esempio rientrato viene raccolto fra le ancore
+buone, e allora un rimando rotto che citi quell'ancora **passa il controllo senza una
+parola**. Un falso positivo lo vedi e ti arrabbi; un falso negativo non lo vedi.
+
+Corretto ammettendo il rientro su apertura e chiusura, con i due test scritti rossi prima. La
+suite passa da sessantatré a sessantacinque test. `make docs-check` restava a `0` anche
+prima, e continua a restarci: dentro quel recinto oggi non c'è né un rimando né un'ancora,
+quindi il difetto era latente e non attivo. È il motivo per cui né i sei criteri di
+completamento né la verifica finale potevano scovarlo — nessuno dei due guarda ciò che uno
+strumento *non* segnala.
+
+`check_citations.py` è stato controllato per la stessa classe di errore e non ce l'ha: i suoi
+punti d'ingresso sono ancorati a inizio riga con prefissi propri — `## ADR-`, `### S-`,
+`- **URL:**` — e un blocco rientrato non li produce.
+
+**Note di metodo.**
+
+28. Un analizzatore va provato sul materiale che dovrà leggere, non su materiale costruito per
+    provarlo. I venticinque test di `check_links.py` giravano su testi scritti a mano, tutti
+    con i recinti in colonna zero, perché è così che li scrive chi li scrive apposta.
+    `Sources.md`, che è la pagina più lunga del repository, li ha quasi tutti rientrati. Il
+    caso che mancava non era un caso limite: era la forma normale del corpus vero.
+29. Lo stesso strumento ha sbagliato due volte nello stesso punto — prima il codice in linea,
+    ora il rientro — e le due volte per la stessa ragione: «che cosa non è prosa» è un'ipotesi
+    sul Markdown, e un'ipotesi non provata contro un file vero è un falso allarme in attesa di
+    turno. Le due volte la correzione è andata allo strumento e non al testo, ed è la sola
+    direzione ammessa: un controllore che si adatta ai documenti che non sa leggere smette di
+    controllarli.
+30. Una review esterna che produce un rilievo solo non ha lavorato meno di una che ne produce
+    cinque. Quel rilievo indicava il file, la riga e la conseguenza, e sotto ce n'era una
+    seconda che il revisore non aveva visto. Il valore non stava nella diagnosi completa: era
+    nell'aver guardato una riga che chi l'aveva scritta considerava chiusa.
+
+---
+
+## 2026-08-31 — Una seconda review esterna, sei rilievi
+
+**Fatto:** la stessa PR è stata data a un secondo revisore automatico, di famiglia diversa dal
+primo. Sei rilievi, tutti con file e riga. Arbitrati uno per uno eseguendo, come vuole la regola
+del repository: **sei fondati su sei**. Quattro corretti qui, uno chiuso motivando, uno che non
+si può correggere senza una decisione — perché il difetto non è nel codice.
+
+**I quattro corretti.**
+
+`tools/check_stack.py` risolveva `${VAR:-x}` e `${VAR:?x}` come se i due punti non ci fossero.
+Provato contro Compose vero (v5.4.0), non contro la specifica: un file d'ambiente con
+`PULL_POLICY=` e `docker compose config` restituisce `pull_policy: missing`, mentre lo
+strumento leggeva la stringa vuota; e `MONGO_IMAGE=` con la forma `:?` fa fallire Compose
+con «required variable MONGO_IMAGE is missing a value», mentre lo strumento la lasciava
+passare. Il controllore giudicava uno stack diverso da quello che si avvia. Le due prove
+stanno per intero nel messaggio di questo giro di commit e diventeranno una voce di verifica
+in `Sources.md` insieme all'ADR che scioglie il sesto rilievo, che è l'ADR che le cita.
+
+`tools/check_stack.py`, ancora: `DIGEST` accettava da tre a sessantaquattro cifre esadecimali.
+Un digest SHA-256 ne ha sessantaquattro esatte, Docker rifiuta il resto, e la regola nata per
+impedire i tag mobili approvava un pin inesistente. Il punto amaro: nove fixture dei test
+usavano `sha256:abc`. I test non avevano mancato il caso — lo avevano scritto e promosso.
+
+`tools/check_links.py` ignorava la quinta delle cinque regole di
+[S-053](Sources.md#s-053), quella che il repository cita per esteso: «If the automatically
+generated anchor for a heading is identical to an earlier anchor in the same document, a unique
+identifier is generated by appending a hyphen and an auto-incrementing integer». Tre titoli
+uguali danno `esempio`, `esempio-1`, `esempio-2`; lo strumento ne conosceva uno e avrebbe
+segnalato come rotti due rimandi che su GitHub funzionano.
+
+`tools/check_citations.py` perdeva un blocco intero quando un identificatore compariva due
+volte: il dizionario che accumula gli ADR non sa dire «ce n'erano due», e il secondo
+sovrascriveva il primo. Se i due blocchi citano la stessa fonte, il controllo stampa
+«Citazioni coerenti.» su un documento a cui manca un pezzo.
+
+**Quello chiuso senza correzione.** Lo stesso rilievo sulle ancore aggiungeva che i
+collegamenti con la destinazione fra parentesi angolari — `[testo](<con spazi.md>)` — non
+vengono riconosciuti. Vero, e senza conseguenze: nel corpus non esiste un solo file con uno
+spazio nel nome, la convenzione è kebab-case, e ogni forma di parsing in più su un corpus che
+non la usa è un falso positivo in attesa di turno. Chiuso dichiarando il motivo, non tacendo.
+
+**Quello che non si corregge da solo.** Il rilievo sul `pull_policy` di
+`docker/01-standalone/compose.yaml` era formulato come una difformità dall'ADR-0027, e nel
+verificarlo è saltato fuori che il conflitto sta a monte:
+[ADR-0018](Decision.md#adr-0018) prescrive `${PULL_POLICY:-missing}` con `never` esportato dal
+profilo di palco, [ADR-0027](Decision.md#adr-0027) prescrive `never` fisso in ogni servizio di
+ogni stack e argomenta contro `missing` per nome. **Sono entrambi Accettata, nessuno dei due
+supera l'altro.** L'artefatto implementa il primo e `check_stack.py` lo fa rispettare. È una
+questione da ADR, non da correzione: aspetta la decisione del Product Owner.
+
+**Note di metodo.**
+
+31. Un secondo revisore, di famiglia diversa dal primo, non ha trovato «gli stessi difetti
+    meglio»: ne ha trovati sei che il primo non aveva nominato, nei tre strumenti che il primo
+    aveva letto. La differenza non è la bravura, è dove si posa lo sguardo. Vale la pena
+    pagare due volte.
+32. Il rilievo più difficile da arbitrare è stato quello che alla prima prova sembrava
+    infondato. Avevo costruito il caso con due ADR omonimi che citavano fonti diverse, e il
+    controllo falliva — segno apparente che il difetto non c'era. Falliva per un'altra
+    ragione, e con un messaggio fuorviante. Il caso giusto era l'altro, quello in cui i due
+    blocchi citano la stessa fonte: lì il controllo tace. **Una prova che assolve va guardata
+    con lo stesso sospetto di una che accusa**, perché un controesempio mal costruito difende
+    il codice invece di metterlo alla prova.
+33. Quattro rilievi su sei riguardano non ciò che il codice fa, ma ciò che il codice *crede*
+    di un sistema esterno: come Compose interpola una variabile vuota, quante cifre ha un
+    digest, come GitHub numera le ancore ripetute. Nessuno dei tre è verificabile leggendo il
+    codice; tutti e tre lo sono in trenta secondi eseguendo. La regola che ne esce è la stessa
+    per lo strumento e per la pagina di documentazione: **un'affermazione su un sistema che
+    non è tuo va provata contro quel sistema**, e la prova va scritta.
+
+---
+
+## 2026-08-31 — `pull_policy: never`, e due ADR che non potevano stare insieme
+
+**Fatto:** il Product Owner ha sciolto il conflitto emerso dalla review: governa
+[ADR-0027](Decision.md#adr-0027), quindi `never` fisso e regola di `check_stack.py` rovesciata,
+registrato in [ADR-0039](Decision.md#adr-0039) che **supera** [ADR-0018](Decision.md#adr-0018).
+ADR-0018 non è stata riscritta: le è stato aggiornato lo stato e aggiunto il motivo del
+superamento, come già per [ADR-0008](Decision.md#adr-0008).
+
+Il motivo per cui ADR-0018 cade merita di essere scritto, perché non l'ha smontata un fatto nuovo:
+l'ha smontata una sua riga. Fra le alternative scartate ADR-0018 respingeva `--pull never` da riga
+di comando perché «si dimentica, e soprattutto non è scritto nel file: l'artefatto non
+documenterebbe più il proprio comportamento». È l'argomento esatto che vale contro una variabile
+d'ambiente. **La decisione conteneva la propria confutazione, e ci sono voluti sei giorni e due
+revisori esterni perché qualcuno la leggesse.**
+
+**Cos'è cambiato.** `docker/01-standalone/compose.yaml` porta `pull_policy: never` letterale;
+`PULL_POLICY` sparisce da `.env.example`, che al suo posto spiega perché non c'è più. In
+`tools/check_stack.py` la regola non chiede più che `pull_policy` esista: chiede che valga `never`
+**e** che non provenga da un'interpolazione. Per poterlo chiedere lo strumento legge il file due
+volte, prima e dopo la sostituzione delle variabili: le altre regole giudicano lo stack che si
+avvia, questa giudica ciò che il file promette a chi lo apre. Due test rossi prima, suite da
+settantaquattro a settantasei.
+
+**Provato, non dedotto** ([V-022](Sources.md#v-022)): `make up-01` porta il container a `Healthy`,
+`make smoke-01` passa dodici prove su dodici, e con un digest che non è in cache `up` fallisce in
+**0,113 s** con `No such image` — lo stesso ordine di grandezza misurato dallo spike in
+[V-006](Sources.md#v-006). Prima di correggere ho fatto girare `make stack-check` sul file vecchio
+e la regola nuova: fallisce nominando il servizio. Un controllo che non si vede fallire non è un
+controllo.
+
+Le due pagine di piano hanno ricevuto una **nota di allineamento in testa**, non una riscrittura.
+Restano da rifare i filmati? No: nessun filmato mostra quella riga.
+
+**Una correzione a margine.** [ADR-0038](Decision.md#adr-0038) scrive che la numerazione delle
+ancore ripetute «qui non è mai servita, e il giorno che servisse si vedrebbe subito». La seconda
+metà è falsa, e il giro di review l'ha dimostrato: non si sarebbe vista affatto — si sarebbe vista
+la segnalazione di un rimando rotto che rotto non è, cioè il contrario di ciò che è. L'ADR non si riscrive; la correzione sta qui
+e nel codice, che ora la regola la implementa.
+
+**Note di metodo.**
+
+34. Due decisioni accettate e opposte sono peggio di nessuna delle due. Finché convivono, chi legge
+    ne applica una a caso e ha ragione comunque — e lo strumento di controllo, che ne conosce una
+    sola, difende attivamente quella sbagliata. `check_stack.py` ha passato sei giorni a far
+    rispettare ADR-0018 contro ADR-0027. **Un controllo automatico amplifica la decisione che
+    conosce: se è quella superata, amplifica l'errore** e gli dà l'autorevolezza di un test verde.
+35. Il posto dove cercare l'errore di una decisione è la sua sezione «alternative scartate». È lì
+    che chi decide scrive gli argomenti nella loro forma più nuda, ed è lì che si vede se ne ha
+    applicato uno a metà. Vale la pena rileggere le alternative scartate degli ADR vecchi con gli
+    occhi di oggi: costa dieci minuti e non richiede fonti nuove.
+36. La differenza fra `${PULL_POLICY:-never}` e `never` è invisibile a chi esegue e decisiva per
+    chi guarda. Il primo si comporta bene su questa macchina, oggi, con questo file d'ambiente. Il
+    secondo **dice** come si comporta, a chiunque lo apra, per sempre. In un repository che è
+    materiale didattico prima che infrastruttura, la seconda proprietà vale più della prima.
+
+37. **Un consuntivo si conta all'ultimo commit, non al penultimo.** La prima stesura della riga
+    qui sotto diceva «ventisei commit», e aveva contato il branch com'era *prima* del commit che la
+    conteneva. È lo stesso errore corretto il 28 agosto da `fix: il conteggio della voce di chiusura
+    era vecchio di un commit`, ricomparso tre giorni dopo nello stesso file — segno che stava in una
+    riga di messaggio e non in una regola. La regola, adesso scritta: quando un numero descrive il
+    branch e vive dentro il branch, si calcola includendo il commit che lo introduce.
+
+**Consuntivo del branch, alla vigilia dell'unione.** Ventotto commit e ventinove file rispetto a
+`develop`: i sedici della chiusura, i due del primo giro di review, i cinque del secondo, i tre di
+ADR-0039 e i due di coda — questo compreso. La PR è `MERGEABLE` senza conflitti, l'unico filo di
+commento è risolto, e nel
+repository non gira alcun controllo automatico su GitHub — per scelta
+([ADR-0038](Decision.md#adr-0038)): i tre controllori girano in locale, ed è lì che sono stati
+eseguiti.
+
+**Quello che resta aperto** non appartiene a questo branch e va scritto perché non si perda: la
+prova con la rete fisicamente staccata. Dopo [ADR-0039](Decision.md#adr-0039) il comando non ha
+più una variabile davanti — è `make up-01` con il Wi-Fi spento, e basta.

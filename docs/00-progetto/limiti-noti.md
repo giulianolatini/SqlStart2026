@@ -28,11 +28,13 @@ globale che dica a Compose di non toccare la rete. Il digest garantisce **quale*
 viene usata, non **se** si contatta il registry: nessuna pagina ufficiale afferma che
 un'immagine pinnata a digest e già presente in cache eviti la rete.
 
-**Come lo gestiamo:** `pull_policy: ${PULL_POLICY:-missing}` nei file Compose, con
-`PULL_POLICY=never` sul profilo di palco. `never` è l'unico valore con una frase documentale
-esplicita sul non contattare il registry, e fallisce in modo rumoroso se l'immagine manca —
-comportamento desiderabile: meglio scoprirlo al preflight che davanti al pubblico. Fonte:
-[S-019](../Sources.md#s-019).
+**Come lo gestiamo:** `pull_policy: never` scritto fisso in ogni servizio di ogni file Compose,
+senza variabile che possa sovrascriverlo ([ADR-0039](../Decision.md#adr-0039), che supera
+[ADR-0018](../Decision.md#adr-0018)). `never` è l'unico valore con una frase documentale esplicita
+sul non contattare il registry, e fallisce in modo rumoroso se l'immagine manca — comportamento
+desiderabile: meglio scoprirlo al preflight che davanti al pubblico. Misurato: senza l'immagine in
+cache l'avvio fallisce in 0,113 s, che è un tentativo di rete mai iniziato
+([V-022](../Sources.md#v-022)). Fonte: [S-019](../Sources.md#s-019).
 
 ---
 

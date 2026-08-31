@@ -23,12 +23,12 @@ approfondire trova qui proprio le parti che dal vivo sono state saltate.
 | Cartella | Contenuto | Stato |
 |---|---|---|
 | [`docs/`](docs/README.md) | tutta la documentazione: architetture, installazione, amministrazione, `mongosh`, decisioni e fonti | presente, con le sezioni mancanti dichiarate nell'[indice](docs/README.md) |
-| `docker/` | i tre stack Compose, uno per architettura | **non ancora nel repository** — vedi [Stato di avanzamento](#stato-di-avanzamento) |
+| `docker/` | i tre stack Compose, uno per architettura | [`01-standalone`](docker/01-standalone/compose.yaml) è nel repository, gli altri due no — vedi [Stato di avanzamento](#stato-di-avanzamento) |
 | `app/` | l'applicazione dimostrativa in Python | **non ancora nel repository** — vedi [Stato di avanzamento](#stato-di-avanzamento) |
-| `tools/` | strumenti di repository: preflight, pre-scaricamento delle immagini, verifica delle citazioni | presente |
+| `tools/` | strumenti di repository: preflight, pre-scaricamento delle immagini, prova end-to-end dello stack, e i tre controllori che verificano citazioni, file Compose e collegamenti | presente |
 
-La tabella dice cosa il repository conterrà: due righe su quattro sono ancora una promessa,
-e lo dicono invece di lasciarlo scoprire a chi clona.
+La tabella dice cosa il repository conterrà: quello che manca è dichiarato riga per riga,
+invece di lasciarlo scoprire a chi clona.
 
 Due file meritano una menzione a parte, perché sono il modo in cui questo materiale prova
 quello che afferma:
@@ -50,12 +50,12 @@ Il repository è in costruzione fino a metà settembre 2026. Questo è quello ch
 
 | Stack | Stato | Branch |
 |---|---|---|
-| `docker/01-standalone` | in lavorazione | `feature/01-stack-standalone` |
+| `docker/01-standalone` | **nel repository** | `feature/01-stack-standalone` |
 | `docker/02-replicaset` | in lavorazione | `feature/02-stack-replicaset` |
 | `docker/03-sharded` | in lavorazione | `feature/03-stack-sharded` |
 
-Anche l'applicazione Python in `app/` è in lavorazione, su `feature/04-app-python`. In
-questo momento sono pronti solo l'impianto documentale e gli strumenti di repository: le
+Anche l'applicazione Python in `app/` è in lavorazione, su `feature/04-app-python`. Oggi
+sono pronti l'impianto documentale, gli strumenti di repository e il primo stack: le
 sezioni della documentazione non ancora scritte sono elencate
 nell'[indice](docs/README.md) con la feature che le produrrà.
 
@@ -73,23 +73,45 @@ nell'[indice](docs/README.md) con la feature che le produrrà.
 
 ## Avvio rapido
 
-Gli stack Compose non sono ancora nel repository: appena ci saranno, i comandi per
-avviarli compariranno qui. Per ora quello che si può eseguire su un clone appena fatto è
-l'impianto documentale.
+Dei tre stack Compose oggi c'è il primo, l'istanza singola. Su un clone appena fatto:
 
 ```bash
 git clone https://github.com/giulianolatini/SqlStart2026.git
 cd SqlStart2026
 
-# Verifica che ogni ADR citi fonti esistenti e che nessuna fonte sia orfana.
-uv run --project tools python tools/check_citations.py docs/Decision.md docs/Sources.md
+# Scarica le immagini e le pinna per digest: è l'unico comando che vuole rete.
+make images-pull
 
-# Esegue la suite degli strumenti di repository.
-uv run --directory tools pytest -q
+# Avvia l'istanza singola e attende che il container sia sano.
+make up-01
+
+# Dodici controlli end-to-end sullo stack avviato.
+make smoke-01
+
+# Ferma lo stack conservando i dati nel volume.
+make down-01
 ```
 
-Il primo dei due comandi scarica le dipendenze di sviluppo alla prima esecuzione, quindi
-vuole rete una volta sola.
+Dopo `make images-pull` lo stack parte anche con la rete staccata, che è il motivo per cui
+le immagini sono pinnate per digest ([ADR-0018](docs/Decision.md#adr-0018)). Cosa fa ognuno
+di quei comandi, e cosa succede dentro il container mentre li esegui, sta nella pagina
+sull'[istanza singola](docs/02-architetture/standalone.md); `make help` elenca gli altri
+target.
+
+Senza avviare niente, quello che si può eseguire su qualunque clone è l'impianto
+documentale:
+
+```bash
+# Verifica che ogni ADR citi fonti esistenti, che nessuna fonte sia orfana
+# e che nessun rimando fra le pagine sia rotto.
+make docs-check
+
+# Esegue la suite degli strumenti di repository.
+make tools-test
+```
+
+Entrambi scaricano le dipendenze di sviluppo alla prima esecuzione, quindi vogliono rete
+una volta sola.
 
 ## Licenza
 

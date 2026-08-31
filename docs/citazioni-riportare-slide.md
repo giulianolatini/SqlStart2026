@@ -390,6 +390,97 @@ Fonte: [S-015](Sources.md#s-015) — Docker Docs, Using profiles with Compose.
 profilo. È la regola su cui poggia la distinzione fra il profilo di palco e quello completo
 dello stack sharded.
 
+### Il gesto con cui tutti simulano un guasto non simula un guasto
+
+> «If you manually stop a container, the restart policy is ignored until the Docker daemon
+> restarts or the container is manually restarted. This prevents a restart loop.»
+
+Fonte: [S-039](Sources.md#s-039) — Docker Docs, politiche di riavvio.
+
+E la pagina di `docker kill` dice soltanto questo:
+
+> «The `docker kill` subcommand kills one or more containers. The main process inside the
+> container is sent `SIGKILL` signal (default)»
+
+Fonte: [S-040](Sources.md#s-040) — Docker Docs, `docker kill`.
+
+**Perché una slide:** la parola «restart» non compare da nessuna parte nella pagina di
+`docker kill`. Per il demone quel comando è una fermata voluta da un umano; per chi guarda lo
+schermo è un crash. Misurato: con `restart: unless-stopped` in vigore, `docker kill -s KILL`
+lascia il container `exited` e `RestartCount` a **zero**, mentre lo stesso container riparte da
+solo con `RestartCount=1` se `mongod` termina da sé ([V-017](Sources.md#v-017)). Regge il
+Blocco 2 meglio di qualunque diagramma sulle politiche di riavvio
+([ADR-0034](Decision.md#adr-0034)).
+
+### Dentro il container, `kill -9 1` non fa niente e dice che è andato bene
+
+> «Only signals for which the "init" process has established a signal handler can be sent to
+> the "init" process by other members of the PID namespace. This restriction applies even to
+> privileged processes, and prevents other members of the PID namespace from accidentally
+> killing the "init" process.»
+
+> «`SIGKILL` or `SIGSTOP` are treated exceptionally: these signals are forcibly delivered when
+> sent from an ancestor PID namespace.»
+
+Fonte: [S-041](Sources.md#s-041) — `pid_namespaces(7)`, manuale Linux.
+
+**Perché una slide:** due frasi che spiegano perché lo stesso segnale funziona da fuori e non
+da dentro. `SIGKILL` non è gestibile per definizione, quindi dall'interno del namespace non
+raggiunge PID 1 — e il comando ritorna successo senza aver fatto niente. Il demone Docker sta
+invece nel namespace antenato, e passa. Chi entra nel container per «uccidere `mongod`» si
+convince di averlo fatto.
+
+---
+
+## Installazione su una macchina vera
+
+### MongoDB non è supportato su WSL
+
+> «MongoDB is not supported on Windows Subsystem for Linux (WSL). To run MongoDB on Linux, use
+> a supported Linux system.»
+
+Fonte: [S-049](Sources.md#s-049) — MongoDB Manual, Install on Windows.
+
+**Perché una slide:** non è un'avvertenza sulle prestazioni, è un'esclusione dal supporto, e
+smentisce la scorciatoia più diffusa fra chi sviluppa su Windows. Le due strade sostenute
+restano una macchina virtuale vera oppure un container.
+
+### Su Windows la shell va installata a parte
+
+> «The MongoDB Shell (`mongosh`) is not installed with MongoDB Server. You need to follow the
+> `mongosh` installation instructions to download and install `mongosh` separately.»
+
+> «The `.msi` installer does not include `mongosh`.»
+
+Fonte: [S-049](Sources.md#s-049).
+
+**Perché una slide:** la documentazione lo dice due volte nella stessa pagina, il che è già una
+misura di quante volte è stato chiesto. Su Ubuntu il pacchetto `mongodb-org` si porta dietro
+`mongodb-mongosh`; su Windows, finita l'installazione, la macchina non ha ancora un modo per
+parlare con il database.
+
+### I permessi del keyfile, su Windows, non vengono controllati
+
+> «On UNIX systems, the keyfile must not have group or world permissions. On Windows systems,
+> keyfile permissions are not checked.»
+
+Fonte: [S-005](Sources.md#s-005) — MongoDB Manual, autenticazione con keyfile.
+
+**Perché una slide:** un controllo che su un sistema impedisce l'avvio e sull'altro non esiste.
+Su Linux un keyfile con i permessi sbagliati blocca `mongod`; su Windows non produce nessun
+errore, nessun avviso e nessuna riga di log — e chi riesce a leggere quel file si autentica
+come membro del replica set. È la rete di sicurezza che una procedura portata da Linux a
+Windows perde senza che nessuno lo segnali.
+
+### Ogni connessione costa due descrittori, non uno
+
+> «Incoming connections to a `mongod` or `mongos` instance require two file descriptors.»
+
+Fonte: [S-052](Sources.md#s-052) — MongoDB Manual, impostazioni `ulimit` su UNIX.
+
+**Perché una slide:** il numero da reggere non è quello delle connessioni, è il doppio. Serve
+esattamente nella demo di carico, quando il pubblico vede salire le connessioni concorrenti e
+si chiede dove sia il limite.
 ---
 
 ## Applicazione Python

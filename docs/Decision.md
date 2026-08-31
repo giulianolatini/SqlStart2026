@@ -624,7 +624,7 @@ tenere allineati, e nessuno dei due completo).
 <a id="adr-0018"></a>
 ## ADR-0018 — `pull_policy` parametrico, `never` sul profilo di palco
 
-**Data:** 2026-08-25 · **Stato:** Accettata
+**Data:** 2026-08-25 · **Stato:** **Superata da [ADR-0039](#adr-0039)** il 2026-08-31
 
 **Contesto:** [ADR-0009](#adr-0009) impone il funzionamento offline, ma la verifica ha
 mostrato che Compose non ha una modalità offline documentata. L'unico meccanismo con una frase
@@ -648,6 +648,16 @@ mancanti si scaricano da sole. Sul palco lo stack è blindato: se qualcosa manca
 chi clona il repository, che è il momento in cui la rete serve davvero); passare `--pull never`
 da riga di comando (si dimentica, e soprattutto non è scritto nel file: l'artefatto non
 documenterebbe più il proprio comportamento).
+
+**Motivo del superamento:** non il fine, ma il mezzo. L'obiettivo — nessun accesso al registro il
+giorno del talk — è rimasto ed è quello di [ADR-0039](#adr-0039). A cadere è la forma parametrica.
+Due ragioni. La prima è che [ADR-0027](#adr-0027), preso lo stesso giorno e più tardi, prescrive
+`never` fisso e scarta `missing` per nome: due decisioni Accettata e opposte sono peggio di
+entrambe, perché chi legge ne applica una a caso. La seconda è che l'ultima riga delle alternative
+scartate qui sopra — «non è scritto nel file: l'artefatto non documenterebbe più il proprio
+comportamento» — è l'argomento che smonta la decisione presa. Vale contro `--pull never` da riga di
+comando e vale, identico, contro una variabile d'ambiente. Nemmeno la promessa «il preflight la
+controlla» è stata mantenuta.
 
 **Fonti:** [S-003](Sources.md#s-003), [S-019](Sources.md#s-019)
 
@@ -1165,3 +1175,766 @@ regola qui è più modesta e riguarda i costrutti che lo standard applicabile di
 indefiniti, non l'adesione integrale a un profilo).
 
 **Fonti:** [S-030](Sources.md#s-030), [S-031](Sources.md#s-031)
+
+---
+
+<a id="adr-0030"></a>
+## ADR-0030 — Il log del lab sta su stdout, e a ruotarlo pensa il runtime
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** il design del 24 agosto, al §5.3, dava per acquisito un «doppio canale di log
+deliberato: stdout (per `docker compose logs`) **e** file `--logpath`». L'idea era comoda: il
+comando che tutti conoscono per guardare i log di un container, e insieme un file dentro il
+container su cui mostrare le procedure amministrative. Il piano di `feature/01` ha messo questo
+assunto in cima al task invece che in fondo, con la formula «questo task comincia con una misura,
+non con del codice». Ha fatto bene: l'assunto è falso.
+
+`--logpath` è una **redirezione**, non una duplicazione. Due container identici salvo quel flag
+producono le stesse sessantacinque righe di avvio, ma o in `docker logs` o nel file, mai in
+entrambi [V-010](Sources.md#v-010). Non è una sottigliezza da scoprire eseguendo: lo dice
+l'aiuto del binario dentro l'immagine del lab — «Log file to send write to **instead of**
+stdout» — e lo dice il manuale, che tratta le tre destinazioni come alternative esplicite,
+«Specify **either** `file` or `syslog`», con stdout come ripiego di chi non sceglie
+[S-032](Sources.md#s-032). Il canale doppio non esiste e non c'è un'opzione per costruirlo.
+
+Bisogna quindi scegliere, e la scelta ha una conseguenza che va guardata prima di deciderla.
+`logRotate`, il comando che il capitolo di amministrazione deve insegnare, su un `mongod` che
+scrive su stdout risponde `{"ok":1}`, scrive a log «Log rotation initiated» e **non fa
+assolutamente niente**. La risposta è indistinguibile da quella del caso in cui il file c'è ed è
+stato davvero rinominato [V-010](Sources.md#v-010). Rinunciare al file non toglie un comando
+dall'insegnamento: lo trasforma in un comando che mente.
+
+C'è poi un secondo fatto, che scegliere stdout tira dentro per forza. Il driver `json-file`, che
+è il predefinito, nasce con `LogConfig` vuoto: nessun `max-size`, nessun `max-file`, e `max-size`
+vale `-1 (unlimited)` [S-033](Sources.md#s-033), [V-011](Sources.md#v-011). `mongod` scrive una
+riga per ogni connessione aperta e una per ogni connessione chiusa, e la demo sulle prestazioni
+apre e chiude connessioni a raffica perché è precisamente ciò che misura. Su stdout, senza
+limiti, la demo che dimostra le prestazioni è anche quella che riempie il disco.
+
+**Decisione:** tre clausole, che sono la stessa decisione vista da tre lati.
+
+1. **Nessuno stack del lab dichiara `--logpath`.** Il log di ogni `mongod` e di ogni `mongos` va
+   su stdout, e si guarda con `docker compose logs`. Dal palco «adesso vi mostro i log» deve
+   essere un comando solo, quello che il pubblico ha già visto mille volte.
+2. **Ogni servizio dichiara `logging:` con `driver: json-file`, `max-size: "10m"` e
+   `max-file: "3"`.** Trenta MiB per container: molto più di quanto qualunque demo produca, e
+   molto meno di un disco pieno a metà talk. Il driver è dichiarato per esteso e non solo le
+   opzioni, perché su un host che ha già cambiato `log-driver` nel proprio `daemon.json` le sole
+   opzioni potrebbero applicarsi a un driver diverso.
+3. **La rotazione con `logRotate` si insegna dove ha senso, cioè sull'installazione su ferro.**
+   Il capitolo `docs/03-amministrazione/log.md` mostra le due situazioni una accanto all'altra e
+   dice qual è la differenza: dentro un container il log lo possiede il runtime e lo ruota il
+   runtime; su una macchina dove `mongod` è un servizio di sistema, il log lo possiede `mongod` e
+   lo ruota `logRotate`, in coppia con `logrotate(8)` e `--logRotate reopen`. La dimostrazione di
+   `logRotate` si fa su un container avviato apposta con `--logpath`, fuori dagli stack.
+
+**Conseguenze:** `docker compose logs -f` funziona su tutti e tre gli stack, il che è la
+proprietà che serve dal palco e che si sarebbe persa in silenzio. Il capitolo sui log ci guadagna
+la distinzione che vale davvero la pena portare a casa — dove sta il log dipende da come hai
+avviato il processo, chi lo ruota dipende da chi lo possiede — e la porta con una misura sotto
+invece che come opinione. Nel conto ci va anche l'onestà di aver corretto il design: il §5.3
+resta come sta, perché i documenti storici non si riscrivono, e questo ADR è il posto dove è
+scritto che quella riga descriveva una cosa che non esiste.
+
+Il costo è un container in più da avviare quando si dimostra la rotazione, e una tentazione da
+disinnescare: chi copia un file Compose del lab e ci aggiunge `--logpath` perde
+`docker compose logs` senza capire perché. Per questo il commento accanto al comando, dentro il
+file, dice che l'assenza di `--logpath` è deliberata e rimanda alla misura.
+
+**Alternative scartate:** tenere `--logpath` e guardare i log con `docker exec … tail -f` (si
+ottiene il file, si perde il comando che tutti conoscono; e in una demo il comando familiare vale
+più del file); usare `mongod … | tee /var/log/mongod.log` come comando del container (metterebbe
+una shell come PID 1, e il `SIGTERM` di `docker stop` arriverebbe alla shell invece che a
+`mongod`: chiusura sporca, e i dieci secondi di grazia prima del `SIGKILL`. Su un lab che
+dimostra il guasto di un nodo, rovinare la chiusura pulita è l'esatto contrario di ciò che
+serve); `--logpath /dev/stdout` (si ottiene l'output su stdout dichiarando però a `mongod` che
+esiste un file, con `logRotate` che proverebbe a rinominare `/dev/stdout`: un modo elaborato di
+ottenere il comportamento predefinito, più un modo nuovo di rompersi); non dichiarare `logging:`
+e fidarsi del daemon (il predefinito è nessun limite, misurato, e due righe costano meno di un
+disco pieno); `max-size` più generoso (dieci MiB di JSON sono decine di migliaia di righe: il
+limite non si incontra in una demo, si incontra in un ciclo impazzito, che è appunto il caso da
+contenere).
+
+**Una nota su un'apparente contraddizione.** Fra le alternative appena scartate c'è `--logpath`
+puntato su un descrittore invece che su un file — e l'entrypoint ufficiale fa esattamente questo:
+`--logpath "/proc/$$/fd/1"` per il `mongod` temporaneo della fase di inizializzazione
+[S-034](Sources.md#s-034). Non è una smentita, è un caso diverso, e vale la pena dirlo prima che
+lo dica una review. Quel `mongod` è avviato con `--fork`, e `--fork` **obbliga** a dichiarare un
+`--logpath`: l'entrypoint non sta scegliendo fra file e stdout, sta scegliendo fra un file e un
+descrittore, perché la terza possibilità gli è preclusa. E lo fa su un processo che vive qualche
+secondo, su cui nessuno chiamerà mai `logRotate`. Il nostro `mongod` non forka, quindi la scelta
+ce l'ha; e vive quanto dura il talk, quindi la rotazione lo riguarda davvero.
+
+Resta però l'osservazione che conta di più: per far uscire su stdout i log di un `mongod` con
+`--logpath`, chi costruisce l'immagine ufficiale ha dovuto ricorrere a un espediente, corredato
+di due link di giustificazione nel codice. È la conferma, dal lato di chi l'immagine la scrive,
+che il canale doppio non esiste.
+
+**Fonti:** [S-032](Sources.md#s-032), [S-033](Sources.md#s-033), [S-034](Sources.md#s-034), [V-010](Sources.md#v-010), [V-011](Sources.md#v-011), [V-012](Sources.md#v-012)
+
+---
+
+<a id="adr-0031"></a>
+## ADR-0031 — Il dataset di demo è deterministico, e chi decide se esiste è il volume
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** tutte le demo hanno bisogno di dati, e tre vincoli decidono che dati.
+
+Il primo viene dal palco. Le demo sono dal vivo con una registrazione di riserva
+[ADR-0016](#adr-0016): se qualcosa va storto e si passa al filmato, i numeri sullo schermo devono
+essere gli stessi di prima, altrimenti il salto lo vede il pubblico. Un dataset che cambia a ogni
+avvio rende la riserva inutilizzabile proprio nel momento in cui serve.
+
+Il secondo viene dal riuso. Gli stessi dati serviranno agli stack 02 e 03 e all'applicazione
+Python: nascere in una forma copiabile costa poco adesso e molto dopo.
+
+Il terzo viene dal meccanismo. In Docker il caricamento iniziale passa da
+`/docker-entrypoint-initdb.d`, e quel meccanismo ha un comportamento che nessuno si aspetta: gli
+script vengono eseguiti **solo** se il volume non è già inizializzato, e quando non lo sono
+l'entrypoint **non stampa niente** — verificato eseguendo, con i dati cancellati che non tornano
+e zero righe di log a dirlo [V-014](Sources.md#v-014). Il criterio non è nemmeno «la cartella è
+vuota»: è la presenza di uno fra quattro percorsi noti dentro `dbPath`
+[S-034](Sources.md#s-034). Chi sviluppa il lab incontrerà questa trappola il primo giorno,
+modificando il seed e non vedendo cambiare niente.
+
+**Decisione:** cinque clausole.
+
+1. **Il dataset è uno script JavaScript versionato, non un dump binario.** Si legge in una
+   review, si confronta con un `diff`, non pesa sul repository [S-021](Sources.md#s-021) e non
+   va rigenerato quando cambia la versione di MongoDB.
+2. **Ogni sorgente di variabilità è bandita.** Nessun `Math.random()`, nessun `new Date()` senza
+   argomento, `_id` espliciti e sequenziali, epoca fissa dichiarata come costante. Il generatore
+   è uno **xorshift a 32 bit** con seme fisso, e non un congruenziale lineare: in JavaScript il
+   prodotto di un LCG sfonda i 2^53 interi esatti, e i suoi bit bassi hanno periodo cortissimo.
+   La prima versione di questo file sbagliava su entrambi i fronti e produceva cinque città con
+   diecimila ordini e cinque con qualche decina [V-013](Sources.md#v-013).
+3. **Il seed non crea indici.** Il confronto fra la stessa interrogazione con e senza indice è
+   una delle demo: crearlo qui toglierebbe il «prima».
+4. **Il file vive in un posto solo** e gli stack successivi lo riusano invece di copiarlo.
+5. **La semantica dell'entrypoint si accetta e si documenta, non si aggira.** Il modo di
+   ricaricare da zero è `docker compose down -v`; e perché non sia l'unico modo, il `Makefile`
+   espone `make seed-01`, che esegue lo stesso file su uno stack già in piedi. Due strade
+   esplicite sono meglio di una implicita che ogni tanto non parte.
+
+**Conseguenze:** la riserva registrata diventa davvero intercambiabile con la demo dal vivo, che
+era il punto. La distribuzione uniforme rende onesto il confronto con e senza indice: con la
+prima versione del generatore, la differenza fra due misure sarebbe stata la selettività della
+città e non l'indice, e sarebbe passata per un risultato. Il caricamento costa 1,7 secondi e sta
+comodamente dentro lo `start_period` dell'healthcheck [V-013](Sources.md#v-013).
+
+Il prezzo è una trappola che resta nel prodotto e che quindi va insegnata invece che nascosta:
+finisce in `docs/02-architetture/trappole-mongodb-in-docker.md` e in un commento dentro il file
+Compose, accanto alla riga del montaggio. Questa è la forma che qui prende il principio secondo
+cui un comportamento sorprendente documentato vale più di un comportamento sorprendente
+aggirato — chi copia il file si porta dietro anche la spiegazione.
+
+**Alternative scartate:** un dump con `mongorestore` (binario, illeggibile in review, pesante nel
+repository, e da rigenerare a ogni cambio di versione); un servizio «seeder» separato che attende
+`service_healthy` e carica (più parti mobili, e dovrebbe decidere da sé se i dati ci sono già,
+cioè reimplementare male il controllo che l'entrypoint fa già); `Math.random()` con un seme
+(JavaScript non permette di seminare `Math.random`: non è una preferenza, non si può);
+sostituire l'entrypoint con uno script nostro per forzare il seed a ogni avvio (si perde
+l'allineamento con l'immagine ufficiale e si guadagna un file da mantenere, per un problema che
+si risolve con un target del `Makefile`); ridurre il dataset a poche centinaia di documenti per
+velocizzare l'avvio (1,7 secondi non sono un problema, e con poche centinaia di documenti la
+differenza fra scansione e indice non si vede).
+
+**Fonti:** [S-021](Sources.md#s-021), [S-034](Sources.md#s-034), [V-013](Sources.md#v-013), [V-014](Sources.md#v-014)
+
+---
+
+<a id="adr-0032"></a>
+## ADR-0032 — L'istanza singola si presenta con quattro limiti citabili, non con un aggettivo
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** il talk apre con l'istanza singola e dura sessanta minuti perché quell'istanza non
+basta. La frase che regge tutto il resto — «un nodo solo non basta» — è però anche la più facile
+da dire male: si può dire in modo vago («non è affidabile»), in modo apocalittico («si perdono i
+dati»), o in modo sbagliato («non va mai bene in produzione»). Le prime due non si possono
+verificare, la terza è falsa, e un pubblico di professionisti se ne accorge in tutti e tre i casi.
+
+C'è poi un rischio specifico del formato. Chi presenta tre architetture in fila ha un incentivo a
+far sembrare la prima peggiore di quanto sia, perché rende più interessanti le altre due. È
+esattamente il tipo di scorciatoia che [ADR-0024](#adr-0024) esiste per impedire: quella gerarchia
+distingue ciò che è documentato da ciò che è stato verificato da ciò che è opinione, e «lo standalone
+è fragile» non appartiene a nessuna delle tre categorie.
+
+Nel corso del Task 7 sono emerse due cose che la sola lettura del manuale non avrebbe dato.
+
+La prima è che i limiti dell'istanza singola non si comportano allo stesso modo. Tre su quattro
+sono **rumorosi**: si chiede un change stream e arriva `Location40573`, si chiede `rs.status()` e
+arriva `NoReplicationEnabled`, si chiede `w: 2` e arriva `BadValue`. Il quarto è **silenzioso**:
+`w: "majority"` su un'istanza singola riesce, restituisce `acknowledged: true`, e non dà nulla in
+più di `w: 1` [V-015](Sources.md#v-015). Un'applicazione scritta per un replica set, diligentemente
+piena di `w: "majority"`, puntata su un nodo solo continua a funzionare con una garanzia in meno di
+quella che il suo codice crede di avere. Nessun messaggio la avverte.
+
+La seconda è che la perdita di dati si può misurare invece di evocarla. Con `w: 1` e `j` non
+specificato — il caso predefinito — [S-035](Sources.md#s-035) dice che l'acknowledgement è «In
+memory», e [S-036](Sources.md#s-036) dice che il journal tocca il disco «At every 100
+milliseconds» e che «updates can be lost following a hard shutdown». Messe insieme, le due frasi
+descrivono una finestra. Aprirla è bastato un `SIGKILL`: il client aveva ricevuto conferma fino al
+documento 41.558, ne sono sopravvissuti 41.458, **cento scritture confermate e perdute**
+[V-016](Sources.md#v-016).
+
+**Decisione:** `docs/02-architetture/standalone.md` dichiara i limiti dell'istanza singola in
+quattro affermazioni, e ciascuna porta la fonte primaria che la sostiene.
+
+1. **Nessuna ridondanza e nessun failover.** Il processo che muore è il servizio che finisce. Non
+   c'è nulla da eleggere: `rs.status()` risponde `NoReplicationEnabled` perché non c'è replica set
+   [V-015](Sources.md#v-015).
+2. **`w: 1` è tutto ciò che si può chiedere, e `w: "majority"` è la stessa cosa travestita.**
+   `w > 1` viene rifiutato [S-035](Sources.md#s-035); `w: "majority"` viene accettato in silenzio.
+   La pagina spiega che l'ack di `w: 1` è la memoria e mostra i cento documenti persi
+   [V-016](Sources.md#v-016).
+3. **Nessun oplog, quindi nessun change stream e nessun backup a caldo coerente.** `local` contiene
+   la sola `startup_log` [V-015](Sources.md#v-015); i change stream «are available for replica sets
+   and sharded clusters» [S-038](Sources.md#s-038); `mongodump --oplog` fallisce, e fallisce con un
+   messaggio che parla d'altro. Il seguito è in [ADR-0022](#adr-0022).
+4. **La manutenzione richiede una finestra di fermo.** Aggiornare la versione, cambiare
+   configurazione, spostare i dati: ogni operazione che ferma il processo ferma il servizio, perché
+   non c'è nessun altro a rispondere.
+
+Alle quattro si affianca, **nella stessa pagina e con lo stesso peso tipografico**, la sezione su
+quando un'istanza singola basta davvero. Non è una cortesia: è la parte che rende credibile il
+resto.
+
+**Conseguenze:** la pagina è più lunga e più lenta da scrivere di un elenco puntato di paure, e in
+compenso regge una domanda dal pubblico. Ogni affermazione ha un comando che la riproduce, il che
+la rende utilizzabile anche come materiale di demo: le quattro righe di [V-015](Sources.md#v-015)
+si eseguono in venti secondi davanti a chiunque.
+
+La misura di [V-016](Sources.md#v-016) porta con sé un debito onesto: non abbiamo provato lo stesso
+esperimento con `j: true`, che dovrebbe azzerare la perdita al prezzo della velocità. È scritto
+nella riserva della verifica e va fatto quando l'applicazione Python potrà generare carico
+controllato (`feature/04`).
+
+Resta un rischio da sorvegliare: le tre risposte «rumorose» dipendono da messaggi d'errore, e i
+messaggi cambiano fra versioni più facilmente dei comportamenti. La pagina cita i codici
+(`40573`, `76`, `2`) accanto ai testi, perché i codici sono la parte stabile.
+
+**Alternative scartate:** presentare i limiti solo a parole, senza comandi (più breve, ma
+indistinguibile dal marketing al contrario, e non riproducibile da chi legge); dedurre tutto dal
+manuale senza eseguire (avremmo scritto che i change stream «non sono disponibili» senza sapere che
+l'errore è `Location40573`, e soprattutto **non avremmo mai trovato** il caso di `w: "majority"`
+accettato in silenzio, che è il più interessante dei quattro); rimandare la dimostrazione della
+perdita a `feature/02`, dove ci sarà un replica set con cui confrontarla (il confronto sarà più
+bello lì, ma la pagina dell'istanza singola sarebbe rimasta senza la sua prova, e un'affermazione
+senza prova in questo repository ha una scadenza breve).
+
+**Fonti:** [S-035](Sources.md#s-035), [S-036](Sources.md#s-036), [S-037](Sources.md#s-037), [S-038](Sources.md#s-038), [V-015](Sources.md#v-015), [V-016](Sources.md#v-016)
+
+---
+
+<a id="adr-0033"></a>
+## ADR-0033 — Le trappole si raccolgono in una pagina sola, e ogni voce comincia dal sintomo
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** durante `feature/00` e `feature/01` sono emersi diversi punti in cui MongoDB e
+Docker si fraintendono, e hanno una caratteristica in comune: **nessuno di essi produce un
+messaggio d'errore che nomini la causa**. Gli script di inizializzazione vengono saltati in
+silenzio su un volume popolato ([V-014](Sources.md#v-014)); una versione di MongoDB che il
+kernel della VM non regge esce senza dire perché ([V-007](Sources.md#v-007)); le variabili
+`MONGO_INITDB_ROOT_*` su un config server producono un avvio apparentemente riuscito e un
+cluster che non si forma ([V-006](Sources.md#v-006), [S-034](Sources.md#s-034));
+`localhost` risolve verso la macchina sbagliata invece di non risolvere
+([V-018](Sources.md#v-018)).
+
+Chi incontra uno di questi casi non parte dalla causa: parte dal sintomo. Ha davanti un
+container che è uscito, o un dataset che non c'è, o un `ECONNREFUSED`, e cerca quello. Una
+documentazione organizzata per argomento — «volumi», «rete», «entrypoint» — è inutile a
+quella persona, perché per trovare la sezione giusta dovrebbe già sapere la risposta.
+
+C'è anche un problema di proprietà. Le trappole non appartengono a una feature: nascono qui, ma
+`feature/02` ne aggiungerà sui permessi del keyfile e sulla scoperta della topologia, e
+`feature/03` sui config server e sul bilanciamento. Se ognuna se le tiene nella propria pagina,
+la stessa trappola viene raccontata tre volte e nessuna delle tre versioni è quella completa.
+
+**Decisione:** `docs/02-architetture/trappole-mongodb-in-docker.md` è la sede unica. Il suo
+contratto, che i branch successivi ereditano:
+
+1. **Una sezione per trappola, numerata**, e le sezioni esistenti non si riscrivono: i branch
+   successivi ne aggiungono in coda. La numerazione diventa così un riferimento stabile.
+2. **Il titolo della sezione è il sintomo, non la causa.** «Il container esce e il log non dice
+   niente», non «incompatibilità fra kernel e versione». Chi cerca, cerca il sintomo.
+3. **Quattro voci fisse in ogni sezione:** *sintomo* (cosa si vede), *causa* (cosa sta davvero
+   succedendo), *rimedio* (cosa fare), *fonte* (dove è scritto o dove è stato misurato).
+4. **Ogni trappola porta almeno un riferimento verificabile**, come ovunque in `docs/`. Una
+   trappola raccontata a memoria è un aneddoto, e gli aneddoti in questo repository hanno una
+   scadenza breve ([ADR-0024](#adr-0024)).
+5. **Se una trappola ha una decisione dietro, la sezione la nomina e non la ripete.** La pagina
+   dice cosa si vede e cosa fare; il perché sta nell'ADR.
+
+**Conseguenze:** la pagina cresce per aggiunta e non per riscrittura, il che la rende
+modificabile da tre branch diversi senza conflitti di merito. Il costo è la ridondanza: la
+stessa informazione compare nella pagina dell'architettura e nella pagina delle trappole, con
+angolazioni diverse. È una ridondanza voluta, perché i due lettori sono diversi — uno sta
+studiando, l'altro sta cercando di far ripartire qualcosa.
+
+Il vincolo del sintomo-come-titolo ha un effetto collaterale utile: obbliga a ricordare **cosa
+si vedeva** prima di sapere cosa fosse. È l'informazione che si perde per prima, subito dopo
+aver risolto il problema, ed è l'unica che serve a chi il problema ce l'ha ancora.
+
+**Alternative scartate:** una sezione «problemi noti» in fondo a ciascuna pagina di architettura
+(la stessa trappola andrebbe ripetuta tre volte, e chi cerca non sa in quale pagina guardare);
+un file per trappola (comodo da versionare, ostile da sfogliare, e il valore di questa pagina è
+proprio poterla scorrere); rimandare la pagina a fine progetto, quando le trappole saranno tutte
+note (è esattamente il momento in cui nessuno ricorda più il sintomo).
+
+**Fonti:** [S-034](Sources.md#s-034), [V-006](Sources.md#v-006), [V-007](Sources.md#v-007), [V-014](Sources.md#v-014), [V-018](Sources.md#v-018)
+
+---
+
+<a id="adr-0034"></a>
+## ADR-0034 — `docker kill` non simula un guasto, e il lab lo dirà invece di fingere
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** la demo che regge la seconda metà del talk è la caduta di un nodo. Il gesto ovvio
+per provocarla è `docker kill`, ed è il gesto che si vede in quasi tutte le presentazioni su
+MongoDB in container. Misurandolo è saltato fuori che quel gesto non fa quello che sembra.
+
+Con `restart: unless-stopped` in vigore, un `docker kill -s KILL` lascia il container `exited` e
+`RestartCount` a **zero**: il demone non prova nemmeno a rialzarlo, né subito né dodici secondi
+dopo ([V-017](Sources.md#v-017)). Lo stesso container, se `mongod` termina da sé, riparte da
+solo in pochi secondi con `RestartCount=1`. Stessa politica, stesso container, esito opposto: a
+cambiare è soltanto chi ha mandato il segnale.
+
+La documentazione lo copre, ma non in modo che qualcuno potesse prevederlo.
+[S-039](Sources.md#s-039) dice che la politica «is ignored until the Docker daemon restarts or
+the container is manually restarted» dopo che il container «is stopped (manually or otherwise)»,
+e la pagina di `docker kill` ([S-040](Sources.md#s-040)) non contiene la parola «restart». Per
+il demone un `docker kill` è una fermata voluta da un umano. Per chi guarda lo schermo è un
+crash.
+
+Nella stessa sessione è emerso il caso simmetrico: `kill -9 1` **dentro** il container non fa
+niente e ritorna successo. Non è una stranezza del runtime, è il kernel: solo i segnali per cui
+«init» ha installato un gestore possono raggiungerlo dagli altri membri del suo namespace, e
+`SIGKILL` non è gestibile ([S-041](Sources.md#s-041)).
+
+**Decisione:** il lab non finge che `docker kill` sia un guasto.
+
+1. Le demo di caduta nodo **dichiarano cosa stanno simulando**. `docker kill` resta lo strumento
+   — è immediato, è riproducibile, è quello che il pubblico si aspetta — ma la narrazione dice
+   «sto spegnendo un nodo», non «sto simulando un crash».
+2. **Dove serve mostrare la ripartenza automatica**, il nodo si fa terminare da sé (comando
+   `shutdown`), che è la via misurata in cui la politica di riavvio interviene davvero.
+3. La trappola sta in `trappole-mongodb-in-docker.md` con il suo sintomo per titolo — «ho ucciso
+   il container e `restart: unless-stopped` non l'ha rialzato» — secondo il contratto di
+   [ADR-0033](#adr-0033).
+4. `restart: unless-stopped` **resta** nei tre file Compose. Serve al caso per cui esiste: la
+   macchina che si riavvia, il demone che riparte, il processo che muore da solo. Toglierlo
+   perché non copre un caso che non gli compete sarebbe la reazione sbagliata alla scoperta.
+
+**Conseguenze:** la demo di failover di `feature/02` va progettata sapendo questo, e il runbook
+del talk ([ADR-0015](#adr-0015)) deve contenere la frase giusta accanto al comando — perché è
+esattamente il momento in cui un ascoltatore attento chiede «ma allora non riparte da solo?», e
+la risposta onesta è più interessante della domanda.
+
+C'è un guadagno inatteso. «Il gesto con cui tutti simulano un guasto non simula un guasto» è un
+aneddoto migliore di qualunque diagramma sulle politiche di riavvio, e viene con tre fonti e una
+tabella di misure. Va in [`citazioni-riportare-slide.md`](citazioni-riportare-slide.md).
+
+**Alternative scartate:** togliere `restart: unless-stopped` dai file per evitare l'imbarazzo
+(nasconde il fenomeno invece di spiegarlo, e priva gli stack di una protezione che serve
+davvero); usare `docker stop` nelle demo perché «è più onesto» (è più lento e mette in mezzo un
+arresto pulito, che è un terzo scenario ancora diverso); tacere e lasciare che la demo suggerisca
+una conclusione sbagliata (funziona finché in sala non c'è nessuno che conosce Docker).
+
+**Fonti:** [S-039](Sources.md#s-039), [S-040](Sources.md#s-040), [S-041](Sources.md#s-041), [V-017](Sources.md#v-017)
+
+---
+
+<a id="adr-0035"></a>
+## ADR-0035 — Le righe di log si citano per `id`, e la pagina distingue ciò che è stato letto da ciò che sarà letto
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** il talk mostra dal vivo un nodo che cade e un cluster che se ne accorge. L'unica
+prova che l'ha notato è il log, e sarà proiettato. Serve una pagina che insegni a leggerlo prima
+che serva, perché sul palco non c'è tempo per imparare.
+
+Il primo problema è che il log non è fatto per essere letto dall'alto. Misurandolo su questo
+stack — novemilanovecentotrentuno righe, nessun carico applicativo — il **91,9 %** appartiene a
+`NETWORK` e `ACCESS`, e il **99,3 %** di quanto viene scritto al minuto è l'healthcheck che
+apre cinque connessioni ogni dieci secondi ([V-019](Sources.md#v-019)). Le righe che
+interessano un amministratore sono trenta su novemilanovecentoventidue, e quindici delle trenta
+sono lo stesso avviso d'avvio ripetuto. Chi scorre, non trova.
+
+Il secondo problema è la citabilità. [S-042](Sources.md#s-042) descrive `id` come «Unique
+identifier for the log statement» e dedica un esempio al filtro per `id`; del testo di `msg` non
+promette niente. Una pagina didattica che dicesse «cerca la riga *Connection accepted*» invecchia
+alla prima versione che riformula il messaggio, e invecchia in silenzio: il lettore cerca, non
+trova, e conclude che il server non ha fatto quella cosa.
+
+Il terzo problema è che metà della materia qui non è verificabile. Le righe di un'elezione
+esistono solo dove c'è un replica set, e su questo branch non c'è. [S-044](Sources.md#s-044)
+descrive il meccanismo — battiti ogni due secondi, nodo dato per irraggiungibile dopo dieci,
+«The median time before a cluster elects a new primary should not typically exceed 12 seconds» —
+ma non nomina una sola riga di log. Scrivere quella sezione adesso significa scrivere qualcosa
+che non è stato visto.
+
+**Decisione:** quattro regole per `docs/03-amministrazione/log.md` e per ogni altra pagina che
+citi un log.
+
+1. **Il riferimento è l'`id`.** Ogni riga citata nel repository porta il suo numero. Il testo di
+   `msg` compare come illustrazione, mai come chiave di ricerca: si cerca `"id":22943`, non
+   «Connection accepted». Dove il lettore deve filtrare, il repository mostra il filtro sull'`id`.
+2. **La pagina dichiara riga per riga cosa è stato misurato e cosa no.** Le sezioni sul formato e
+   su `logRotate` poggiano su misure fatte qui e le citano ([V-010](Sources.md#v-010),
+   [V-019](Sources.md#v-019)). La sezione sull'elezione poggia solo su
+   [S-044](Sources.md#s-044) e si apre con una riserva esplicita: **gli `id` verranno inseriti in
+   `feature/02`, dopo averne vista una**. Nessuna riga inventata per rendere la pagina completa.
+3. **Gli avvisi d'avvio si mostrano con `getLog`, non scorrendo.**
+   `db.adminCommand({getLog: "startupWarnings"})` restituisce tre righe invece di
+   novemilanovecento ([V-019](Sources.md#v-019)), ed è il gesto che va sullo schermo. Fra le tre
+   c'è `22120`, «Access control is not enabled for the database»: il lab senza autenticazione
+   ([ADR-0005](Decision.md#adr-0005)) **è** avvisato dal server, e la pagina lo dice invece di
+   lasciarlo scoprire a un revisore.
+4. **Su `logRotate` la pagina riporta il limite documentato e la misura che lo contraddice.**
+   [S-043](Sources.md#s-043) scrive che «Your `mongod` instance needs to be running with the
+   `--logpath [file]` option in order to use `logRotate`»; il server, senza `--logpath`, risponde
+   comunque `{ok: 1}` senza ruotare niente ([V-010](Sources.md#v-010)). Le due frasi stanno
+   accanto, e la pagina conclude che in container la rotazione è affare del runtime
+   ([ADR-0030](Decision.md#adr-0030)), non del database.
+
+**Conseguenze:** la pagina resiste a un cambio di versione, perché ciò che cita è stabile per
+dichiarazione della fonte. Chi la legge impara a filtrare, che è l'unico modo di usare un log
+in cui il 92 % delle righe parla di connessioni. La sezione sull'elezione resta con un debito
+scritto in chiaro, e `feature/02` non può chiudersi senza saldarlo: è il prezzo di non scrivere
+righe mai viste.
+
+Il costo è di leggibilità. Una riga citata come `id 22943` è meno evocativa di «Connection
+accepted», e la pagina deve quindi riportarle entrambe, allungandosi. Va accettato: la seconda
+serve a capire, la prima a ritrovare.
+
+**Alternative scartate:** citare i messaggi per testo (leggibile, e fragile in modo silenzioso —
+la fonte non promette stabilità); rimandare tutta la pagina a `feature/02`, quando ci sarà un
+replica set (ma il formato del log serve prima, e su un'istanza singola è già interamente
+osservabile); alzare la verbosità a `D1` per la demo, così «si vede di più» (si vede di più del
+rumore: le righe interessanti annegano, e [S-042](Sources.md#s-042) ricorda che le severità
+superiori sono mostrate comunque); togliere l'healthcheck per avere un log pulito (si baratta la
+leggibilità del log con la diagnosi di uno stack che non parte, che è il problema più frequente).
+
+**Fonti:** [S-042](Sources.md#s-042), [S-043](Sources.md#s-043), [S-044](Sources.md#s-044), [V-010](Sources.md#v-010), [V-019](Sources.md#v-019)
+
+---
+
+<a id="adr-0036"></a>
+## ADR-0036 — `mongosh` si usa dentro il container, e in automazione non si crede al codice di uscita
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** la guida a `mongosh` deve servire due lettori diversi con la stessa pagina. Il
+primo è chi segue il talk e riproduce i comandi: per lui conta che la riga da incollare funzioni
+al primo colpo. Il secondo è chi scrive uno strumento di verifica del repository — `smoke-01`,
+`stack-check`, e domani l'applicazione Python: per lui conta sapere che cosa il comando promette
+quando nessuno lo guarda.
+
+Il primo fatto è che sul portatile di sviluppo `mongosh` **non esiste**. `which mongosh` non
+trova niente; la shell, il server e gli strumenti di backup vivono dentro l'immagine
+`mongo:7.0.40`, nella versione **2.10.0** ([V-020](Sources.md#v-020)). Una guida scritta come le
+guide di [S-045](Sources.md#s-045), che presuppongono `mongosh` installato accanto al database,
+manderebbe il lettore a installare un pacchetto che non serve e a collegarsi a un «localhost» che
+per lui significa un'altra macchina ([V-018](Sources.md#v-018)).
+
+Il secondo fatto è che `mongosh` sceglie da sé tre parametri che nessuno ha scritto. Interrogato
+su dove sia andato risponde
+`mongodb://127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+2.10.0`.
+Il terzo è il pericoloso: **due secondi** di attesa per trovare un server, contro un'elezione che
+[S-044](Sources.md#s-044) dà per lunga fino a dodici. Nessuna delle pagine consultate nomina
+quel valore predefinito.
+
+Il terzo fatto è la tabella dei codici di uscita, che non esiste in nessuna pagina di
+[S-046](Sources.md#s-046) né di [S-047](Sources.md#s-047). Misurata su quindici casi
+([V-020](Sources.md#v-020)) dice due cose scomode: **ogni errore vale `1`** — un `throw`, un
+`TypeError`, un `MongoServerError` e un server irraggiungibile sono indistinguibili dal codice di
+uscita — e **il silenzio vale `0`**: un `countDocuments` che restituisce zero termina con
+successo. Uno script di verifica che si limiti a interrogare e a guardare se torna zero
+**dichiara sano un database vuoto**.
+
+**Decisione.**
+
+1. **Ogni comando della guida passa da `docker compose exec`.** La pagina apre dichiarando che
+   `mongosh` non è sull'host, e non offre la variante «installalo e collegati»: non è il lab.
+   L'invocazione canonica del repository è
+   `docker compose --env-file tools/images.env -f docker/01-standalone/compose.yaml exec -T mongo-standalone mongosh --quiet --eval "…"`,
+   e la sua forma breve è il bersaglio del `Makefile`.
+2. **Negli script si scrive `-T`, e non si scrive mai `-it`.** Misurato: senza `-T` i comandi
+   funzionano lo stesso, anche con lo standard input chiuso; è `docker exec -it` a fallire con
+   `cannot attach stdin to a TTY-enabled container because stdin is not a terminal`. `-T` resta
+   perché è esplicito e non costa niente, ma la pagina dice qual è il vero colpevole, perché la
+   diagnosi sbagliata circola più della giusta.
+3. **In automazione si scrive `--quiet` anche dove sarebbe già implicito.** [S-046](Sources.md#s-046)
+   accende `--quiet` da sé nelle sessioni non interattive, ma non definisce «non interattiva», e
+   la stessa riga di comando nel lab finisce ora in uno script ora incollata a mano. Scriverlo
+   rende l'output indipendente da quella distinzione.
+4. **Uno script che verifica qualcosa esce con un codice scelto da chi lo scrive.** Mai affidarsi
+   al codice implicito: si controlla il risultato e si chiama `exit(<codice>)`, come raccomanda
+   [S-047](Sources.md#s-047), restando fra 1 e 125 perché `exit(300)` arriva al chiamante come 44
+   ed `exit(-1)` come 255.
+5. **I file di script si passano con `--file` e con percorso assoluto.** Dentro un container la
+   directory di lavoro non è quella da cui si è digitato il comando, e `load()` non ha percorso di
+   ricerca ([S-047](Sources.md#s-047)). Niente script per pipe: `mongosh` tratta lo standard input
+   come una sessione interattiva e ci stampa sopra i prompt.
+6. **Le sezioni non eseguibili su questo branch sono dichiarate tali.** I comandi di
+   amministrazione di un replica set e di uno sharded cluster stanno nella pagina perché servono
+   al talk, ma sono marcati come **non eseguiti qui**: la verifica è dovuta a `feature/02` e
+   `feature/03`. È la stessa regola di [ADR-0035](#adr-0035).
+
+**Conseguenze:** i comandi della guida sono lunghi, e la pagina lo ammette invece di accorciarli
+barando. In cambio si incollano e funzionano, anche a chi non ha mai visto questo repository, e
+sono gli stessi che girano nel `Makefile`. La regola 4 spiega perché gli strumenti di verifica del
+repository non si limitano a lanciare comandi: `smoke-01` conta i documenti e confronta
+un'impronta, e questa ADR è la ragione scritta di quella scelta.
+
+Il costo è che la guida è meno portabile di quanto sembri: chi ha `mongosh` installato sull'host
+deve tradurre. La pagina lo dice in apertura e mostra una volta la forma equivalente, poi non ci
+torna più.
+
+**Alternative scartate:** installare `mongosh` sul portatile e scrivere la guida «normale» (una
+versione in più da tenere allineata, e il rischio che in sala si parli a un server diverso da
+quello che si crede — [V-018](Sources.md#v-018)); avvolgere ogni comando in un bersaglio del
+`Makefile` e documentare solo quelli (comodo e opaco: chi guarda le slide non impara `mongosh`,
+impara questo repository); fidarsi del codice di uscita e scrivere strumenti più corti (è
+esattamente la trappola che [V-020](Sources.md#v-020) misura); rimandare la pagina a quando
+esisterà l'applicazione Python (la shell serve prima, ed è ciò che si proietta quando la demo si
+inceppa).
+
+**Fonti:** [S-044](Sources.md#s-044), [S-045](Sources.md#s-045), [S-046](Sources.md#s-046), [S-047](Sources.md#s-047), [V-018](Sources.md#v-018), [V-020](Sources.md#v-020)
+
+---
+
+<a id="adr-0037"></a>
+## ADR-0037 — Le pagine di installazione sul sistema operativo si scrivono da fonte e si dichiarano non eseguite
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** buona parte del pubblico di SqlStart non tornerà in ufficio a scrivere un file
+Compose. Tornerà a installare MongoDB su una macchina Linux o su un server Windows, perché è così
+che sta il database in azienda. Le due pagine di `01-installazione` sono le uniche del branch che
+non parlano di Docker, e sono quelle che verranno riaperte più spesso dopo il talk.
+
+Il problema è che **non si possono eseguire qui**. La macchina di sviluppo è un Mac; non esiste un
+Ubuntu su cui provare `apt-get install mongodb-org`, non esiste una macchina Windows su cui
+lanciare il `.msi`. Le tre strade possibili erano: non scrivere le pagine; scriverle presentandole
+come verificate; scriverle dichiarando che non lo sono.
+
+La prima strada lascia scoperta la domanda più frequente che il talk riceverà. La seconda è il
+primo posto in cui questo repository mentirebbe, e mentirebbe in un punto controllabile: chiunque
+segua le istruzioni e trovi una differenza scoprirebbe che «verificato» qui non vuol dire niente,
+e da quel momento non varrebbe niente nemmeno dove è vero. [ADR-0024](#adr-0024) esiste per
+distinguere ciò che è stato osservato da ciò che è stato letto, e non ammette eccezioni comode.
+
+C'è però un fatto che rende le pagine meno teoriche di quanto sembri. L'immagine del lab **è**
+un'installazione Ubuntu: `PRETTY_NAME="Ubuntu 22.04.5 LTS"`, e dentro c'è
+`/etc/apt/sources.list.d/mongodb-org.list` che punta allo stesso repository ufficiale del tutorial
+([V-021](Sources.md#v-021)). Quello che l'immagine ha tolto — `systemd`, `/etc/mongod.conf`,
+`/var/log/mongodb` — è esattamente l'elenco di ciò che le pagine devono spiegare. E gli avvisi che
+il server emette a ogni avvio (`22297` sul filesystem, `9068900` su THP) sono le note di produzione
+che si presentano da sole.
+
+**Decisione.**
+
+1. **Le due pagine si scrivono, complete, e portano una riserva in testa.** Un riquadro in
+   apertura dichiara: la procedura non è stata eseguita, la fonte è la documentazione ufficiale
+   MongoDB per la 7.0, e il lettore è il primo a provarla davvero. Nessun avverbio che ammorbidisca
+   («dovrebbe funzionare», «in genere»): la riserva è un fatto, non un'attenuante.
+2. **Ogni comando riportato viene da una fonte primaria, e la fonte è citata accanto.** Niente
+   comandi ricostruiti a memoria, niente varianti «più comode» inventate qui. Dove la fonte dà una
+   forma sola, si riporta quella; dove ne dà due, si riportano entrambe.
+3. **Ciò che è stato misurato viene marcato come tale, e tenuto separato.** Le misure di
+   [V-021](Sources.md#v-021) — il filesystem `ext4`, THP acceso, i `ulimit` a 1 048 576, l'utente
+   `mongodb` del processo 1 — stanno nelle pagine in blocchi riconoscibili, che dicono «questo è
+   stato eseguito, ma dentro un container, e per questo vale come contrasto e non come conferma».
+4. **La messa a punto del sistema operativo sta nella pagina Linux, non altrove.** `ulimit`, THP,
+   swap, NUMA, filesystem: sono cinque argomenti che un amministratore incontra il primo giorno e
+   che nessuna pagina su Docker gli darà mai. Vanno insieme alla procedura che li rende necessari.
+5. **Le differenze di Windows si dicono per intero, comprese quelle che riguardano la sicurezza.**
+   La più concreta è sul keyfile: «On UNIX systems, the keyfile must not have group or world
+   permissions. On Windows systems, keyfile permissions are not checked»
+   ([S-005](Sources.md#s-005)). Un controllo che su un sistema esiste e sull'altro no non è un
+   dettaglio da nota a piè di pagina.
+6. **Il debito è scritto.** Se in futuro il progetto disporrà di una macchina Ubuntu o Windows, le
+   pagine vanno rieseguite e la riserva sostituita con una verifica. Fino ad allora la riserva
+   resta, e nessuna revisione può toglierla senza aver eseguito la procedura.
+
+**Conseguenze:** il repository guadagna le due pagine che il pubblico userà di più, e le guadagna
+senza spendere la propria credibilità. Il lettore sa esattamente su che cosa poggia ogni riga: la
+documentazione ufficiale, che è la fonte migliore disponibile, ma non un'esecuzione. La riserva ha
+anche un effetto collaterale utile — rende evidente che il resto del repository, dove la riserva
+non c'è, è stato invece eseguito.
+
+Il costo è che le pagine sono meno autorevoli di quelle che le circondano, e si nota. Va bene
+così: l'alternativa era essere autorevoli senza averne diritto.
+
+**Alternative scartate:** avviare una macchina virtuale Ubuntu sul Mac e provare davvero
+(possibile, e fuori tempo: la sola messa a punto di NUMA, THP e `ulimit` in una VM non
+rappresentativa avrebbe prodotto misure che non valgono per nessun server reale — un costo alto per
+una verifica finta); limitarsi a un rimando alla documentazione MongoDB (è la risposta che il
+pubblico può darsi da solo, e lascia fuori proprio le cinque messe a punto che nessuno legge finché
+non fanno male); scrivere una pagina sola «installazione su sistema operativo» con due colonne
+(Linux e Windows divergono su percorsi, init system, sicurezza e messa a punto: una tabella a due
+colonne sarebbe più corta da leggere e più facile da sbagliare); usare il container come prova
+sostitutiva, dichiarando le procedure verificate «in sostanza» (è la scorciatoia che
+[ADR-0024](#adr-0024) esclude, e [V-021](Sources.md#v-021) mostra quanto sarebbe stata sbagliata:
+metà delle note di produzione, dentro un container, non si applicano affatto).
+
+**Fonti:** [S-005](Sources.md#s-005), [S-048](Sources.md#s-048), [S-049](Sources.md#s-049), [S-050](Sources.md#s-050), [S-051](Sources.md#s-051), [S-052](Sources.md#s-052), [V-021](Sources.md#v-021)
+
+---
+
+<a id="adr-0038"></a>
+## ADR-0038 — Le decisioni che una macchina può controllare le controlla una macchina
+
+**Data:** 2026-08-28 · **Stato:** Accettata
+
+**Contesto:** [ADR-0029](#adr-0029) ha aperto la sede che mancava — una decisione che governa
+`tools/` e il `Makefile` — ma ha risolto una domanda sola: come devono essere scritti gli
+strumenti. Resta l'altra, che in questo branch si è presentata due volte: **quando** una
+decisione merita uno strumento che la faccia rispettare.
+
+Il caso che l'ha posta per primo è quello delle risorse. [ADR-0004](#adr-0004) dice che il
+limite di memoria e la cache di WiredTiger vanno dichiarati entrambi e che la seconda è un
+quarto del primo; [ADR-0009](#adr-0009) dice che le immagini si pinnano per digest;
+[ADR-0018](#adr-0018) dice che il vincolo offline dipende da una variabile sola;
+[ADR-0023](#adr-0023) dice che `depends_on` usa la forma lunga con `condition`. Sono quattro
+frasi in un documento e quattro righe in un file YAML, e fino al 2026-08-28 niente le teneva
+nella stessa stanza. Un `mem_limit` cambiato in fretta durante una prova, e la decisione resta
+scritta mentre l'artefatto racconta un'altra cosa — senza che nessuno se ne accorga, perché lo
+stack parte lo stesso.
+
+Il secondo caso è più piccolo e più istruttivo. Un collegamento relativo rotto **non rompe
+niente**: la pagina si apre, il link porta a un 404 o in cima al documento invece che al punto
+giusto, e i test passano tutti. Il 2026-08-28 uno script scritto per l'occasione ha trovato
+quattro collegamenti rotti nel piano di `feature/00` ([`8af49a0`](https://github.com/giulianolatini/SqlStart2026/commit/8af49a0)):
+un documento riletto più volte, in un repository dove la disciplina delle citazioni è
+automatica. Nessuno li aveva visti perché non c'era niente da vedere. Quel commit ha preso un
+impegno esplicito — «diventerà un tool del repository nel giro di chiusura di feature/01» — ed
+è l'impegno che questa decisione salda.
+
+C'è un dettaglio tecnico che merita di essere registrato, perché è il punto in cui un
+controllore fatto male direbbe bugie. I rimandi interni di questo repository si scrivono nella
+forma naturale `#1-prima-di-cominciare`, e quell'ancora **nessuno l'ha dichiarata**: la genera
+GitHub dal testo del titolo. Chi vuole verificarli deve riprodurre la stessa trasformazione,
+comprese le regole che nessuno indovina: «Spaces are replaced by hyphens ( - ). Any other
+whitespace or punctuation characters are removed» ([S-053](Sources.md#s-053)) — ogni singolo
+spazio, senza accorpare, il che significa che «S-001 — WiredTiger» produce `s-001--wiredtiger`
+con **due** trattini, perché il trattino lungo sparisce e lascia due spazi. Il codice
+dell'emulazione ufficiosa lo conferma in una riga: `value.replace(regex, '').replace(/ /g, '-')`
+([S-054](Sources.md#s-054)). Un controllore che accorpasse gli spazi segnalerebbe come rotti
+proprio i rimandi scritti bene, e verrebbe spento dopo tre falsi allarmi.
+
+**Decisione.**
+
+1. **Un ADR il cui vincolo si può esprimere come predicato su un file riceve un controllore in
+   `tools/`.** Il criterio è meccanico quanto il controllo: se la decisione si può violare
+   modificando un file, e la violazione si può riconoscere leggendo quel file, allora la
+   rilettura umana non è lo strumento giusto. Gli ADR che riguardano il metodo, il taglio o il
+   contenuto restano fuori: nessuna macchina sa se una pagina dice il vero.
+2. **Il controllore nasce prima dell'artefatto che controlla, con i propri test.**
+   `check_stack.py` è stato scritto prima del file Compose dello stack 01: il file è nato già
+   conforme, invece di essere corretto dopo. È la stessa disciplina TDD che vale per
+   l'applicazione, applicata al repository.
+3. **Ogni messaggio di errore cita l'ADR che si sta violando.** Un controllo che dice «non
+   conforme» senza dire a quale decisione è un ostacolo; uno che dice «il digest manca, e la
+   ragione è ADR-0009» è documentazione che si presenta al momento giusto.
+4. **Ogni controllore entra in un target `make`, e nel target che si esegue senza sapere che
+   esiste.** `make docs-check` ora ne lancia due, `check_citations.py` e `check_links.py`;
+   `make stack-check` lancia `check_stack.py`. Uno strumento che va invocato a mano è uno
+   strumento che dopo tre settimane nessuno invoca.
+5. **Il controllore riproduce il comportamento del sistema che verifica, non un'approssimazione
+   comoda, e cita la fonte accanto alla riga.** È [ADR-0029](#adr-0029) applicato al caso
+   nuovo: la funzione `slug()` di `check_links.py` implementa le cinque regole di
+   [S-053](Sources.md#s-053), e il commento accanto spiega perché non accorpa gli spazi.
+6. **Quello che i controllori non fanno si dichiara.** Nessuno di loro tocca la rete: gli
+   indirizzi `https:` non vengono verificati, perché il repository deve restare controllabile
+   con il Wi-Fi spento — è lo stesso vincolo di [ADR-0018](#adr-0018), e vale anche per i
+   propri strumenti. `check_links.py` non verifica l'unicità delle ancore generate, che GitHub
+   risolve appendendo `-1` e `-2` ([S-053](Sources.md#s-053)): qui non è mai servito, e il
+   giorno che servisse si vedrebbe subito. Nessuno guarda dentro i blocchi recintati da ```` ``` ````,
+   dove un `# commento` non è un titolo e un `[testo](url)` è un esempio.
+
+**Conseguenze:** il repository ha tre controllori e sessanta test che li tengono onesti. Il
+guadagno vero non è aver trovato quattro link rotti: è che d'ora in poi le decisioni sulle
+risorse e i rimandi fra le pagine non possono divergere in silenzio dall'artefatto. La classe
+di errore che questo branch ha incontrato — vero quando è stato scritto, falso tre commit dopo,
+e nessuno se ne accorge — è la stessa che rende inutili le documentazioni vecchie.
+
+Il costo è codice da mantenere, e un controllore sbagliato è peggio di nessun controllore:
+insegna a ignorare i suoi messaggi. È il motivo del punto 2, ed è il motivo per cui la regola
+dello slug è stata verificata contro il codice dell'emulazione e non contro l'intuizione. Resta
+il limite di fondo, che va detto: questi strumenti vedono la forma. Che una pagina sia vera lo
+decide chi la legge, e per quello esistono la [gerarchia delle fonti](#adr-0024) e le riserve
+dichiarate.
+
+**Alternative scartate:** adottare un linter Markdown generico (`markdownlint` e simili
+controllano lo stile — righe lunghe, spazi doppi, livelli di titolo saltati — non le decisioni
+di *questo* repository, e porterebbero una dipendenza Node in un progetto che ha scelto Python e
+`uv`; il controllo che serviva qui, «l'ancora esiste nel file di destinazione», nessuno di loro
+lo fa fra file diversi); verificare i collegamenti con una richiesta HTTP (trasformerebbe un
+controllo deterministico in un test di rete, che fallisce per motivi che non riguardano il
+repository, e violerebbe il vincolo offline proprio nello strumento che dovrebbe difenderlo);
+delegare i controlli a GitHub Actions (girerebbero dopo il commit e non prima, e il giorno del
+talk, in una sala senza rete garantita, non girerebbero affatto); continuare a rileggere
+(misurato: quattro collegamenti rotti sono sopravvissuti alle riletture, e sono stati trovati in
+un secondo da venti righe di Python).
+
+**Fonti:** [S-053](Sources.md#s-053), [S-054](Sources.md#s-054)
+
+<a id="adr-0039"></a>
+## ADR-0039 — `pull_policy: never` scritto nel file, non dedotto dall'ambiente
+
+**Data:** 2026-08-31 · **Stato:** Accettata — sostituisce [ADR-0018](#adr-0018)
+
+**Contesto:** una review esterna della PR #2 ha segnalato che
+`docker/01-standalone/compose.yaml` non rispetta [ADR-0027](#adr-0027). Verificando il rilievo è
+emerso che il conflitto sta a monte dell'artefatto: [ADR-0018](#adr-0018) prescrive
+`pull_policy: ${PULL_POLICY:-missing}` con `never` esportato dal profilo di palco, ADR-0027
+prescrive `never` fisso in ogni servizio di ogni stack e scarta `missing` per nome — «esattamente
+ciò che non deve accadere il 18 settembre». **Erano entrambe Accettata, e nessuna superava
+l'altra.** L'artefatto implementava la prima; `tools/check_stack.py` la faceva rispettare come
+regola, e quindi difendeva attivamente la decisione sbagliata. In più, la promessa di ADR-0018 «il
+preflight la controlla» non è mai stata implementata: il preflight verifica che l'immagine sia in
+cache, non che la variabile valga `never`.
+
+Sul merito, la ragione che ADR-0018 dava per la forma parametrica — non rendere scomodo il primo
+avvio a chi clona il repository — è stata smontata da ADR-0027 stesso: `make images-pull` esiste,
+è un passo solo, e l'errore che riceve chi lo salta arriva a casa propria, con la rete, non in
+sala.
+
+**Decisione:** ogni servizio di ogni stack porta `pull_policy: never` **scritto letteralmente nel
+file Compose**. La variabile `PULL_POLICY` non esiste più: né in `docker/*/.env.example`, né in
+`tools/images.env`, né in un profilo di palco. `tools/check_stack.py` rovescia la propria regola e
+ne aggiunge una seconda: il valore deve essere `never`, e non deve provenire da un'interpolazione.
+Per poterlo fare lo strumento legge il file **due volte**, prima e dopo la sostituzione delle
+variabili: le altre regole giudicano lo stack che si avvia, questa giudica ciò che il file promette
+a chi lo apre.
+
+**Conseguenze:** la garanzia offline diventa una proprietà leggibile dell'artefatto invece di una
+proprietà dell'ambiente in cui l'artefatto viene lanciato. È la differenza che conta in sala: un
+file si proietta, una variabile d'ambiente dimenticata no. Misurato dopo la modifica
+([V-022](Sources.md#v-022)): `make up-01` porta il container a `Healthy` e `make smoke-01` passa
+dodici prove su dodici; con un digest che non è in cache, `up` fallisce in **0,113 s** con `No
+such image`, che conferma su questo file la misura di [V-006](Sources.md#v-006). Il costo resta
+quello che ADR-0027 aveva già accettato: `make images-pull` è obbligatorio prima del primo avvio.
+
+Una conseguenza minore ma didattica: `.env.example` non elenca più `PULL_POLICY` e spiega al suo
+posto perché non c'è. Un parametro tolto lascia un buco, e il buco va spiegato dove qualcuno
+andrebbe a cercarlo.
+
+**Alternative scartate:** lasciare i due ADR in conflitto e allineare solo l'artefatto (il
+repository sarebbe rimasto con due regole scritte e opposte, e il prossimo che legge `Decision.md`
+avrebbe applicato quella sbagliata a caso); riscrivere ADR-0018 invece di superarlo (il repository
+non riscrive le decisioni: [ADR-0008](#adr-0008) e [ADR-0028](#adr-0028) sono il precedente);
+tenere la forma parametrica e implementare finalmente il controllo del preflight promesso da
+ADR-0018 (aggiunge un controllo per difendere una variabile che non serve — la stessa garanzia
+costa zero controlli se è scritta nel file); controllare il valore solo dopo l'interpolazione
+(passa un file parametrico purché l'ambiente del momento sia quello giusto, cioè verifica proprio
+la cosa che si è deciso di non dover più verificare).
+
+**Fonti:** [S-019](Sources.md#s-019), [V-006](Sources.md#v-006), [V-022](Sources.md#v-022)

@@ -13,6 +13,12 @@
 > fotografia di ciò che si sapeva quando è stato scritto, e il repository non riscrive le
 > decisioni, le supera.
 
+> **Nota di allineamento, 2026-08-31.** Dove questo piano dice
+> `pull_policy: ${PULL_POLICY:-missing}` con `PULL_POLICY=never` sul profilo di palco, leggere
+> **`pull_policy: never` scritto fisso nel file Compose**, senza variabile:
+> [ADR-0039](../Decision.md#adr-0039) supera [ADR-0018](../Decision.md#adr-0018). Anche qui il
+> testo non è stato riscritto.
+
 ---
 
 **Obiettivo:** dotare il repository di igiene, impianto documentale verificabile e
@@ -242,7 +248,7 @@ prima di procedere.
 
 Registro delle fonti consultate. Ogni affermazione tecnica in `docs/` cita almeno una voce
 di questo file; ogni voce di questo file è citata da almeno un ADR di
-[`Decision.md`](Decision.md). Il vincolo è verificato da `tools/check_citations.py`.
+[`Decision.md`](../Decision.md). Il vincolo è verificato da `tools/check_citations.py`.
 
 | Prefisso | Tipo |
 |---|---|
@@ -667,7 +673,7 @@ devono riportare `**Fonti:** nessuna (decisione organizzativa)` — la regola 4 
 
 Le decisioni sono in ordine cronologico e non vengono riscritte: una decisione superata
 resta, con lo stato aggiornato e il rimando a quella che la sostituisce. Ogni ADR cita le
-fonti di [`Sources.md`](Sources.md) che lo sostengono; il legame è verificato da
+fonti di [`Sources.md`](../Sources.md) che lo sostengono; il legame è verificato da
 `tools/check_citations.py`.
 ```
 
@@ -748,7 +754,7 @@ male:
 # Registro operativo di sviluppo
 
 Diario cronologico: cosa è stato fatto, cosa è fallito, cosa se ne è imparato. Una voce per
-sessione, la più recente in fondo. Distinto da [`Decision.md`](Decision.md), che registra
+sessione, la più recente in fondo. Distinto da [`Decision.md`](../Decision.md), che registra
 le sole decisioni.
 
 ---
@@ -757,7 +763,7 @@ le sole decisioni.
 
 **Fatto:** rilevazione dell'ambiente; esclusione di Apple `container` (V-001); design delle
 tre architetture, dell'applicazione e dell'impianto documentale in
-[`00-progetto/2026-08-24-design.md`](00-progetto/2026-08-24-design.md); diciassette ADR.
+[`00-progetto/2026-08-24-design.md`](2026-08-24-design.md); diciassette ADR.
 
 **Fallito:** il primo tentativo di usare Rancher Desktop come runtime — il binario `docker`
 risolveva a Rancher mentre il contesto puntava al socket di Docker Desktop. Sostituito con
