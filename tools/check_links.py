@@ -69,7 +69,17 @@ def ancore(testo: str) -> set[str]:
     """I punti di atterraggio di una pagina: quelli dichiarati e quelli generati."""
     prosa = _prosa(testo)
     esplicite = set(ANCORA_ESPLICITA.findall(_senza_codice(testo)))
-    generate = {slug(riga) for riga in INTESTAZIONE.findall(prosa)}
+    # Le intestazioni si contano in ordine, perché la quinta regola di S-053
+    # dipende da quante volte lo stesso titolo è già comparso: la prima
+    # «Esempio» dà `esempio`, la seconda `esempio-1`, la terza `esempio-2`. Un
+    # insieme perderebbe proprio l'informazione che serve.
+    generate: set[str] = set()
+    comparse: dict[str, int] = {}
+    for riga in INTESTAZIONE.findall(prosa):
+        radice = slug(riga)
+        numero = comparse.get(radice, 0)
+        comparse[radice] = numero + 1
+        generate.add(radice if numero == 0 else f"{radice}-{numero}")
     return (esplicite | generate) - {""}
 
 
