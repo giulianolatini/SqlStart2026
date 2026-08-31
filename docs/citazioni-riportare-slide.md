@@ -547,6 +547,39 @@ dà sempre ragione non sta misurando.
 
 ---
 
+### L'elezione dura sei millisecondi. I dieci secondi sono l'attesa prima di cominciarla
+
+> ```text
+> 19:01:47.369  id=21216    Member is now in state DOWN        ← 0,3 s dopo il colpo
+>
+>      ... nove secondi, e diciannove «Heartbeat failed after max retries» ...
+>
+> 19:01:56.558  id=4615652  Starting an election, since we've seen no PRIMARY
+>                           in election timeout period
+>                           electionTimeoutPeriodMillis: 10000
+> 19:01:56.564  id=21450    Election succeeded, assuming primary role
+> ```
+
+Fonte: [V-030](Sources.md#v-030), un'elezione vera sullo stack `02-replicaset`, log del nodo
+eletto. I tempi complessivi sono in [V-029](Sources.md#v-029): `docker kill` sul primario costa
+**~10 s**, uno `shutdown` **~0,5 s**.
+
+**Perché una slide:** perché smonta due frasi che si dicono sempre. La prima è «l'elezione è
+lenta»: non lo è, dura sei millisecondi. Il tempo se ne va tutto ad **aspettare**, e il log lo dice
+in un attributo invece che in una nota a piè di pagina. La seconda è che il set «si accorge dopo
+dieci secondi»: se ne accorge dopo tre decimi, con `Connection refused` scritto nell'attributo, e
+poi *decide di non fare niente* — perché un membro irraggiungibile per un istante non è un membro
+morto, e indire un'elezione a ogni singhiozzo di rete costerebbe più di quello che salva. È la
+differenza fra un timeout e un ritardo, e in sala è il punto in cui si capisce che quei dieci
+secondi sono una scelta di progetto, non una lentezza.
+
+Il seguito naturale è il confronto delle due scene: il gesto brutale — `docker kill` — costa dieci
+secondi, quello educato mezzo. Chi si aspetta l'opposto ha ragione a sorprendersi, e la risposta è
+sempre la stessa riga di log: con lo `shutdown` il primario **avvisa**, quindi non c'è nessun
+timeout da far scadere.
+
+---
+
 ## Installazione su una macchina vera
 
 ### MongoDB non è supportato su WSL

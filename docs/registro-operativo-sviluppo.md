@@ -1368,3 +1368,107 @@ nota di allineamento su [V-025](Sources.md#v-025).
     entrambi i file**, e mettere un controllo che diventi rosso se le due copie smettono di
     coincidere dove devono coincidere. Senza il secondo requisito è solo copia-incolla con una
     scusa scritta bene.
+
+---
+
+## 2026-08-31 — feature/02, Task 8: dieci secondi contro mezzo, e il log che dice perché
+
+**Deciso.** Due bersagli distinti per le due scene di failover — `make failover-02` con
+`docker kill`, `make failover-02-termina` con lo `shutdown` — più `tools/reset-demo.sh <stack>`,
+che salda un debito di `feature/01`. È [ADR-0044](Decision.md#adr-0044).
+
+**Misurato.** `docker kill` sul primario: elezione in **9 812 / 10 619 / 10 943 ms**, container
+`exited` con `RestartCount=0` e `ExitCode=137`. `shutdownServer()`: **574 / 480 / 486 ms**,
+container di nuovo `running` con `RestartCount` che avanza. **Venti volte di differenza, nel verso
+opposto all'intuizione**: il gesto brutale è quello lento. È [V-029](Sources.md#v-029), e conferma
+su tre membri quello che [V-017](Sources.md#v-017) aveva misurato su uno solo — dopo un
+`docker kill` la politica di riavvio non interviene, perché per il demone quella fermata l'ha
+voluta un umano.
+
+**Il debito di ADR-0035 è saldato.** Quella decisione aveva lasciato scritto che gli `id` delle
+righe di elezione sarebbero stati inseriti «in `feature/02`, dopo averne vista una». Eccoli, in
+[V-030](Sources.md#v-030), e portano con sé il risultato più bello del Task: fra `id=4615652`
+(«Starting an election, since we've seen no PRIMARY in election timeout period», con
+`electionTimeoutPeriodMillis: 10000` nell'attributo) e `id=21450` («Election succeeded, assuming
+primary role») passano **sei millisecondi**. I dieci secondi non sono l'elezione: sono l'attesa
+prima di cominciarla. E la caduta è notata dopo **tre decimi di secondo** — `id=21216`, con
+«Connection refused» scritto nell'attributo. Il set sa subito e aspetta apposta.
+
+**Un errore evitato per un soffio.** La prima versione dello script stampava le righe di log
+dell'**osservatore**, cioè del nodo da cui si guardava. Ma l'osservatore quasi mai è l'eletto: chi
+ha solo votato registra `id=23980 Responding to vote request` e nient'altro. Con quel filtro si
+sarebbe concluso che un'elezione non lascia quasi traccia nel log — esattamente il contrario di
+quello che V-030 dimostra. Lo script legge ora il log del nodo eletto, ricavato dall'esito della
+misura.
+
+**Il cronometro parte prima del colpo.** `mongosh` impiega quasi un secondo ad avviarsi e
+autenticarsi. Lanciandolo dopo il `docker kill`, quel secondo sarebbe finito dentro la misura e la
+scena sarebbe sembrata più lenta del vero. L'osservatore si collega prima, stampa `PRONTO` quando è
+caldo, e solo allora chi lo ha lanciato uccide il primario.
+
+**`reset-demo.sh` provato su uno stack sporco davvero.** Un `✓ collezioni rimosse: nessuna` su uno
+stack pulito non prova niente — è la lezione della nota 50, un Task più tardi. Sono state create
+due collezioni di scarto e cancellati cento `ordini`: lo script ha tolto `scratch` e
+`prova_failover`, ha ricaricato il dataset, e l'impronta è tornata `50000 124861860.70 150281` con
+lo smoke a 42/0.
+
+**Controlli.** `make failover-02` → elezione in 9 481 ms, `RestartCount=0`, righe di log stampate.
+`./tools/reset-demo.sh 02` su uno stack con un membro `exited` → tutto sano, `mongo-rs-1` di nuovo
+primario, impronta intatta. `make docs-check` verde.
+
+**Documentazione prodotta.** [V-029](Sources.md#v-029) e [V-030](Sources.md#v-030);
+[ADR-0044](Decision.md#adr-0044), che le cita insieme a [S-044](Sources.md#s-044) e
+[V-017](Sources.md#v-017); una citazione da slide per il Blocco 2 sui sei millisecondi. La frase
+che [ADR-0034](Decision.md#adr-0034) mandava in `citazioni-riportare-slide.md` — «il gesto con cui
+tutti simulano un guasto non simula un guasto» — **c'era già** da `feature/01`: il Passo 5 del
+piano era soddisfatto prima di cominciare, e non è stato duplicato.
+
+**Note di metodo.**
+
+57. **Il cronometro va acceso prima del colpo, non dopo.** Lo strumento che misura ha un costo di
+    avvio, e quel costo finisce dentro la misura se lo si avvia nel momento sbagliato. Qui erano
+    quasi mille millisecondi su una scena da cinquecento: avrebbe raddoppiato il risultato della
+    scena veloce senza che niente sembrasse strano. Il rimedio costa poche righe — l'osservatore
+    dichiara di essere pronto, e solo allora si agisce — ed è la stessa disciplina della nota 54
+    vista dall'altro capo: **là si scartava il primo giro, qui lo si tiene fuori dal cronometro.**
+
+58. **Un diagnostico va puntato sull'oggetto giusto, e «giusto» non è «comodo».** Il log
+    dell'elezione stava sul nodo eletto; lo script guardava quello dell'osservatore, perché
+    l'osservatore era la variabile che aveva già in mano. Non avrebbe dato errore: avrebbe dato
+    *poche righe plausibili*, che è il modo in cui uno strumento sbagliato passa inosservato. Il
+    controllo che smaschera questi casi è chiedersi **quale nodo/processo/file dovrebbe contenere
+    la prova**, e verificarlo prima di credere a un output scarno.
+
+---
+
+## Punto di ripresa — sospensione del 2026-08-31, sera
+
+Sessione chiusa per limite, non per fine del lavoro. Si riprende con una sessione intera.
+
+**Deciso e chiuso.** I Task 3, 4, 5, 6, 7 e 8 di `feature/02` sono committati e spinti su
+`feature/02-stack-replicaset`. Lo stack 02 si avvia, si semina, si prova e sa cadere:
+`up-02`, `down-02`, `reset-02`, `logs-02`, `seed-02`, `smoke-02`, `reset-demo-02`, `failover-02`,
+`failover-02-termina`, più `reset-demo-01`. ADR da 0038 a 0044, verifiche da V-020 a V-030.
+
+**Misurato oggi, e da non rimisurare.** Ritardo di replica a riposo 1 ms mediano, `w: "majority"`
+2 ms ([V-027](Sources.md#v-027)); stack end-to-end e 42 controlli ([V-028](Sources.md#v-028));
+failover 10 s contro 0,5 s ([V-029](Sources.md#v-029)); le righe di log dell'elezione
+([V-030](Sources.md#v-030)).
+
+**Prossimo passo, in ordine.**
+
+1. **Chiudere il Task 8 misurando la maggioranza persa** — due membri su tre fermi, il set che
+   diventa di sola lettura. È il caso che spiega perché i membri sono tre e non due, è dichiarato
+   scoperto in [ADR-0043](Decision.md#adr-0043) e in [ADR-0044](Decision.md#adr-0044), e non è
+   stato misurato. Serve prima del Task 9, che dovrà scriverlo.
+2. **Task 9** — `docs/02-architetture/replica-set.md`, con i numeri misurati e non stimati.
+3. **Task 12** — la pagina delle trappole ha ora quattro debiti aperti: il keyfile a 644,
+   `--env-file` che sostituisce e non aggiunge, `up --wait` che esce presto, e il `$$` di Compose.
+   Al Task 12 spetta anche togliere da `docs/03-amministrazione/log.md` la riserva di
+   [ADR-0035](Decision.md#adr-0035), ora che gli `id` esistono in [V-030](Sources.md#v-030).
+4. **Task 14** — la PR. **Mai `git flow feature finish`**: salta la revisione, ed è già successo
+   con la PR #1.
+
+**Attenzione per chi riprende.** Lo stack 02 è rimasto **avviato e sano** a fine sessione, con
+l'impronta a posto. Se i container non ci fossero più, `make up-02` li ricrea; se ci fossero ma
+malmessi dopo una prova, `./tools/reset-demo.sh 02` è più veloce.

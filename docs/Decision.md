@@ -2289,3 +2289,76 @@ e si rinuncerebbe alla sola cosa che distingue questo stack dal precedente; `dow
 un `reset` che distrugge anche ciò che non è dato è un `reset` che si smette di usare.
 
 **Fonti:** [S-022](Sources.md#s-022), [S-035](Sources.md#s-035), [V-013](Sources.md#v-013), [V-014](Sources.md#v-014), [V-027](Sources.md#v-027), [V-028](Sources.md#v-028)
+
+<a id="adr-0044"></a>
+## ADR-0044 — Due scene di failover, non una, e uno script che cronometra invece di ricordare
+
+**Data:** 2026-08-31 · **Stato:** Accettata
+
+**Contesto.** [ADR-0034](#adr-0034) aveva stabilito che il lab non finge che `docker kill` sia un
+guasto, e aveva rimandato a `feature/02` il compito di progettare la demo sapendolo. Adesso i
+numeri ci sono. `docker kill` sul primario costa **~10 secondi** di elezione e lascia il container
+`exited` con `RestartCount=0`; lo `shutdown` costa **~0,5 secondi** e il container torna su da sé
+([V-029](Sources.md#v-029)). Venti volte di differenza, e nel verso opposto all'intuizione: il
+gesto brutale è quello lento.
+
+Il log spiega perché, e con una precisione che nessuna parafrasi migliora: la caduta è notata in
+tre decimi di secondo — `id=21216`, «Connection refused» nell'attributo — e poi non succede niente
+per nove secondi, finché `id=4615652` dichiara di indire l'elezione «since we've seen no PRIMARY in
+election timeout period», con `electionTimeoutPeriodMillis: 10000` scritto accanto. **L'elezione
+vera dura sei millisecondi** ([V-030](Sources.md#v-030)). I dieci secondi non sono l'elezione: sono
+l'attesa prima di cominciarla.
+
+**Decisione.**
+
+*Due bersagli distinti, non uno con una variabile.* `make failover-02` esegue la scena con
+`docker kill`; `make failover-02-termina` quella con lo `shutdown`. Un bersaglio solo con un
+parametro invita a mostrarne una sola, e la sola che si mostrerebbe è la prima — quella che dà il
+numero sbagliato a chi generalizza.
+
+*Lo script cronometra la propria esecuzione.* `tools/failover-replicaset.sh` non stampa i numeri di
+[V-029](Sources.md#v-029): li rimisura ogni volta e stampa quelli. Se in sala l'elezione dura il
+doppio, si vede sullo schermo invece di essere smentita da una slide. Il cronometro parte **prima**
+del colpo — l'osservatore si collega, si autentica, dichiara `PRONTO`, e solo allora il primario
+cade — perché avviare `mongosh` dopo metterebbe il suo secondo di avvio dentro la misura.
+
+*Il log si filtra per `id`.* Lo script stampa dieci `id` e nessun testo di messaggio, secondo la
+regola 1 di [ADR-0035](#adr-0035). Legge il log del nodo **eletto** e non dell'osservatore: chi ha
+solo votato registra `23980` e basta, e guardare il log sbagliato porta a concludere che
+un'elezione non lasci traccia.
+
+*La frase giusta è nello script, non nella memoria di chi parla.* Prima del `docker kill` lo script
+stampa: «da dire ad alta voce: *sto SPEGNENDO un nodo*, non *sto simulando un crash*». È il punto 1
+di [ADR-0034](#adr-0034) messo dove non si può dimenticare.
+
+*`tools/reset-demo.sh <stack>` salda il debito di `feature/01`.* Riporta uno stack allo stato di
+partenza **senza ricostruirlo**: riavvia i container fermati a mano, aspetta che i tre membri siano
+sani, che esista un primario e che sia tornato quello a priorità 2, cancella dal database `lab`
+tutto ciò che non è `ordini`, ricarica il dataset. Non è `reset-02`, che ferma lo stack e cancella i
+volumi: serve al caso opposto, la prova generale in cui la stessa scena si ripete tre volte. Lo
+stack è un **argomento**, così `feature/03` lo eredita invece di riscriverlo.
+
+**Conseguenze.** Provato sul vero: dopo un `make failover-02` che lascia `mongo-rs-1` `exited`,
+`reset-demo.sh 02` lo riavvia, aspetta che si riprenda il ruolo, e lo smoke torna 42/0. Sporcando
+il database di proposito — due collezioni di scarto e cento documenti cancellati — lo script
+riporta l'impronta a `50000 124861860.70 150281` e stampa i nomi di ciò che ha tolto.
+
+Il debito di [ADR-0035](#adr-0035) è saldato: gli `id` di un'elezione vera esistono e sono in
+[V-030](Sources.md#v-030). La riserva scritta in quella pagina — «gli `id` verranno inseriti in
+`feature/02`, dopo averne vista una» — può essere tolta al Task 12.
+
+Resta scoperto il caso della **maggioranza persa**, due membri su tre fermi, in cui il set diventa
+di sola lettura: è la variante che spiega meglio di ogni diagramma perché i membri sono tre e non
+due, e non è ancora stata misurata.
+
+**Alternative scartate:** un bersaglio solo con `SCENA=kill|shutdown` — comodo, e finisce che se ne
+mostra una; stampare i numeri misurati invece di rimisurarli — una slide che dice «dieci secondi»
+mentre lo schermo ne conta venti è peggio di nessun numero; abbassare `electionTimeoutMillis` per
+accorciare la scena — renderebbe la demo più agile e mostrerebbe un cluster che il pubblico non
+troverà, visto che il valore predefinito è quello che si eredita installando; usare `docker stop`
+al posto di `docker kill` — è più gentile ma soffre dello stesso equivoco sulla politica di
+riavvio, e in più aggiunge dieci secondi di attesa del `SIGTERM` che non insegnano niente;
+`kill -9 1` dentro il container — non fa niente e ritorna successo, misurato in
+[ADR-0034](#adr-0034), e sarebbe una scena che non succede.
+
+**Fonti:** [S-044](Sources.md#s-044), [V-017](Sources.md#v-017), [V-029](Sources.md#v-029), [V-030](Sources.md#v-030)

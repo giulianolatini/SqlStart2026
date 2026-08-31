@@ -3,8 +3,9 @@
 
 .DEFAULT_GOAL := help
 .PHONY: help docs-check tools-test images-pull images-verify preflight stack-check \
-        up-01 down-01 reset-01 logs-01 seed-01 smoke-01 \
-        up-02 down-02 reset-02 logs-02 seed-02 smoke-02
+        up-01 down-01 reset-01 logs-01 seed-01 smoke-01 reset-demo-01 \
+        up-02 down-02 reset-02 logs-02 seed-02 smoke-02 reset-demo-02 \
+        failover-02 failover-02-termina
 
 # `--env-file tools/images.env` porta MONGO_IMAGE, che nei file Compose è dichiarato
 # nella forma `${MONGO_IMAGE:?...}`: senza, Compose si ferma subito dicendo cosa manca
@@ -81,6 +82,12 @@ seed-01: ## Ricarica i dati di demo su uno stack 01 già avviato
 smoke-01: ## Prova end-to-end dello stack 01 avviato
 	./tools/smoke-standalone.sh
 
+# Diverso da `reset-01`: quello ferma lo stack e cancella il volume, questo lavora sui
+# container in piedi. Serve in prova generale, quando la stessa scena si ripete tre
+# volte e ricostruire da zero ogni volta costa mezzo minuto a giro.
+reset-demo-01: ## Riporta lo stack 01 allo stato di partenza senza ricostruirlo
+	./tools/reset-demo.sh 01
+
 # --- Stack 02 — replica set a tre membri ----------------------------------------------
 
 # DUE `--env-file`, e il secondo non è ridondante: la flag non aggiunge un file, prende
@@ -140,3 +147,19 @@ seed-02: $(AMBIENTE_02) ## Ricarica i dati di demo su uno stack 02 già avviato
 
 smoke-02: ## Prova end-to-end dello stack 02 avviato
 	./tools/smoke-replicaset.sh
+
+reset-demo-02: ## Riporta lo stack 02 allo stato di partenza senza ricostruirlo
+	./tools/reset-demo.sh 02
+
+# --- Le due scene di failover ---------------------------------------------------------
+#
+# Sono DUE bersagli perché sono due fenomeni diversi, e tenerli in uno solo con una
+# variabile invita a mostrarne uno soltanto. `docker kill` è quello che il pubblico si
+# aspetta e costa ~10 s di elezione perché nessuno ha avvisato nessuno; lo `shutdown`
+# costa ~0,5 s ed è l'unico dei due in cui `restart: unless-stopped` interviene
+# davvero. La differenza è la scena (ADR-0034, ADR-0044, misure in V-029).
+failover-02: ## Demo di failover: SPEGNE il primario con docker kill (~10 s di elezione)
+	./tools/failover-replicaset.sh spegni
+
+failover-02-termina: ## Demo di failover: il primario esce da sé (~0,5 s, e il container torna su)
+	./tools/failover-replicaset.sh termina

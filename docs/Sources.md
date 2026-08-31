@@ -1244,7 +1244,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   `docs/03-amministrazione/log.md`, che per questa ragione è **dichiarata non verificata** su
   questo branch: qui non esiste un replica set. La verifica è dovuta a `feature/02`
   ([ADR-0035](Decision.md#adr-0035)).
-- **Usata da:** ADR-0035, ADR-0036
+- **Usata da:** ADR-0035, ADR-0036, ADR-0044
 
 ---
 
@@ -2484,7 +2484,7 @@ dodici controlli verdi, impronta invariata.
   stop`, che [S-039](#s-039) copre esplicitamente ed è il caso non interessante. Il numero
   `RestartCount` è cumulativo sulla vita del container: azzerarlo richiede ricrearlo.
 - **Data:** 2026-08-28
-- **Usata da:** ADR-0034
+- **Usata da:** ADR-0034, ADR-0044
 
 ---
 
@@ -3625,5 +3625,141 @@ dopo:   volumi keyfile                        keyfile sha 33257423c039b2a2
   stato verificato.
 - **Data:** 2026-08-31
 - **Usata da:** ADR-0043
+
+---
+
+<a id="v-029"></a>
+### V-029 — Dieci secondi contro mezzo: le due morti di un primario non costano lo stesso
+
+- **Comandi:** `docker kill <primario>` · `db.adminCommand({shutdown: 1})` · un `mongosh` che
+  gira dentro un membro superstite e interroga `hello()` in un ciclo da 20 ms · `docker inspect`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, stack
+  `docker/02-replicaset/compose.yaml`, tre membri sani, `mongo-rs-1` primario per priorità 2,
+  nessun carico applicativo. Tre esecuzioni per scena.
+- **Che cosa si voleva sapere:** quanto dura, cronometrato, l'intervallo fra la caduta del
+  primario e il momento in cui un client può di nuovo scrivere. Il numero serve alla pagina del
+  Task 9 e serve a decidere se la scena regge dal vivo — dieci secondi di schermo fermo davanti a
+  cento persone sono una cosa diversa da due.
+- **Come si è misurato, e perché non nel modo ovvio.** Il cronometro non poteva partire *dopo* il
+  colpo: `mongosh` impiega quasi un secondo ad avviarsi e ad autenticarsi, e quel secondo sarebbe
+  finito dentro la misura. L'osservatore viene quindi avviato **prima**, dentro un membro
+  superstite; quando è connesso e caldo stampa `PRONTO`, e solo allora chi lo ha lanciato uccide il
+  primario e segna `t0`. Il ciclo interroga `hello()` ogni 20 ms fino a vedere un `primary` diverso
+  da quello di partenza.
+
+- **Esito, scena 1 — `docker kill` sul primario:**
+
+```
+giro 1   nuovo primario mongo-rs-3:27017   elezione in  9812 ms
+giro 2   nuovo primario mongo-rs-2:27017   elezione in 10619 ms
+giro 3   nuovo primario mongo-rs-3:27017   elezione in 10943 ms
+stato del container ucciso, tutte e tre le volte:
+  Status=exited  RestartCount=0  ExitCode=137
+```
+
+- **Esito, scena 2 — il processo esce da sé (`shutdownServer()`):**
+
+```
+giro 1   nuovo primario mongo-rs-2:27017   elezione in 574 ms
+giro 2   nuovo primario mongo-rs-2:27017   elezione in 480 ms
+giro 3   nuovo primario mongo-rs-2:27017   elezione in 486 ms
+stato del container terminato:
+  Status=running  RestartCount=1, poi 2, poi 3  ExitCode=0
+```
+
+**Venti volte più veloce, e nel verso che nessuno si aspetta.** Il gesto brutale è quello lento; il
+gesto educato è quello rapido. Il motivo sta nel log ([V-030](#v-030)) e non è misterioso: con
+`docker kill` nessuno avvisa nessuno, quindi i superstiti devono aspettare che scada
+`electionTimeoutMillis` — che vale 10 000 ms, e infatti i tre numeri della scena 1 stanno tutti
+poco sopra i dieci secondi. Con `shutdown` il primario cede il ruolo *e lo dice*: non c'è nessun
+timeout da far scadere, e restano solo i millisecondi del voto.
+
+- **`RestartCount=0` è la seconda metà del risultato.** Su un replica set vale quello che
+  [V-017](#v-017) aveva misurato su un'istanza singola: dopo un `docker kill` la politica
+  `restart: unless-stopped` **non interviene**, perché per il demone quella fermata l'ha voluta un
+  umano. Il container resta `exited` con `ExitCode=137`, e ci resta finché qualcuno non lo riavvia.
+  Dopo lo `shutdown`, invece, `RestartCount` avanza a ogni giro e il membro torna su da sé: è la
+  prova che la politica funziona e che il problema non era mai la politica.
+- **Conseguenza:** le due scene sono due bersagli distinti — `make failover-02` e
+  `make failover-02-termina` — registrati in [ADR-0044](Decision.md#adr-0044). La misura conferma
+  su tre membri quanto [ADR-0034](Decision.md#adr-0034) aveva deciso su uno solo, e le dà il numero
+  che le mancava.
+- **Riserve:** tre membri sulla stessa macchina, senza carico e senza rete vera: i dieci secondi
+  sono dominati da un timeout di configurazione e quindi reggeranno altrove, ma il mezzo secondo
+  della scena 2 no — è tempo di rete e di voto, e su datacenter separati vale di più.
+  `electionTimeoutMillis` non è stato modificato: abbassarlo accorcerebbe la scena 1, e non lo si è
+  fatto apposta, perché il valore predefinito è quello che il pubblico troverà. Le tre esecuzioni
+  per scena sono poche per parlare di distribuzione; bastano per dire che i due ordini di grandezza
+  non si sovrappongono. Infine il primario è sempre stato `mongo-rs-1`: il caso in cui cade un
+  **secondario** — che non provoca nessuna elezione — non è cronometrato qui perché non ha niente
+  da cronometrare.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0044
+
+---
+
+<a id="v-030"></a>
+### V-030 — Le righe di un'elezione, finalmente viste: il voto dura sei millisecondi, il resto è attesa
+
+- **Comandi:** `docker kill <primario>` · `docker logs mongo-rs-2` · filtro per `id` sul JSON
+- **Ambiente:** come [V-029](#v-029). Log del membro **eletto** (`mongo-rs-2`), non di chi ha votato.
+- **Che cosa si voleva sapere:** [ADR-0035](Decision.md#adr-0035) aveva lasciato aperto un debito
+  dichiarato: la sezione sull'elezione di `docs/03-amministrazione/log.md` poggiava solo su
+  [S-044](#s-044), che descrive il meccanismo ma **non nomina una sola riga di log**. Gli `id`
+  andavano inseriti «in `feature/02`, dopo averne vista una». Questa è quella.
+
+- **Esito, la sequenza completa** (orari veri, un'elezione sola):
+
+```
+19:01:47.369  id=21216    REPL      Member is now in state DOWN
+              attr: hostAndPort=mongo-rs-1:27017, heartbeatMessage="Connection refused"
+
+   ... nove secondi, e diciannove ripetizioni di id=23974 «Heartbeat failed after max retries» ...
+
+19:01:56.558  id=4615652  ELECTION  Starting an election, since we've seen no PRIMARY in
+                                    election timeout period
+              attr: electionTimeoutPeriodMillis=10000
+19:01:56.558  id=21438    ELECTION  Conducting a dry run election to see if we could be elected
+              attr: currentTerm=13
+19:01:56.560  id=51799    ELECTION  VoteRequester processResponse
+              attr: dryRun=true, vote="yes", from=mongo-rs-3:27017
+19:01:56.560  id=21444    ELECTION  Dry election run succeeded, running for election
+              attr: newTerm=14
+19:01:56.560  id=6015300  ELECTION  Storing last vote document in local storage for my election
+19:01:56.564  id=51799    ELECTION  VoteRequester processResponse
+              attr: dryRun=false, vote="yes", from=mongo-rs-3:27017
+19:01:56.564  id=21450    ELECTION  Election succeeded, assuming primary role
+              attr: term=14
+19:01:56.564  id=21358    REPL      Replica set state transition
+              attr: newState="PRIMARY", oldState="SECONDARY"
+```
+
+Sul membro che ha **votato** e non è stato eletto compaiono invece solo `id=23980` «Responding to
+vote request», due volte — una per il giro a vuoto e una per quello vero — e `id=21215` «Member is
+in new state».
+
+**Il numero che cambia il racconto: 56.558 → 56.564 sono sei millisecondi.** L'elezione vera —
+giro a vuoto, voto scritto su disco, richiesta di voto, ruolo assunto — dura quanto un battito di
+ciglia. I dieci secondi di [V-029](#v-029) non sono l'elezione: sono l'**attesa prima di
+cominciarla**, e il log lo dice per esteso in un attributo, `electionTimeoutPeriodMillis: 10000`.
+Ancora più preciso: la caduta è **notata subito**, a `19:01:47.369`, tre decimi di secondo dopo il
+colpo, con «Connection refused» scritto nell'attributo. Il set sa che il primario è morto quasi
+istantaneamente e aspetta comunque dieci secondi prima di reagire — perché un membro irraggiungibile
+per un istante non è un membro morto, e indire un'elezione a ogni singhiozzo di rete costerebbe più
+di quello che salva.
+
+- **Conseguenza:** gli `id` entrano in `docs/03-amministrazione/log.md` al Task 12, e la riserva
+  dichiarata da [ADR-0035](Decision.md#adr-0035) può essere tolta. Lo script
+  `tools/failover-replicaset.sh` filtra il log **per questi `id`** e non per il testo dei
+  messaggi, secondo la regola 1 di quell'ADR. Registrato in [ADR-0044](Decision.md#adr-0044).
+- **Riserve:** una sola elezione osservata riga per riga, su un set a tre membri con priorità
+  2/1/1 e senza carico. Il numero di termine (`term`) qui è 13→14 perché il set aveva già subìto
+  altre prove: su un set appena creato sarebbe 1→2, e chi confronta i propri log non deve
+  aspettarsi lo stesso valore. La sequenza è stata letta sul nodo **eletto**: guardare il log del
+  votante fa concludere che l'elezione non lasci quasi traccia, ed è l'errore più facile da
+  commettere. Infine non è stata osservata un'elezione *contesa* — due candidati nello stesso
+  termine, con un `dry run` che fallisce — che è il caso in cui `21438` e `21444` divergono.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0044
 
 ---
