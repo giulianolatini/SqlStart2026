@@ -642,9 +642,17 @@ e nel codice, che ora la regola la implementa.
     secondo **dice** come si comporta, a chiunque lo apra, per sempre. In un repository che è
     materiale didattico prima che infrastruttura, la seconda proprietà vale più della prima.
 
-**Consuntivo del branch, alla vigilia dell'unione.** Ventisei commit e ventotto file rispetto a
-`develop`: i sedici della chiusura, i cinque del primo giro di review, i quattro del secondo, e
-questi tre. La PR è `MERGEABLE` senza conflitti, l'unico filo di commento è risolto, e nel
+37. **Un consuntivo si conta all'ultimo commit, non al penultimo.** La prima stesura della riga
+    qui sotto diceva «ventisei commit», e aveva contato il branch com'era *prima* del commit che la
+    conteneva. È lo stesso errore corretto il 28 agosto da `fix: il conteggio della voce di chiusura
+    era vecchio di un commit`, ricomparso tre giorni dopo nello stesso file — segno che stava in una
+    riga di messaggio e non in una regola. La regola, adesso scritta: quando un numero descrive il
+    branch e vive dentro il branch, si calcola includendo il commit che lo introduce.
+
+**Consuntivo del branch, alla vigilia dell'unione.** Ventotto commit e ventinove file rispetto a
+`develop`: i sedici della chiusura, i due del primo giro di review, i cinque del secondo, i tre di
+ADR-0039 e i due di coda — questo compreso. La PR è `MERGEABLE` senza conflitti, l'unico filo di
+commento è risolto, e nel
 repository non gira alcun controllo automatico su GitHub — per scelta
 ([ADR-0038](Decision.md#adr-0038)): i tre controllori girano in locale, ed è lì che sono stati
 eseguiti.
