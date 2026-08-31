@@ -829,3 +829,65 @@ qui resta il verbale.
     si ritrovano. È la ragione per cui il piano chiedeva di provocare il guasto invece di
     descriverlo, e la ragione per cui è valsa la pena: descrivendolo non sarebbe emerso che la riga
     diagnostica è informativa e quella fatale è muta.
+
+## 2026-08-31 — Punto di ripresa: `feature/02` si riprende dal Task 3
+
+Sessione interrotta per esaurimento del limite, non per un problema del lavoro. Tutto quello che
+c'è è committato e spinto su `origin/feature/02-stack-replicaset`; l'albero di lavoro è pulito.
+Questa voce esiste perché la prossima sessione riparta senza ricostruire il contesto a memoria.
+
+**Quello che è deciso e non va più discusso.** [ADR-0040](Decision.md#adr-0040) è `Accettata`: la
+catena di inizializzazione del replica set usa la **strada C**. Nessun `mongod` riceve
+`MONGO_INITDB_ROOT_*`; l'utente amministratore nasce sotto eccezione localhost da un servizio
+one-shot `rs-init` che condivide il namespace di rete del primo membro
+(`network_mode: "service:mongo-rs-1"`). Le tre strade sono state montate e misurate prima di
+scegliere: il verbale è in [V-023](Sources.md#v-023), la fonte nella versione pinnata in
+[S-055](Sources.md#s-055).
+
+**Quello che è costruito.** Il Task 1 e il Task 2 del
+[piano](00-progetto/2026-08-31-piano-feature-02-stack-replicaset.md) sono chiusi. Nel repository ci
+sono `docker/02-replicaset/compose.yaml` — per ora il solo servizio `keyfile-init` — e
+`docker/02-replicaset/init/01-keyfile.sh`, idempotente, che genera il keyfile a `400` e `999:999`
+dentro il volume nominato `keyfile`.
+
+**Quello che è già misurato e non va rimisurato.** Tre cose che i task successivi darebbero per
+ignote e che invece hanno già una risposta:
+
+- **Task 5, l'uovo e la gallina dell'healthcheck.** Su un `mongod` con `--keyFile` non ancora
+  inizializzato, `hello()` risponde **senza credenziali** (`isWritablePrimary=false
+  secondary=true`). Quindi l'healthcheck deve chiedere «`hello()` risponde?» e non «sei primario o
+  secondario?», altrimenti resta rosso fino a `rs.initiate()` e blocca il servizio che dovrebbe
+  eseguirlo.
+- **Task 4, la corsa di `rs-init`.** `depends_on` con `condition: service_started` non basta: nella
+  prova è arrivato mentre il membro era ancora nella fase del `mongod` temporaneo e ha preso
+  `ECONNREFUSED`. Serve `service_healthy`, che l'healthcheck qui sopra rende raggiungibile.
+- **Task 12, la trappola del keyfile.** Con `chmod 644` `mongod` esce con codice `1`. La riga che
+  spiega il perché — `permissions on … are too open`, `id: 20254` — è di severità **informativa**;
+  la riga fatale `id: 20575` dice solo `Unable to acquire security key[s]` e non nomina i permessi.
+  La voce di [`Sources.md`](Sources.md) per questa misura **non è ancora stata creata**: nasce al
+  Task 12, insieme alla pagina che la spiega. È l'unico debito documentale aperto dai due task
+  chiusi.
+
+**Da dove si riparte.** Task 3 del piano: i tre `mongod` con `--replSet`, `--keyFile`,
+`--bind_ip_all`, `768m` di memoria, `0.25` GB di cache WiredTiger, `0.75` CPU per membro
+([ADR-0004](Decision.md#adr-0004)) e le porte `27021`/`27022`/`27023`. Il piano ne porta lo YAML
+completo per il membro 1.
+
+**Come si verifica che lo stato sia quello descritto qui**, prima di toccare qualunque cosa:
+
+```console
+$ git log --oneline origin/develop..HEAD   # quattro commit
+$ make docs-check                          # citazioni e collegamenti coerenti
+$ make stack-check                         # lo stack 01 rispetta i suoi ADR
+$ uv run --directory tools pytest -q       # 76 passati
+```
+
+**Note di metodo.**
+
+44. **Una sessione che finisce non è una consegna che finisce.** Il lavoro era già tutto committato
+    e spinto, quindi non si è perso niente di materiale — ma il contesto sì: quale strada fosse
+    stata scelta e perché, che cosa fosse già stato misurato, dove stesse il debito aperto. Quel
+    contesto vive nella testa di chi lavora e muore con la sessione, a meno che non venga scritto
+    dove il lavoro vive. Da qui la regola: quando si sospende, l'ultimo commit non è il codice, è il
+    punto di ripresa — e dice tre cose, che cosa è deciso, che cosa è già misurato, da quale passo
+    si riparte.
