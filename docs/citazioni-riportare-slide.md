@@ -488,6 +488,35 @@ travestita da regola.
 
 ---
 
+### `up` ha detto di sì, e per quattordici secondi la replica non c'era
+
+> ```console
+> $ docker compose ... up -d --wait
+> $ echo $?
+> 0
+> $ docker inspect rs-init --format '{{.State.Status}}'
+> running
+> $ mongosh --quiet --eval 'rs.status()'
+> NotYetInitialized (94)
+> ```
+
+Fonte: [V-025](Sources.md#v-025), misurata sullo stack `02-replicaset`. `--wait` è documentato
+come «Wait services be running|healthy» ([S-057](Sources.md#s-057)); il servizio che inizializza
+il replica set non ha un healthcheck, quindi la soglia che gli si applica è `running` — e un
+container che deve morire è `running` nell'istante esatto in cui comincia. Il rimedio è un secondo
+comando, `docker compose wait rs-init`, che «blocca fino a che i container si fermano» e ne
+restituisce il codice di uscita.
+
+**Perché una slide:** perché l'opzione fa esattamente ciò che dichiara, e la dichiarazione è stata
+letta male da chi l'ha usata — cioè da me. In uno stesso file convivono due generi di servizio:
+quelli per cui «pronto» significa *essere su*, e quelli per cui significa *essere finiti*. Una sola
+opzione risponde alla prima domanda, e chi non si accorge di avere anche la seconda ottiene uno
+zero che non vale niente. In sala funziona come esempio della classe di bug peggiore: quella che
+riesce quasi sempre, perché su una macchina veloce lo scarto si accorcia e il test rosso arriva una
+volta ogni tanto, su un'altra macchina, davanti a qualcun altro.
+
+---
+
 ## Installazione su una macchina vera
 
 ### MongoDB non è supportato su WSL

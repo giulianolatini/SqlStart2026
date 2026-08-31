@@ -1011,3 +1011,153 @@ testa — il corpo non si tocca.
     una decisione consapevole. È la stessa famiglia della nota 42: lì una conferma non poteva
     fallire, qui una regola non poteva scattare. Quando si scrive uno strumento che legge un
     formato, l'insieme delle scritture equivalenti nel formato è parte del formato.
+
+## 2026-08-31 — `feature/02`, Task 4 e 5: la catena si chiude, e «fatto» viene detto due volte
+
+**Perché due task in uno.** Il piano teneva separati il Task 4 (il servizio `rs-init` nel file
+Compose) e il Task 5 (lo script `rs.initiate()` che quel servizio esegue). Separarli non era
+possibile: `rs-init` dipende dai tre membri con `condition: service_healthy`, e
+[`tools/check_stack.py`](../tools/check_stack.py) rifiuta un `service_healthy` verso un servizio
+privo di `healthcheck`. Il Task 4 da solo sarebbe dunque nato rosso, e per farlo diventare verde
+avrebbe dovuto scrivere l'healthcheck, che è del Task 5 — oppure dichiarare una dipendenza più
+debole e correggerla subito dopo, cioè scrivere una cosa sbagliata di proposito per poterla
+riscrivere. I due task sono stati fusi e verificati insieme. Il piano non viene modificato: resta
+com'era, con questa nota che spiega perché è stato eseguito diversamente.
+
+**Che cosa è stato costruito.** Il servizio `rs-init` in `docker/02-replicaset/compose.yaml` —
+one-shot, `restart: "no"`, `network_mode: "service:mongo-rs-1"`, dipendente dai tre membri sani — e
+lo script `docker/02-replicaset/init/10-rs-initiate.js` che esegue `rs.initiate()` con i tre membri
+elencati per nome di servizio, attende l'elezione del primario e crea l'amministratore sotto
+eccezione localhost. Le credenziali arrivano dall'ambiente, e la password non ha valore
+predefinito. Con questo lo stack `02-replicaset` è completo: `keyfile-init` → tre `mongod` →
+`rs-init`.
+
+**L'idempotenza, e perché non si riconosce dal `catch`.** Lo script deve poter girare due volte.
+La forma che viene in mente per prima è tentare `rs.status()` e trattare l'errore
+`NotYetInitialized` come «non ancora inizializzato, procedi». Non funziona, e il modo in cui non
+funziona è istruttivo: dopo che il primo utente è stato creato, l'eccezione localhost si richiude, e
+una `rs.status()` **senza credenziali** su uno stack perfettamente sano non risponde
+`NotYetInitialized` — risponde `Unauthorized (13)`. Un `catch` scritto su quel presupposto leggerebbe
+uno stack a posto come uno stack rotto. Lo script usa invece `db.hello().setName`, che risponde
+senza credenziali in tutti e due i casi: assente prima dell'inizializzazione, presente dopo.
+Verificato: il secondo avvio stampa «già formato» e «già presente», ed esce 0.
+
+**La catena, misurata.** Da volumi vuoti, quattro righe e codice 0:
+
+```console
+inizializzo il replica set «rs0»
+primario eletto: mongo-rs-1:27017
+utente amministratore «admin» creato
+catena completata
+```
+
+Il set è formato con `mongo-rs-1` primario e gli altri due secondari, una scrittura con
+`w: "majority"` viene confermata e si rilegge sul membro 3, e la stessa `rs.status()` senza
+credenziali viene rifiutata con `Unauthorized (13)`. Il verbale completo è in
+[V-024](Sources.md#v-024).
+
+**Il debito di V-023 è saldato.** [ADR-0040](Decision.md#adr-0040) era stato deciso su una prova
+che [V-023](Sources.md#v-023) dichiarava incompleta: `network_mode: "service:"` era stato provato
+nella forma equivalente `docker run --network container:…`, non dentro un file Compose del
+repository. Ora sì, e la prova è netta — l'identificatore che Compose scrive in `NetworkMode` è,
+cifra per cifra, l'identificatore del container del membro 1, e nello spazio di rete condiviso
+esiste un solo indirizzo, quello del `mongod`. `rs-init` non ha una rete propria: il suo `localhost`
+è quello del membro, ed è per questo che l'eccezione localhost lo riconosce.
+
+**Prima scoperta: `up --wait` esce con successo prima che la replica esista.** Misurato: il comando
+ritorna 0 dopo otto secondi, `rs-init` in quell'istante è in stato `running`, e chi si collega
+riceve `NotYetInitialized (94)`. Lo script finisce quattordici secondi più tardi.
+
+```console
+«up -d --wait» uscita=0 dopo 8 secondi
+stato di rs-init in quell'istante: running
+--- che cosa vede un client in quell'istante ---
+NotYetInitialized (94)
+
+rs-init uscito dopo 22 secondi dall'avvio, codice=0
+scarto fra «up dice fatto» e «la replica c'e'»: 14 secondi
+```
+
+Non è un difetto di Compose. `--wait` è documentato come «Wait services be running|healthy»
+([S-057](Sources.md#s-057)) e `rs-init` non ha un healthcheck, quindi la soglia applicabile è
+`running` — che un container destinato a morire raggiunge nell'istante in cui comincia. Il rimedio
+sta in un secondo comando, `docker compose wait rs-init`, che blocca fino all'uscita e ne riporta il
+codice: la catena completa passa allora da otto a venti secondi, e subito dopo il set c'è. Le due
+opzioni non sono alternative fra cui scegliere: `up --wait` serve ai tre membri, che devono essere
+**sani**, e `compose wait` serve a `rs-init`, che deve essere **finito**. Lo stack ha bisogno di
+entrambe perché contiene entrambi i generi di servizio. Registrato in
+[ADR-0041](Decision.md#adr-0041), punti uno e tre.
+
+**Seconda scoperta: `--env-file` non aggiunge un file, ne prende il posto.** Lo stack ha bisogno di
+due ambienti — il pin dell'immagine in `tools/images.env`, la password in
+`docker/02-replicaset/.env` — e passando solo il primo il secondo smette di essere letto, benché sia
+accanto al file indicato con `-f`:
+
+```console
+uscita di «config» con un solo --env-file: 1
+error while interpolating services.rs-init.environment.PASSWORD_AMMINISTRATORE: required variable
+PASSWORD_AMMINISTRATORE is missing a value: assente — copiare docker/02-replicaset/.env.example in
+.env e riempire la password
+```
+
+La documentazione lo dice — «Passing the `--env-file` argument overrides the default file path» —
+ma **non sulla pagina dove uno andrebbe a cercarlo**: la pagina intitolata «Environment variables
+precedence» non contiene mai quell'affermazione, che sta invece sotto il titolo «Interpolation»
+([S-056](Sources.md#s-056)). La flag si può ripetere, e i file si leggono nell'ordine dato. Lo stack
+02 si avvia quindi con due `--env-file`, in quest'ordine: prima il pin comune, poi il file dello
+stack, che può sovrascriverlo.
+
+**Il dettaglio che ha reso rumoroso l'errore.** Vale la pena guardare *come* si è manifestata la
+seconda scoperta: non con un amministratore creato con password vuota, ma con un rifiuto che nomina
+il file da copiare. Quel messaggio esiste perché la variabile è scritta nella forma
+`${PASSWORD_AMMINISTRATORE:?…}`, decisa al Task 4 quando si è scritto `.env.example`. Nella forma
+senza `:?` — che è la forma che quasi tutti scrivono — Compose avrebbe sostituito la stringa vuota,
+`createUser` sarebbe riuscito, lo stack sarebbe partito, e l'amministratore del replica set avrebbe
+avuto password vuota senza che nessuna riga di output lo dicesse.
+
+**Una misura controintuitiva che non finisce in slide.** Cronometrando dall'avvio alla fine di
+`compose wait rs-init`, l'avvio **a caldo** — con i volumi conservati — è risultato più lento di
+quello da volumi vuoti: 24 secondi contro 19, 21 e 21. La spiegazione plausibile è che dopo uno
+spegnimento completo il set debba rieleggere un primario prima che qualunque cosa funzioni. È il
+genere di fatto che si racconta volentieri, ed è esattamente per questo che non è stato messo in
+[`citazioni-riportare-slide.md`](citazioni-riportare-slide.md): l'avvio a caldo è stato misurato
+**una volta sola**, contro tre giri a freddo, e la causa proposta non è stata isolata da nessuna
+misura. Sta nelle riserve di [V-025](Sources.md#v-025) come cosa da rifare con più ripetizioni.
+
+**Controlli.** `make docs-check` verde; `uv run --directory tools pytest -q`, 76 test verdi;
+`check_stack.py` sul file 02 con un ambiente unito, conforme; smontaggio con `down -v` verificato —
+zero container, zero volumi. Resta aperto il debito del Task 6: `make stack-check` continua a non
+conoscere il file 02, `--ambiente` accetta un file solo, e `avvia_mongod` non riconosce la forma di
+comando che comincia per trattino.
+
+**Documentazione prodotta.** [S-056](Sources.md#s-056) e [S-057](Sources.md#s-057) fra le fonti
+ufficiali; [V-024](Sources.md#v-024) e [V-025](Sources.md#v-025) fra le verifiche empiriche;
+[ADR-0041](Decision.md#adr-0041) che le cita e rende obbligatoria la forma d'avvio a due comandi con
+due `--env-file`; una voce in [`citazioni-riportare-slide.md`](citazioni-riportare-slide.md).
+
+**Note di metodo.**
+
+47. **Un comando che dice «fatto» sta rispondendo alla sua domanda, non alla tua.** `up --wait`
+    aveva ragione: i servizi erano `running|healthy`, che è ciò che dichiara di attendere. Il
+    codice 0 era corretto e inutile, perché la domanda a cui rispondeva non era quella che
+    interessava. Il controllo da fare, davanti a un'opzione che aspetta qualcosa, è leggere che
+    cosa aspetta e confrontarlo con la propria definizione di pronto — parola che in uno stesso
+    file può significare *essere su* per un servizio e *essere finito* per quello accanto. Quando
+    le due definizioni convivono, un comando solo non può bastare, e cercarne uno che basti è il
+    modo di non trovarlo.
+
+48. **L'assenza di una configurazione obbligatoria va scritta in modo che faccia rumore.** La
+    stessa dimenticanza — un `--env-file` invece di due — ha prodotto un errore leggibile in otto
+    secondi solo perché la variabile era dichiarata `${NOME:?messaggio}`. Nella forma comune
+    avrebbe prodotto uno stack funzionante con l'amministratore senza password: un successo
+    apparente, che è il modo peggiore in cui un errore di configurazione può presentarsi. La forma
+    con `:?` costa un carattere e un messaggio, e il messaggio conviene scriverlo dicendo *che cosa
+    fare*, non *che cosa manca*.
+
+49. **Una riserva dichiarata è un debito; un'approssimazione taciuta diventa un presupposto.**
+    [V-023](Sources.md#v-023) aveva provato `network_mode:` in una forma equivalente e aveva
+    scritto, nero su bianco, che la forma definitiva restava da verificare — e su quella prova
+    incompleta è stato deciso [ADR-0040](Decision.md#adr-0040). Decidere su una prova incompleta è
+    legittimo; deciderlo senza dirlo non lo è. La riserva scritta è ciò che ha fatto sì che, sei
+    ore dopo, qualcuno sapesse ancora che cosa andava misurato. Se non fosse stata scritta, oggi
+    non ci sarebbe un errore: ci sarebbe una cosa che tutti danno per provata.

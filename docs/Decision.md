@@ -2027,3 +2027,91 @@ esattamente l'errore che [ADR-0039](#adr-0039) ha appena finito di correggere su
 giorni fa e nello stesso repository.
 
 **Fonti:** [S-006](Sources.md#s-006), [S-022](Sources.md#s-022), [S-055](Sources.md#s-055), [V-023](Sources.md#v-023)
+
+<a id="adr-0041"></a>
+## ADR-0041 — Quando lo stack si può dire pronto, e come gli si passano gli ambienti
+
+**Data:** 2026-08-31 · **Stato:** Accettata
+
+**Contesto:** il Task 4/5 di `feature/02` ha chiuso la catena — `keyfile-init`, i tre `mongod`,
+`rs-init` — e nel misurarla ha trovato due cose che nessun documento del repository copre, e che non
+sono misure ma decisioni da prendere una volta per tutte.
+
+La prima è che **`docker compose up -d --wait` esce con successo prima che il replica set esista**.
+Non di poco: quattordici secondi, misurati in [V-025](Sources.md#v-025), durante i quali il comando
+ha già restituito zero e chi si collega riceve `NotYetInitialized (94)`. Non è un difetto da
+segnalare a Docker. `--wait` è documentato come «Wait services be running|healthy»
+([S-057](Sources.md#s-057)), `rs-init` non ha un healthcheck, quindi la soglia che gli si applica è
+`running` — e un container che deve morire è `running` nell'istante in cui comincia. L'opzione fa
+esattamente ciò che dichiara; è la parola «pronto» a significare due cose diverse per due generi di
+servizio che stanno nello stesso file. I tre membri sono pronti quando **sono su e sani**; `rs-init`
+è pronto quando **è finito**.
+
+La seconda è che lo stack ha bisogno di due file d'ambiente — il pin dell'immagine in
+`tools/images.env`, condiviso da tutti gli stack, e la password dell'amministratore in
+`docker/02-replicaset/.env`, che è di questo stack soltanto — e che `--env-file` **non aggiunge un
+file, ne prende il posto**: «Passing the `--env-file` argument overrides the default file path»
+([S-056](Sources.md#s-056)). Passandone uno solo, il `.env` che sta accanto al file indicato con
+`-f` smette di essere letto, benché sia lì. Misurato in [V-025](Sources.md#v-025).
+
+**Decisione.** Tre punti, tutti e tre vincolanti per il Makefile del Task 7 e per la procedura che
+si esegue in sala.
+
+*Uno.* L'avvio dello stack `02-replicaset` è di **due comandi, non di uno**:
+
+```
+docker compose … up -d --wait
+docker compose … wait rs-init
+```
+
+Il verdetto è il codice di uscita del secondo, non del primo. Chi scrive automazione contro questo
+stack — il Makefile, l'applicazione di `feature/03`, uno script di dimostrazione — non può assumere
+che il ritorno di `up` significhi «la replica c'è». Nessun bersaglio del Makefile scrive solo la
+prima riga.
+
+*Due.* Gli ambienti si passano con **due `--env-file`, in quest'ordine**: prima
+`tools/images.env`, poi `docker/02-replicaset/.env`. L'ordine non è indifferente — «Later files can
+override variables from earlier files» ([S-056](Sources.md#s-056)) — e mette lo stack in condizione
+di sovrascrivere il pin comune, non il contrario. Non zero, perché il pin non verrebbe risolto; non
+uno, perché il secondo file sparirebbe insieme al `.env` implicito.
+
+*Tre.* **`rs-init` resta senza healthcheck**, ed è una scelta, non una dimenticanza. La tentazione,
+davanti allo scarto del punto uno, è di dargliene uno perché `--wait` lo aspetti. Non regge: un
+healthcheck descrive un container che resta vivo e continua a rispondere, mentre `rs-init` deve
+morire, e il suo verdetto è un codice di uscita. Leggere un codice di uscita è precisamente ciò per
+cui `docker compose wait` è documentato — «Block until containers of all (or specified) services
+stop» ([S-057](Sources.md#s-057)). Lo strumento giusto esiste già: va usato quello, invece di
+piegare il concetto di salute a descrivere una cosa morta.
+
+**Conseguenze.** Il Task 7 scrive nel Makefile entrambi i comandi e entrambe le occorrenze di
+`--env-file`; senza questo ADR li avrebbe scritti sbagliati, perché la forma sbagliata **funziona
+quasi sempre** — su una macchina veloce lo scarto si accorcia e l'errore si presenta come un test
+che fallisce una volta ogni tanto. Il Task 12 eredita due trappole per la pagina
+`02-architetture/trappole-mongodb-in-docker.md`: «`up --wait` ha detto di sì» e «`--env-file` toglie
+il `.env` che credevi di avere». La documentazione operativa di `feature/02` non scrive mai il primo
+comando da solo, neanche negli esempi abbreviati.
+
+Una conseguenza che vale oltre questo stack, ed è il motivo per cui è stata registrata qui invece
+che in una nota: il fallimento del punto due è stato **rumoroso** solo perché la variabile è scritta
+nella forma `${PASSWORD_AMMINISTRATORE:?messaggio}`. Nella forma senza `:?` la stessa dimenticanza
+avrebbe prodotto un utente amministratore con password vuota, e lo stack sarebbe partito. La forma
+con `:?` va usata per **ogni** variabile senza un valore predefinito sensato, negli stack che
+verranno.
+
+Infine, [ADR-0040](#adr-0040) è confermato nella forma definitiva: la terza via — `rs-init` con
+`network_mode: "service:mongo-rs-1"` — funziona dentro un file Compose del repository e non solo
+nella prova da riga di comando su cui era stata decisa. La riserva che
+[V-023](Sources.md#v-023) aveva dichiarato è scaricata da [V-024](Sources.md#v-024).
+
+**Alternative scartate:** aumentare `--wait-timeout` — non c'entra niente, `--wait` non è andato in
+timeout, si è dichiarato soddisfatto, e un timeout più lungo non cambia una condizione già vera;
+dare un healthcheck a `rs-init` — il punto tre; mettere un'attesa a tempo dopo `up` (`sleep 20`) —
+funziona sulla macchina su cui la si è tarata e su nessun'altra, ed è esattamente il genere di riga
+che in sala si scopre insufficiente davanti a cento persone; unire i due file d'ambiente in uno solo
+alla radice — eviterebbe la doppia flag, ma metterebbe il pin dell'immagine, che è comune ai tre
+stack, nello stesso file della password, che è di uno solo: o si copia il pin in tre posti, o si
+mette una password nel file che leggono anche gli altri due; leggere l'esito dai log invece che dal
+codice di uscita — `docker logs` va interrogato al momento giusto, che è il problema che si sta
+cercando di risolvere.
+
+**Fonti:** [S-056](Sources.md#s-056), [S-057](Sources.md#s-057), [V-024](Sources.md#v-024), [V-025](Sources.md#v-025)

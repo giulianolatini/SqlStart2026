@@ -1681,6 +1681,68 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   uno che non ci riesce, e la misura sta in [V-023](#v-023).
 - **Usata da:** ADR-0040
 
+<a id="s-056"></a>
+### S-056 — Docker Docs: Environment variables — Interpolation (`--env-file`)
+
+- **URL:** https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** riferimento Compose v2
+- **Consultata:** 2026-08-31
+- **Verdetto:** conferma
+- **Cosa afferma:** che il `.env` accanto al progetto si legge da solo, ma solo finché non si
+  passa la flag: «If the `--env-file` is not used in the command line, the `.env` file is loaded
+  by default», e «Passing the `--env-file` argument **overrides** the default file path». La
+  stessa cosa detta dal lato opposto: «Your `.env` file can be overridden by another `.env` if it
+  is substituted with `--env-file`». Il rimedio è nella riga successiva: «You can use multiple
+  `--env-file` options to specify multiple environment files, and Docker Compose reads them in
+  order», con la regola di fusione esplicita — «Later files can override variables from earlier
+  files». Un percorso sbagliato non viene ignorato: «When an invalid file path is being passed as
+  an `--env-file` argument, Compose returns an error». I percorsi si risolvono «relative to the
+  current working directory where the Docker Compose command is executed». Sulla directory di
+  progetto — quella dove il `.env` implicito viene cercato — la pagina dà tre passi in ordine:
+  «`--project-directory` if set», altrimenti la «directory of the first Compose file specified
+  with `-f`/`--file`», altrimenti `PWD`. L'ordine di precedenza complessivo mette prima le
+  variabili di shell, poi i file passati con `--env-file`, poi il `.env` della directory di
+  progetto.
+- **Riserve:** la frase che conta **non sta sulla pagina che si andrebbe a leggere**. La pagina
+  intitolata «Environment variables precedence», che è quella dove uno cerca, non contiene mai
+  l'affermazione che `--env-file` sostituisce il `.env`: dice solo «When `--env-file` is not set,
+  Compose may load up to two `.env` files», e lascia dedurre il resto. L'affermazione esplicita è
+  su questa pagina, sotto un titolo — «Interpolation» — che non lascia sospettare di contenerla.
+  Seconda riserva: «overrides the default file path» va combinato con la regola dei tre passi per
+  arrivare alla conseguenza che serve qui, cioè che passando `--env-file` sparisce anche il `.env`
+  che sta **accanto al file indicato con `-f`**. Sono due frasi distanti sulla stessa pagina, e la
+  conclusione è una deduzione: la misura diretta è in [V-025](#v-025).
+- **Usata da:** ADR-0041
+
+<a id="s-057"></a>
+### S-057 — `docker compose wait` e `docker compose up --wait`: che cosa dichiarano di attendere
+
+- **URL:** https://docs.docker.com/reference/cli/docker/compose/wait/
+- **Editore:** Docker Inc. — Docker Docs, e la guida del comando installato
+- **Versione documentata:** Docker Compose v5.4.0
+- **Consultata:** 2026-08-31
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** `docker compose wait --help` dà la definizione in una riga — «Block until
+  containers of all (or specified) services stop.» — con la forma d'uso `docker compose wait
+  SERVICE [SERVICE...] [OPTIONS]` e una sola opzione propria, `--down-project` («Drops project
+  when the first container stops»). Il riferimento in rete di `docker compose up` descrive
+  l'opzione omonima ma diversa: `--wait` è «Wait services be running|healthy. Implies detached
+  mode», e `--wait-timeout` è la «Maximum duration in seconds wait project to be running|healthy».
+  Le due formulazioni non dicono la stessa cosa: `up --wait` attende che i servizi **siano** in
+  esecuzione o sani, `compose wait` attende che i container **si fermino**.
+- **Riserve:** la pagina in rete di `docker compose wait` non è stata leggibile in forma
+  utilizzabile — la lettura ha restituito soltanto la tabella delle opzioni, senza il testo di
+  descrizione. La definizione citata qui viene quindi dalla guida del comando installato sulla
+  versione pinnata, che è una fonte primaria ma **locale**: su un'altra versione di Compose la
+  formulazione può cambiare, e chi rilegge queste righe dovrebbe rieseguire `docker compose wait
+  --help` prima di darle per attuali. La riserva che pesa davvero è però un'altra, ed è un
+  silenzio: **nessuno dei due testi dice che cosa faccia `--wait` con un servizio che finisce il
+  suo lavoro ed esce.** La distinzione fra un container che resta su e uno che muore per
+  progetto non compare da nessuna parte sulla pagina di `up`. Non è un dettaglio di lettura: è
+  esattamente il buco in cui cade lo stack di questo repository, misurato in [V-025](#v-025).
+- **Usata da:** ADR-0041
+
 ---
 
 ## Verifiche empiriche
@@ -3095,5 +3157,206 @@ l'inizializzazione non partirebbe mai.
   definitiva spetta al Task 2.
 - **Data:** 2026-08-31
 - **Usata da:** ADR-0040
+
+---
+
+<a id="v-024"></a>
+### V-024 — La terza via nella forma definitiva: un container che non ha una rete propria, e per questo può creare il primo utente
+
+- **Comandi:** `docker compose --env-file tools/images.env --env-file docker/02-replicaset/.env -f
+  docker/02-replicaset/compose.yaml up -d --wait` · `docker inspect` · `docker logs rs-init` ·
+  `mongosh`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, immagine
+  `mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b` (MongoDB 7.0.40),
+  stack `docker/02-replicaset/compose.yaml` del repository, volumi vuoti
+- **Che cosa restava da dimostrare:** [V-023](#v-023) chiudeva con una riserva scritta a chiare
+  lettere — il comportamento di `network_mode: "service:"` era stato provato «nella forma
+  equivalente da riga di comando (`docker run --network container:…`), e non ancora dentro un file
+  Compose del repository». Su quella prova incompleta è stato deciso [ADR-0040](Decision.md#adr-0040).
+  Questa voce salda il debito: stessa terza via, ma nello stack vero, scritta come la leggerà chi
+  clona.
+- **Esito, il namespace è davvero condiviso:** Compose non copia la configurazione di rete del
+  membro, aggancia `rs-init` al suo container. L'identificatore che compare in `NetworkMode` è, cifra
+  per cifra, l'identificatore di `mongo-rs-1`:
+
+```
+NetworkMode di rs-init: container:fdf722b35d3d782d47a5e97caef7ce21ab0ebd3581795d6566cd1fff735fa8d7
+id di mongo-rs-1:       fdf722b35d3d782d47a5e97caef7ce21ab0ebd3581795d6566cd1fff735fa8d7
+indirizzo di mongo-rs-1: 172.18.0.3
+```
+
+C'è un solo indirizzo, e appartiene al membro. `rs-init` non ne ha uno suo: quando parla a
+`localhost` parla all'interfaccia del `mongod`, che è la ragione per cui l'eccezione localhost lo
+riconosce.
+
+- **Esito, la catena arriva in fondo da sola:** quattro righe, nell'ordine previsto, con codice di
+  uscita 0.
+
+```
+inizializzo il replica set «rs0»
+primario eletto: mongo-rs-1:27017
+utente amministratore «admin» creato
+catena completata
+```
+
+- **Esito, il set esiste ed è chiuso:** con le credenziali si vede il set formato; senza, la stessa
+  interrogazione viene rifiutata. L'eccezione localhost si è richiusa da sé alla creazione del primo
+  utente, come [S-055](#s-055) prescrive.
+
+```
+set=rs0
+  mongo-rs-1:27017  PRIMARY  health=1
+  mongo-rs-2:27017  SECONDARY  health=1
+  mongo-rs-3:27017  SECONDARY  health=1
+--- senza credenziali ---
+rifiutato: Unauthorized (13)
+```
+
+Una scrittura con `w: "majority"` sul primario torna `inserito=true` e il documento si legge sul
+membro 3: la replica non è solo dichiarata, trasporta dati.
+
+- **Esito, l'healthcheck è verde in tutte e due le fasi, per due motivi diversi:** è il punto che
+  vale la pena guardare due volte. La condizione scritta nel file è
+  `h.isWritablePrimary || h.secondary || h.isreplicaset === true`, ed è un `or` di tre termini
+  perché nessuno dei tre da solo copre entrambe le fasi. Prima di `rs.initiate()` i tre membri
+  rispondono `isWritablePrimary=false secondary=false isreplicaset=true` ([V-023](#v-023), con la
+  nota di precisione in testa a quella voce): passa il terzo termine. Dopo, `isreplicaset` sparisce
+  e passano i primi due:
+
+```
+mongo-rs-1  isWritablePrimary=true secondary=false isreplicaset=undefined
+mongo-rs-2  isWritablePrimary=false secondary=true isreplicaset=undefined
+mongo-rs-3  isWritablePrimary=false secondary=true isreplicaset=undefined
+```
+
+Un healthcheck che avesse chiesto solo «sei primario o secondario?» sarebbe rimasto rosso nella
+prima fase, e `rs-init` — che dipende da `service_healthy` — non sarebbe mai partito per produrre
+proprio ciò che gli si chiedeva di avere già. Un healthcheck che avesse chiesto solo
+`isreplicaset === true` sarebbe diventato rosso appena il set si forma, cioè avrebbe segnato come
+malato uno stack perfettamente sano.
+
+- **Conseguenza:** la riserva di [V-023](#v-023) è scaricata, e [ADR-0040](Decision.md#adr-0040)
+  regge nella forma definitiva senza modifiche. Il resto delle conseguenze — quando la catena si
+  possa dire finita — sta in [V-025](#v-025) e in [ADR-0041](Decision.md#adr-0041).
+- **Riserve:** una macchina sola, Docker Desktop, nessuna prova su Linux nativo. `NetworkMode` dice
+  `container:<identificatore>`, non `service:mongo-rs-1`: Compose risolve il nome del servizio in un
+  identificatore **al momento della creazione**, il che implica che `mongo-rs-1` debba esistere
+  prima di `rs-init`. Qui quell'ordine è garantito dal `depends_on`, e **non è stato misurato** che
+  cosa succeda togliendolo — la prova non è stata fatta perché il `depends_on` serve comunque per la
+  condizione `service_healthy`, ma resta un'affermazione che questo repository non ha verificato.
+  Infine, che `rs-init` non possa pubblicare porte né essere raggiunto per nome sulla rete Compose è
+  dedotto dal non avere un'interfaccia propria, non provato tentandolo.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0041
+
+---
+
+<a id="v-025"></a>
+### V-025 — «Fatto» detto due volte: `up --wait` esce con successo quattordici secondi prima che la replica esista
+
+- **Comandi:** `docker compose … up -d --wait` · `docker compose … wait rs-init` ·
+  `docker compose … config` · `docker inspect`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, stack
+  `docker/02-replicaset/compose.yaml`, immagine `mongo@sha256:b6421fd6…` (MongoDB 7.0.40)
+- **Esito, lo scarto:** `up -d --wait` termina con codice 0 dopo otto secondi. In quell'istante
+  `rs-init` è in stato `running` — ha appena cominciato — e chi si collega al membro 1 riceve un
+  errore:
+
+```
+«up -d --wait» uscita=0 dopo 8 secondi
+stato di rs-init in quell'istante: running
+--- che cosa vede un client in quell'istante ---
+NotYetInitialized (94)
+
+rs-init uscito dopo 22 secondi dall'avvio, codice=0
+scarto fra «up dice fatto» e «la replica c'e'»: 14 secondi
+```
+
+Quattordici secondi in cui il comando ha già detto di sì e il replica set non esiste. Il perché sta
+nella definizione: [S-057](#s-057) documenta `--wait` come «Wait services be running|healthy», e
+`rs-init` non ha un healthcheck — quindi la soglia applicabile è `running`. Un container che deve
+morire è `running` **nel momento esatto in cui comincia**, e `--wait` si dichiara soddisfatto lì.
+Non è un difetto di Compose: è l'opzione che fa quello che dichiara, applicata a un servizio per cui
+la parola «pronto» significa il contrario di «in esecuzione».
+
+- **Esito, come si chiude lo scarto:** `docker compose wait rs-init` — «Block until containers of
+  all (or specified) services stop», [S-057](#s-057) — blocca fino all'uscita e ne riporta il
+  codice.
+
+```
+«up -d --wait» + «wait rs-init»: 20 secondi, uscita=0
+stampato da «compose wait»: container "6727c2a2386e…" exited with status code 0
+subito dopo wait: set=rs0
+```
+
+Le due opzioni non sono alternative e non si somigliano: `up --wait` serve ai tre membri, che devono
+essere **sani**; `compose wait` serve a `rs-init`, che deve essere **finito**. Lo stack ne ha bisogno
+di entrambe perché contiene i due generi di servizio.
+
+- **Esito, un solo `--env-file` non basta, e si vede:** lo stack ha bisogno di due file d'ambiente —
+  il pin dell'immagine in `tools/images.env`, la password in `docker/02-replicaset/.env`. Passando
+  solo il primo, il secondo **non viene letto**, benché stia accanto al file indicato con `-f`:
+
+```
+uscita di «config» con un solo --env-file: 1
+error while interpolating services.rs-init.environment.PASSWORD_AMMINISTRATORE: required variable
+PASSWORD_AMMINISTRATORE is missing a value: assente — copiare docker/02-replicaset/.env.example in
+.env e riempire la password
+```
+
+È la conferma diretta di [S-056](#s-056): «Passing the `--env-file` argument overrides the default
+file path». La flag non aggiunge un file, ne prende il posto. Con entrambe le occorrenze lo stesso
+comando esce 0. Vale la pena notare **come** si è manifestato l'errore: non con un utente creato con
+password vuota, ma con un rifiuto che nomina il file da copiare. Quel messaggio esiste perché la
+variabile è scritta nella forma `${PASSWORD_AMMINISTRATORE:?…}`; nella forma senza `:?` la stessa
+dimenticanza sarebbe passata in silenzio.
+
+- **Esito, l'idempotenza:** rieseguendo l'avvio su uno stack già inizializzato, `rs-init` riconosce
+  il set e non tocca niente, uscendo di nuovo 0. `docker logs rs-init` mostra **entrambe** le
+  esecuzioni una dopo l'altra, perché Compose riavvia il container one-shot esistente invece di
+  crearne uno nuovo: le prime quattro righe sono del primo avvio, le seconde quattro del secondo.
+
+```
+inizializzo il replica set «rs0»
+primario eletto: mongo-rs-1:27017
+utente amministratore «admin» creato
+catena completata
+replica set «rs0» già formato: non lo reinizializzo
+primario eletto: mongo-rs-1:27017
+utente amministratore già presente: non lo ricreo
+catena completata
+```
+
+- **Esito, i tempi, con una sorpresa:** misurati dal lancio alla fine di `compose wait rs-init`,
+  cioè fino alla replica realmente formata.
+
+```
+freddo, giro 1: 21 secondi
+freddo, giro 2: 21 secondi
+freddo, giro 3: 19 secondi
+caldo (volumi conservati): 24 secondi
+```
+
+Il riavvio **a caldo è più lento** dell'avvio da volumi vuoti. Controintuitivo, e utile a chi deve
+riavviare lo stack in sala: non conviene fare `down` e `up` sperando che «tanto i dati ci sono già».
+Dopo uno smontaggio completo si spengono tre membri, e alla ripartenza il set deve rieleggere un
+primario prima che qualunque cosa funzioni; da volumi vuoti l'elezione è la prima e avviene su un
+set appena costruito. Questa è però una **spiegazione**, non una misura: vedi le riserve.
+
+- **Conseguenza:** l'avvio dello stack 02 è di due comandi, non di uno, e gli ambienti si passano
+  con due `--env-file`. Registrato in [ADR-0041](Decision.md#adr-0041), che ne fa la forma
+  obbligatoria per il Makefile del Task 7.
+- **Riserve:** i secondi valgono per questa macchina e per questa immagine, e non vanno riportati
+  come previsione altrove: quello che non cambia è **che lo scarto esista**, perché discende dalla
+  definizione di `--wait` e non dalla velocità dell'host. Il numero 14 è di una sola esecuzione. La
+  lentezza dell'avvio a caldo è stata osservata **una volta sola**, contro tre giri a freddo: la
+  differenza è larga (24 contro 19÷21) ma un solo campione non stabilisce una regola, e la causa
+  proposta — la rielezione del primario dopo lo spegnimento — non è stata isolata da nessuna misura,
+  è un'ipotesi coerente con il funzionamento noto del protocollo. Va rifatta con più ripetizioni
+  prima di dirla in sala. Infine `compose wait` è stato osservato solo su un'uscita 0: che riporti
+  fedelmente anche un codice diverso da zero è documentato ma non provato qui, e conviene provarlo
+  al Task 7, dove quel codice diventa il verdetto di un bersaglio del Makefile.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0041
 
 ---
