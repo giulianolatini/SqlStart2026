@@ -11,9 +11,9 @@
 # pinnata e già in cache eviti il registry.
 #
 # Il talk gira senza rete grazie a due cose che stanno altrove: questo script,
-# eseguito prima quando la rete c'è, e `pull_policy: never` sul profilo di palco
-# (ADR-0018, ADR-0027) — l'unico meccanismo con una frase documentale esplicita sul
-# non contattare il registry. Qui si prepara la cache e si verifica che sia piena;
+# eseguito prima quando la rete c'è, e `pull_policy: never` scritto fisso in ogni
+# servizio di ogni file Compose (ADR-0027, ADR-0039) — l'unico meccanismo con una
+# frase documentale esplicita sul non contattare il registry. Qui si prepara la cache e si verifica che sia piena;
 # a non uscire ci pensa Compose.
 set -euo pipefail
 

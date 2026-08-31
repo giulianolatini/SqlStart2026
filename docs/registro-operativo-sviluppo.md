@@ -641,3 +641,14 @@ e nel codice, che ora la regola la implementa.
     chi guarda. Il primo si comporta bene su questa macchina, oggi, con questo file d'ambiente. Il
     secondo **dice** come si comporta, a chiunque lo apra, per sempre. In un repository che è
     materiale didattico prima che infrastruttura, la seconda proprietà vale più della prima.
+
+**Consuntivo del branch, alla vigilia dell'unione.** Ventisei commit e ventotto file rispetto a
+`develop`: i sedici della chiusura, i cinque del primo giro di review, i quattro del secondo, e
+questi tre. La PR è `MERGEABLE` senza conflitti, l'unico filo di commento è risolto, e nel
+repository non gira alcun controllo automatico su GitHub — per scelta
+([ADR-0038](Decision.md#adr-0038)): i tre controllori girano in locale, ed è lì che sono stati
+eseguiti.
+
+**Quello che resta aperto** non appartiene a questo branch e va scritto perché non si perda: la
+prova con la rete fisicamente staccata. Dopo [ADR-0039](Decision.md#adr-0039) il comando non ha
+più una variabile davanti — è `make up-01` con il Wi-Fi spento, e basta.
