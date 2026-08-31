@@ -1262,3 +1262,109 @@ test. Resta nel registro, dove serve a chi legge il repository.
     vincolo*, è *di che cosa ha bisogno lo strumento che il vincolo non gli dà* — qui, un valore
     che esista senza somigliare a una credenziale — e la risposta è quasi sempre più piccola della
     deroga che si stava per concedere.
+
+---
+
+## 2026-08-31 — feature/02, Task 7: i dati di demo, e uno smoke che sa restare in piedi mentre un membro cade
+
+**Deciso.** Lo stack 02 carica i suoi 50 000 ordini come **ultimo passo di `rs-init`**, con
+`w: "majority"` e `wtimeout: 10000`, saltando il lavoro se il dataset c'è già e rifacendolo se glielo
+si chiede con `RICARICA=1`. Sei bersagli nuovi nel `Makefile` e `tools/smoke-replicaset.sh` con 42
+controlli. È [ADR-0043](Decision.md#adr-0043).
+
+**Il quarto servizio che non è stato scritto.** La forma pulita era un servizio `dati-init` a valle
+di `rs-init`, e per un quarto d'ora è stata la forma prevista. L'ha fermata
+[ADR-0041](Decision.md#adr-0041), scritto poche ore prima: un secondo one-shot vuol dire un secondo
+`docker compose wait`, cioè **due verdetti** dove ADR-0041 ne aveva appena stabilito uno solo. Due
+verdetti sono la premessa di un `make up-02` che ne guarda uno e ignora l'altro, ed è lo stesso
+genere di bug che ADR-0041 era nato per chiudere. Piegare la catena per tenere il verdetto unico ha
+prodotto, per caso, la cosa migliore del Task: il caricamento dei dati è la **prima connessione
+autenticata** dello stack, e sta nel file subito dopo il `createUser` che ha chiuso l'eccezione
+localhost. Chi legge i due script di seguito vede la riga esatta in cui la password comincia a
+servire.
+
+**La misura che rispondeva sempre uguale.** Il piano chiedeva il ritardo di replica a riposo. Il
+modo canonico è la differenza fra gli `optimeDate` di `rs.status()`, e su questo set risponde
+`0 ms`. Tre volte, a cinque secondi di distanza, sempre zero — che non è un risultato, è la
+granularità: `optimeDate` viene dal timestamp dell'oplog, che conta secondi. La misura vera si fa
+scrivendo con `w: 1` — così il cronometro parte prima che i secondari sappiano qualcosa — e
+interrogando un secondario in un ciclo stretto finché il documento non compare: ritardo mediano
+**1 ms**, `w: "majority"` mediano **2 ms**. Le medie dicevano 1,6 · 1,9 · 6,2 ms, e sono state
+buttate: ogni esecuzione aveva un valore fuori scala (3, 9, 46 ms) ed era sempre **il primo giro**,
+cioè la connessione che si apre e si autentica. È [V-027](Sources.md#v-027), con la riserva che
+conta scritta per esteso — tre membri sullo stesso portatile non hanno una rete, e quel millisecondo
+descrive un bridge Docker, non la produzione.
+
+**Lo smoke che si fermava proprio quando serviva.** `tools/smoke-replicaset.sh` è nato ricalcando
+`smoke-standalone.sh`, e ha ereditato il suo cancello d'ingresso: se un nodo non è sano, esci. Su
+un'istanza singola è giusto — senza il nodo non c'è niente da chiedere. Provato con `mongo-rs-3`
+fermo, lo script usciva dopo tre righe: due verdi e un rosso, e nient'altro. Ma è **esattamente il
+momento** in cui uno vuole sapere se c'è ancora un primario, se le scritture passano, se il dataset
+è intatto. Il cancello è stato ristretto al caso «il container non esiste», e ora con un membro
+fermo lo script dice 34 verdi e 8 rossi, e fra i verdi «primari: 1» e «scrittura con w: majority
+accettata». Non è stato dedotto leggendo il codice: è stato visto fermando un container
+([V-028](Sources.md#v-028)).
+
+**La copia deliberata.** `20-dati-demo.js` è, per generatore seme epoca e liste, una copia di
+`docker/01-standalone/init/20-dati-demo.js`. Fattorizzarli sarebbe stato l'istinto, ed è stato
+scartato: i due stack devono poter divergere — sul write concern sono già divergenti — e un file
+condiviso farebbe cambiare di nascosto il dataset dello stack 01 a chi tocca il 02. La duplicazione
+è dichiarata in testa a entrambi i file e **sorvegliata dove conta**: i due script di prova
+controllano la stessa terna `50000 124861860.70 150281`, quindi modificarne uno solo fa diventare
+rosso l'altro. L'impronta misurata sullo stack 02 coincide con quella di [V-013](Sources.md#v-013)
+al centesimo.
+
+**Un numero di ieri che oggi è falso.** [V-025](Sources.md#v-025) si intitola «`up --wait` esce con
+successo *quattordici* secondi prima che la replica esista». Da quando il seed vive dentro `rs-init`
+lo scarto è di **ventidue** secondi. Il titolo non è stato riscritto — così è stato misurato quel
+giorno, su quella configurazione — ma la voce ha ricevuto una **nota di allineamento in testa**, e
+la citazione da slide ha ricevuto un paragrafo che dice di rimisurare la mattina stessa. La
+conclusione di ADR-0041 non cambia di una virgola; cambia il numero, ed è la ragione per cui il
+numero non va imparato a memoria.
+
+**Controlli.** `make smoke-02` → `Superati: 42 · Errori: 0`, quattro esecuzioni di fila. Avvio a
+freddo: `up --wait` 8 s, `compose wait rs-init` altri 22 s, seed di 50 000 documenti in 6 439 ms.
+`make seed-02` ricarica in 7 658 ms lasciando l'impronta identica. `make reset-02` lascia in piedi
+il solo volume del keyfile, e il segreto è byte per byte lo stesso prima e dopo. Con un membro
+fermo: uscita 1, 34/8. Con lo stack giù: uscita 1, 0/3, «Mancano 3 container su 3». `make docs-check`
+verde, `make tools-test` 95 verdi, `make stack-check` → `Stack conformi: 2.`
+
+**Documentazione prodotta.** [V-027](Sources.md#v-027) e [V-028](Sources.md#v-028) fra le verifiche;
+[ADR-0043](Decision.md#adr-0043), che le cita insieme a [S-022](Sources.md#s-022),
+[S-035](Sources.md#s-035), [V-013](Sources.md#v-013) e [V-014](Sources.md#v-014); una citazione da
+slide per il Blocco 2 sul costo della maggioranza, con dentro la riserva che la rende dicibile; la
+nota di allineamento su [V-025](Sources.md#v-025).
+
+**Note di metodo.**
+
+53. **Uno strumento che risponde sempre la stessa cosa non sta misurando.** `optimeDate` dava
+    `0 ms` a ogni lettura, e zero somiglia a una risposta: nessun ritardo. Non era una risposta,
+    era la risoluzione dello strumento — un secondo — messa davanti a un fenomeno che vive nei
+    millisecondi. È il parente stretto della nota 50, un piano più in là: là un controllo che non
+    poteva fallire, qui una misura che non poteva variare. Il test è lo stesso e costa poco:
+    **provocare il fenomeno e pretendere che il numero si muova.** Se non si muove, non si è
+    misurato niente, e si è sul punto di scriverlo in una slide.
+
+54. **Il primo giro di un ciclo di misura non è un dato.** In tutte e tre le esecuzioni il valore
+    fuori scala era il primo, e sempre per lo stesso motivo — la connessione che si apre, la cache
+    che si scalda, la pagina che si tocca per la prima volta. Una media su dieci giri di cui uno è
+    riscaldamento è una media che descrive il riscaldamento. Si guardano **i valori grezzi e la
+    mediana**, in quest'ordine: la mediana perché regge agli estremi, i grezzi perché mostrano
+    *dove* stanno gli estremi, che è l'informazione che dice se buttarli è legittimo o comodo.
+
+55. **Un controllo di salute portato da una topologia a un'altra porta con sé le sue assunzioni.**
+    «Se un nodo non è sano, smetti di chiedere» è corretto su un'istanza singola e distruttivo su
+    tre membri, dove il nodo malato è il motivo per cui si stanno facendo le domande. La copia non
+    ha prodotto un errore: ha prodotto uno script che funziona benissimo finché tutto va bene, cioè
+    la classe di strumenti che si scopre inutile nell'unico momento in cui la si usa davvero. Un
+    diagnostico si prova rompendo qualcosa, e si giudica da **quante domande riesce ancora a
+    rispondere**, non da quante ne fallisce.
+
+56. **Una duplicazione dichiarata è più onesta di una fattorizzazione che lega.** Due file identici
+    fanno male da guardare, e l'istinto è unirli. Prima conviene chiedersi se sono identici *per
+    caso* o *per necessità*: se i due usi possono divergere legittimamente — e qui divergono già,
+    sul write concern — un file condiviso trasforma ogni modifica in un effetto collaterale su un
+    altro stack. La versione difendibile della copia ha due requisiti: **dichiararla in testa a
+    entrambi i file**, e mettere un controllo che diventi rosso se le due copie smettono di
+    coincidere dove devono coincidere. Senza il secondo requisito è solo copia-incolla con una
+    scusa scritta bene.

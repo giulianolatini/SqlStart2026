@@ -2198,3 +2198,94 @@ verificare il 02 a mano — è lo stato da cui si parte, ed è il motivo per cui
 scoperti eseguendo invece che leggendo.
 
 **Fonti:** [S-022](Sources.md#s-022), [S-056](Sources.md#s-056), [V-026](Sources.md#v-026)
+
+<a id="adr-0043"></a>
+## ADR-0043 — I dati di demo sullo stack 02: dentro `rs-init`, con la maggioranza, e uguali a quelli dello stack 01
+
+**Data:** 2026-08-31 · **Stato:** Accettata
+
+**Contesto.** Lo stack 02 sa formare un replica set, sa proteggerlo con un keyfile e sa creare
+l'amministratore ([ADR-0038](#adr-0038), [ADR-0039](#adr-0039), [ADR-0040](#adr-0040)), ma finisce
+con un database vuoto. Metà della demo è un confronto: la stessa interrogazione sullo stack 01 e
+sullo stack 02, per mostrare che cosa cambia e che cosa no. Con due dataset diversi quel confronto
+non dimostra niente, quindi la prima cosa che serve non è «dei dati», sono **gli stessi dati**.
+
+La strada ovvia è quella dello stack 01: uno script in `/docker-entrypoint-initdb.d`. Sul replica
+set non funziona, e il motivo è istruttivo. L'entrypoint ufficiale esegue quegli script sotto un
+`mongod` **temporaneo e non replicato** — nessun `--replSet`, un processo che nasce e muore prima
+che il server vero parta ([S-022](Sources.md#s-022)). Uno script che scrivesse là chiederebbe
+`w: "majority"` a un'istanza che non ha una maggioranza, e più in generale scriverebbe prima che il
+set esista. Lo stesso entrypoint salta quegli script quando il volume è già popolato, senza dirlo
+([V-014](Sources.md#v-014)): la seconda ragione per non affidargli il seed è che il suo silenzio,
+sullo stack 01, è già costato una diagnosi.
+
+**Decisione.** Cinque scelte, e la prima è la sola discutibile.
+
+*Il seed è l'ultimo passo di `rs-init`, non un quarto servizio.* La catena resta a **tre anelli**.
+Un servizio `dati-init` separato sarebbe più pulito da guardare, e sarebbe la scelta di default; ha
+però un costo preciso: chi avvia lo stack dovrebbe attendere **due** one-shot invece di uno, cioè un
+secondo `docker compose wait`, e [ADR-0041](#adr-0041) ha appena stabilito che il verdetto
+dell'avvio è il codice di uscita di *quel* comando lì. Due comandi d'attesa sono due verdetti, e due
+verdetti sono la premessa di un `make up-02` che ne guarda uno e ignora l'altro. In cambio si ottiene
+anche una cosa che non si era cercata: il caricamento dei dati è **la prima connessione
+autenticata** dello stack, e sta nel file subito sotto il `createUser` che ha chiuso l'eccezione
+localhost. Chi legge `10-rs-initiate.js` e poi `20-dati-demo.js` vede la sequenza per intero — prima
+non serve la password, da qui in poi sì.
+
+*Si scrive con `w: "majority"`, e con un `wtimeout`.* È la prima cosa tangibile che un replica set
+offre e che un'istanza singola non può offrire: l'ack torna quando la scrittura è su una maggioranza
+di membri, quindi sopravvive alla caduta del primario ([S-035](Sources.md#s-035)). Il prezzo è stato
+misurato invece che stimato: **un millisecondo in più** di `w: 1`, su questa configurazione
+([V-027](Sources.md#v-027)). Il `wtimeout: 10000` c'è perché senza di esso una scrittura che non
+raggiunge la maggioranza aspetta per sempre; con esso, dopo dieci secondi, fallisce dicendolo — e
+[ADR-0041](#adr-0041) fa fallire l'avvio invece di dichiararlo riuscito.
+
+*Il caricamento è condizionato, con una via d'uscita esplicita.* Se `lab.ordini` ha già i 50 000
+documenti attesi, lo script non fa niente e lo stampa. `RICARICA=1` forza la ricarica, ed è ciò che
+`make seed-02` passa. La ragione è che `make down-02` promette di conservare i dati: un seed
+incondizionato li cancellerebbe e li rifarebbe a ogni riavvio, cioè smentirebbe il bersaglio
+accanto. La ragione didattica è la seconda: è la stessa regola che l'entrypoint ufficiale applica
+in silenzio, scritta in tre righe che si leggono.
+
+*Il file è una copia deliberata di quello dello stack 01, non un modulo condiviso.* Generatore,
+seme, epoca e liste sono identici — è l'unico modo perché l'impronta coincida. Fattorizzare i due
+script in un file solo li legherebbe: una modifica pensata per lo stack 02 cambierebbe di nascosto
+il dataset dello stack 01, e i due stack devono poter divergere quando la loro topologia lo impone,
+come è già successo per il write concern. La duplicazione è dichiarata in testa a entrambi i file, e
+sorvegliata dove conta: **i due script di prova controllano la stessa terna di numeri**, quindi
+toccarne uno solo fa diventare rosso l'altro.
+
+*`reset-02` cancella i volumi dati per nome, non con `down -v`.* `down -v` porterebbe via anche il
+volume del keyfile, e i tre membri dovrebbero ricostruire da zero un segreto condiviso che non
+c'entra niente con i dati. Verificato: dopo `reset-02` resta in piedi il solo volume del keyfile, e
+il segreto è byte per byte lo stesso ([V-028](Sources.md#v-028)).
+
+**Conseguenze.** Sei bersagli nuovi nel `Makefile` — `up-02`, `down-02`, `reset-02`, `logs-02`,
+`seed-02`, `smoke-02` — e `tools/smoke-replicaset.sh`, che esegue **42 controlli**: salute dei tre
+membri, keyfile identico e a 400 su tutti e tre, esattamente un primario e due secondari, il rifiuto
+di una connessione anonima e di una password sbagliata, versione e limiti di memoria, l'impronta del
+dataset, e una scrittura con `w: "majority"` riletta da un secondario. L'impronta è
+`50000 124861860.70 150281`, cioè **la stessa dello stack 01** ([V-013](Sources.md#v-013)).
+
+Lo script è stato visto fallire, e la forma di quel fallimento ha cambiato lo script. Fermando un
+membro, la prima versione usciva dopo tre righe — aveva ereditato dallo smoke dello stack 01 il
+cancello «se un nodo non è sano, smetti», che su un'istanza singola è ovvio e su tre membri butta
+via proprio le risposte che uno cerca in quel momento: *c'è ancora un primario? le scritture passano
+ancora?* Ora il cancello scatta solo quando un container **non esiste**, e con un membro fermo lo
+script riporta 34 verdi e 8 rossi dicendo, fra i verdi, «primari: 1» e «scrittura con w: majority
+accettata» ([V-028](Sources.md#v-028)).
+
+Resta scoperto il caso che conta di più: **due membri su tre fermi**, cioè la maggioranza persa e il
+set in sola lettura. Non è stato provato qui perché è la scena del Task 8, e va misurato là.
+
+**Alternative scartate:** un quarto servizio `dati-init` — più leggibile, ma aggiunge un secondo
+comando d'attesa e toglie ad [ADR-0041](#adr-0041) il suo verdetto unico; lo script in
+`/docker-entrypoint-initdb.d` — girerebbe su un `mongod` senza replica, dove `w: "majority"` non
+vuol dire niente ([S-022](Sources.md#s-022)); un `mongorestore` da un dump versionato nel repository
+— più veloce all'avvio, ma mette in git un file binario di alcune decine di MB che nessuno può
+leggere in una code review, e toglie dalla vista il generatore, che è materiale didattico di per sé;
+caricare con `w: 1` per far partire lo stack un secondo prima — il secondo non c'è ([V-027](Sources.md#v-027)),
+e si rinuncerebbe alla sola cosa che distingue questo stack dal precedente; `down -v` in `reset-02` —
+un `reset` che distrugge anche ciò che non è dato è un `reset` che si smette di usare.
+
+**Fonti:** [S-022](Sources.md#s-022), [S-035](Sources.md#s-035), [V-013](Sources.md#v-013), [V-014](Sources.md#v-014), [V-027](Sources.md#v-027), [V-028](Sources.md#v-028)

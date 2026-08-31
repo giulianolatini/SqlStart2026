@@ -3,7 +3,8 @@
 
 .DEFAULT_GOAL := help
 .PHONY: help docs-check tools-test images-pull images-verify preflight stack-check \
-        up-01 down-01 reset-01 logs-01 seed-01 smoke-01
+        up-01 down-01 reset-01 logs-01 seed-01 smoke-01 \
+        up-02 down-02 reset-02 logs-02 seed-02 smoke-02
 
 # `--env-file tools/images.env` porta MONGO_IMAGE, che nei file Compose è dichiarato
 # nella forma `${MONGO_IMAGE:?...}`: senza, Compose si ferma subito dicendo cosa manca
@@ -79,3 +80,63 @@ seed-01: ## Ricarica i dati di demo su uno stack 01 già avviato
 
 smoke-01: ## Prova end-to-end dello stack 01 avviato
 	./tools/smoke-standalone.sh
+
+# --- Stack 02 — replica set a tre membri ----------------------------------------------
+
+# DUE `--env-file`, e il secondo non è ridondante: la flag non aggiunge un file, prende
+# il posto del `.env` implicito. Passandone uno solo, il `.env` che sta accanto al file
+# indicato con `-f` NON viene letto benché sia lì accanto (S-056, misurato in V-025).
+COMPOSE_02 := docker compose --env-file tools/images.env --env-file docker/02-replicaset/.env -f docker/02-replicaset/compose.yaml
+AMBIENTE_02 := docker/02-replicaset/.env
+
+# I volumi dei dati, uno per membro. Il nome vero è il nome del progetto Compose
+# (`name:` in cima al file) più quello dichiarato in `volumes:`.
+PROGETTO_02 := sqlstart-02-replicaset
+DATI_02 := $(PROGETTO_02)_dati-1 $(PROGETTO_02)_dati-2 $(PROGETTO_02)_dati-3
+
+# Regola su un FILE, non su un target fittizio: se il file esiste, make la considera
+# soddisfatta e non esegue niente. Se manca, si ferma qui con una frase che dice cosa
+# fare, invece di lasciare a Compose un «env file not found» che non spiega perché quel
+# file non è nel repository (ADR-0014).
+$(AMBIENTE_02):
+	@printf 'Manca %s.\n' "$(AMBIENTE_02)" >&2
+	@printf 'Contiene la password dell'\''amministratore e sta fuori dal repository apposta.\n' >&2
+	@printf 'Crearlo con: cp %s.example %s, poi riempire PASSWORD_AMMINISTRATORE.\n' \
+		"$(AMBIENTE_02)" "$(AMBIENTE_02)" >&2
+	@exit 1
+
+# DUE comandi, non uno, ed è la decisione di ADR-0041. `up --wait` attende che i servizi
+# siano «running|healthy»: rs-init non ha healthcheck perché deve morire, quindi per
+# `--wait` è a posto nell'istante in cui parte, e il comando esce 0 quattordici secondi
+# prima che il replica set esista (V-025). Il verdetto è il secondo comando, che blocca
+# fino a che rs-init si ferma e ne restituisce il codice di uscita.
+up-02: $(AMBIENTE_02) ## Avvia lo stack 02 (replica set) e attende che la replica esista
+	$(COMPOSE_02) up -d --wait
+	$(COMPOSE_02) wait rs-init
+
+down-02: $(AMBIENTE_02) ## Ferma lo stack 02 conservando i dati e il keyfile
+	$(COMPOSE_02) down
+
+# `down -v` NON va bene qui, e la differenza è tutta in una parola: cancellerebbe anche
+# il volume del keyfile. Rigenerarlo significa un segreto nuovo, quindi tre membri che
+# non si riconoscono più fra loro finché non ripartono tutti insieme — un giro in più
+# per niente, visto che si voleva solo azzerare i dati. Si tolgono i tre volumi dei dati
+# per nome, e il keyfile resta.
+reset-02: $(AMBIENTE_02) ## Ferma lo stack 02 e CANCELLA i dati, conservando il keyfile
+	$(COMPOSE_02) down
+	docker volume rm --force $(DATI_02)
+
+logs-02: $(AMBIENTE_02) ## Segue i log dello stack 02
+	$(COMPOSE_02) logs -f
+
+# Rilancia lo STESSO servizio che ha seminato all'avvio, con `RICARICA=1` che gli dice di
+# ricaricare anche se i dati ci sono già. Non è una scorciatoia: rs-init è idempotente
+# per costruzione — trova la replica formata e non la reinizializza, trova
+# l'amministratore e non lo ricrea — quindi rieseguirlo è sicuro, e mostra quell'
+# idempotenza invece di raccontarla. È anche il motivo per cui la password non compare
+# in questa riga: sta già nell'ambiente del servizio.
+seed-02: $(AMBIENTE_02) ## Ricarica i dati di demo su uno stack 02 già avviato
+	$(COMPOSE_02) run --rm -e RICARICA=1 rs-init
+
+smoke-02: ## Prova end-to-end dello stack 02 avviato
+	./tools/smoke-replicaset.sh

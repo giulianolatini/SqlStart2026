@@ -515,6 +515,36 @@ zero che non vale niente. In sala funziona come esempio della classe di bug pegg
 riesce quasi sempre, perché su una macchina veloce lo scarto si accorcia e il test rosso arriva una
 volta ogni tanto, su un'altra macchina, davanti a qualcun altro.
 
+**Il numero è cambiato, e va detto così.** Da quando il caricamento dei dati di demo sta dentro
+`rs-init` ([ADR-0043](Decision.md#adr-0043)) lo scarto misurato è di **ventidue** secondi
+([V-028](Sources.md#v-028)). Sul palco si dica quello che si è misurato la mattina stessa, non un
+numero imparato a memoria: il punto della slide non è il quattordici, è che lo zero arrivava prima.
+
+---
+
+### Chiedere la maggioranza costa un millisecondo, e questo è il numero più pericoloso della demo
+
+> ```text
+> ritardo primario -> secondario   mediana 1 ms
+> scrittura con w: 1               mediana 1 ms
+> scrittura con w: "majority"      mediana 2 ms
+> ```
+
+Fonte: [V-027](Sources.md#v-027), tre esecuzioni da dieci giri sullo stack `02-replicaset` a riposo.
+`w: "majority"` restituisce l'ack quando la scrittura è arrivata a una maggioranza di membri, quindi
+sopravvive alla caduta del primario ([S-035](Sources.md#s-035)); è il write concern con cui lo stack
+02 carica i suoi 50 000 ordini.
+
+**Perché una slide:** perché la garanzia più citata dei replica set, qui, costa un millisecondo — e
+perché quel millisecondo non vale niente fuori da questa macchina. I tre membri girano sullo stesso
+portatile, su un bridge Docker: `w: "majority"` è per definizione un giro fino al secondo membro più
+veloce, e su due datacenter quel giro è la latenza fra i due datacenter — il termine dominante, non
+un millisecondo. La slide serve a dire due cose insieme: *la maggioranza è quasi gratis qui*, e *chi
+riporta questo numero altrove sta citando la propria rete, non MongoDB*. È anche l'occasione per
+mostrare la misura sbagliata: `optimeDate` in `rs.status()`, che tutti usano per il ritardo di
+replica, ha granularità di un secondo e su questo set risponde `0 ms` sempre — uno strumento che
+dà sempre ragione non sta misurando.
+
 ---
 
 ## Installazione su una macchina vera

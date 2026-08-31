@@ -601,7 +601,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   `--keyFile`. **`rs.initiate()` non viene mai eseguito dall'immagine: resta a nostro
   carico.** Trattandosi di sorgente, l'API non ha garanzie di stabilità fra versioni: la
   citazione deve indicare commit e riga.
-- **Usata da:** ADR-0005, ADR-0026, ADR-0040, ADR-0042
+- **Usata da:** ADR-0005, ADR-0026, ADR-0040, ADR-0042, ADR-0043
 
 <a id="s-023"></a>
 ### S-023 — `docker-library/mongo`: `8.0/Dockerfile`
@@ -956,7 +956,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 - **Riserve:** la tabella dello standalone descrive il momento dell'*acknowledgement*, non la
   durabilità. Quanto dura la finestra fra l'ack in memoria e il disco non sta qui: sta in
   [S-036](#s-036), ed è il numero che rende la finestra misurabile.
-- **Usata da:** ADR-0032
+- **Usata da:** ADR-0032, ADR-0043
 
 ---
 
@@ -2231,7 +2231,7 @@ presenterebbe come un nodo che tarda a diventare sano.
   32 bit, che è specificata: non dipende dalla macchina, ma dipende dal fatto che il motore sia
   conforme, e qui è stato provato solo su `mongosh` 2.10.0.
 - **Data:** 2026-08-28
-- **Usata da:** ADR-0031
+- **Usata da:** ADR-0031, ADR-0043
 
 ---
 
@@ -2282,7 +2282,7 @@ succedendo è «la mia modifica non è stata nemmeno letta».
   perché il volume non è di Docker: bisogna cancellare la cartella sull'host. Non provato qui,
   perché il lab non usa bind mount per i dati.
 - **Data:** 2026-08-28
-- **Usata da:** ADR-0031, ADR-0033
+- **Usata da:** ADR-0031, ADR-0033, ADR-0043
 
 ---
 
@@ -3254,6 +3254,13 @@ malato uno stack perfettamente sano.
 <a id="v-025"></a>
 ### V-025 — «Fatto» detto due volte: `up --wait` esce con successo quattordici secondi prima che la replica esista
 
+> **Nota di allineamento, 2026-08-31.** Il fenomeno descritto qui regge intatto, il numero no.
+> Al Task 7 il caricamento dei dati di demo è entrato dentro `rs-init` ([ADR-0043](Decision.md#adr-0043)),
+> quindi quel servizio dura di più e lo scarto misurato è salito a **ventidue** secondi
+> ([V-028](#v-028)). Il titolo resta com'era perché così è stato misurato quel giorno, su quella
+> configurazione: chi cita lo scarto citi la voce che corrisponde allo stack che ha davanti, e
+> soprattutto lo rimisuri invece di impararlo a memoria — è la conclusione, non il quattordici.
+
 - **Comandi:** `docker compose … up -d --wait` · `docker compose … wait rs-init` ·
   `docker compose … config` · `docker inspect`
 - **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, stack
@@ -3432,5 +3439,191 @@ Una regola che dorme è peggio di una regola assente: dà la ricevuta senza aver
   non c'è un numero di copertura da citare, c'è un elenco di sei casi che si possono rileggere.
 - **Data:** 2026-08-31
 - **Usata da:** ADR-0042
+
+---
+
+<a id="v-027"></a>
+### V-027 — Il ritardo di replica a riposo, e quanto costa davvero chiedere la maggioranza
+
+- **Comandi:** `mongosh --file` di uno script che scrive sul primario e interroga un secondario in
+  un ciclo stretto finché il documento non compare; 10 giri per esecuzione, 3 esecuzioni
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, stack
+  `docker/02-replicaset/compose.yaml`, tre membri con 768 MiB e 0,75 CPU ciascuno, replica formata
+  e `lab.ordini` già caricata, nessun altro carico
+- **Che cosa si voleva sapere:** la pagina del Task 9 parla di «ritardo di replica» e senza un
+  numero non lo mostra. Serviva anche il prezzo di `w: "majority"`, perché il dataset dello stack 02
+  si scrive così e dire «costa di più» senza dire quanto è un'affermazione che non impegna nessuno.
+- **La misura ovvia non funziona, ed è il primo risultato.** `rs.status()` porta `optimeDate` per
+  ogni membro, e la differenza fra primario e secondari è il modo in cui il ritardo si misura in
+  tutti gli esempi che si trovano. Su questo set, a riposo, tre letture a cinque secondi di
+  distanza:
+
+```
+mongo-rs-2:27017  ritardo 0 ms
+mongo-rs-3:27017  ritardo 0 ms
+```
+
+`optimeDate` deriva dal timestamp dell'oplog, che ha **granularità di un secondo**: quello zero non
+significa «nessun ritardo», significa «meno di un secondo, e più in là non vedo». Per un set che
+replica in millisecondi è uno strumento che risponde sempre la stessa cosa.
+
+- **La misura vera:** si scrive sul primario con `w: 1` — che torna appena il primario ha preso la
+  scrittura, quindi il cronometro parte prima che i secondari sappiano qualcosa — e si interroga un
+  secondario in un ciclo finché il documento non compare.
+
+```
+esecuzione 1
+ritardo primario -> secondario     min 1  mediana 1  max 3   media 1.6 ms
+costo di una scrittura w: 1        min 0  mediana 1  max 58  media 7.0 ms
+costo di una w: majority           min 2  mediana 2  max 68  media 8.9 ms
+valori grezzi del ritardo: 3 1 1 1 1 3 2 2 1 1
+
+esecuzione 2
+ritardo primario -> secondario     min 1  mediana 1  max 9   media 1.9 ms
+costo di una scrittura w: 1        min 0  mediana 1  max 9   media 1.6 ms
+costo di una w: majority           min 1  mediana 2  max 3   media 2.0 ms
+valori grezzi del ritardo: 9 1 1 2 1 1 1 1 1 1
+
+esecuzione 3
+ritardo primario -> secondario     min 1  mediana 1  max 46  media 6.2 ms
+costo di una scrittura w: 1        min 0  mediana 1  max 8   media 1.8 ms
+costo di una w: majority           min 2  mediana 2  max 82  media 10.4 ms
+valori grezzi del ritardo: 46 1 3 6 1 1 1 1 1 1
+```
+
+**I due numeri da tenere sono le mediane, e le medie vanno ignorate.** Ritardo mediano **1 ms**;
+`w: 1` mediana **1 ms**, `w: "majority"` mediana **2 ms**. Le medie sono più alte perché ogni
+esecuzione ha esattamente un valore fuori scala — 3, 9, 46 — ed è sempre **il primo giro**: i valori
+grezzi lo mostrano a occhio. Non è ritardo di replica, è la prima connessione al secondario che si
+apre e si autentica. Una media su dieci giri di cui uno è il riscaldamento non descrive niente.
+
+- **Conseguenza:** chiedere la maggioranza costa **un millisecondo in più** che non chiederla, su
+  questa configurazione. Registrato in [ADR-0043](Decision.md#adr-0043) come il motivo per cui il
+  dataset dello stack 02 si scrive con `w: "majority"` senza rimpianti: la garanzia si prende perché
+  è quasi gratis, non perché il prezzo non conti.
+- **Riserve:** e sono la parte importante di questa voce. **I tre membri girano sulla stessa
+  macchina**, dentro la stessa rete Docker: fra loro non c'è una rete vera, c'è un bridge locale.
+  Il costo di `w: "majority"` è, per definizione, un giro fino al secondo membro più veloce — qui
+  vale un millisecondo, su due datacenter varrebbe la latenza fra i due datacenter, e sarebbe il
+  termine dominante. Il numero **non va portato sul palco come se descrivesse la produzione**: va
+  detto insieme alla frase che lo qualifica. Seconda riserva: il ciclo di attesa costa un giro di
+  rete per ogni tentativo, quindi il ritardo misurato ha un pavimento di circa un giro — il ritardo
+  vero potrebbe essere sotto il millisecondo e questo metodo non saprebbe distinguerlo. Terza: il
+  set è a riposo e la collezione di prova è vuota; sotto il carico della demo dell'applicazione i
+  numeri saranno altri, e vanno rimisurati là invece che estrapolati da qui.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0043
+
+---
+
+<a id="v-028"></a>
+### V-028 — Lo stack 02 dall'avvio alla prova: 42 controlli, e lo stesso dataset dello stack 01
+
+- **Comandi:** `make up-02` · `make seed-02` · `make reset-02` · `make down-02` · `make smoke-02` ·
+  `docker stop mongo-rs-3`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, immagine
+  `mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b` (MongoDB 7.0.40)
+- **Che cosa si voleva sapere:** se i sei bersagli del `Makefile`, il seed dentro `rs-init` e
+  `tools/smoke-replicaset.sh` fanno quello che dicono — e, soprattutto, se lo smoke sa diventare
+  rosso. Un `Superati: 42 · Errori: 0` che non si è mai visto fallire vale quanto il verde del
+  Task 6 prima di [V-026](#v-026).
+- **Esito, l'avvio a freddo:**
+
+```
+up --wait uscita=0
+container "4955bdf1…" exited with status code 0
+compose wait rs-init uscita=0
+
+up --wait ha impiegato   8 secondi
+compose wait ha aggiunto 22 secondi
+totale                   30 secondi
+
+=== log di rs-init ===
+inizializzo il replica set «rs0»
+primario eletto: mongo-rs-1:27017
+utente amministratore «admin» creato
+catena completata
+Carico 50000 ordini in lab.ordini con w: "majority"...
+Caricati 50000 ordini in 6439 ms.
+```
+
+Il divario fra i due comandi è ora di **22 secondi**, non dei 14 misurati in [V-025](#v-025): il
+seed vive dentro `rs-init`, quindi `rs-init` dura di più, quindi il tratto che `up --wait` non copre
+si allunga. Il fenomeno è lo stesso e la conclusione di [ADR-0041](Decision.md#adr-0041) non cambia
+— cambia il numero, ed è il motivo per cui il numero non va imparato a memoria.
+
+- **Esito, l'impronta del dataset:**
+
+```
+✓ impronta di lab.ordini: 50000 124861860.70 150281
+```
+
+Sono **gli stessi tre numeri** dello stack 01 ([V-013](#v-013)), ottenuti da un file diverso, su una
+topologia diversa, con un write concern diverso. È il controllo che tiene insieme i due stack: una
+parte della demo confronta la stessa interrogazione sull'uno e sull'altro, e con dataset diversi il
+confronto sarebbe una recita. I due script di prova sorvegliano la stessa terna, quindi modificarne
+uno solo fa fallire l'altro.
+
+- **Esito, lo smoke sa diventare rosso.** Con `docker stop mongo-rs-3`:
+
+```
+uscita=1
+  ✗ salute di mongo-rs-3: atteso healthy, ottenuto «unhealthy»
+  ✗ PID 1 non è mongod su mongo-rs-3: «»
+  ✗ i tre keyfile differiscono o mancano: 33257423… 33257423…
+  ✗ secondari: atteso 2, ottenuto «1»
+  ✗ membri non in salute: atteso nessuno, ottenuto «mongo-rs-3:27017»
+  ✗ memoria vista da mongo-rs-3 (MiB): atteso 768, ottenuto «»
+  ✗ cache WiredTiger di mongo-rs-3 (byte): atteso 268435456, ottenuto «»
+  ✗ nessuna porta pubblicata per mongo-rs-3:27017
+Superati: 34 · Errori: 8
+```
+
+E, nella stessa esecuzione, le risposte che contano:
+
+```
+  ✓ primari: 1
+  ✓ scrittura con w: majority accettata: true
+  ✓ rilettura da mongo-rs-2 (secondario): 1
+  ✓ impronta di lab.ordini: 50000 124861860.70 150281
+```
+
+Questo è un risultato di progetto, non solo una prova: la prima versione dello script si fermava
+dopo tre righe, perché aveva ereditato da `smoke-standalone.sh` un cancello che esce appena un nodo
+non è sano. Su un'istanza singola quel cancello è giusto — senza il nodo non c'è niente da chiedere.
+Su tre membri butta via esattamente le risposte che uno cerca in quel momento. Il cancello è stato
+ristretto al caso «il container non esiste»:
+
+```
+  ✗ il container mongo-rs-3 non esiste — esegui prima «make up-02»
+Superati: 0 · Errori: 3
+Mancano 3 container su 3: lo stack non è avviato.
+```
+
+- **Esito, `reset-02` conserva il segreto:**
+
+```
+prima:  volumi dati-1 dati-2 dati-3 keyfile   keyfile sha 33257423c039b2a2
+dopo:   volumi keyfile                        keyfile sha 33257423c039b2a2
+```
+
+- **Esito, i tempi degli altri bersagli:** `make up-02` a caldo (dati conservati) 16 s; dopo
+  `reset-02`, cioè con i dati da rifare e il keyfile già buono, 29 s; `make seed-02` su uno stack in
+  piedi ricarica 50 000 documenti in 7 658 ms e stampa da sé le due righe dell'idempotenza
+  («replica set già formato: non lo reinizializzo», «utente amministratore già presente»).
+  `make smoke-02` è stato eseguito quattro volte di fila su stack sano: `Superati: 42 · Errori: 0`
+  tutte e quattro.
+- **Conseguenza:** i sei bersagli, il seed dentro `rs-init` e lo script di prova sono registrati in
+  [ADR-0043](Decision.md#adr-0043).
+- **Riserve:** una macchina sola, Docker Desktop, nessun Linux nativo — vale per i tempi, non per
+  gli esiti. Lo smoke è stato visto fallire su **un** guasto, un membro fermato: gli altri 34
+  controlli restano verdi perché il resto funzionava, non perché siano stati messi alla prova uno
+  per uno come in [V-026](#v-026). Il caso «due membri fermi su tre», che è quello interessante —
+  il set perde la maggioranza e diventa di sola lettura — non è stato provato qui: è la scena del
+  Task 8, e va misurato là. Infine `make down-02` e `make reset-02` sono stati eseguiti su uno stack
+  che non aveva mai perso un volume per errore: che si comportino bene su uno stato sporco non è
+  stato verificato.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0043
 
 ---

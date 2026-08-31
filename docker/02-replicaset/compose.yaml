@@ -18,7 +18,15 @@
 #        ↓        (service_completed_successfully)
 #   mongo-rs-1/2/3  partono con --keyFile, rispondono, non sono ancora una replica
 #        ↓        (service_healthy)
-#   rs-init      esegue rs.initiate(), attende il primario, crea l'amministratore
+#   rs-init      esegue rs.initiate(), attende il primario, crea l'amministratore,
+#                e come ultimo passo carica i dati di demo con w: "majority"
+#
+# Gli anelli restano TRE anche se rs-init fa due cose, ed è una scelta: un quarto
+# servizio per il solo seed aggiungerebbe un terzo comando d'attesa e toglierebbe
+# ad ADR-0041 il suo verdetto unico, che è il codice di uscita di
+# `docker compose wait rs-init`. Il seed è il primo punto del lab in cui qualcuno
+# si autentica come client, e sta bene attaccato al `createUser` che ha appena
+# chiuso l'eccezione localhost.
 #
 # Serve un file `.env` accanto a questo, copiato da `.env.example`: la password
 # dell'amministratore non ha un valore predefinito e senza di essa l'avvio si
@@ -150,6 +158,14 @@ services:
       # Un volume dati PER MEMBRO. Condividerne uno significherebbe tre processi
       # sullo stesso /data/db, che è il modo più rapido di corrompere un database.
       - dati-1:/data/db
+      # Lo stesso file che esegue rs-init all'avvio, montato anche qui perché
+      # `make seed-02` lo rilancia con `compose exec` su uno stack già in piedi.
+      # Una sorgente sola, due modi di eseguirla — come per lo stack 01
+      # (ADR-0031). NON è in /docker-entrypoint-initdb.d: là lo eseguirebbe il
+      # mongod temporaneo dell'entrypoint, che gira SENZA --replSet, e una
+      # scrittura con w: "majority" su un processo che non è una replica non
+      # significa niente.
+      - ./init/20-dati-demo.js:/init/20-dati-demo.js:ro
 
     # Vedi il commento sui log dello stack 01: mongod scrive su stdout e la
     # rotazione diventa affare del runtime, che per impostazione predefinita non
@@ -344,20 +360,44 @@ services:
       # quanto una assente, quindi il segnaposto vuoto di .env.example scatta qui.
       PASSWORD_AMMINISTRATORE: ${PASSWORD_AMMINISTRATORE:?assente — copiare docker/02-replicaset/.env.example in .env e riempire la password}
 
+    # Due mongosh in fila, legati da `&&`, ed è la catena in miniatura.
+    #
+    # Il primo gira SENZA credenziali e ci riesce solo grazie all'eccezione
+    # localhost. Il secondo gira CON le credenziali, e non per scrupolo: la
+    # `createUser` con cui finisce il primo script chiude l'eccezione, quindi
+    # dall'istante successivo su questo nodo non passa più niente in anonimo.
+    # Chi vuole vedere la differenza fra i due mondi la vede in queste due righe.
+    #
+    # `$$` e non `$`: il dollaro singolo lo mangerebbe Compose, che interpola il
+    # file PRIMA di consegnarlo al container. `$$` è come si scrive un dollaro
+    # che deve arrivare intero alla shell.
+    #
+    # `--host "rs0/localhost:27017"` è la forma «insieme di semi con nome della
+    # replica»: il driver si collega, scopre la topologia e scrive sul primario,
+    # chiunque esso sia. Con `--host localhost` scriverebbe sul nodo che ha
+    # accanto, e se quello non fosse primario la scrittura fallirebbe. Usare le
+    # credenziali con `--username/--password` e non dentro l'URI evita di dover
+    # codificare in percentuale una password che contenga `@` o `:`.
+    #
     # `--file` con percorso ASSOLUTO, mai per pipe: dentro un container la
     # directory di lavoro non è quella da cui si è digitato il comando, e sullo
     # standard input mongosh crede di avere una sessione interattiva e ci stampa
     # sopra i prompt (ADR-0036, S-047).
     command:
-      - mongosh
-      - --quiet
-      - --host
-      - localhost
-      - --file
-      - /init/10-rs-initiate.js
+      - sh
+      - -c
+      - >-
+        mongosh --quiet --host localhost --file /init/10-rs-initiate.js
+        &&
+        mongosh --quiet --host "$$NOME_REPLICA/localhost:27017"
+        --username "$$UTENTE_AMMINISTRATORE"
+        --password "$$PASSWORD_AMMINISTRATORE"
+        --authenticationDatabase admin
+        --file /init/20-dati-demo.js
 
     volumes:
       - ./init/10-rs-initiate.js:/init/10-rs-initiate.js:ro
+      - ./init/20-dati-demo.js:/init/20-dati-demo.js:ro
 
     depends_on:
       # Tutti e tre sani, non solo il primo. rs.initiate() elenca tre membri: se
