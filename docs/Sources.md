@@ -2947,6 +2947,15 @@ iniziato, e conferma su questo file quello che [V-006](#v-006) aveva misurato su
 <a id="v-023"></a>
 ### V-023 — Chi inizializza il replica set: tre strade provate, e una terza che non era scritta da nessuna parte
 
+> **Nota di precisione, 2026-08-31 (Task 3).** Nella «misura di contorno» qui sotto il blocco di
+> console riporta `isWritablePrimary=false secondary=true` attribuendolo a un membro «non ancora
+> inizializzato». La *conclusione* tratta lì è giusta e oggi è confermata sullo stack vero — un
+> controllo «sei primario o secondario?» resterebbe rosso fino a `rs.initiate()` — ma quei due
+> valori vengono da un membro che l'inizializzazione l'aveva già ricevuta. Su un membro davvero
+> vergine i tre `mongod` dello stack rispondono `isWritablePrimary=false secondary=false
+> **isreplicaset=true**`, e `isreplicaset` è il marcatore che il Task 5 può usare. Il corpo non
+> viene toccato: si legge com'era, con questa nota davanti.
+
 - **Domanda:** il design (§5.4) e [ADR-0026](Decision.md#adr-0026) dicono due cose diverse su chi
   crea l'utente amministratore di uno stack a replica set sotto keyfile. Il design mette
   `MONGO_INITDB_ROOT_USERNAME`/`_PASSWORD` sul primo membro e fa inizializzare il set a un sidecar

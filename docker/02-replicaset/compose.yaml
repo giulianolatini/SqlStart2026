@@ -12,9 +12,10 @@
 # `docker compose up -d` da solo produce un replica set completo e autenticato,
 # senza passi manuali e senza una password scritta nel repository.
 #
-# Questo file è in costruzione: il Task 2 del piano di feature/02 posa il primo
-# anello — il keyfile — e i task successivi aggiungono i membri, rs-init e gli
-# healthcheck.
+# Questo file è in costruzione: i Task 2 e 3 del piano di feature/02 posano il
+# keyfile e i tre membri; restano da aggiungere rs-init (Task 4) e gli healthcheck
+# (Task 5). Finché rs-init non c'è, `up` avvia tre mongod che NON formano ancora
+# una replica: rispondono, ma non hanno un primario.
 
 name: sqlstart-02-replicaset
 
@@ -34,6 +35,15 @@ services:
     # quindi la catena non completerebbe mai e `service_completed_successfully`
     # non scatterebbe per nessuno.
     restart: "no"
+
+    # ADR-0004 chiede limiti espliciti a OGNI servizio, non solo ai mongod, e la
+    # regola ha ragione anche qui: un `openssl rand` non consuma niente, ma un
+    # servizio senza tetto è un servizio di cui nessuno ha fatto il conto. Questi
+    # 128 MiB non entrano nel bilancio dei 2,25 GiB del design §5.1, perché
+    # keyfile-init è già uscito quando il primo mongod parte.
+    mem_limit: 128m
+    cpus: 0.25
+
     command: ["bash", "/init/01-keyfile.sh"]
     volumes:
       # Volume NOMINATO, non bind mount, ed è la decisione di ADR-0014: su macOS
@@ -46,5 +56,181 @@ services:
       # il bit di esecuzione, che è appunto la cosa che macOS non garantisce.
       - ./init/01-keyfile.sh:/init/01-keyfile.sh:ro
 
+  # ---------------------------------------------------------------------------
+  # I tre membri. Sono scritti per esteso tre volte, senza ancoraggi YAML e senza
+  # `extends`: la ripetizione è deliberata (ADR-0003). Questo file è materiale
+  # didattico e va letto dall'alto in basso da chi non conosce né il progetto né
+  # gli ancoraggi YAML; un `<<: *membro` risparmierebbe trenta righe a chi lo sa
+  # già leggere e ne costerebbe dieci minuti a chiunque altro.
+  # ---------------------------------------------------------------------------
+
+  mongo-rs-1:
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: mongo-rs-1
+    # Il nome host qui non è una buona abitudine come nello stack 01: è un
+    # requisito. `rs.initiate()` registra i membri con il nome con cui li si
+    # elenca, e quel nome finisce DENTRO la configurazione della replica — poi
+    # torna al driver quando scopre la topologia. Deve risolvere ovunque, quindi
+    # nomi e mai indirizzi (ADR-0021).
+    hostname: mongo-rs-1
+    pull_policy: never
+    restart: unless-stopped
+
+    # 768 MiB per membro, 2,25 GiB per i tre: il bilancio del design §5.1, pensato
+    # per girare su un portatile che intanto proietta. Parametrico perché chi
+    # clona può avere più memoria di chi presenta; il valore predefinito è quello
+    # con cui il talk è stato provato.
+    mem_limit: ${MEMORIA_MEMBRO:-768m}
+    cpus: ${CPU_MEMBRO:-0.75}
+
+    command:
+      # `mongod` scritto per esteso, e non è pedanteria. L'entrypoint ufficiale
+      # antepone `mongod` da sé quando il primo argomento comincia per trattino,
+      # quindi le due forme avviano lo stesso processo — ma `tools/check_stack.py`
+      # riconosce un mongod dal primo elemento del comando, e sulla forma
+      # abbreviata la regola ADR-0004 sulla cache NON scatta. Misurato: un file
+      # con `--replSet` in testa e nessuna cache dichiarata passa il controllo
+      # come conforme. Una regola che non può fallire non è una regola.
+      - mongod
+      - --replSet
+      - ${NOME_REPLICA:-rs0}
+      # L'autenticazione interna fra i membri. Con --keyFile MongoDB attiva anche
+      # l'autenticazione dei client: è la ragione per cui esiste tutta la catena
+      # di ADR-0040 — prima che un utente esista, nessuno può inizializzare la
+      # replica, e senza replica inizializzata non si può creare un utente.
+      - --keyFile
+      - /keyfile/mongo-keyfile
+      # Dentro un container l'interfaccia utile non è `localhost`: i compagni di
+      # replica arrivano dalla rete Compose. È anche la ragione per cui questo
+      # stack NON va esposto fuori dalla macchina di chi presenta.
+      - --bind_ip_all
+      # 0,25 GiB = 256 MiB di cache dentro 768 MiB di limite. Il valore è fisso
+      # mentre `mem_limit` è parametrico, e la coppia va mossa insieme: chi
+      # abbassa MEMORIA_MEMBRO sotto i 256 MiB configura una cache più grande
+      # della memoria che avrà, e mongod lo accetta senza un avviso. È
+      # esattamente il caso che `make stack-check` intercetta (ADR-0004, V-009).
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+
+    ports:
+      # 27021-27023 dalla mappa del design §5.2, già riservate in
+      # tools/preflight.sh da prima che questo stack esistesse. Gli intervalli dei
+      # tre stack non si sovrappongono apposta: il 01 deve poter restare acceso
+      # mentre questo gira (ADR-0003).
+      - "${PORTA_MEMBRO_1:-27021}:27017"
+
+    volumes:
+      # In SOLA LETTURA. Un membro non ha ragione di riscrivere il keyfile, e il
+      # montaggio glielo impedisce invece di fidarsi che non lo faccia.
+      - keyfile:/keyfile:ro
+      # Un volume dati PER MEMBRO. Condividerne uno significherebbe tre processi
+      # sullo stesso /data/db, che è il modo più rapido di corrompere un database.
+      - dati-1:/data/db
+
+    # Vedi il commento sui log dello stack 01: mongod scrive su stdout e la
+    # rotazione diventa affare del runtime, che per impostazione predefinita non
+    # ruota niente (V-011). Qui il volume è triplo — tre membri — e la scena di
+    # failover produce log di elezione a raffica proprio nel momento in cui
+    # servono leggibili.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    depends_on:
+      # Non «dopo che è partito» ma «dopo che ha finito bene»: il keyfile deve
+      # esistere e avere i permessi giusti PRIMA che mongod apra il file, e un
+      # one-shot che è partito non ha ancora fatto niente (ADR-0023).
+      keyfile-init:
+        condition: service_completed_successfully
+
+  mongo-rs-2:
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: mongo-rs-2
+    hostname: mongo-rs-2
+    pull_policy: never
+    restart: unless-stopped
+
+    mem_limit: ${MEMORIA_MEMBRO:-768m}
+    cpus: ${CPU_MEMBRO:-0.75}
+
+    command:
+      - mongod
+      - --replSet
+      # Lo stesso nome di replica del membro 1: è ciò che li rende compagni. Un
+      # membro avviato con un --replSet diverso non dà errore all'avvio, si
+      # limita a non partecipare, ed è un guasto che si scopre tardi.
+      - ${NOME_REPLICA:-rs0}
+      # Lo stesso keyfile, dallo stesso volume. Se i tre file differissero anche
+      # di un byte i membri si rifiuterebbero a vicenda con un errore di
+      # autenticazione che sembra tutt'altro: è la ragione per cui lo script del
+      # keyfile è idempotente e non lo rigenera mai al secondo avvio.
+      - --keyFile
+      - /keyfile/mongo-keyfile
+      - --bind_ip_all
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+
+    ports:
+      - "${PORTA_MEMBRO_2:-27022}:27017"
+
+    volumes:
+      - keyfile:/keyfile:ro
+      - dati-2:/data/db
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    depends_on:
+      keyfile-init:
+        condition: service_completed_successfully
+
+  mongo-rs-3:
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: mongo-rs-3
+    hostname: mongo-rs-3
+    pull_policy: never
+    restart: unless-stopped
+
+    mem_limit: ${MEMORIA_MEMBRO:-768m}
+    cpus: ${CPU_MEMBRO:-0.75}
+
+    command:
+      - mongod
+      - --replSet
+      - ${NOME_REPLICA:-rs0}
+      - --keyFile
+      - /keyfile/mongo-keyfile
+      - --bind_ip_all
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+
+    ports:
+      # Il terzo membro è quello che rende il set tollerante a un guasto: con due
+      # soli membri, fermarne uno lascia il superstite in minoranza e il set
+      # diventa di sola lettura. È la scena del talk, e vive di questo terzo.
+      - "${PORTA_MEMBRO_3:-27023}:27017"
+
+    volumes:
+      - keyfile:/keyfile:ro
+      - dati-3:/data/db
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    depends_on:
+      keyfile-init:
+        condition: service_completed_successfully
+
 volumes:
   keyfile:
+  dati-1:
+  dati-2:
+  dati-3:

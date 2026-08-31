@@ -891,3 +891,123 @@ $ uv run --directory tools pytest -q       # 76 passati
     dove il lavoro vive. Da qui la regola: quando si sospende, l'ultimo commit non è il codice, è il
     punto di ripresa — e dice tre cose, che cosa è deciso, che cosa è già misurato, da quale passo
     si riparte.
+
+## 2026-08-31 — `feature/02`, Task 3: i tre membri, e due controlli che non controllavano
+
+Il task chiedeva di aggiungere i tre `mongod` al file Compose e di scrivere `.env.example`. La
+parte prevista è andata come previsto; le due cose che valgono la pena di essere scritte sono
+emerse dal contorno, e sono entrambe della stessa famiglia — un controllo che gira, esce `0`, e
+non guarda quello che credevamo guardasse.
+
+**Quello che è stato costruito.** `docker/02-replicaset/compose.yaml` ha adesso `mongo-rs-1`,
+`mongo-rs-2` e `mongo-rs-3`: `--replSet`, `--keyFile`, `--bind_ip_all`, cache WiredTiger a
+`0,25 GiB`, `768m` e `0.75` CPU per membro ([ADR-0004](Decision.md#adr-0004)), porte `27021`,
+`27022`, `27023`, un volume dati per ciascuno e il keyfile montato in sola lettura. Accanto,
+`docker/02-replicaset/.env.example` con i parametri modificabili e la password
+dell'amministratore lasciata **vuota di proposito**: per Compose una variabile vuota vale quanto
+una assente, quindi la forma `${...:?}` che il Task 4 userà farà fallire l'avvio con un messaggio
+invece di creare un utente senza password.
+
+I tre membri sono scritti per esteso, senza ancoraggi YAML e senza `extends`
+([ADR-0003](Decision.md#adr-0003)). Trenta righe risparmiate a chi sa già leggere gli ancoraggi
+costerebbero dieci minuti a chiunque altro, e questo file è materiale didattico prima che
+configurazione.
+
+**Prima scoperta: `make stack-check` non guardava questo file.** Il target usa un elenco esplicito
+di file, e lo stack 02 non c'era. Passandogli il file del Task 2 a mano:
+
+```console
+$ uv run --project tools python tools/check_stack.py --ambiente tools/images.env docker/02-replicaset/compose.yaml
+✗ keyfile-init: manca «mem_limit».
+✗ keyfile-init: manca «cpus».
+2 problemi negli stack.
+```
+
+Due violazioni di [ADR-0004](Decision.md#adr-0004) erano entrate nel repository con il commit del
+Task 2 e ci sono rimaste, non perché il controllo fosse debole ma perché non era stato invitato a
+guardare. Corrette qui: `keyfile-init` dichiara `128m` e `0.25` CPU — che non entrano nel bilancio
+dei 2,25 GiB del design §5.1, visto che il servizio è già uscito quando il primo `mongod` parte.
+Il Task 6 insegnerà al target l'elenco nuovo; il punto non è quello, è che l'elenco esiste.
+
+**Seconda scoperta: lo YAML del piano avrebbe disarmato la regola sulla cache.** Il piano scriveva
+il comando dei membri senza `mongod` in testa, cominciando da `--replSet`. Per Docker le due forme
+sono equivalenti: l'entrypoint ufficiale antepone `mongod` da sé quando il primo argomento comincia
+per trattino. Per `tools/check_stack.py` no — riconosce un `mongod` dal primo elemento del comando.
+Due file minimi che differiscono solo in quello, entrambi con un `mongod` e **nessuna** cache
+dichiarata:
+
+```console
+$ ... check_stack.py senza-mongod.yaml
+Stack conformi: 1.
+uscita=0
+
+$ ... check_stack.py con-mongod.yaml
+✗ membro: avvia mongod senza «--wiredTigerCacheSizeGB». Il valore va dichiarato a mano […]
+uscita=1
+```
+
+Scritto come lo scriveva il piano, lo stack sarebbe passato conforme con tre `mongod` a cache non
+dichiarata — cioè esattamente la cosa che [ADR-0004](Decision.md#adr-0004) esiste per impedire. Il
+file adesso scrive `mongod` per esteso, che è anche la forma dello stack 01. Resta la lacuna nello
+strumento: una regola che si può eludere scrivendo la stessa cosa in un altro modo legittimo non è
+una regola, è una convenzione. Materiale per il **Task 6**, che sullo strumento ci deve tornare.
+
+**Le misure, sullo stack avviato davvero.** Il piano si fermava a `config -q`; un file che non ha
+mai avviato niente dice solo di essere sintatticamente valido. Avviato:
+
+```console
+$ docker inspect mongo-rs-1 mongo-rs-2 mongo-rs-3 --format '{{.Name}} memoria={{.HostConfig.Memory}} nanocpu={{.HostConfig.NanoCpus}}'
+/mongo-rs-1 memoria=805306368 nanocpu=750000000
+/mongo-rs-2 memoria=805306368 nanocpu=750000000
+/mongo-rs-3 memoria=805306368 nanocpu=750000000
+```
+
+805306368 byte sono esattamente 768 MiB e 750000000 nanocpu sono 0,75 CPU: il runtime ha applicato
+quello che il file dichiara. Nei log di `mongod`, `cache_size=256M`, cioè i `0,25 GiB` richiesti
+letti come GiB e non come GB decimali — la conferma sullo stack vero di quanto
+[V-009](Sources.md#v-009) aveva misurato in laboratorio. Il keyfile è lo stesso su tutti e tre (una
+sola somma `md5`), è `-r-------- 999 999`, e un tentativo di scriverci sopra da dentro un membro
+prende `Read-only file system`. Porta anche la data del Task 2: il volume è sopravvissuto fra due
+sessioni senza essere rigenerato, che è l'idempotenza dello script vista da lontano.
+
+**La correzione: `secondary=true` era di un membro già inizializzato.** Il punto di ripresa dava per
+misurato che su un `mongod` con `--keyFile` non ancora inizializzato `hello()` risponde
+`isWritablePrimary=false secondary=true`, e la stessa coppia sta nel blocco di console di
+[V-023](Sources.md#v-023). Sui tre membri veri, con `rs.status()` che risponde
+`NotYetInitialized code=94`, la risposta è un'altra:
+
+```console
+mongo-rs-1  isWritablePrimary=false secondary=false isreplicaset=true  ->  espressione del piano = false
+mongo-rs-2  isWritablePrimary=false secondary=false isreplicaset=true  ->  espressione del piano = false
+mongo-rs-3  isWritablePrimary=false secondary=false isreplicaset=true  ->  espressione del piano = false
+```
+
+Quei `secondary=true` venivano da un membro che l'inizializzazione l'aveva già ricevuta. La
+*conclusione* di [V-023](Sources.md#v-023) era comunque giusta — «un controllo che chiedesse "sei
+primario o secondario?" resterebbe rosso fino a `rs.initiate()`» — ed è la misura di oggi a
+confermarla: l'espressione `hello().isWritablePrimary || hello().secondary`, che il Passo 1 del
+Task 5 riporta dal design §5.4, vale `false` su tutti e tre. Mentre `hello().ok` vale `1`.
+
+Il Passo 3 del Task 5 aveva già previsto il nodo e chiedeva di scioglierlo «misurando e non
+ragionando»: la misura è questa, ed è arrivata due task in anticipo. Il marcatore utilizzabile è
+`isreplicaset: true`, che un `mongod` avviato con `--replSet` espone finché non ha ricevuto una
+configurazione. La voce formale di [`Sources.md`](Sources.md) nasce al Task 5, dove il Passo 2 la
+prevede già; qui resta il verbale, e [V-023](Sources.md#v-023) riceve una nota di precisione in
+testa — il corpo non si tocca.
+
+**Note di metodo.**
+
+45. **Un controllo non controlla i file a cui nessuno gliel'ha chiesto.** `make stack-check` ha
+    otto regole buone e un elenco di file scritto a mano, e per un commit intero il file nuovo è
+    stato fuori dall'elenco: le regole c'erano, il verde era vero, e non voleva dire niente sul
+    file appena scritto. Un controllo ha due metà, le regole e l'ambito, e la seconda non si
+    verifica leggendo le prime. Il modo di accorgersene è chiedersi, davanti a un verde, *su che
+    cosa* è verde — e la risposta deve essere un elenco di nomi, non una sensazione.
+
+46. **Due modi equivalenti per il sistema non sono equivalenti per chi lo controlla.** `mongod` in
+    testa al comando o `--replSet` in testa avviano lo stesso processo, e nessuno dei due è
+    sbagliato. Ma lo strumento riconosce il primo e non il secondo, quindi la scelta di come
+    scrivere il file decide se una regola si applica o no — in silenzio, senza che nessuno prenda
+    una decisione consapevole. È la stessa famiglia della nota 42: lì una conferma non poteva
+    fallire, qui una regola non poteva scattare. Quando si scrive uno strumento che legge un
+    formato, l'insieme delle scritture equivalenti nel formato è parte del formato.

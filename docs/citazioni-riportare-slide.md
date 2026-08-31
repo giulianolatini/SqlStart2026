@@ -465,6 +465,27 @@ raggiunge PID 1 — e il comando ritorna successo senza aver fatto niente. Il de
 invece nel namespace antenato, e passa. Chi entra nel container per «uccidere `mongod`» si
 convince di averlo fatto.
 
+### Lo stesso stack, scritto in due modi equivalenti: uno passa il controllo, l'altro no
+
+> ```console
+> $ check_stack.py senza-mongod.yaml     # command: [--replSet, rs0, --bind_ip_all]
+> Stack conformi: 1.
+>
+> $ check_stack.py con-mongod.yaml       # command: [mongod, --replSet, rs0, --bind_ip_all]
+> ✗ membro: avvia mongod senza «--wiredTigerCacheSizeGB».
+> ```
+
+Fonte: misura del Task 3 di `feature/02`, verbalizzata in
+[`registro-operativo-sviluppo.md`](registro-operativo-sviluppo.md). L'entrypoint ufficiale
+antepone `mongod` quando il primo argomento comincia per trattino: per Docker i due file
+avviano lo stesso identico processo.
+
+**Perché una slide:** è la lezione dei controlli automatici in sei righe. Lo strumento non
+sbaglia una regola, sbaglia a riconoscere il bersaglio — e chi legge il verde non ha modo di
+saperlo. Vale per ogni linter di configurazione: l'insieme delle scritture equivalenti nel
+formato è parte del formato, e un controllo che ne conosce una sola è una convenzione
+travestita da regola.
+
 ---
 
 ## Installazione su una macchina vera
