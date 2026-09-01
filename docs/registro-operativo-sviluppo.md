@@ -1858,3 +1858,105 @@ smoke **42 · 0** rieseguito a fine sessione. Non restano container usa-e-getta 
 container. Se una prova futura avesse bisogno di una finestra di oplog stretta, la ricetta è in
 [V-036](Sources.md#v-036) e va usata **solo** su un'istanza separata: `--syncdelay` non si tocca
 sullo stack del lab.
+
+---
+
+## 2026-09-01 — `feature/02`, Task 11: il keyfile si difende dicendo a quali condizioni la fonte lo ammette
+
+Il Task 11 chiede cinque passi: perché il lab usa il keyfile, perché MongoDB lo riserva a test e
+sviluppo con le parole della fonte, come si passa a X.509, la distinzione fra utenti del cluster e
+utenti locali a un nodo, e `docs-check`. Tutti e cinque eseguiti. Due sono andati oltre quello che il
+piano chiedeva, e uno è costato tre tentativi.
+
+**Il piano non è stato modificato; le deviazioni sono dichiarate qui.** Il Passo 3 dice «le
+differenze concrete … se qualcosa non è stato eseguito su questo branch, è marcato come non
+eseguito». La lettura minima era: descrivere X.509 dalla documentazione e marcare tutto come non
+eseguito. È stata scelta la lettura massima — **eseguire quello che si poteva eseguire** su istanze
+usa-e-getta con l'immagine pinnata — e ha prodotto tre fatti che nessuna delle tre pagine
+consultate scrive.
+
+**Il primo fatto è un rifiuto all'avvio.** `mongod --clusterAuthMode sendKeyFile` **non parte** senza
+TLS: `BadValue: need to enable TLS via the tlsMode flag`, uscita 1. `sendKeyFile` è il modo di
+*transizione*, quello che continua a mandare il keyfile e serve solo a non fermare il cluster
+durante la migrazione. Se non parte senza TLS, allora il primo passo della migrazione verso X.509
+non riguarda i certificati di membro: riguarda TLS, cioè tutti i client
+([V-039](Sources.md#v-039)). È la riga che cambia la stima dei tempi, ed è finita anche fra le
+citazioni da slide.
+
+**Il secondo è sull'ordine.** [S-062](Sources.md#s-062) presenta i due `setParameter` del secondo
+passo uno sotto l'altro, senza dire che il primo abiliti il secondo. Invertendoli, `clusterAuthMode`
+viene rifiutato: `Illegal state transition … need to enable SSL for outgoing connections`. Il
+vincolo è sulle connessioni **uscenti** — con `allowTLS` il nodo accetta TLS ma non lo usa per
+chiamare gli altri — e `preferTLS` è il primo modo in cui le uscenti sono cifrate. Nell'ordine
+giusto la sequenza completa passa a caldo, con il nodo che resta `PRIMARY` e scrivibile.
+
+**Il terzo è che non si torna indietro.** `Location5579202: Illegal state transition for
+clusterAuthMode from 'x509' to 'sendX509'`, e lo stesso per `tlsMode` da `requireTLS` in giù. Chi
+sbaglia tappa riavvia il nodo. Un dettaglio osservato e **non spiegato**, scritto nelle riserve
+perché serve a chi scriverà uno script: reimpostare `clusterAuthMode` al valore che ha già viene
+rifiutato — la migrazione non è idempotente.
+
+**Tre tentativi per una misura.** Il primo giro ha ucciso il container prima di poter provare le
+transizioni, perché `sendKeyFile` non parte senza TLS e questo non lo sapevo ancora. Il secondo è
+finito contro `Unauthorized` su ogni `setParameter`: l'eccezione localhost non copre `setParameter`,
+e questo è a sua volta una conferma misurata di [S-006](Sources.md#s-006) e del terzo punto di
+[ADR-0026](Decision.md#adr-0026). Il terzo giro, con `rs.initiate()` e un utente prima di tutto, ha
+prodotto la tabella. Il conto è due container buttati per una tabella di otto righe, e vale il
+prezzo: le otto righe sono l'unica parte della sezione X.509 che non è una parafrasi.
+
+**Il debito nominale di ADR-0026, saldato con un messaggio d'errore.** «La distinzione fra utenti del
+cluster e utenti locali allo shard è materia da `03-amministrazione/sicurezza-keyfile-x509.md`»,
+scritto ad agosto. Lo shard non c'è, quindi la domanda è stata riformulata per il replica set — e la
+risposta è netta: `createUser` sul database `local` risponde `Cannot create users in the local
+database` ([V-038](Sources.md#v-038)). L'unico database che non viene replicato è precisamente
+l'unico in cui non si possono mettere utenti. Tre righe di prova al posto di un paragrafo prudente;
+il caso sharded resta marcato e dovuto a `feature/03`.
+
+**Una misura che il piano non chiedeva, e che serviva.** Nel comando dei tre membri `--auth` non
+compare. Era già dichiarato da due fonti dal `feature/00` ([S-002](Sources.md#s-002),
+[S-005](Sources.md#s-005)) e non era mai stato mostrato. Adesso c'è la tabella dei rifiuti, con
+l'unica cosa che passa — `hello()` — e la ragione per cui passa.
+
+**Il keyfile misura 1024 byte, e non si sa se è un caso.** Il massimo dichiarato per la lunghezza di
+una chiave è 1024 caratteri; `openssl rand -base64 756` produce 1008 caratteri base64 più sedici a
+capo, cioè esattamente 1024 byte sul disco. Quale dei due numeri MongoDB confronti con il limite non
+è scritto da nessuna parte. La riserva è in [V-038](Sources.md#v-038) invece di una frase sicura in
+una direzione o nell'altra.
+
+**Controlli.** `make docs-check` verde al primo giro — l'ancora `<a id="adr-0048"></a>` era già al
+suo posto, lezione del Task 10 applicata. `make tools-test`, `make stack-check` e
+`./tools/smoke-replicaset.sh` rieseguiti a fine task. Le tre istanze usa-e-getta sono state rimosse
+con `docker rm -f -v`; sullo stack del lab l'unica scrittura è stata la creazione e la rimozione di
+`lettore-demo`, con i tre membri tornati a un utente solo.
+
+**Documentazione prodotta.** [S-061](Sources.md#s-061), [S-062](Sources.md#s-062) e
+[S-063](Sources.md#s-063) — le prime fonti su X.509 del repository; [V-038](Sources.md#v-038),
+[V-039](Sources.md#v-039) e [V-040](Sources.md#v-040); [ADR-0048](Decision.md#adr-0048);
+`docs/03-amministrazione/sicurezza-keyfile-x509.md`; tre citazioni da slide nel Blocco 2.
+[S-005](Sources.md#s-005) acquisisce il quarto ADR che la cita, [S-002](Sources.md#s-002) e
+[S-006](Sources.md#s-006) il terzo: sono le fonti di `feature/00` che questo branch ha finalmente
+messo alla prova invece di limitarsi a citarle.
+
+**Note di metodo.**
+
+67. **Una riserva della fonte si riporta con il preventivo dell'alternativa accanto.** «Use keyfiles
+    only for testing and development environments» si può citare in due modi. Da sola, spaventa e
+    non insegna: chi legge conclude che il lab è fatto male. Con accanto il costo di X.509 in questo
+    stack — una CA, un certificato per membro con il `SAN` di ogni host, una rotazione in sei passi e
+    tre giri di riavvii — la stessa frase diventa una descrizione di economia, e la scelta del lab
+    diventa difendibile invece che imbarazzante. La citazione è la stessa; cambia solo che cosa le
+    sta vicino.
+
+68. **Il debito si salda dove è scritto, marcando la parte che manca.** [ADR-0026](Decision.md#adr-0026)
+    intesta a questa pagina, per nome, una distinzione che riguarda gli shard, e gli shard sono di
+    un'altra feature. Le uscite comode erano due: rimandare tutto a `feature/03`, oppure scrivere per
+    analogia fingendo di aver provato. La terza è riformulare la domanda per la topologia che c'è,
+    misurarla, e marcare esplicitamente il resto. Costa una sezione più corta e un riquadro «non
+    eseguito», e lascia il debito visibile invece che sciolto in una frase.
+
+69. **Un esperimento che muore tre volte non è tre fallimenti: è la misura che si sta formando.** Il
+    primo container è morto perché `sendKeyFile` vuole TLS — ed è diventato il fatto principale della
+    sezione. Il secondo è morto contro `Unauthorized` — ed è diventato una conferma di
+    [S-006](Sources.md#s-006). Solo il terzo ha prodotto la tabella. La tentazione, al secondo, era
+    scrivere la sezione dalla documentazione e chiudere: sarebbe costato un'ora in meno e avrebbe
+    perso due fatti su tre, entrambi arrivati proprio dai tentativi andati male.

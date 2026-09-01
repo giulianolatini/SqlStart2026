@@ -2622,3 +2622,103 @@ di amministrazione — `--oplog` esiste solo qui, e una pagina di backup senza `
 pagina dello standalone, cioè [ADR-0022](#adr-0022) un'altra volta.
 
 **Fonti:** [S-011](Sources.md#s-011), [S-059](Sources.md#s-059), [S-060](Sources.md#s-060), [V-034](Sources.md#v-034), [V-035](Sources.md#v-035), [V-036](Sources.md#v-036), [V-037](Sources.md#v-037)
+
+---
+
+<a id="adr-0048"></a>
+## ADR-0048 — Il keyfile si giustifica dicendo a quali condizioni la sua fonte lo ammette
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto.** Il lab autentica i membri con un keyfile da [ADR-0005](#adr-0005), e la stessa fonte
+che spiega come farlo scrive: «Use keyfiles only for testing and development environments because
+of their limited manageability and cryptographic strength. For production environments, use X.509
+certificates» ([S-005](Sources.md#s-005)). La riserva è registrata da agosto e non era ancora stata
+scritta in una pagina rivolta a chi legge. Una pagina che insegna il keyfile senza riportarla
+insegna male, e il modo in cui la si riporta decide se il lettore capisce o si spaventa.
+
+C'è poi un debito nominale. [ADR-0026](#adr-0026) intesta a questa pagina, per nome, «la distinzione
+fra utenti del cluster e utenti locali allo shard». Il branch che chiude quel debito è questo, e lo
+shard non c'è: la distinzione va data nella forma che il replica set consente, senza fingere di
+avere provato il caso sharded.
+
+**Decisione.**
+
+*La riserva si cita per intero, e si smonta.* «Test and development» non è un difetto del keyfile:
+è una descrizione della sua economia. La pagina riporta la frase con le parole della fonte, poi dice
+che cosa costerebbe l'alternativa in questo stack — una CA, un certificato per membro con `SAN` che
+nomini ogni host, e una procedura di rotazione in sei passi e tre giri di riavvii
+([S-063](Sources.md#s-063)). Il keyfile qui non è una scorciatoia: è la scelta giusta per un lab che
+deve partire offline sul portatile di chi presenta. Dirlo con il numero dei passi accanto è più
+onesto che dirlo con un aggettivo.
+
+*Il controllo degli accessi arriva con il keyfile, e va detto perché è controintuitivo.* Nel comando
+dei tre membri `--auth` non compare, eppure ogni comando vuole credenziali: misurato
+([V-038](Sources.md#v-038)), e dichiarato da due fonti — «`--keyFile` implies `--auth`»
+([S-002](Sources.md#s-002)), «enforces both Self-Managed Internal/Membership Authentication and
+Role-Based Access Control» ([S-005](Sources.md#s-005)). È la stessa frase che vale per X.509
+([S-061](Sources.md#s-061)): l'autenticazione interna, comunque la si faccia, si porta dietro
+quella dei client. È anche la ragione per cui esiste la catena di [ADR-0040](#adr-0040), e la pagina
+lo richiama invece di raccontarla di nuovo.
+
+*Il debito di ADR-0026 si salda con la misura, non con l'analogia.* In un replica set un utente
+locale a un nodo **non esiste**, e non per convenzione: `createUser` sul database `local` — l'unico
+che non viene replicato — risponde `Cannot create users in the local database`; su un secondario
+risponde `not primary`; e l'utente interno dei membri non è un documento in nessuna collezione
+([V-038](Sources.md#v-038)). Tre righe di prova al posto di un paragrafo prudente. Il caso sharded,
+dove gli utenti locali a uno shard esistono davvero perché ogni shard è un replica set con il suo
+`admin`, resta **marcato come non eseguito** ed è dovuto a `feature/03`: la regola di
+[ADR-0035](#adr-0035) e [ADR-0036](#adr-0036) vale anche quando la marcatura è scomoda.
+
+*La migrazione a X.509 si esegue, per quel poco che si può eseguire.* Il piano chiedeva «le
+differenze concrete». Descriverle dalla documentazione sarebbe bastato a riempire la sezione, e
+avrebbe prodotto l'ennesima parafrasi. La sequenza `sendKeyFile` → `sendX509` → `x509` di
+[S-062](Sources.md#s-062) è stata invece eseguita su un'istanza usa-e-getta con l'immagine pinnata,
+e ha restituito due fatti che la fonte non scrive ([V-039](Sources.md#v-039)): l'ordine dei due
+`setParameter` **non è indifferente** — `clusterAuthMode` non sale finché `tlsMode` non è almeno
+`preferTLS`, perché il vincolo è sulle connessioni uscenti — e la scala è **a senso unico**, su
+entrambi i parametri, con `Illegal state transition` a sbarrare il ritorno. Chi sbaglia tappa non
+annulla il comando: riavvia il nodo.
+
+*Il fatto più utile è il rifiuto che nessuno si aspetta.* `mongod --clusterAuthMode sendKeyFile`,
+cioè il modo di transizione che continua a mandare il keyfile, **non parte** senza TLS:
+`BadValue: need to enable TLS via the tlsMode flag`, uscita 1 ([V-039](Sources.md#v-039)). La
+migrazione verso X.509 non comincia da X.509: comincia da TLS, e quindi dai client. La pagina lo
+mette prima della sequenza, perché è la cosa che cambia la stima dei tempi.
+
+*Il costo per i client si mostra con i suoi messaggi d'errore.* Dopo `requireTLS` un client in
+chiaro viene chiuso, un client TLS senza certificato viene chiuso con `No SSL certificate provided
+by peer`, e un client che si connette per indirizzo invece che per nome viene fermato **dal client
+stesso** perché il `SAN` non lo elenca ([V-040](Sources.md#v-040)). Tre rifiuti diversi, nessuno dei
+quali è il server che va male. È il preventivo che [S-062](Sources.md#s-062) riassume in una riga —
+«applies to all connections; that is, with the clients as well as with the members of the cluster»
+— reso in tre schermate.
+
+*Quello che non si esegue si dichiara, e la fonte dichiara per prima.* [S-061](Sources.md#s-061)
+scrive che «a full description of TLS/SSL, PKI … is beyond the scope of this document» e presuppone
+«access to valid X.509 certificates». Questo repository fa lo stesso: non insegna a produrre
+certificati, non ne distribuisce, e non pretende di aver provato un *rolling upgrade* — che per
+definizione richiede un cluster misto, mentre la prova è girata su un nodo solo. La sezione lo
+scrive.
+
+**Conseguenze.** Nasce `docs/03-amministrazione/sicurezza-keyfile-x509.md`, seconda pagina della
+sezione `03-amministrazione` di questo branch; in `docs/README.md` la riga passa da promessa a
+collegamento. [S-005](Sources.md#s-005) acquisisce il quarto ADR che la cita, [S-002](Sources.md#s-002)
+e [S-006](Sources.md#s-006) il terzo: sono le fonti di `feature/00` che questo branch ha finalmente
+messo alla prova invece di limitarsi a citarle. Il debito nominale di [ADR-0026](#adr-0026) è
+saldato per la parte replica set; la parte sharded resta aperta e marcata, con la sede già scritta.
+
+**Alternative scartate:** scrivere la sezione X.509 dalla sola documentazione — sarebbe costata
+un'ora in meno e non avrebbe prodotto né il rifiuto di `sendKeyFile` senza TLS né il vincolo
+sull'ordine, che sono le due cose per cui la sezione vale la pena; mostrare X.509 **funzionante**
+sullo stack del lab, con una CA e tre certificati generati all'avvio — è la strada tecnicamente più
+ricca, e va scartata per tre motivi: allunga `make up-02` di una generazione di chiavi, introduce
+certificati con una scadenza dentro un lab che deve funzionare anche fra un anno
+([ADR-0016](#adr-0016)), e sposterebbe la demo dal replica set alla PKI, che non è l'argomento del
+talk; tacere la riserva «test and development» per non indebolire il lab — è scritta nella fonte
+che il repository cita da agosto, e nasconderla la renderebbe la prima domanda ostile in sala;
+rimandare la distinzione sugli utenti a `feature/03`, dove lo shard esiste — [ADR-0026](#adr-0026)
+la intesta a questa pagina per nome, e un debito si salda dove è scritto, marcando la parte che
+manca.
+
+**Fonti:** [S-002](Sources.md#s-002), [S-005](Sources.md#s-005), [S-006](Sources.md#s-006), [S-061](Sources.md#s-061), [S-062](Sources.md#s-062), [S-063](Sources.md#s-063), [V-038](Sources.md#v-038), [V-039](Sources.md#v-039), [V-040](Sources.md#v-040)

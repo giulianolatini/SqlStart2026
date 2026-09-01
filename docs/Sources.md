@@ -102,7 +102,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   più per la verifica empirica. Il tipo dell'opzione (intero o frazionario) e il suo default
   non sono pubblicati: la pagina `reference/configuration-options` viene servita troncata
   prima delle Storage Options.
-- **Usata da:** ADR-0004, ADR-0005
+- **Usata da:** ADR-0004, ADR-0005, ADR-0048
 
 <a id="s-003"></a>
 ### S-003 — Docker Docs: Define services in Docker Compose
@@ -179,7 +179,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   «Use keyfiles only for testing and development environments because of their limited
   manageability and cryptographic strength. For production environments, use X.509
   certificates».
-- **Usata da:** ADR-0005, ADR-0014, ADR-0037
+- **Usata da:** ADR-0005, ADR-0014, ADR-0037, ADR-0048
 
 <a id="s-006"></a>
 ### S-006 — MongoDB Manual: Localhost Exception in Self-Managed Deployments
@@ -206,7 +206,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   all'assunzione di progetto: l'eccezione decade anche con `createRole`, e non si attiva
   affatto se esiste già un ruolo — perimetro più stretto di quello che avevamo scritto. I
   config server non sono menzionati.
-- **Usata da:** ADR-0005, ADR-0040
+- **Usata da:** ADR-0005, ADR-0040, ADR-0048
 
 <a id="s-007"></a>
 ### S-007 — MongoDB Manual: Connection String Options
@@ -1863,6 +1863,149 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 - **Usata da:** ADR-0047
 
 ---
+
+<a id="s-061"></a>
+### S-061 — MongoDB Manual 7.0: Verify Cluster Membership with X.509 on Self-Managed MongoDB
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/configure-x509-member-authentication/
+  (citazioni dalla variante `configure-x509-member-authentication.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** 7.0 — la versione pinnata del lab ([ADR-0028](Decision.md#adr-0028))
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma:** l'alternativa al keyfile è dichiarata in apertura: «Sharded cluster members and
+  replica set members can use X.509 certificates to verify their membership to the cluster or the
+  replica set instead of using keyfiles. The membership authentication is an internal process.» La
+  conseguenza sul controllo degli accessi è **la stessa** del keyfile: «Enabling internal
+  authentication also enables Role-Based Access Control in Self-Managed Deployments. Clients must
+  authenticate as a user in order to connect and perform operations in the deployment.»
+
+  I requisiti dei certificati di membro, che sono la vera differenza di costo rispetto al keyfile:
+  «A single Certificate Authority (CA) must issue all X.509 certificates for the members of a
+  sharded cluster or a replica set»; il soggetto deve avere un valore non vuoto per almeno uno fra
+  Organization (`O`), Organizational Unit (`OU`) e Domain Component (`DC`), e «MongoDB verifies that
+  entries match exactly across all member certificates. If you list multiple `OU` values, all
+  certificates must use an identical list»; «At least one of the Subject Alternative Name (`SAN`)
+  entries must match the server hostname used by other cluster members. When comparing `SAN`s,
+  MongoDB can compare either DNS names or IP addresses», con la nota che in mancanza di
+  `subjectAltName` «MongoDB compares the Common Name (CN) instead. However, this usage of CN is
+  deprecated per RFC2818». Sugli usi estesi della chiave: il certificato di
+  `tlsCertificateKeyFile` deve includere `serverAuth`, quello di `tlsClusterFile` deve includere
+  `clientAuth`, e se `tlsClusterFile` è omesso il primo deve includerli entrambi — ma «If
+  `tlsCertificateKeyFile` or `tlsClusterFile` point to certificates that omit these extensions, no
+  restrictions apply».
+
+  L'avvio: `mongod --replSet <name> --tlsMode requireTLS --clusterAuthMode x509 --tlsClusterFile
+  <path to membership certificate and key PEM file> --tlsCertificateKeyFile <path to TLS/SSL
+  certificate and key file> --tlsCAFile <path to root CA file> --bind_ip localhost,<hostname(s)|ip
+  address(es)>`, con l'obbligo che «To use X.509 authentication, `--tlsCAFile` or `net.tls.CAFile`
+  must be specified unless you are using `--tlsCertificateSelector`». Sull'uniformità del
+  parametro: «Outside of rolling upgrade procedures, every component of a replica set or sharded
+  cluster should use the same `--clusterAuthMode` setting». Infine due avvertenze che valgono anche
+  per chi non usa X.509: «MongoDB disables support for TLS 1.0 encryption on systems where TLS 1.1+
+  is available» e «If you specify `--tlsAllowInvalidCertificates` or
+  `net.tls.allowInvalidCertificates: true`, an invalid certificate is sufficient only to establish
+  a TLS connection but it is *insufficient* for authentication».
+- **Riserve:** la pagina dichiara i propri limiti in modo esplicito, e vanno riportati: «A full
+  description of TLS/SSL, PKI (Public Key Infrastructure) certificates, in particular X.509
+  certificates, and Certificate Authority is beyond the scope of this document. This tutorial
+  assumes prior knowledge of TLS/SSL as well as access to valid X.509 certificates.» Cioè: la fonte
+  che questo repository cita per «come si passa a X.509» **non insegna a produrre i certificati**, e
+  questo repository nemmeno. La pagina inoltre **non contiene** né la sequenza di migrazione a
+  caldo né la rotazione dei certificati: rimanda a due pagine separate, registrate come
+  [S-062](#s-062) e [S-063](#s-063). Nota terminologica utile: gli alias `ssl` sono deprecati ma
+  non diversi — «The `tls` settings/options provide **identical** functionality as the `ssl`
+  options since MongoDB has always supported TLS 1.0 and later».
+- **Usata da:** ADR-0048
+
+<a id="s-062"></a>
+### S-062 — MongoDB Manual 7.0: Upgrade from Keyfile Authentication to X.509 Authentication
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/upgrade-keyfile-to-x509/
+  (citazioni dalla variante `upgrade-keyfile-to-x509.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** 7.0
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma:** la migrazione è una **procedura a caldo**, in due varianti a seconda che il
+  cluster usi già TLS. Per un cluster con keyfile e **senza** TLS — il caso dello stack di questo
+  repository — i passi sono quattro.
+
+  Primo, riavvio di ogni membro con `net.tls.mode: allowTLS` («This value allows the node to accept
+  both TLS/SSL and non-TLS/non-SSL incoming connections. Its outgoing connections do not use
+  TLS/SSL»), `net.tls.certificateKeyFile`, `net.tls.clusterFile` («Set to the appropriate path of
+  the node's certificate key file for membership authentication»), `net.tls.CAFile`, e
+  `security.clusterAuthMode: sendKeyFile` — «each node continues to send its keyfile to
+  authenticate itself as a member. However, each node can receive either a keyfile or an X.509
+  certificate from other members to authenticate those members». Il keyfile **resta al suo posto**
+  in questa fase.
+
+  Secondo, su ogni nodo, due `setParameter`:
+  `db.adminCommand( { setParameter: 1, tlsMode: "preferTLS" } )` e
+  `db.adminCommand( { setParameter: 1, clusterAuthMode: "sendX509" } )`. Con `preferTLS` «the node
+  accepts both TLS/SSL and non-TLS/non-SSL incoming connections, and its outgoing connections use
+  TLS/SSL»; con `sendX509` «each node sends its `net.tls.clusterFile` to authenticate itself as a
+  member. However, each node continues to accept either a keyfile or an X.509 certificate».
+  «Upgrade all nodes of the cluster to these settings before continuing.»
+
+  Terzo, riscrittura del file di configurazione perché il nuovo stato sopravviva ai riavvii. Quarto,
+  *«Optional but recommended»*: `net.tls.mode: requireTLS` e `security.clusterAuthMode: x509`, con
+  un avviso in grassetto sul fatto che il requisito TLS riguarda **anche i client** — «This TLS/SSL
+  connection requirement applies to all connections; that is, with the clients as well as with the
+  members of the cluster.»
+
+  Per il cluster che usa già TLS la procedura si accorcia a `sendKeyFile` → `sendX509` → `x509`,
+  senza toccare `tlsMode`. In coda, un'alternativa dichiarata: «As an alternative to using the
+  `setParameter` command, you can also restart the nodes with the appropriate TLS/SSL and x509
+  options and values.»
+- **Riserve:** la pagina **non dice** che le transizioni siano a senso unico, e non dice che
+  l'ordine dei due `setParameter` del secondo passo sia obbligatorio — li presenta insieme, nello
+  stesso blocco, senza spiegare perché quello su `tlsMode` viene prima. Entrambe le cose sono state
+  misurate: [V-039](#v-039). La parola «downtime» non compare nella pagina; l'assenza di fermo
+  macchina è implicita nella formula «rolling upgrade process», non dichiarata. Un refuso della
+  fonte, riportato per fedeltà: nel testo del secondo passo si legge «Update the `tlsMode` to
+  `preferSSL`» mentre il comando immediatamente sotto usa `preferTLS` — il valore giusto è quello
+  del comando.
+- **Usata da:** ADR-0048
+
+<a id="s-063"></a>
+### S-063 — MongoDB Manual 7.0: Rotate Certificates on Clusters without clusterAuthX509
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/rotate-x509-membership-certificates/
+  (citazioni dalla variante `rotate-x509-membership-certificates.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** 7.0
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma:** come un membro riconosce un altro membro, prima di tutto: «When a server node
+  receives a connection request, it compares the Distinguished Name (DN) attributes in the
+  `subject` field of the presented certificates to the subject DN attributes of its own
+  certificates. The certificates match if their subjects contain the same values for the
+  Organization (`O`), Organizational Unit (`OU`), and Domain Component (`DC`) attributes.» Da qui
+  discende il problema: cambiare il DN dei certificati significa che i nodi smettono di
+  riconoscersi. La via d'uscita è un parametro-ponte: «Clusters adopting new certificates can use
+  the `tlsX509ClusterAuthDNOverride` parameter to accept x.509 certificates with different subject
+  DN attributes during the certificate rotation procedure. Once all members use certificates with
+  the new value, remove the override to begin rejecting the now out of date certificates.»
+
+  La procedura è di **sei passi** e comporta **tre giri di riavvii** dell'intero cluster: si imposta
+  l'override al DN nuovo su tutti i nodi e si riavvia; si sostituiscono i certificati mettendo
+  l'override sul DN **vecchio** e si riavvia; si toglie l'override e si riavvia una terza volta. Il
+  giro di riavvii è descritto con precisione: «To perform a rolling restart of all members, restart
+  each secondary and then the primary», con `db.shutdownServer()` su ogni secondario, l'attesa che
+  torni in stato `SECONDARY` verificata con `rs.status()`, e `rs.stepDown()` sul primario prima di
+  fermarlo. Sull'assenza di fermo macchina la pagina è esplicita: «In a rolling update, member
+  certificates are updated one at a time, and your deployment does not incur any downtime.» Ogni
+  passo ripete lo stesso avviso: «This configuration will not be taken into consideration until you
+  restart each member.»
+- **Riserve:** la pagina copre **solo** i cluster che non usano `net.tls.clusterAuthX509`; per gli
+  altri rimanda a una procedura diversa, non consultata qui. Non dice niente sulla **scadenza** dei
+  certificati — né come accorgersene, né che cosa succede a un cluster i cui certificati scadono
+  mentre è in esercizio: la rotazione è descritta come una scelta organizzativa («such as if an
+  organization changes its name»), non come una manutenzione periodica obbligata. La procedura è
+  registrata qui per il suo **costo**, che è il termine di paragone onesto con il keyfile: non è
+  stata eseguita.
+- **Usata da:** ADR-0048
 
 ## Verifiche empiriche
 
@@ -4335,5 +4478,201 @@ USCITA=1
   incoerente in silenzio.
 - **Data:** 2026-09-01
 - **Usata da:** ADR-0047
+
+---
+
+<a id="v-038"></a>
+### V-038 — `--keyFile` senza `--auth`, e dove vivono gli utenti di un replica set
+
+- **Comandi:** `docker inspect` sul comando di `mongo-rs-1`; `stat` sul keyfile dentro il
+  container; una sessione `mongosh` **senza credenziali** su `localhost:27017` da dentro il membro;
+  poi, autenticati, lettura di `admin.system.users` sui tre membri, creazione di un utente sul
+  primario, rilettura sui secondari, tentativo di creazione **su un secondario** e su `local`.
+- **Ambiente:** stack `docker/02-replicaset` in esercizio, mongod 7.0.40, replica `rs0`.
+- **Che cosa si voleva sapere:** quattro cose che la pagina della sicurezza deve poter affermare.
+  Che `--keyFile` attivi il controllo degli accessi **da solo** ([S-002](#s-002)); che l'eccezione
+  localhost sia davvero chiusa dopo il primo utente ([S-006](#s-006)); se l'utente interno dei
+  membri sia un documento da qualche parte; e se in un replica set esistano utenti «locali a un
+  nodo», che è la distinzione che [ADR-0026](Decision.md#adr-0026) intesta a quella pagina.
+- **Esito:**
+
+```text
+comando:  ["mongod","--replSet","rs0","--keyFile","/keyfile/mongo-keyfile",
+           "--bind_ip_all","--wiredTigerCacheSizeGB","0.25"]
+keyfile:  /keyfile/mongo-keyfile  400  mongodb:mongodb  1024 byte
+          16 righe, 1008 caratteri base64 senza gli a capo
+utente del processo: uid=999(mongodb) gid=999(mongodb)
+```
+
+  Nel comando **`--auth` non c'è**. Da una connessione senza credenziali, sullo stesso loopback a
+  cui l'eccezione localhost si applicherebbe:
+
+```text
+hello()                            -> OK: setName=rs0 primary=mongo-rs-1:27017
+admin.system.users.countDocuments  -> Unauthorized: Command aggregate requires authentication
+replSetGetStatus                   -> Unauthorized: Command replSetGetStatus requires authentication
+lab.ordini.countDocuments          -> Unauthorized: Command aggregate requires authentication
+createUser                         -> Unauthorized: Command createUser requires authentication
+```
+
+  Autenticati, i tre membri dicono la stessa cosa — un utente, e l'utente interno **non è un
+  documento**:
+
+```text
+mongo-rs-1 (primario)  utenti=1  __system=0   admin.admin  ruoli=[{"role":"root","db":"admin"}]
+mongo-rs-2 (secondario) utenti=1 __system=0   admin.admin  ruoli=[{"role":"root","db":"admin"}]
+mongo-rs-3 (secondario) utenti=1 __system=0   admin.admin  ruoli=[{"role":"root","db":"admin"}]
+```
+
+  Creando `lettore-demo` sul primario, i due secondari lo vedono subito (`utenti=2`, stessi ruoli).
+  I due tentativi che dovevano fallire falliscono:
+
+```text
+createUser su un secondario   -> NotWritablePrimary: not primary
+createUser sul database local -> BadValue: Cannot create users in the local database
+```
+
+  L'utente di prova è stato rimosso; i tre membri sono tornati a `utenti=1`.
+- **Conseguenza:** quattro affermazioni della pagina della sicurezza sono misurate invece che
+  dedotte. La quarta è quella che chiude il debito di [ADR-0026](Decision.md#adr-0026): in un
+  replica set **un utente locale a un nodo non esiste**, e non per convenzione — MongoDB rifiuta di
+  crearne uno nell'unico database che non viene replicato. Registrato in
+  [ADR-0048](Decision.md#adr-0048).
+- **Riserve:** il keyfile misura **1024 byte** sul disco, che è esattamente il massimo dichiarato da
+  [S-005](#s-005) per la lunghezza di una chiave («between 6 and 1024 characters»); tolti i sedici
+  a capo che `openssl` inserisce, i caratteri base64 sono **1008**. Quale dei due numeri MongoDB
+  confronti con il limite **non è scritto** nella fonte: la ricetta ufficiale
+  `openssl rand -base64 756` produce un file che sta al confine con entrambe le letture, e questa
+  verifica non le distingue. Non è stato provato che cosa succeda con un keyfile più lungo. Non è
+  stato provato il caso dello sharded cluster, dove l'eccezione localhost «applies to each shard
+  individually as well as to the cluster as a whole» ([S-006](#s-006)) e dove gli utenti locali a
+  uno shard esistono davvero: è materia di `feature/03`.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0048
+
+---
+
+<a id="v-039"></a>
+### V-039 — `clusterAuthMode` è a senso unico, e la strada passa da `tlsMode`
+
+- **Comandi:** quattro avvii di `mongod` con `--clusterAuthMode` e senza il resto, per vedere dove
+  si ferma; poi un'istanza avviata come prescrive la procedura di migrazione
+  ([S-062](#s-062)) — keyfile, certificato autofirmato, `--tlsMode allowTLS`,
+  `--clusterAuthMode sendKeyFile` — su cui la sequenza è stata eseguita con `setParameter`, prima
+  nell'ordine sbagliato e poi in quello documentato.
+- **Ambiente:** istanze usa-e-getta con l'immagine pinnata (mongod 7.0.40), rimosse con
+  `docker rm -f -v`. Lo stack del lab non è stato toccato: su di esso è stato solo **letto**
+  `getParameter` → `clusterAuthMode: 'keyFile'`, `tlsMode: 'disabled'`.
+- **Che cosa si voleva sapere:** [S-062](#s-062) elenca i passi ma non dice se siano reversibili, e
+  presenta i due `setParameter` del secondo passo nello stesso blocco senza dire che l'ordine conti.
+  Prima di scrivere «si può fare a caldo» in una pagina, conviene averlo fatto.
+- **Esito.** Gli avvii, tutti con **uscita 1**:
+
+```text
+--clusterAuthMode x509         BadValue: need to enable TLS via the tlsMode flag
+--clusterAuthMode sendX509     BadValue: need to enable TLS via the tlsMode flag
+--clusterAuthMode sendKeyFile  BadValue: need to enable TLS via the tlsMode flag
+--clusterAuthMode keyFile      Location5579201: Unable to acquire security key[s]
+  (preceduto da  id 20254  «Read security file failed»  InvalidPath)
+```
+
+  Il terzo è quello che sorprende: **anche il modo di transizione, quello che continua a mandare il
+  keyfile, si rifiuta di partire senza TLS.** La migrazione non comincia da X.509, comincia da TLS.
+
+  Sull'istanza configurata a dovere, partendo da `[sendKeyFile / allowTLS]`, l'ordine sbagliato:
+
+```text
+clusterAuthMode=x509         -> BadValue: Illegal state transition for clusterAuthMode,
+                                need to enable SSL for outgoing connections
+clusterAuthMode=sendX509     -> BadValue: (idem)
+clusterAuthMode=keyFile      -> Location5579202: Illegal state transition for clusterAuthMode
+                                from 'sendKeyFile' to 'keyFile'
+```
+
+  E l'ordine documentato, sulla stessa istanza ripartita da capo:
+
+```text
+partenza: [sendKeyFile / allowTLS]
+  tlsMode=preferTLS            [sendKeyFile / allowTLS]   ->  accettato
+  clusterAuthMode=sendX509     [sendKeyFile / preferTLS]  ->  accettato
+  tlsMode=requireTLS           [sendX509 / preferTLS]     ->  accettato
+  clusterAuthMode=x509         [sendX509 / requireTLS]    ->  accettato
+arrivo:   [x509 / requireTLS]     il nodo scrive: true     stato: PRIMARY
+```
+
+  Nessun riavvio, nessuna interruzione: il nodo è rimasto primario e scrivibile per tutta la
+  sequenza. Indietro non si torna:
+
+```text
+clusterAuthMode=sendX509  [x509]        -> Location5579202: Illegal state transition
+                                           for clusterAuthMode from 'x509' to 'sendX509'
+clusterAuthMode=keyFile   [x509]        -> Location5579202: (idem, verso 'keyFile')
+tlsMode=preferTLS         [requireTLS]  -> BadValue: Illegal state transition for tlsMode,
+                                           attempt to change from requireTLS to preferTLS
+```
+
+- **Conseguenza:** la pagina può affermare tre cose che la fonte non scrive. Che l'ordine dei due
+  `setParameter` **non è indifferente**: `clusterAuthMode` non sale finché `tlsMode` non è almeno
+  `preferTLS`, perché il vincolo è sulle connessioni **uscenti**. Che la scala è **a senso unico**,
+  su entrambi i parametri: sbagliare tappa costa un riavvio, non un comando. E che il ritorno al
+  keyfile, dopo, non è un ripensamento ma una rimessa in piedi. Registrato in
+  [ADR-0048](Decision.md#adr-0048).
+- **Riserve:** **un solo nodo.** La sequenza è stata eseguita su un replica set di un membro, dove
+  l'autenticazione interna non ha nessuno con cui parlare: quello che non è stato provato è
+  esattamente ciò che rende la procedura un *rolling upgrade*, cioè un cluster misto in cui un nodo
+  a `sendX509` e uno a `sendKeyFile` continuano a riconoscersi. Il certificato è **autofirmato** e
+  privo di estensioni di uso della chiave, quindi per [S-061](#s-061) «no restrictions apply»: i
+  requisiti `serverAuth`/`clientAuth` non sono stati messi alla prova, e nemmeno la regola che
+  vuole un'unica CA per tutti i membri. Un dettaglio osservato e **non spiegato**: reimpostare
+  `clusterAuthMode` al valore che ha già viene rifiutato, con il messaggio sul TLS invece che con
+  quello sulla transizione — chi scrive uno script di migrazione idempotente lo scoprirà, e questa
+  verifica non dice perché.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0048
+
+---
+
+<a id="v-040"></a>
+### V-040 — Con `requireTLS` il client cambia mestiere, e il certificato deve nominare l'host
+
+- **Comandi:** un'istanza usa-e-getta con `--tlsMode requireTLS`, `--tlsCertificateKeyFile` e
+  `--tlsCAFile` puntati a un certificato autofirmato con
+  `subjectAltName = DNS:x509-san, DNS:localhost`, e cinque tentativi di connessione con `mongosh`
+  da dentro il container.
+- **Ambiente:** istanza usa-e-getta con l'immagine pinnata, rimossa con `docker rm -f -v`.
+- **Che cosa si voleva sapere:** il quarto passo di [S-062](#s-062) avverte che il requisito TLS
+  «applies to all connections; that is, with the clients as well as with the members of the
+  cluster». Quell'avviso è la ragione per cui una migrazione a X.509 non è un lavoro da
+  amministratore soltanto, e vale la pena vederlo succedere.
+- **Esito:**
+
+```text
+127.0.0.1  tls=true   -> Hostname/IP does not match certificate's altnames:
+                         IP: 127.0.0.1 is not in the cert's list:      (rifiuto del CLIENT)
+localhost  senza tls  -> connessione chiusa
+                         lato server: SSLHandshakeFailed
+                         «The server is configured to only allow SSL connections»
+x509-san   tls=true   -> connessione chiusa
+                         lato server: id 23255, «No SSL certificate provided by peer;
+                         connection rejected»  →  SSLHandshakeFailed
+```
+
+  Tre rifiuti diversi, e nessuno dei tre è il server che va male. Il primo è il **client** che
+  verifica il nome: il certificato elenca `DNS:localhost` e nessun indirizzo, quindi connettersi a
+  `127.0.0.1` non passa. Il secondo è il client in chiaro contro un server che non parla più in
+  chiaro. Il terzo è il server che, avendo un `--tlsCAFile`, **pretende un certificato anche dal
+  client** e non lo riceve.
+- **Conseguenza:** la pagina può dire, con i messaggi accanto, che passare a `requireTLS` sposta il
+  lavoro sui client e sui nomi: ogni host va nominato nel `SAN`, e ogni client va provvisto. È il
+  costo che il keyfile non ha, ed è il motivo per cui questo repository non lo paga.
+  Registrato in [ADR-0048](Decision.md#adr-0048).
+- **Riserve:** **nessun certificato client è stato generato**, quindi non è stato mostrato il caso
+  che funziona — solo i tre modi di sbagliare. Non è stata provata l'opzione che allenta la
+  pretesa del server (`--tlsAllowConnectionsWithoutCertificates`), né l'autenticazione **dei client**
+  via X.509, che è cosa diversa dall'autenticazione interna fra membri ed è fuori dal Task. Il
+  certificato è autofirmato e usato al tempo stesso come certificato del server e come CA: in una
+  configurazione vera i due file sono distinti.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0048
 
 ---

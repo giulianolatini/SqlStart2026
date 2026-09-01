@@ -335,6 +335,75 @@ tenuto appesa una `insertOne` per dieci secondi invece di farla fallire. La repl
 dati; il driver ha salvato la faccia all'applicazione. Sono due cose diverse, e vale la pena non
 attribuirle alla stessa.
 
+### Nel comando non c'è `--auth`, e senza credenziali non passa niente
+
+> ```text
+> ["mongod","--replSet","rs0","--keyFile","/keyfile/mongo-keyfile",
+>  "--bind_ip_all","--wiredTigerCacheSizeGB","0.25"]
+> ```
+>
+> ```text
+> hello()                            -> OK: setName=rs0 primary=mongo-rs-1:27017
+> admin.system.users.countDocuments  -> Unauthorized: requires authentication
+> replSetGetStatus                   -> Unauthorized: requires authentication
+> lab.ordini.countDocuments          -> Unauthorized: requires authentication
+> createUser                         -> Unauthorized: requires authentication
+> ```
+
+Fonte: [V-038](Sources.md#v-038); dichiarato da [S-002](Sources.md#s-002) — «`--keyFile` implies
+`--auth`» — e da [S-005](Sources.md#s-005). Decisione in [ADR-0048](Decision.md#adr-0048).
+
+**Perché una slide:** perché la platea legge il comando e cerca `--auth`, e non lo trova. Il
+keyfile non è solo autenticazione **fra** i membri: attiva anche quella dei client, e nessuno lo ha
+chiesto. La riga da dire mentre la seconda schermata è a video è che passa **una cosa sola**,
+`hello()`, perché altrimenti un driver non saprebbe nemmeno a chi presentare le credenziali. Ed è
+anche la spiegazione del paradosso che rende complicata l'inizializzazione: prima di un utente
+nessuno può inizializzare la replica, e senza replica non si crea un utente.
+
+### La migrazione a X.509 non comincia da X.509
+
+> ```text
+> mongod --clusterAuthMode x509         BadValue: need to enable TLS via the tlsMode flag
+> mongod --clusterAuthMode sendX509     BadValue: need to enable TLS via the tlsMode flag
+> mongod --clusterAuthMode sendKeyFile  BadValue: need to enable TLS via the tlsMode flag
+> uscita = 1
+> ```
+
+Fonte: [V-039](Sources.md#v-039), sull'immagine pinnata. La procedura è
+[S-062](Sources.md#s-062). Decisione in [ADR-0048](Decision.md#adr-0048).
+
+**Perché una slide:** perché ribalta la stima dei tempi. `sendKeyFile` è il modo *di transizione*,
+quello che continua a mandare il keyfile e serve solo a non fermare il cluster — e non parte se il
+TLS non c'è. Quindi il primo passo della migrazione non riguarda i certificati di membro: riguarda
+TLS, cioè **tutti i client**, cioè persone che non lavorano nel gruppo che amministra il database.
+Da dire subito dopo: la scala è a senso unico, `Illegal state transition` in tutte e due le
+direzioni, e chi sbaglia tappa riavvia il nodo invece di annullare il comando.
+
+### Un utente locale a un nodo non esiste, e MongoDB lo dice a chiare lettere
+
+> ```text
+> createUser su un secondario   -> NotWritablePrimary: not primary
+> createUser sul database local -> BadValue: Cannot create users in the local database
+> ```
+>
+> ```text
+> mongo-rs-1  utenti=2  admin.admin  admin.lettore-demo
+> mongo-rs-2  utenti=2  admin.admin  admin.lettore-demo
+> mongo-rs-3  utenti=2  admin.admin  admin.lettore-demo
+> ```
+
+Fonte: [V-038](Sources.md#v-038). Decisione in [ADR-0048](Decision.md#adr-0048).
+
+**Perché una slide:** perché la domanda «devo creare l'utente su tutti e tre?» arriva sempre, e la
+risposta migliore non è «no, si replica»: è il secondo messaggio d'errore. L'unico database che non
+viene replicato è `local`, ed è precisamente l'unico in cui non si possono mettere utenti. Il posto
+dove un utente «solo di questo nodo» potrebbe vivere è l'unico posto che gli è vietato.
+
+Terza riga, se c'è tempo: `__system`, l'identità con cui i membri parlano fra loro, **non è un
+documento** — non sta in nessuna collezione, sta nel keyfile. È il motivo per cui perdere il
+keyfile non è come perdere una password: non c'è niente da riscrivere, c'è un file da
+ridistribuire ovunque.
+
 ---
 
 ## Blocco 3 — Sharded cluster
