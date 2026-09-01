@@ -601,3 +601,281 @@ def test_una_variabile_scritta_male_e_un_errore_d_uso(tmp_path, capsys):
         == 2
     )
     assert "SENZA_UGUALE" in capsys.readouterr().err
+
+
+# --- Task 5: le regole che nascono con lo sharded ---------------------------
+#
+# Il piano ne elencava sei. Tre erano già in vigore e non hanno avuto bisogno di
+# codice nuovo: nessun servizio usa un IP letterale, ogni servizio dichiara
+# `mem_limit`, `cpus` e `pull_policy: never`, ogni mongod dichiara una cache non
+# superiore al proprio `mem_limit`. Valgono sui ruoli nuovi perché non guardano
+# il ruolo: `test_un_servizio_che_non_avvia_mongod_non_deve_dichiarare_la_cache`
+# usa già un comando `mongos` per dire che a lui la cache non si chiede.
+#
+# Le altre tre — `--shardsvr`, `--configsvr`, `--configdb` — sono qui, con due
+# che sono venute dietro alla stessa domanda: per applicarle lo strumento deve
+# DECIDERE CHE RUOLO HA UN SERVIZIO, e la decisione va presa leggendo il file.
+#
+# Il vincolo che le tiene insieme è quello di sempre: NON DEVONO SCATTARE SUGLI
+# STACK 01 E 02. La condizione che le accende è la presenza di un `mongos` nel
+# file, non un elenco di nomi che qualcuno dovrebbe tenere aggiornato.
+
+
+def sharded(**modifiche):
+    """Un config server, un membro di shard e un `mongos`, conformi.
+
+    Le modifiche si applicano per servizio: `sharded(mongos={...})` cambia il
+    router e lascia intatti gli altri due, così il problema segnalato da un test
+    è attribuibile al servizio che quel test ha rotto.
+    """
+    comune = {
+        "image": "mongo@sha256:aaa",
+        "pull_policy": "never",
+        "mem_limit": "512m",
+        "cpus": 0.5,
+        "volumes": ["keyfile:/keyfile:ro"],
+    }
+    servizi = {
+        "cfg1": {
+            **comune,
+            "command": [
+                "mongod",
+                "--configsvr",
+                "--replSet",
+                "cfgrs",
+                "--keyFile",
+                "/keyfile/mongo-keyfile",
+                "--wiredTigerCacheSizeGB",
+                "0.25",
+            ],
+        },
+        "shard1a": {
+            **comune,
+            "command": [
+                "mongod",
+                "--shardsvr",
+                "--replSet",
+                "shard1rs",
+                "--keyFile",
+                "/keyfile/mongo-keyfile",
+                "--wiredTigerCacheSizeGB",
+                "0.25",
+            ],
+        },
+        # Il router non ha storage e non ha volume dati: monta solo il keyfile.
+        "mongos": {
+            **comune,
+            "command": [
+                "mongos",
+                "--configdb",
+                "cfgrs/cfg1:27017",
+                "--keyFile",
+                "/keyfile/mongo-keyfile",
+            ],
+        },
+    }
+    for nome, cambi in modifiche.items():
+        servizi[nome] = {**servizi[nome], **cambi}
+    return {"services": servizi}
+
+
+def test_il_campione_sharded_non_produce_problemi():
+    assert verifica(sharded(), digest_noti={"sha256:aaa"}) == []
+
+
+# Regola 1 — un membro di shard dichiara `--shardsvr`.
+
+
+def test_un_membro_di_shard_senza_shardsvr_e_un_problema():
+    # Misurato: `sh.addShard()` risponde `ok: 0` con «Cannot run addShard on a
+    # node started without --shardsvr», e la catena si ferma con `add-shard` che
+    # esce 6. Il server lo dice chiaramente — la regola non serve a tradurre un
+    # messaggio oscuro, serve a incontrarlo con `make stack-check` invece che
+    # davanti al pubblico, un minuto dopo aver avviato lo stack (V-057).
+    documento = sharded(
+        shard1a={
+            "command": [
+                "mongod",
+                "--replSet",
+                "shard1rs",
+                "--keyFile",
+                "/keyfile/mongo-keyfile",
+                "--wiredTigerCacheSizeGB",
+                "0.25",
+            ]
+        }
+    )
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any("--shardsvr" in problema for problema in problemi), problemi
+
+
+def test_uno_stack_senza_mongos_non_pretende_lo_shardsvr():
+    # La guardia che tiene verdi gli stack 01 e 02. I tre membri dello stack 02
+    # sono mongod con `--replSet` e senza `--shardsvr`, e stanno benissimo: la
+    # regola si accende solo se nel file c'è un `mongos`.
+    problemi = verifica(replica(), digest_noti={"sha256:aaa"})
+    assert not any("--shardsvr" in problema for problema in problemi), problemi
+
+
+# Regola 2 — un config server dichiara `--configsvr`.
+
+
+def test_un_config_server_senza_configsvr_e_un_problema():
+    # Misurato: `rs.initiate({configsvr: true, …})` risponde «Nodes being used
+    # for config servers must be started with the --configsvr flag», e `cfg-init`
+    # muore per eccezione non gestita — uscita 1, che non è nessuno dei codici
+    # che ADR-0036 assegna (V-057).
+    documento = sharded(
+        cfg1={
+            "command": [
+                "mongod",
+                "--replSet",
+                "cfgrs",
+                "--keyFile",
+                "/keyfile/mongo-keyfile",
+                "--wiredTigerCacheSizeGB",
+                "0.25",
+            ]
+        }
+    )
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any("--configsvr" in problema for problema in problemi), problemi
+
+
+def test_il_ruolo_si_deduce_dal_set_non_dal_nome_del_servizio():
+    # La prova che la regola legge il file e non indovina dai nomi: qui il config
+    # server si chiama «secondo» e il membro di shard «primo». Se lo strumento
+    # cercasse «cfg» nel nome del servizio sbaglierebbe entrambi i verdetti.
+    documento = sharded()
+    servizi = documento["services"]
+    documento["services"] = {
+        "primo": servizi["shard1a"],
+        "secondo": servizi["cfg1"],
+        "terzo": servizi["mongos"],
+    }
+    assert verifica(documento, digest_noti={"sha256:aaa"}) == []
+
+
+def test_configsvr_e_shardsvr_insieme_sono_un_problema():
+    # Misurato: `BadValue: shardsvr is not allowed when configsvr is specified`,
+    # e il processo non parte affatto (V-057). Lo stack 03 esiste per mostrare
+    # che i due ruoli sono distinti: un file che li fonde insegna il contrario
+    # di quello per cui è stato scritto.
+    documento = sharded(
+        cfg1={
+            "command": [
+                "mongod",
+                "--configsvr",
+                "--shardsvr",
+                "--replSet",
+                "cfgrs",
+                "--keyFile",
+                "/keyfile/mongo-keyfile",
+                "--wiredTigerCacheSizeGB",
+                "0.25",
+            ]
+        }
+    )
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any(
+        "--configsvr" in problema and "--shardsvr" in problema
+        for problema in problemi
+    ), problemi
+
+
+# Regola 3 — `--configdb` nomina un replica set, e quel set esiste nel file.
+
+
+def test_un_mongos_senza_configdb_e_un_problema():
+    documento = sharded(
+        mongos={"command": ["mongos", "--keyFile", "/keyfile/mongo-keyfile"]}
+    )
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any("--configdb" in problema for problema in problemi), problemi
+
+
+def test_un_configdb_senza_nome_del_set_e_un_problema():
+    # Misurato: `FailedToParse: invalid url [cfg1:27017]`. Dalla 3.4 `--configdb`
+    # accetta solo la forma `nomeSet/host:porta`: l'elenco nudo di host è la
+    # scrittura di prima, ed è quella che si trova copiando una guida vecchia.
+    documento = sharded(
+        mongos={
+            "command": [
+                "mongos",
+                "--configdb",
+                "cfg1:27017",
+                "--keyFile",
+                "/keyfile/mongo-keyfile",
+            ]
+        }
+    )
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any("--configdb" in problema for problema in problemi), problemi
+
+
+def test_un_configdb_che_nomina_un_set_inesistente_e_un_problema():
+    # Un refuso di due lettere: «cfgsr» invece di «cfgrs». Nessun processo si
+    # rifiuta di partire, mongos resta a cercare un replica set che non esiste, e
+    # questo è l'unico dei cinque casi che non produce un messaggio con la causa
+    # scritta dentro.
+    documento = sharded(
+        mongos={
+            "command": [
+                "mongos",
+                "--configdb",
+                "cfgsr/cfg1:27017",
+                "--keyFile",
+                "/keyfile/mongo-keyfile",
+            ]
+        }
+    )
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any("cfgsr" in problema for problema in problemi), problemi
+
+
+def test_un_mongos_non_ha_la_cache_di_wiredtiger():
+    # Misurato: `Error parsing command line: unrecognised option
+    # '--wiredTigerCacheSizeGB'`. Il router non ha uno storage engine, e questo è
+    # l'errore che si ottiene copiando il blocco di un mongod e cambiando solo la
+    # prima riga — cioè il modo in cui il file didattico verrà davvero riusato.
+    documento = sharded(
+        mongos={
+            "command": [
+                "mongos",
+                "--configdb",
+                "cfgrs/cfg1:27017",
+                "--keyFile",
+                "/keyfile/mongo-keyfile",
+                "--wiredTigerCacheSizeGB",
+                "0.25",
+            ]
+        }
+    )
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any("wiredTigerCacheSizeGB" in problema for problema in problemi), problemi
+
+
+def test_la_regola_della_cache_vale_anche_su_un_config_server():
+    # Delle sei regole del piano tre erano già in vigore, e questa è la verifica
+    # che valgano sul ruolo nuovo senza che nessuno le abbia estese: il config
+    # server è un mongod come gli altri, e 1 GiB di cache dentro 512 MiB di
+    # memoria è lo stesso errore che V-009 ha misurato altrove.
+    documento = sharded(
+        cfg1={
+            "command": [
+                "mongod",
+                "--configsvr",
+                "--replSet",
+                "cfgrs",
+                "--keyFile",
+                "/keyfile/mongo-keyfile",
+                "--wiredTigerCacheSizeGB",
+                "1.0",
+            ]
+        }
+    )
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any(
+        "wiredTigerCacheSizeGB" in problema and "mem_limit" in problema
+        for problema in problemi
+    ), problemi

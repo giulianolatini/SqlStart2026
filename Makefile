@@ -13,6 +13,7 @@
 COMPOSE_01 := docker compose --env-file tools/images.env -f docker/01-standalone/compose.yaml
 STACK_01   := docker/01-standalone/compose.yaml
 STACK_02   := docker/02-replicaset/compose.yaml
+STACK_03   := docker/03-sharded/compose.yaml
 
 # `FS` usa `.*` e non il `.*?` dell'idioma che gira in rete: `awk` parla ERE, dove il
 # non-greedy non esiste, e POSIX dichiara indefinito il comportamento di due
@@ -48,7 +49,7 @@ preflight: ## Controlli della mattina del talk
 stack-check: ## Verifica i file Compose contro le decisioni degli ADR
 	uv run --project tools python tools/check_stack.py \
 		--variabile PASSWORD_AMMINISTRATORE=valore-finto-il-controllo-non-si-collega \
-		$(STACK_01) $(STACK_02)
+		$(STACK_01) $(STACK_02) $(STACK_03)
 
 # --- Stack 01 — istanza singola -------------------------------------------------------
 

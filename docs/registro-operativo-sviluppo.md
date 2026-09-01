@@ -3074,3 +3074,110 @@ stampavano. Con il `try/catch` il caso rotto esce 6 e le stampa.
      sbagliati: è che un passo di piano formulato come proprietà desiderata («deve valere X»)
      interroga meglio di uno formulato come procedura («fai Y»), perché quando X non vale
      costringe a cercare, mentre Y si esegue e basta.
+
+## 2026-09-01 — `feature/03`, Task 5: le regole dei ruoli, e la scoperta che l'errore non era muto
+
+Il Task 5 chiede di insegnare allo strumento le regole dello sharded, in TDD. Il piano ne elencava
+sei. La prima cosa fatta è stata contarle contro il codice che c'era: **tre erano già in vigore** —
+niente IP letterali, `mem_limit`/`cpus`/`pull_policy` su ogni servizio, cache non superiore alla
+memoria su ogni `mongod` — e valgono sui ruoli nuovi senza che nessuno le abbia estese, perché non
+guardano il ruolo. Una prova esisteva da prima che lo stack 03 esistesse: un test dello stack 01
+usa un comando `mongos` proprio per dire che a lui la cache non si chiede. Sono entrate comunque
+nella suite due verifiche che lo mettono per iscritto sui ruoli nuovi, perché «vale ancora» e «non
+è mai stato messo alla prova» si somigliano troppo.
+
+**Prima le misure, poi i test, poi il codice.** L'ordine del TDD dice test-codice; qui davanti a
+tutti e due sono andate le misure, per un motivo di forma che questo repository ha già scelto: i
+messaggi di `check_stack.py` citano il sintomo che prevengono, e un sintomo si cita dopo averlo
+visto. Sei modi di sbagliare i ruoli, misurati uno per uno ([V-057](Sources.md#v-057)). Quattro
+costano un `docker run` di tre secondi; due hanno richiesto una copia dello stack rotta apposta e
+un avvio intero.
+
+**La notizia è arrivata al contrario.** L'aspettativa era di trovare errori muti, che è la
+giustificazione classica di una regola statica. Invece **cinque sintomi su sei nominano l'opzione
+che manca**, in inglese, con una frase che si cerca in rete così com'è: «Cannot run addShard on a
+node started without --shardsvr», «Nodes being used for config servers must be started with the
+--configsvr flag», «shardsvr is not allowed when configsvr is specified». La giustificazione comoda
+era falsa. Quella vera è più modesta e regge meglio: il guadagno non è tradurre un messaggio
+oscuro, è **incontrarlo in due secondi su un file fermo invece che al minuto e ventuno di un avvio,
+con dieci container accesi e il pubblico che guarda**.
+
+Due commenti del repository sostenevano quella giustificazione e sono stati corretti. Il primo, su
+`shard1a`, diceva che senza `--shardsvr` «il messaggio parla d'altro»: non parla d'altro, nomina
+esattamente la riga che manca. Il secondo, su `cfg1`, diceva che sulla forma abbreviata del comando
+la regola della cache non scatta: era vero fino al Task 3 di `feature/02`, che l'ha riparata
+([ADR-0042](Decision.md#adr-0042)), ed è rimasto scritto per un mese oltre la sua scadenza.
+
+**Il sesto sintomo però è muto sul serio, e ripaga tutte le regole da solo.** `cfgsr` per `cfgrs`
+dentro `--configdb`: due lettere. Tutti i processi partono, `up --wait` esce 1 dopo
+**novantaquattro secondi** — il caso più lento dei sei — il router resta `unhealthy` senza mai
+aprire la porta, e nel suo log **la stringa `cfgrs` non compare nemmeno una volta**. Contata: zero
+occorrenze. Quello che si legge è `HostUnreachable` su `cfg2` e `cfg3`, che nel profilo `palco`
+sono irraggiungibili per costruzione, e `FailedToSatisfyReadPreference` sull'unico host che
+risponde benissimo. La diagnosi indica la rete; la causa sono due lettere.
+
+**Cinque regole, e il criterio che decide a chi si applicano.** La parte difficile non era
+controllare due opzioni, era far **dedurre il ruolo** allo strumento senza chiederlo a un elenco di
+nomi. La catena sta tutta nel file: il `mongos` nomina in `--configdb` il replica set dei config
+server, ogni `mongod` nomina in `--replSet` il proprio, chi appartiene al primo è un config server
+e chiunque altro è uno shard. Un test rinomina `cfg1` in `secondo` e `shard1a` in `primo` e pretende
+zero problemi. Le regole tacciono sugli stack 01 e 02 perché quei file non hanno un `mongos`, non
+perché siano in una lista di eccezioni — è il criterio di ADR-0042, ripreso identico
+([ADR-0063](Decision.md#adr-0063)).
+
+**Due deviazioni dal piano, dichiarate.** La prima: le regole implementate sono cinque, non tre. La
+regola sui due ruoli insieme è venuta dietro alla stessa domanda — per decidere il ruolo bisogna
+gestire prima il caso «tutti e due» — e quella sul `mongos` senza cache protegge il ruolo nuovo
+dall'errore che un file didattico rende più probabile di ogni altro, copiare il blocco di un
+`mongod` e cambiare solo la prima riga. La seconda: il piano scriveva «la stringa `--configdb`
+nomina il set `cfgrs`», e `cfgrs` dentro lo strumento non ci è entrato. Avrebbe legato un controllo
+generico al nome di un solo stack, contro il principio che lo stack è un argomento, e avrebbe perso
+proprio il caso del refuso — dove il nome non è sbagliato in assoluto, è **incoerente con il resto
+del file**. Il piano approvato non si tocca: la deviazione si registra qui.
+
+**Una cosa presa dal Task 7 in anticipo.** Il Passo 4 chiede `make stack-check` con tre stack
+conformi, e `STACK_03` nel `Makefile` era assegnato al Task 7. Entra ora, perché senza non esiste
+il modo di evadere il passo. Al Task 7 resta tutto il resto: i bersagli `up-03`/`down-03` e
+compagnia, `reset-demo.sh`, le porte in `preflight`.
+
+**Verificato eseguendo.** I sette test nuovi rossi prima del codice, tutti con `AssertionError: []`
+— nessuna regola, non un errore d'importazione. Dopo: `make tools-test` **125 passed**, erano 114.
+`make stack-check` **tre stack conformi**. E la prova che ADR-0042 aveva stabilito e che un verde
+non sostituisce: sette copie dello stack 03 vero, un difetto ciascuna, la copia intatta a zero
+problemi e le altre sei a **un problema ciascuna**, sei messaggi distinti. Un problema per copia, e
+non una cascata: la regola che scatta è quella del difetto introdotto. Ogni avvio chiuso con
+`down -v`, nessun residuo.
+
+**Note di metodo.**
+
+103. **Misurare prima di scrivere la regola non serve a sapere se la regola serve: serve a sapere
+     perché.** La regola sul `--shardsvr` sarebbe stata scritta identica anche senza misurare
+     niente — il vincolo è documentato, il codice è lo stesso. Quello che sarebbe cambiato è la
+     frase accanto, e con la frase la giustificazione dell'intera famiglia. Avrei scritto «senza
+     questa regola l'errore è illeggibile», che è comodo, plausibile e **falso**, e sarebbe
+     rimasto scritto in un ADR come motivo di una decisione. La regola generale: quando si
+     costruisce una difesa, l'attacco va provato davvero, perché la difesa si scrive uguale ma la
+     ragione no — e la ragione è la parte che gli altri leggeranno.
+104. **Un commento che descrive il comportamento di un altro file è un'affermazione a termine, e
+     nessuno le mette la scadenza.** Ne sono stati trovati due nello stesso file, tutti e due
+     scritti da me: uno diceva che `check_stack.py` non riconosce la forma abbreviata del comando
+     — vero fino al Task 3 di `feature/02`, che l'ha riparata, e rimasto scritto per un mese
+     oltre — e uno diceva che `sh.addShard()` non nomina la causa, smentito dalla prima misura di
+     oggi. Nessuno dei due era sbagliato quando è stato scritto. La differenza fra i due generi di
+     commento è netta e vale la pena tenerla a mente scrivendo: «questa riga fa X» invecchia con
+     la riga sotto, e la riga sotto è nello stesso schermo; «questo serve perché altrove succede
+     Y» invecchia quando cambia Y, che è in un altro file, e non c'è nessun controllo automatico
+     che possa accorgersene. La contromossa che costa poco è citare la misura — «V-057», «S-022»
+     — così chi rilegge sa **dove** andare a verificare se vale ancora.
+105. **Una regola generica non deve contenere il nome del caso particolare che l'ha fatta
+     nascere.** Il piano chiedeva di verificare che `--configdb` nomini il set `cfgrs`, e la
+     traduzione letterale — cercare la stringa `cfgrs` — sarebbe passata su tutti i test scritti
+     per lo stack 03 e avrebbe fatto verde su `make stack-check`. Sbagliava due volte. Legava uno
+     strumento che prende lo stack come argomento al nome usato da uno solo dei tre; e soprattutto
+     avrebbe **mancato il caso vero**, perché il difetto che conta non è che il nome sia diverso
+     da `cfgrs`, è che sia diverso da quello che i config server dello stesso file dichiarano. La
+     forma generale — «il set nominato da `--configdb` deve essere dichiarato da qualche `mongod`
+     di questo file» — è più corta da scrivere, non usa nessun nome proprio, e prende il refuso
+     che quella letterale lasciava passare. Quando la versione generale di una regola è anche
+     quella che cattura di più, è un segnale che il caso particolare era la formulazione sbagliata
+     della domanda.

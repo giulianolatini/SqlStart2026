@@ -6053,3 +6053,123 @@ oppure il replica set nominato non ha un primario eletto.
   con `down -v`, nessun residuo. Tutto su arm64.
 - **Data:** 2026-09-01
 - **Usata da:** ADR-0062
+
+<a id="v-057"></a>
+### V-057 — I tre ruoli dello sharded: sei modi di sbagliarli, cinque che lo dicono e uno che no
+
+- **Comandi:** `docker run --rm` con `mongod` e `mongos` e le opzioni rotte una alla volta;
+  copie di `docker/03-sharded/compose.yaml` con un difetto ciascuna avviate con
+  `docker compose --profile palco up -d --wait`; `docker inspect --format`; `docker logs`;
+  `tools/check_stack.py` su sette copie dello stesso file
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.4.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-01
+- **Che cosa si voleva sapere:** il Task 5 chiede di insegnare a `check_stack.py` le regole dello
+  stack sharded. Prima di scrivere una regola serve sapere **che cosa succede davvero senza**, per
+  due motivi distinti. Il primo è di forma: i messaggi di `check_stack.py` citano il sintomo, e un
+  sintomo si cita solo dopo averlo visto. Il secondo è di merito: una regola che previene un errore
+  già rumoroso vale meno di una che previene un errore muto, e prima di misurare non si sa quale
+  delle due si sta scrivendo.
+
+- **Esito, primo punto — quattro rifiuti sulla riga di comando, tutti immediati e tutti espliciti.**
+  Quattro `docker run` da pochi secondi, nessun cluster acceso:
+
+```
+mongod --configsvr --shardsvr --replSet x
+  -> BadValue: shardsvr is not allowed when configsvr is specified   (uscita 1)
+mongos --configdb x/a:27017 --wiredTigerCacheSizeGB 0.25
+  -> Error parsing command line: unrecognised option '--wiredTigerCacheSizeGB'
+mongos --configdb a:27017,b:27017
+  -> FailedToParse: invalid url [a:27017,b:27017]
+mongos --port 27017
+  -> BadValue: error: no args for --configdb
+```
+
+  Nessuno dei quattro processi parte, e ognuno nomina l'opzione che ha in mano. Il terzo dice
+  anche una cosa sulla storia: dalla 3.4 `--configdb` accetta soltanto la forma
+  `nomeSet/host:porta`, e l'elenco nudo di host — la scrittura di prima, quella che si trova
+  copiando una guida vecchia — oggi non è un'incompatibilità silenziosa ma un rifiuto.
+
+- **Esito, secondo punto — uno shard senza `--shardsvr`: lo dice l'ultimo anello, e lo dice bene.**
+  Copia dello stack con le sei righe `--shardsvr` tolte, profilo `palco`. `up --wait` esce **1**,
+  `add-shard` esce **6**, e il log è questo:
+
+```
+registro lo shard «shard1rs» -> shard1rs/shard1a:27017
+ERRORE: sh.addShard(«shard1rs/shard1a:27017») ha risposto ok=0
+Messaggio: Cannot run addShard on a node started without --shardsvr
+Le due cause frequenti: il mongod non è stato avviato con --shardsvr,
+oppure il replica set nominato non ha un primario eletto.
+```
+
+  Due cose vanno annotate. La prima: `sh.addShard()` qui **restituisce** `ok: 0`, non solleva —
+  al contrario del caso di [V-056](#v-056), dove con un replica set irraggiungibile sollevava. I
+  due comportamenti convivono, e il `try/catch` aggiunto al Task 4 li copre entrambi; senza di
+  quello, metà dei casi sarebbe rimasta muta. La seconda: il commento di `shard1a` nel file
+  Compose diceva che «il messaggio parla d'altro». Non è vero, il messaggio nomina esattamente
+  l'opzione che manca, e il commento è stato corretto.
+
+- **Esito, terzo punto — un config server senza `--configsvr`: lo dice il primo anello.**
+  Copia con le tre righe `--configsvr` tolte. `up --wait` esce **1**, `cfg-init` esce **1** —
+  che non è nessuno dei codici che [ADR-0036](Decision.md#adr-0036) assegna, perché è
+  un'eccezione non gestita — e stampa:
+
+```
+inizializzo il replica set dei config server «cfgrs»
+MongoServerError: Nodes being used for config servers must be started with the --configsvr flag
+```
+
+- **Esito, quarto punto — il refuso nel nome del set: novantaquattro secondi, e la causa non
+  compare da nessuna parte.** Copia con `cfgsr` al posto di `cfgrs` dentro `--configdb`: due
+  lettere scambiate, tutto il resto intatto. È il caso peggiore dei sei, e per tre ragioni che si
+  sommano.
+
+  Primo, il tempo. `up --wait` esce **1 dopo 94 secondi**, contro i 20-60 degli altri casi: il
+  `mongos` non fallisce, ritenta, e la catena si ferma solo quando la sonda esaurisce i dodici
+  tentativi. `add-shard` e `up-03` restano in `Created`, cfg1 e i due shard risultano `healthy`.
+
+  Secondo, il posto. Tutti i processi partono; il solo malato è il router, che resta
+  `unhealthy` senza mai aprire la porta — `mongosh` da dentro il container risponde
+  `MongoNetworkError: connect ECONNREFUSED 127.0.0.1:27017`.
+
+  Terzo, e decisivo: **la stringa `cfgrs` non compare mai nel log di `mongos`.** Contata:
+  zero occorrenze. Il nome giusto non viene mai messo accanto a quello sbagliato, e quello che
+  si legge invece è questo:
+
+```
+"msg":"RSM host was removed from the topology","attr":{"replicaSet":"cfgsr","addr":"cfg1:27017"}
+"msg":"Host failed in replica set","attr":{"replicaSet":"cfgsr","host":"cfg2:27017", …
+   "error":"HostUnreachable: …"
+"s":"W", "c":"SHARDING", "msg":"Error loading global settings from config server.
+   Sleeping for 2 seconds and retrying","attr":{"error":{"code":133,
+   "codeName":"FailedToSatisfyReadPreference", …
+```
+
+  Chi legge trova «host irraggiungibile» su `cfg2` e `cfg3` — che nel profilo `palco` sono
+  irraggiungibili **per costruzione**, sono semi e basta, come lo spike ha già documentato — e
+  `FailedToSatisfyReadPreference` sul solo host che invece risponde benissimo. La diagnosi punta
+  alla rete. La causa sono due lettere.
+
+- **Esito, quinto punto — le sette copie del file vero.** Le regole nuove non sono state provate
+  solo sui campioni dei test, come già per [V-026](#v-026): sette copie di
+  `docker/03-sharded/compose.yaml`, un difetto ciascuna, passate a `check_stack.py`. La copia
+  intatta esce **0**; le altre sei escono **1 con esattamente un problema ciascuna**, e sei
+  messaggi diversi. Un problema solo per copia, non una cascata: la regola che scatta è quella
+  del difetto introdotto.
+
+- **Esito, sesto punto — la notizia, che è l'opposto di quella attesa.** Cinque dei sei sintomi
+  nominano l'opzione che manca, e lo fanno con una frase che si può cercare in rete così com'è.
+  Non sono errori muti. Il guadagno delle regole nuove non è quindi tradurre un messaggio oscuro:
+  è **incontrarlo in due secondi con `make stack-check` invece che al minuto e ventuno di un
+  avvio**, davanti al pubblico, con dieci container accesi da spegnere. Il sesto sintomo, il
+  refuso, è l'unico veramente muto, ed è quello per cui la terza regola esiste da sola.
+
+- **Conseguenza:** [ADR-0063](Decision.md#adr-0063).
+- **Riserve:** tutte le prove sul profilo `palco`; il profilo `completo` non è stato rotto, e non
+  c'è motivo di aspettarsi sintomi diversi, ma non è misurato. I quattro rifiuti del primo punto
+  sono su `docker run` nudo, senza keyfile né rete Compose: dicono che la riga di comando è
+  rifiutata, non che nel cluster il sintomo si presenti identico. Le novantaquattro secondi del
+  quarto punto dipendono dai parametri della sonda di `mongos` — dodici tentativi ogni cinque
+  secondi con venti di grazia — e cambierebbero cambiando quelli. Password di scarto, ogni caso
+  chiuso con `down -v`, nessun container né volume residuo. Tutto su arm64.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0063

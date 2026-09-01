@@ -3693,3 +3693,92 @@ in là e lascia `up --wait` a mentire a chi lo lancia a mano, che è il caso d'u
 didattico).
 
 **Fonti:** [V-056](Sources.md#v-056)
+
+---
+
+<a id="adr-0063"></a>
+## ADR-0063 — Che cosa `check_stack.py` deve saper bocciare quando lo stack è sharded
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto.** [ADR-0042](#adr-0042) ha insegnato a `tools/check_stack.py` il mondo dello stack 02:
+un replica set, un keyfile condiviso, una catena di dipendenze. Lo stack 03 aggiunge una cosa che i
+primi due non avevano — **i ruoli**. Fino a qui ogni `mongod` era intercambiabile con ogni altro; da
+qui un `mongod` è un config server oppure un membro di shard, e la differenza è una riga sola nel
+comando. Accanto compare un terzo programma, `mongos`, che non è un `mongod` e che quasi tutte le
+regole scritte finora devono avere il buon senso di non toccare.
+
+Il piano elencava sei regole candidate. Tre erano **già in vigore e sono state verificate senza
+scrivere codice**: nessun servizio usa un IP letterale, ogni servizio dichiara `mem_limit`, `cpus` e
+`pull_policy: never`, ogni `mongod` dichiara una cache non superiore al proprio `mem_limit`. Valgono
+sui ruoli nuovi perché non guardano il ruolo, e la prova che il caso del router fosse già previsto
+esisteva da prima: un test dello stack 01 usa un comando `mongos` proprio per dire che a lui la
+cache non si chiede.
+
+Prima di scrivere le altre tre sono stati misurati i sintomi che dovrebbero prevenire, e la misura
+ha dato la notizia contraria a quella attesa ([V-057](Sources.md#v-057)): **cinque sintomi su sei
+non sono muti affatto**. Il server nomina l'opzione che manca, in inglese, con una frase cercabile —
+«Cannot run addShard on a node started without --shardsvr», «Nodes being used for config servers
+must be started with the --configsvr flag», «shardsvr is not allowed when configsvr is specified».
+La giustificazione «senza questa regola l'errore è illeggibile» sarebbe stata comoda e falsa, e due
+commenti del file Compose che la sostenevano sono stati corretti.
+
+Il sesto sintomo però è muto sul serio, ed è quello del refuso: `cfgsr` per `cfgrs` dentro
+`--configdb`. Tutti i processi partono, il router resta `unhealthy` per novantaquattro secondi
+senza mai aprire la porta, e nel suo log **il nome giusto del replica set non compare nemmeno una
+volta**. Quello che si legge è `HostUnreachable` su due host che nel profilo `palco` sono
+irraggiungibili per costruzione, e `FailedToSatisfyReadPreference` sull'unico host che risponde. La
+diagnosi indica la rete; la causa sono due lettere scambiate.
+
+**Decisione.** Cinque regole nuove, e un criterio per decidere a chi si applicano.
+
+*Il criterio, che è la parte che conta.* Lo strumento deve **dedurre il ruolo di un servizio
+leggendo il file**, e la catena è tutta lì dentro: il `mongos` dichiara in `--configdb` il nome del
+replica set dei config server; ogni `mongod` dichiara in `--replSet` a quale set appartiene; chi
+appartiene a quel set è un config server, chiunque altro è uno shard. Nessuno dei tre passaggi
+guarda il nome del servizio — rinominare `cfg1` in `secondo` non sposta un verdetto, e c'è un test
+che lo esercita. È lo stesso criterio di ADR-0042 e per lo stesso motivo: un elenco di nomi da
+tenere aggiornato a mano invecchia in silenzio, una guardia che legge il file no. Ed è per questo
+che le regole tacciono sugli stack 01 e 02: quei file non hanno un `mongos`, non compaiono in
+nessuna lista di eccezioni.
+
+*Le cinque regole*, descritte dai messaggi che stampano, che restano la loro documentazione vera:
+
+1. un `mongod` che sta nel replica set nominato da `--configdb` dichiara **`--configsvr`**;
+2. un `mongod` che sta in un altro replica set è uno shard e dichiara **`--shardsvr`**;
+3. nessun `mongod` dichiara tutti e due — non è un ruolo ambiguo, è un ruolo impossibile, e mongod
+   non parte affatto;
+4. un `mongos` dichiara `--configdb`, nella forma `nomeSet/host:porta`, e il set nominato deve
+   essere dichiarato da qualche `mongod` di questo file;
+5. un `mongos` non dichiara `--wiredTigerCacheSizeGB`, perché non ha uno storage engine.
+
+Le regole 3 e 5 non erano nell'elenco del piano. La 3 è venuta dietro alla stessa domanda delle
+prime due — per applicarle lo strumento deve decidere il ruolo, e «tutti e due» è la risposta che va
+gestita prima delle altre — e la 5 protegge il ruolo nuovo dall'errore che il file didattico rende
+più probabile di ogni altro: copiare il blocco di un `mongod` e cambiare solo la prima riga. La
+regola 4 è la traduzione onesta di quella che il piano scriveva come «`--configdb` nomina il set
+`cfgrs`»: scrivere `cfgrs` dentro lo strumento avrebbe legato un controllo generico al nome di un
+solo stack, contro il principio che lo stack è un argomento, e avrebbe perso il caso che conta —
+non il nome sbagliato in assoluto, ma il nome **incoerente con il resto del file**.
+
+*La giustificazione, detta come la misura la sostiene.* Il guadagno di queste regole non è tradurre
+un messaggio oscuro. È **spostare l'incontro con l'errore**: due secondi di `make stack-check` su un
+file fermo, invece di un minuto e ventuno di avvio con dieci container accesi, e il pubblico che
+guarda. La sola eccezione è la regola 4 nel caso del refuso, dove non c'è nessun messaggio da
+anticipare e la regola è l'unica cosa che parla.
+
+**Conseguenze.** `make stack-check` verifica ora **tre** file Compose, e `STACK_03` entra nel
+`Makefile` con un Task di anticipo rispetto al piano, che lo collocava al Task 7. La suite degli
+strumenti passa da 114 a 125 test. Le regole sono state provate sul file vero e non solo sui
+campioni, come ADR-0042 aveva stabilito: sette copie dello stack 03, un difetto ciascuna, la copia
+intatta verde e sei messaggi distinti, uno per copia.
+
+Restano due limiti da non nascondere. Il primo è quello di sempre e vale integralmente: sei difetti
+non sono tutti i difetti, e la conformità statica non ha mai sostituito l'avvio dello stack. Il
+secondo è più stretto e riguarda la regola 4: lo strumento legge un file solo per volta, quindi «il
+set è dichiarato da qualche `mongod` di questo file» è una verità che vale finché i tre stack del
+lab restano in un file ciascuno. Il giorno in cui un `mongos` vivesse in un Compose separato dai suoi
+config server, la regola darebbe un falso allarme — rumoroso e visibile, che è il verso giusto in
+cui sbagliare, ma sarebbe da rivedere.
+
+**Fonti:** [V-057](Sources.md#v-057)

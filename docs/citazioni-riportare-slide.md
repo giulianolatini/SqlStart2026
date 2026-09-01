@@ -1264,3 +1264,60 @@ Fonte: [ADR-0061](Decision.md#adr-0061) e [ADR-0062](Decision.md#adr-0062), note
 
 **Perché una slide:** chiusura del Blocco 3 se resta tempo. È una regola di progettazione delle
 catene di avvio che vale ovunque ci siano dipendenze e sonde, non solo in Compose.
+
+---
+
+### Due lettere, novantaquattro secondi, e la parola giusta che non compare mai
+
+> `cfgsr` invece di `cfgrs` dentro `--configdb`. Tutti i container partono. Dopo novantaquattro
+> secondi il router è ancora `unhealthy` e non ha mai aperto la porta. Nel suo log il nome giusto
+> del replica set — `cfgrs` — compare **zero volte**: quello che si legge è «host irraggiungibile»
+> su due host che dovevano essere irraggiungibili, e un errore di read preference sull'unico host
+> che sta rispondendo benissimo. La diagnosi indica la rete. La causa sono due lettere.
+
+Fonte: [V-057](Sources.md#v-057) quarto punto, [ADR-0063](Decision.md#adr-0063).
+
+**Perché una slide:** è il caso più forte del Blocco 3 per giustificare un controllo statico, e non
+ha bisogno di sapere che cos'è uno sharded cluster per fare effetto. Chiunque abbia debuggato una
+rete che non era la rete la riconosce.
+
+---
+
+### Il guadagno non è capire l'errore: è quando lo incontri
+
+> Cinque errori su sei nello sharded cluster te li dice il server, per nome e in chiaro: «Cannot run
+> addShard on a node started without --shardsvr». Non sono muti. Il controllo statico non serve a
+> tradurli — serve a incontrarli in due secondi su un file fermo, invece che al minuto e ventuno
+> dell'avvio, con dieci container accesi e il pubblico che guarda.
+
+Fonte: [ADR-0063](Decision.md#adr-0063), [V-057](Sources.md#v-057) sesto punto.
+
+**Perché una slide:** è la giustificazione onesta di ogni linter, e va contro quella che si dà di
+solito. Sposta il valore dal contenuto del messaggio al momento in cui arriva.
+
+---
+
+### Misurare non serve a sapere se la regola serve: serve a sapere perché
+
+> La regola l'avrei scritta identica senza misurare niente. Quello che sarebbe cambiato è la frase
+> accanto: avrei scritto «senza questo controllo l'errore è illeggibile», che è comodo, plausibile,
+> e falso. E sarebbe rimasto scritto in un documento come il motivo di una decisione.
+
+Fonte: nota di metodo 103 del [registro](registro-operativo-sviluppo.md).
+
+**Perché una slide:** se resta tempo. Vale per ogni difesa che si costruisce senza aver mai provato
+l'attacco: il codice viene uguale, la ragione no, e la ragione è la parte che gli altri leggono.
+
+---
+
+### Un commento su un altro file è un'affermazione a termine, e nessuno le mette la scadenza
+
+> «Questa riga fa X» invecchia con la riga sotto, che è nello stesso schermo. «Questo serve perché
+> altrove succede Y» invecchia quando cambia Y, che è in un altro file, e nessun controllo
+> automatico se ne accorge. Ne ho trovati due nello stesso file, scritti da me, tutti e due giusti
+> il giorno in cui li ho scritti.
+
+Fonte: nota di metodo 104 del [registro](registro-operativo-sviluppo.md).
+
+**Perché una slide:** se resta tempo, nel blocco sulla manutenzione. La contromossa costa poco —
+citare la misura accanto all'affermazione, così chi rilegge sa dove andare a verificare.

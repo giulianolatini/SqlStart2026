@@ -164,11 +164,19 @@ services:
     cpus: ${CPU_CFG:-0.5}
 
     command:
-      # `mongod` scritto per esteso, e non è pedanteria. L'entrypoint ufficiale lo
-      # antepone da sé quando il primo argomento comincia per trattino, quindi le
-      # due forme avviano lo stesso processo — ma `tools/check_stack.py` riconosce
-      # un mongod dal primo elemento del comando, e sulla forma abbreviata la
-      # regola sulla cache NON scatta.
+      # `mongod` scritto per esteso, e non è pedanteria — ma il motivo scritto qui
+      # fino al Task 5 era scaduto e va corretto. Diceva che `check_stack.py` sulla
+      # forma abbreviata non fa scattare la regola della cache: era vero fino al
+      # Task 3 di feature/02, che l'ha riparata (ADR-0042). L'entrypoint ufficiale
+      # antepone `mongod` quando il primo argomento comincia per trattino (S-022),
+      # lo strumento oggi riconosce entrambe le scritture, e nessuna delle due
+      # sfugge a un controllo.
+      #
+      # Resta scritto per esteso per la ragione che vale sul proiettore: qui la
+      # prima parola del comando dice quale dei tre programmi è, e in uno stack
+      # dove i programmi sono due — `mongod` e `mongos` — è l'informazione che
+      # distingue il blocco. `check_stack.py` la legge per lo stesso motivo
+      # (ADR-0063).
       - mongod
       # Il ruolo. Un mongod con --configsvr rifiuta di essere aggiunto come shard:
       # è il vincolo che tiene distinti i due ruoli, e il talk lo mostra proprio
@@ -387,8 +395,13 @@ services:
     # rimandano a questo (ADR-0059).
     #
     # `--shardsvr` è la riga che lo distingue da un config server. Un mongod
-    # avviato senza viene RIFIUTATO da `sh.addShard()`, e il messaggio parla
-    # d'altro: è una delle trappole che la pagina del Task 9 deve raccogliere.
+    # avviato senza viene RIFIUTATO da `sh.addShard()` — e qui c'era scritto che
+    # «il messaggio parla d'altro». Misurato al Task 5, non è così: la risposta è
+    # `ok: 0` con «Cannot run addShard on a node started without --shardsvr», che
+    # nomina esattamente la riga che manca (V-057). La trappola non è capire il
+    # messaggio, è quando arriva — dopo che config server, shard e router sono
+    # partiti tutti, al minuto e ventuno. Per questo la stessa regola sta anche in
+    # `tools/check_stack.py`, che la dà in due secondi (ADR-0063).
     #
     # 640 MiB contro i 512 di un config server, dal bilancio del design §5.1: qui
     # ci stanno i documenti, non solo i nomi delle collezioni.

@@ -212,6 +212,51 @@ def avvia_mongod(comando: object) -> bool:
     return pezzi[0].startswith("-") or pezzi[0].rsplit("/", 1)[-1] == "mongod"
 
 
+def avvia_mongos(comando: object) -> bool:
+    """Vero se il servizio avvia un `mongos`.
+
+    Qui non serve la seconda forma che `avvia_mongod` deve riconoscere:
+    l'entrypoint ufficiale antepone `mongod` quando il primo argomento comincia
+    per trattino ([S-022]), e non antepone mai `mongos`. Un router va scritto per
+    nome per forza, quindi guardare la prima parola del comando basta.
+
+    È l'unica domanda che decide se lo stack è sharded, e quindi se le regole dei
+    ruoli si accendono. Vale la pena vedere che cosa NON è: non è un elenco di
+    nomi di servizio, non è il nome della cartella, non è un argomento passato
+    dall'esterno. È una riga del file che si sta controllando.
+    """
+    pezzi = pezzi_del_comando(comando)
+    return bool(pezzi) and pezzi[0].rsplit("/", 1)[-1] == "mongos"
+
+
+def ha_opzione(comando: object, opzione: str) -> bool:
+    """Vero se il comando porta l'opzione, che abbia un valore o non ne abbia.
+
+    `valore_opzione` non risponde a questa domanda e non poteva: `--shardsvr` è
+    un interruttore, e chiedergli il valore restituisce la parola dopo, cioè
+    `--replSet`. Sono due funzioni perché sono due domande diverse, e confonderle
+    darebbe una regola che approva `--shardsvr` scritto per ultimo e boccia lo
+    stesso `--shardsvr` scritto per primo.
+    """
+    pezzi = pezzi_del_comando(comando)
+    return any(
+        pezzo == opzione or pezzo.startswith(opzione + "=") for pezzo in pezzi
+    )
+
+
+def nome_del_set(configdb: str | None) -> str | None:
+    """Il nome del replica set dentro un `--configdb`, `None` se non c'è.
+
+    Dalla 3.4 `mongos` accetta soltanto la forma `nomeSet/host:porta,…`. L'elenco
+    nudo di host è la scrittura di prima, ed è quella che si trova copiando una
+    guida vecchia: oggi produce `FailedToParse: invalid url` e il router non
+    parte (misurato in V-057).
+    """
+    if not configdb or "/" not in configdb:
+        return None
+    return configdb.split("/", 1)[0]
+
+
 def montaggi(servizio: dict) -> list[tuple[str, str]]:
     """Le coppie (sorgente, destinazione) dei volumi dichiarati dal servizio."""
     coppie: list[tuple[str, str]] = []
@@ -282,6 +327,115 @@ def problemi_keyfile(nome: str, servizio: dict) -> list[str]:
     ]
 
 
+def problemi_di_ruolo(
+    nome: str,
+    servizio: dict,
+    sharded: bool,
+    set_di_configurazione: set[str],
+    set_dichiarati: set[str],
+) -> list[str]:
+    """Le regole dei tre ruoli di uno sharded cluster.
+
+    Il problema vero non è controllare che due opzioni ci siano: è **decidere
+    che ruolo ha un servizio**, e deciderlo senza chiederlo a un elenco di nomi.
+    La catena che lo permette sta tutta dentro il file. Il `mongos` dichiara in
+    `--configdb` il nome del replica set dei config server; ogni `mongod`
+    dichiara in `--replSet` a quale set appartiene; chi appartiene a quel set è
+    un config server, e chiunque altro è uno shard. Nessuno dei tre passaggi
+    guarda il nome del servizio, ed è la ragione per cui rinominare `cfg1` in
+    `secondo` non sposta un verdetto.
+
+    Le regole tacciono sugli stack 01 e 02 perché quei file non hanno un
+    `mongos`, non perché compaiano in una lista di eccezioni. È lo stesso criterio
+    di [ADR-0042] e per lo stesso motivo: una lista di eccezioni invecchia in
+    silenzio, una guardia che legge il file no.
+
+    Nessuno dei sintomi che queste regole prevengono è muto — il server nomina
+    ogni volta l'opzione che manca, e la scoperta ha corretto un commento che
+    diceva il contrario. Il guadagno non è tradurre un messaggio oscuro, è
+    incontrarlo con `make stack-check` in due secondi invece che al minuto e
+    ventuno di un avvio, davanti al pubblico. L'unica eccezione è il refuso nel
+    nome del set, che non produce nessun messaggio: lì la regola è l'unica cosa
+    che parla.
+    """
+    comando = servizio.get("command")
+    problemi: list[str] = []
+
+    if avvia_mongod(comando):
+        configsvr = ha_opzione(comando, "--configsvr")
+        shardsvr = ha_opzione(comando, "--shardsvr")
+        insieme = valore_opzione(comando, "--replSet")
+
+        if configsvr and shardsvr:
+            # Prima delle altre due, e al posto loro: con entrambe le opzioni il
+            # ruolo non è ambiguo, è impossibile, e aggiungere «manca --shardsvr»
+            # a «ci sono tutti e due» sarebbe rumore sopra la diagnosi giusta.
+            problemi.append(
+                f"{nome}: dichiara «--configsvr» e «--shardsvr» nello stesso "
+                "comando. mongod non parte affatto — «BadValue: shardsvr is not "
+                "allowed when configsvr is specified» — e un file che fonde i due "
+                "ruoli insegna il contrario di quello per cui lo stack 03 è stato "
+                "scritto (ADR-0063, V-057)"
+            )
+        elif sharded and insieme in set_di_configurazione and not configsvr:
+            problemi.append(
+                f"{nome}: sta nel replica set «{insieme}», che «--configdb» "
+                "indica come quello dei config server, ma non dichiara "
+                "«--configsvr». rs.initiate() lo rifiuta — «Nodes being used for "
+                "config servers must be started with the --configsvr flag» — e la "
+                "catena si ferma al primo anello (ADR-0063, V-057)"
+            )
+        elif (
+            sharded
+            and insieme is not None
+            and insieme not in set_di_configurazione
+            and not shardsvr
+        ):
+            problemi.append(
+                f"{nome}: sta nel replica set «{insieme}», che non è quello "
+                "nominato da «--configdb», quindi è uno shard, e un membro di "
+                "shard dichiara «--shardsvr». Senza, parte tutto e a rifiutarlo è "
+                "l'ultimo anello: «Cannot run addShard on a node started without "
+                "--shardsvr» (ADR-0063, V-057)"
+            )
+
+    if avvia_mongos(comando):
+        configdb = valore_opzione(comando, "--configdb")
+        if configdb is None:
+            problemi.append(
+                f"{nome}: avvia un mongos senza «--configdb». Il router non ha "
+                "una mappa del cluster da leggere e si ferma sulla riga di "
+                "comando: «BadValue: error: no args for --configdb» (ADR-0063, "
+                "V-057)"
+            )
+        elif nome_del_set(configdb) is None:
+            problemi.append(
+                f"{nome}: «--configdb {configdb}» non nomina un replica set. "
+                "Dalla 3.4 mongos accetta soltanto la forma "
+                "«nomeSet/host:porta,…», e su un elenco nudo di host risponde "
+                "«FailedToParse: invalid url» (ADR-0063, V-057)"
+            )
+        elif nome_del_set(configdb) not in set_dichiarati:
+            problemi.append(
+                f"{nome}: «--configdb» nomina il replica set "
+                f"«{nome_del_set(configdb)}», che nessun mongod di questo file "
+                "dichiara con «--replSet». È il caso del refuso, ed è l'unico in "
+                "cui nessuno protesta: i processi partono tutti, e mongos resta a "
+                "cercare un set che non esiste (ADR-0063)"
+            )
+
+        if cache_in_mib(comando) is not None:
+            problemi.append(
+                f"{nome}: avvia un mongos con «--wiredTigerCacheSizeGB». Il router "
+                "non ha uno storage engine e l'opzione per lui non esiste: «Error "
+                "parsing command line: unrecognised option», e il container esce "
+                "subito. È l'errore che nasce copiando il blocco di un mongod e "
+                "cambiando la prima riga (ADR-0063, V-057)"
+            )
+
+    return problemi
+
+
 def verifica(
     documento: dict, digest_noti: set[str], grezzo: dict | None = None
 ) -> list[str]:
@@ -305,6 +459,28 @@ def verifica(
         valore_opzione(servizio.get("command"), "--replSet")
         for servizio in documento.get("services", {}).values()
     )
+
+    # Il terzo ruolo, e la domanda che accende le regole del Task 5: c'è un
+    # `mongos` in questo file? Se c'è, lo stack instrada, e allora ogni mongod ha
+    # un ruolo da dichiarare. Se non c'è — stack 01 e stack 02 — non si pretende
+    # niente, e nessuno dei due compare in una lista di eccezioni.
+    servizi_tutti = documento.get("services", {}).values()
+    router = [
+        servizio
+        for servizio in servizi_tutti
+        if avvia_mongos(servizio.get("command"))
+    ]
+    # Chi sono i config server lo dice il `mongos`, nominando il loro replica set
+    # in `--configdb`. Non lo dice il nome del servizio, che è una convenzione, né
+    # una lista in questo file, che invecchierebbe.
+    set_di_configurazione = {
+        nome_del_set(valore_opzione(servizio.get("command"), "--configdb"))
+        for servizio in router
+    } - {None}
+    set_dichiarati = {
+        valore_opzione(servizio.get("command"), "--replSet")
+        for servizio in servizi_tutti
+    } - {None}
 
     if "version" in documento:
         problemi.append(
@@ -397,6 +573,16 @@ def verifica(
                 )
 
         problemi.extend(problemi_keyfile(nome, servizio))
+
+        problemi.extend(
+            problemi_di_ruolo(
+                nome,
+                servizio,
+                bool(router),
+                set_di_configurazione,
+                set_dichiarati,
+            )
+        )
 
         for indirizzo in indirizzi_letterali(servizio):
             problemi.append(
