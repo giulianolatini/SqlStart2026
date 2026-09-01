@@ -2362,3 +2362,107 @@ riavvio, e in più aggiunge dieci secondi di attesa del `SIGTERM` che non insegn
 [ADR-0034](#adr-0034), e sarebbe una scena che non succede.
 
 **Fonti:** [S-044](Sources.md#s-044), [V-017](Sources.md#v-017), [V-029](Sources.md#v-029), [V-030](Sources.md#v-030)
+
+<a id="adr-0045"></a>
+## ADR-0045 — La terza scena, e un lettore di log che non si fida di `docker logs`
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto.** [ADR-0044](#adr-0044) si chiude dichiarando che cosa manca: «Resta scoperto il caso
+della **maggioranza persa**, due membri su tre fermi, in cui il set diventa di sola lettura».
+Adesso è misurato ([V-031](Sources.md#v-031)).
+
+Il motivo per cui mancava vale più del caso in sé. Le due scene di [ADR-0044](#adr-0044)
+**finiscono bene**: il set perde un membro e se ne dà un altro. Chi le guarda ne ricava che un
+replica set «regge ai guasti» — senza mai sentirsi dire *a quanti*. La risposta è una sottrazione:
+la maggioranza di tre è due, quindi si tollera **un** guasto. Al secondo, il superstite resta vivo,
+sano, raggiungibile, con tutti i dati, e dopo circa nove secondi **si retrocede da solo**. Da lì le
+scritture rispondono `NotWritablePrimary` e le letture continuano.
+
+Il numero è 9 329 ms di mediana su sei esecuzioni, in una forbice di 9,1–9,4 s, e la forbice non è
+rumore: `electionTimeoutMillis` vale 10 000 ms ma si conta dall'**ultimo battito ricevuto**, e i
+battiti vanno ogni 2 000 ms ([S-044](Sources.md#s-044)), quindi la misura cade fra 8 e 10 secondi a
+seconda di dove capita il colpo. La riga di log che chiude la scena è `id=21809`, «Can't see a
+majority of the set, relinquishing primary»: non «ho perso la connessione», ma «non vedo una
+maggioranza, quindi **cedo**».
+
+Lavorando alla scena è saltato fuori dell'altro, e non era previsto: dopo un riavvio del demone
+Docker, `docker logs` può restare **fermo per sempre** all'istante in cui il demone è caduto,
+mentre il container è tornato su da solo e mongod continua a scrivere. Senza errori: silenzio.
+Misurato su un membro partito alle 08:05 con 2 548 righe scritte, di cui `docker logs` ne mostrava
+zero ([V-032](Sources.md#v-032)). La sezione «righe di log» di tutte e tre le scene legge proprio
+`docker logs`.
+
+**Decisione.**
+
+*Una terza scena, e non una variante delle prime due.* `make failover-02-maggioranza` esegue
+`./tools/failover-replicaset.sh maggioranza`. Ferma un secondario — il caso già coperto dallo
+smoke, che passa e non insegna niente di nuovo — poi ferma il secondo e cronometra la
+retrocessione. Sta accanto alle altre due per la stessa ragione per cui quelle sono due e non una
+([ADR-0044](#adr-0044)): un bersaglio solo con un parametro invita a mostrarne uno, e quello che si
+mostrerebbe è sempre il primo.
+
+*La scena finisce con il set rotto, e nessuno lo rialza.* Non c'è un ripristino automatico in coda,
+perché non ci sarebbe nemmeno nella realtà: **non esiste nessuno che possa eleggere il
+superstite**, ed è esattamente il punto. Lo script lo dice e indica il gesto —
+`./tools/reset-demo.sh 02` — invece di eseguirlo. Una scena che si ripara da sola cancella la sola
+cosa che aveva da mostrare.
+
+*La differenza fra connessione diretta e URI del replica set si mostra, non si racconta.* Il
+superstite retrocesso **legge**: `mongosh --host localhost` restituisce i 50 000 documenti, perché
+`mongosh` aggiunge `directConnection=true` da sé quando la stringa non nomina un `replicaSet`
+([S-045](Sources.md#s-045)). Chi prova la demo così conclude che il set funziona ancora; con l'URI
+del replica set e `readPreference` predefinita il driver non trova nessun server. Lo script stampa
+tutte e due le risposte, perché è la confusione più facile da fare e la più cara da fare in
+produzione.
+
+*Il numero si rimisura e si spiega, come in [ADR-0044](#adr-0044).* Il cronometro gira dentro il
+primario stesso — una `mongosh` collegata e autenticata prima del colpo, che interroga `hello()`
+ogni 20 ms — perché nessun altro nodo può datare quella retrocessione: non ne resta nessuno. E
+subito sotto il numero lo script stampa la forbice 8–10 s e il perché, così una sala che vede 8,7
+non sente una smentita.
+
+*Il lettore di log controlla la propria fonte prima di crederle.* Prima di leggere, lo script
+confronta l'ultima riga catturata con `.State.StartedAt` del container: se il log è più vecchio
+dell'avvio non può essere di questa esecuzione, e le righe si chiedono a **mongod** con
+`getLog: "global"`, che le tiene in memoria e non dipende da Docker. Il ripiego stampa una riga che
+dice di essere scattato: il tranello si insegna, non si nasconde. Il confronto è **stretto** — a
+parità di secondo si ripiega — perché credere a un log vecchio costa la scena, mentre chiedere a
+mongod non costa niente. Vale per tutte e tre le scene, non solo per quella nuova.
+
+*Quel rilevatore ha un test.* `tools/tests/test_failover_log.py` estrae la funzione dallo script,
+senza tenerne una copia che divergerebbe, e la esegue con `docker` sostituito da un finto che
+risponde con gli istanti veri di [V-032](Sources.md#v-032). Un rilevatore la cui condizione di
+scatto si presenta di rado può rompersi in silenzio e restare rotto fino alla sera in cui serve; il
+test è stato verificato non vuoto rimettendo il difetto e vedendolo fallire.
+
+**Conseguenze.** Il debito dichiarato in [ADR-0043](#adr-0043) e in [ADR-0044](#adr-0044) è
+saldato. Provato sul vero: la scena misura 9 316 ms, stampa le sette righe di log che la
+raccontano, e `reset-demo.sh 02` riporta l'impronta a `50000 124861860.70 150281` con `mongo-rs-1`
+primario, cancellando la collezione di scarto che la scena lascia. `make tools-test` passa 100
+prove, cinque più di prima.
+
+I numeri vanno in `docs/02-architetture/replica-set.md` al Task 9, ed è lì che la sottrazione «tre
+membri, maggioranza due, un guasto tollerato» va scritta per esteso: la scena la mostra, la pagina
+la deve dire.
+
+Resta una riserva nuova per il Task 12, accanto a quelle già in coda: l'errore che il driver
+restituisce quando manca il primario è, nel lab, `getaddrinfo ENOTFOUND mongo-rs-2` — un errore di
+risoluzione del nome, perché un container fermo sparisce dal DNS di Compose. Su macchine vere il
+testo sarebbe un altro. Chi riconosce la situazione dal testo dell'errore sbaglia, ed è la regola 1
+di [ADR-0035](#adr-0035) applicata ai messaggi dei driver invece che a quelli di mongod. Anche il
+congelamento di `docker logs` merita quella pagina.
+
+**Alternative scartate:** fermare il primario e un secondario invece di due secondari — la
+maggioranza si perde uguale, ma il superstite non è mai stato primario e non c'è nessuna
+retrocessione da cronometrare, cioè sparisce il numero; far rialzare il set in coda alla scena —
+comodo in prova generale e distruttivo in sala, perché toglie di mezzo la sola cosa che si voleva
+far vedere; costruire un quarto stack a due membri per dimostrare che non tollera guasti — uno
+stack da mantenere per sempre per illustrare un'aritmetica che si dice in una frase; leggere sempre
+da `getLog` invece di `docker logs` — più uniforme e più robusto, ma è un anello di 1 024 righe
+([V-032](Sources.md#v-032)) e insegnerebbe un comando che nessuno userà mai per guardare i log di
+un container, mentre il ripiego scatta quando serve e lo dichiara; trattare il congelamento come
+una stranezza di Docker Desktop da ignorare — è successo alla prima mattina utile, e la sera del
+talk non c'è tempo per scoprire perché il log è vuoto.
+
+**Fonti:** [S-033](Sources.md#s-033), [S-035](Sources.md#s-035), [S-044](Sources.md#s-044), [S-045](Sources.md#s-045), [V-031](Sources.md#v-031), [V-032](Sources.md#v-032)

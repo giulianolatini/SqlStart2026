@@ -272,6 +272,40 @@ un container avviato con `network_mode: "service:mongo-rs-1"` non ha un'interfac
 usa quella del membro, e il suo `localhost` è il `localhost` del `mongod`. È il momento in cui la
 platea capisce che «localhost» in Docker è una proprietà del namespace, non della macchina.
 
+### Tre membri, maggioranza due: un guasto tollerato, e al secondo il set cede da solo
+
+> ```text
+> 08:28:47.193  id=21216    Member is now in state DOWN    ← il secondo, 0,4 s dopo il colpo
+>
+>      ... nove secondi, e «Heartbeat failed after max retries» ogni due ...
+>
+> 08:28:56.092  id=21809    Can't see a majority of the set, relinquishing primary
+> 08:28:56.092  id=21475    Stepping down from primary in response to heartbeat
+> ```
+
+Fonte: [V-031](Sources.md#v-031) — sei esecuzioni sullo stack `02-replicaset`, log del superstite,
+mediana 9 329 ms. Decisione in [ADR-0045](Decision.md#adr-0045).
+
+**Perché una slide:** perché è l'unica che risponde alla domanda che le scene di failover lasciano
+aperta. Quelle finiscono bene — cade un membro, il set se ne dà un altro — e chi guarda ne ricava
+che un replica set «regge ai guasti», senza sentirsi mai dire *a quanti*. La risposta è una
+sottrazione: la maggioranza di tre è due, quindi si tollera **uno**. Con due membri la maggioranza
+sarebbe ancora due, cioè **zero** guasti tollerati in scrittura: ecco perché i membri sono tre, e
+non è una questione di prestazioni né di copie dei dati.
+
+Al secondo guasto non succede niente di drammatico da vedere, ed è questo che va detto: il
+superstite è **vivo, sano, raggiungibile e con tutti i dati**, e smette di scrivere lo stesso.
+Il verbo del log è `relinquishing`, cedere — non «ho perso la connessione», ma «non vedo una
+maggioranza, quindi mi tolgo». È una decisione, non un guasto, e ha la stessa forma dei dieci
+secondi dell'elezione (vedi «L'elezione dura sei millisecondi», più sotto): il set si accorge in
+quattro decimi di secondo e **aspetta apposta** i nove che seguono.
+
+La coda cattiva sta nella prova: da `mongosh --host` quel nodo restituisce ancora tutti e 50 000 i
+documenti, perché una connessione diretta parla a lui e non cerca un primario
+([S-045](Sources.md#s-045)). Chi verifica la demo così conclude che il set funziona. Le scritture
+rispondono `NotWritablePrimary`, e l'applicazione, che usa l'URI del replica set, non trova nessun
+server a cui parlare.
+
 ---
 
 ## Blocco 3 — Sharded cluster

@@ -1472,3 +1472,123 @@ failover 10 s contro 0,5 s ([V-029](Sources.md#v-029)); le righe di log dell'ele
 **Attenzione per chi riprende.** Lo stack 02 è rimasto **avviato e sano** a fine sessione, con
 l'impronta a posto. Se i container non ci fossero più, `make up-02` li ricrea; se ci fossero ma
 malmessi dopo una prova, `./tools/reset-demo.sh 02` è più veloce.
+
+---
+
+## 2026-09-01 — `feature/02`, Task 8 (seguito): la maggioranza persa, e un log che taceva
+
+**Deciso.** Una **terza** scena di failover, `make failover-02-maggioranza`, e un lettore di log che
+controlla la propria fonte prima di crederle. È [ADR-0045](Decision.md#adr-0045).
+
+**Deviazione dal piano, dichiarata.** Il Task 8 del
+[piano](00-progetto/2026-08-31-piano-feature-02-stack-replicaset.md) ha sei passi e **nessuno**
+nomina la maggioranza persa. Il piano non si tocca — è la regola del repository — quindi la
+deviazione si spiega qui. Il motivo: [ADR-0043](Decision.md#adr-0043) e
+[ADR-0044](Decision.md#adr-0044) dichiarano quel caso scoperto, e il Task 9 dovrà **scriverlo**.
+Misurarlo dopo averlo scritto sarebbe stato l'ordine sbagliato.
+
+**Misurato.** Fermando due membri su tre, il superstite si retrocede a `SECONDARY` in
+**9 364 / 9 136 / 9 331 / 9 334 / 9 327 / 9 316 ms** — sei esecuzioni, mediana **9 329 ms**. Nove e
+non dieci perché i 10 000 ms di `electionTimeoutMillis` si contano dall'**ultimo battito ricevuto**,
+non dal colpo, e i battiti vanno ogni 2 000 ms: la misura cade fra 8 e 10 secondi a seconda di dove
+capita il colpo. Impostazioni lette da `rs.conf()`, non supposte. È
+[V-031](Sources.md#v-031).
+
+La riga che chiude la scena è `id=21809`, «Can't see a majority of the set, **relinquishing**
+primary». Non «ho perso la connessione»: «non vedo una maggioranza, quindi cedo». Stessa forma di
+[V-030](Sources.md#v-030) — la caduta è notata in **quattro decimi di secondo**, e i nove che
+seguono sono attesa deliberata.
+
+**Il tranello della scena.** Il superstite retrocesso **legge ancora**: da `mongosh --host` escono
+tutti e 50 000 i documenti, perché `mongosh` aggiunge `directConnection=true` da sé quando la
+stringa non nomina un `replicaSet` ([S-045](Sources.md#s-045)). Chi prova la demo così conclude che
+il set funziona. Le scritture rispondono `NotWritablePrimary` (code 10107), e con l'URI del replica
+set e `readPreference` predefinita il driver non trova nessun server. Lo script stampa tutte e
+quattro le risposte, perché la confusione è facile da fare e cara da fare in produzione.
+
+**Trovato per caso, e più grave della scena.** Lavorando alla demo, `docker logs` ha smesso di
+mostrare qualunque cosa. Il container era partito alle 08:05, `RestartCount=0`, `healthy`, e mongod
+aveva scritto **2 548 righe** — `docker logs` ne mostrava **zero**, ferma all'ultima riga della sera
+prima, l'istante in cui il demone Docker era caduto. Nessun errore: silenzio. Un container creato in
+quel momento veniva catturato normalmente, quindi non è il demone a non catturare: è la cattura dei
+container **preesistenti** al suo riavvio a non ripartire. E non è nemmeno stabile — un'ora dopo era
+ripresa **da sola** su due membri su tre, lasciando un buco di nove minuti e mezzo che non si è più
+richiuso. È [V-032](Sources.md#v-032).
+
+Conta perché la sezione «righe di log» di **tutte e tre** le scene legge `docker logs`. Ora, prima
+di leggere, lo script confronta l'ultima riga catturata con `.State.StartedAt`: se il log è più
+vecchio dell'avvio non può essere di questa esecuzione, e le righe si chiedono a mongod con
+`getLog: "global"`, stampando una riga che dice di essere ripiegato. Il confronto è **stretto** — a
+parità di secondo si ripiega — perché chiedere a mongod non costa niente, mentre credere a un log
+vecchio costa la scena.
+
+**Il rilevatore ha un test, e il test è stato verificato non vuoto.**
+`tools/tests/test_failover_log.py` estrae la funzione dallo script con `sed` — nessuna copia, che
+divergerebbe — e la esegue con `docker` sostituito da un finto. I quattro casi sono costruiti sugli
+istanti veri di [V-032](Sources.md#v-032). Rimettendo il difetto (`>=` al posto di `>`) la suite
+segna **1 failed, 4 passed**: la prova serve davvero.
+
+**Controlli.** `make failover-02-maggioranza` → **9 316 ms** e sette righe di log stampate.
+`./tools/reset-demo.sh 02` → `mongo-rs-1` di nuovo primario, collezione di scarto
+`prova_maggioranza` rimossa, impronta `50000 124861860.70 150281`. `bash -n` pulito.
+`make tools-test` **100 passed** (erano 95). `make docs-check` verde su citazioni e collegamenti.
+`make stack-check` → 2 stack conformi. `./tools/smoke-replicaset.sh` → **42 · 0**.
+
+**Documentazione prodotta.** [V-031](Sources.md#v-031) e [V-032](Sources.md#v-032);
+[ADR-0045](Decision.md#adr-0045), che le cita insieme a [S-033](Sources.md#s-033),
+[S-035](Sources.md#s-035), [S-044](Sources.md#s-044) e [S-045](Sources.md#s-045); una citazione da
+slide nel Blocco 2 — «tre membri, maggioranza due: un guasto tollerato» — con la sottrazione che
+spiega perché i membri non sono due.
+
+**Note di metodo.**
+
+59. **Un diagnostico può essere morto mentre l'oggetto è vivo.** La nota 58 diceva di puntare lo
+    strumento sull'oggetto giusto. Questa è il grado successivo: lo strumento era puntato bene,
+    l'oggetto stava benissimo, e la **sorgente** in mezzo si era fermata. Un output vuoto non
+    distingue «non è successo niente» da «non te lo sto più raccontando», e nessuno dei due dice
+    quale dei due sia. Il controllo che li separa è confrontare la prova con un **istante
+    indipendente** — qui l'avvio del container — invece di fidarsi del fatto che una risposta sia
+    arrivata. Vale ogni volta che si legge un log attraverso qualcosa che non l'ha scritto.
+
+60. **Una finestra di coda è un filtro implicito, e i cicli d'attesa la riempiono.** Le righe si
+    leggevano con `tail -600`, che sembrava abbondante. Un ciclo d'attesa che riapriva `mongosh`
+    ogni mezzo secondo ha prodotto circa **800 righe** di `NETWORK` e `ACCESS` in pochi minuti,
+    spingendo fuori dalla finestra proprio le righe di `REPL` che si cercavano. Lo strumento con
+    cui si aspettava l'evento ha cancellato la prova dell'evento. Quando si legge una coda di log,
+    la domanda da farsi non è «quante righe mi servono» ma «quante ne scrive, nel frattempo, chi
+    sta guardando».
+
+---
+
+## Punto di ripresa — 2026-09-01
+
+**Deciso e chiuso.** Il Task 8 di `feature/02` è chiuso **per intero**, maggioranza persa compresa.
+Lo stack 02 ha tre scene di failover — `failover-02`, `failover-02-termina`,
+`failover-02-maggioranza` — e un lettore di log che non si fida di `docker logs`. ADR da 0038 a
+**0045**, verifiche da V-020 a **V-032**.
+
+**Misurato oggi, e da non rimisurare.** Retrocessione per maggioranza persa **9,3 s** su sei
+esecuzioni, forbice teorica 8–10 s ([V-031](Sources.md#v-031)); rientro dei due membri 9–12 s; il
+congelamento di `docker logs` dopo un riavvio del demone ([V-032](Sources.md#v-032)).
+
+**Prossimo passo, in ordine.**
+
+1. **Task 9** — `docs/02-architetture/replica-set.md`, con i numeri misurati e non stimati. Deve
+   contenere la sottrazione per esteso: tre membri, maggioranza due, **un** guasto tollerato in
+   scrittura — la scena la mostra, la pagina la deve dire.
+2. **Task 12** — la pagina delle trappole ha ora **sei** debiti aperti: il keyfile a 644,
+   `--env-file` che sostituisce e non aggiunge, `up --wait` che esce presto, il `$$` di Compose, il
+   congelamento di `docker logs` ([V-032](Sources.md#v-032)), e l'errore
+   `getaddrinfo ENOTFOUND` che nel lab prende il posto di un errore di selezione del server, perché
+   un container fermo sparisce dal DNS di Compose ([V-031](Sources.md#v-031)) — la regola 1 di
+   [ADR-0035](Decision.md#adr-0035) applicata ai messaggi dei driver. Al Task 12 spetta anche
+   togliere da `docs/03-amministrazione/log.md` la riserva di [ADR-0035](Decision.md#adr-0035), ora
+   che gli `id` esistono in [V-030](Sources.md#v-030).
+3. **Task 14** — la PR. **Mai `git flow feature finish`**: salta la revisione, ed è già successo
+   con la PR #1.
+
+**Attenzione per chi riprende.** Lo stack 02 è **avviato, sano e con l'impronta a posto**; lo smoke
+è stato rieseguito a fine sessione e fa 42/0. Se i container non ci fossero più, `make up-02` li
+ricrea; se ci fossero ma malmessi dopo una prova, `./tools/reset-demo.sh 02` è più veloce. E se una
+sezione «righe di log» stampasse il nulla, non è la scena che non è successa: è
+[V-032](Sources.md#v-032), e lo script ora lo dice da sé.

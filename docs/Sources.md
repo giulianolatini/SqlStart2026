@@ -883,7 +883,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   esterni, non il disco che si riempie.
 - **Riserve:** «il predefinito è illimitato, quindi non ruota» è una deduzione, e qui una
   deduzione non sostituisce una misura che costa un comando. Misurata in [V-011](#v-011).
-- **Usata da:** ADR-0030
+- **Usata da:** ADR-0030, ADR-0045
 
 ---
 
@@ -956,7 +956,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 - **Riserve:** la tabella dello standalone descrive il momento dell'*acknowledgement*, non la
   durabilità. Quanto dura la finestra fra l'ack in memoria e il disco non sta qui: sta in
   [S-036](#s-036), ed è il numero che rende la finestra misurabile.
-- **Usata da:** ADR-0032, ADR-0043
+- **Usata da:** ADR-0032, ADR-0043, ADR-0045
 
 ---
 
@@ -1244,7 +1244,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   `docs/03-amministrazione/log.md`, che per questa ragione è **dichiarata non verificata** su
   questo branch: qui non esiste un replica set. La verifica è dovuta a `feature/02`
   ([ADR-0035](Decision.md#adr-0035)).
-- **Usata da:** ADR-0035, ADR-0036, ADR-0044
+- **Usata da:** ADR-0035, ADR-0036, ADR-0044, ADR-0045
 
 ---
 
@@ -1282,7 +1282,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 - **Riserve:** la pagina è scritta pensando ad Atlas e a installazioni sull'host. Il caso di
   questo lab — `mongosh` che vive **dentro** il container a cui si connette — non è contemplato,
   e cambia il significato di «localhost» ([V-018](#v-018)).
-- **Usata da:** ADR-0036
+- **Usata da:** ADR-0036, ADR-0045
 
 ---
 
@@ -3761,5 +3761,176 @@ di quello che salva.
   termine, con un `dry run` che fallisce — che è il caso in cui `21438` e `21444` divergono.
 - **Data:** 2026-08-31
 - **Usata da:** ADR-0044
+
+---
+
+<a id="v-031"></a>
+### V-031 — La maggioranza persa: il superstite è vivo, è sano, e non scrive più
+
+- **Comandi:** `./tools/failover-replicaset.sh maggioranza` (cioè `make failover-02-maggioranza`)
+  · `docker kill` su due membri, il primario lasciato in piedi · `hello()` interrogato in ciclo
+  stretto dentro il primario stesso · `rs.conf()`, `rs.status()`, e una scrittura provata a mano
+- **Ambiente:** stack `docker/02-replicaset`, `mongo@sha256:b6421f…` (MongoDB 7.0.40), tre membri
+  con priorità 2/1/1, macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0. Nessun carico.
+  Impostazioni lette da `rs.conf()`, non supposte: `heartbeatIntervalMillis: 2000`,
+  `electionTimeoutMillis: 10000`, `heartbeatTimeoutSecs: 10`.
+- **Che cosa si voleva sapere:** [V-029](#v-029) e [V-030](#v-030) misurano due scene che
+  **finiscono bene** — il set perde il primario e se ne dà un altro. Chi guarda ne ricava che un
+  replica set «regge ai guasti», senza mai sentir dire *a quanti*. Il caso che risponde è l'altro:
+  due membri su tre fermi. È dichiarato scoperto in [ADR-0043](Decision.md#adr-0043) e in
+  [ADR-0044](Decision.md#adr-0044), ed è l'unica scena che spieghi perché i membri sono tre.
+
+- **Esito, primo numero — il primario si retrocede da solo, e ci mette nove secondi.** Sei
+  esecuzioni, stesso protocollo: si ferma un secondario (il set non se ne accorge), poi si ferma
+  il secondo e si cronometra da lì.
+
+```
+9 364 · 9 136 · 9 331 · 9 334 · 9 327 · 9 316  ms      mediana 9 329 ms
+```
+
+  Il cronometro gira **dentro il primario**, in una `mongosh` collegata e autenticata prima del
+  colpo, che interroga `hello()` ogni 20 ms e si ferma al primo `isWritablePrimary` diverso da
+  `true`. È la sua stessa retrocessione: nessun altro nodo può datarla, perché non ne resta
+  nessuno.
+
+- **Perché nove e non dieci.** `electionTimeoutMillis` vale 10 000 ms, ma il conto non parte dal
+  colpo: parte dall'**ultimo battito ricevuto da una maggioranza**. I battiti vanno ogni
+  `heartbeatIntervalMillis` = 2 000 ms ([S-044](#s-044) lo dice a parole: «Replica set members
+  send heartbeats (pings) to each other every two seconds»), quindi il colpo cade in un punto
+  qualunque di quella finestra e la misura vale fra 8 e 10 secondi. Le sei esecuzioni stanno in
+  9,1–9,4 s: coerente, e appunto per questo **il numero non va imparato a memoria**.
+
+- **Esito, la sequenza nel log** (esecuzione del 2026-09-01, `id` sul superstite `mongo-rs-1`):
+
+```
+08:28:45.164  id=21216    REPL   Member is now in state DOWN      ← il primo membro fermato
+08:28:47.193  id=21216    REPL   Member is now in state DOWN      ← il secondo, 0,4 s dopo il colpo
+
+   ... nove secondi, e id=23974 «Heartbeat failed after max retries» ripetuto ogni 2 s ...
+
+08:28:56.092  id=21809    REPL   Can't see a majority of the set, relinquishing primary
+08:28:56.092  id=21475    REPL   Stepping down from primary in response to heartbeat
+08:28:56.092  id=21343    REPL   Starting to kill user operations
+08:28:56.093  id=21358    REPL   Replica set state transition
+08:28:56.094  id=5123007  REPL   Interrupting PrimaryOnlyService due to stepDown
+```
+
+  **`id=21809` è la riga che vale la scena**, e dice in inglese esatto quello che si fatica a far
+  passare a parole: non «ho perso la connessione», ma «non vedo una maggioranza, quindi **cedo**».
+  La forma è la stessa di [V-030](#v-030): la caduta è notata in quattro decimi di secondo, e la
+  reazione arriva nove secondi dopo perché è **decisa**, non subita. `id=21343` spiega di
+  passaggio perché le connessioni aperte cadono: le operazioni degli utenti vengono interrotte.
+
+- **Esito, che cosa risponde da lì in poi.**
+
+| richiesta | come | risposta |
+|---|---|---|
+| scrittura | qualunque | `NotWritablePrimary` (code **10107**) — «not primary» |
+| lettura | `mongosh --host localhost`, connessione **diretta** | `lab.ordini` → 50 000 documenti |
+| lettura | URI con `replicaSet=rs0`, `readPreference` predefinita | `MongoServerSelectionError` |
+| lettura | URI con `replicaSet=rs0`, `readPreference=secondaryPreferred` | 50 000 documenti |
+
+  Il superstite si presenta come `isWritablePrimary=false, secondary=true, primary=nessuno`, e
+  `rs.status()` lo dà `SECONDARY health=1` con gli altri due «(not reachable/healthy)». La
+  differenza fra le due letture non è un capriccio: [S-045](#s-045) documenta che `mongosh`
+  aggiunge `directConnection=true` da sé *a meno che* la stringa non contenga `replicaSet`. Con
+  la connessione diretta si parla a **quel** nodo e si legge; con l'URI del replica set si chiede
+  al driver di trovare un primario, e un primario non c'è. **Chi prova la demo con `mongosh
+  --host` conclude che il set funziona ancora.** L'applicazione, no.
+
+- **Esito, il rientro.** Riavviando i due membri fermati, il primario torna dopo 9 207 · 12 348 ·
+  12 425 ms: il tempo di far ripartire due `mongod` e di rieleggere. Nessuno lo fa da sé — i
+  container sono `exited` dopo un `docker kill` ([V-017](#v-017)) — e il gesto è
+  `./tools/reset-demo.sh 02`, che li rialza, aspetta le priorità e ripulisce la collezione di
+  scarto lasciata dalla scena.
+
+- **Conseguenza:** la scena entra in `tools/failover-replicaset.sh` come terzo bersaglio e nel
+  `Makefile` come `failover-02-maggioranza`; i numeri vanno in `docs/02-architetture/replica-set.md`
+  al Task 9. Registrata in [ADR-0045](Decision.md#adr-0045). Il debito dichiarato in
+  [ADR-0043](Decision.md#adr-0043) e in [ADR-0044](Decision.md#adr-0044) è saldato.
+- **Riserve:** il messaggio d'errore dell'URI di replica set è, alla lettera,
+  `MongoServerSelectionError: getaddrinfo ENOTFOUND mongo-rs-2` — un errore di **risoluzione del
+  nome**, non di selezione del server. È un artefatto dei container: un container fermo sparisce
+  dal DNS della rete Compose, mentre su macchine vere il nome risolverebbe e la connessione
+  verrebbe rifiutata, con un testo diverso. Chi riconosce la situazione dal testo dell'errore
+  sbaglierà: è la stessa lezione di [ADR-0035](Decision.md#adr-0035), un piano più in là. Poi:
+  la finestra 8–10 s è dedotta dai due parametri e corroborata da sei valori che stanno tutti in
+  9,1–9,4 s, ma gli estremi non sono stati osservati — un colpo che cadesse subito dopo un battito
+  dovrebbe dare ~8 s, e non è capitato. La scena ferma sempre **due secondari**, lasciando in
+  piedi il primario; il caso simmetrico — primario più un secondario, con un secondario solo
+  superstite — non è cronometrato, perché lì non c'è nessuna retrocessione da datare. Infine
+  «ecco perché i membri sono tre e non due» resta un **ragionamento** sulla stessa regola, non una
+  misura: un set a due membri non è stato costruito, e la sua maggioranza sarebbe 2, cioè zero
+  guasti tollerati in scrittura.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0045
+
+---
+
+<a id="v-032"></a>
+### V-032 — Il container lavora, `docker logs` tace: la cattura si congela quando il demone riparte
+
+- **Comandi:** `docker logs <membro>` · `docker inspect --format '{{.State.StartedAt}}'` ·
+  `db.adminCommand({ getLog: "global" })` · un container creato apposta come controllo
+- **Ambiente:** Docker Desktop 29.7.2 su macOS 26.6.2 arm64. Il demone era stato **fermo tutta la
+  notte** — la sessione si è aperta con `Cannot connect to the Docker daemon` — ed è stato
+  riavviato la mattina del 2026-09-01. I tre membri dello stack 02 sono tornati su da soli, come
+  prescrive `restart: unless-stopped`, e risultavano `healthy`.
+- **Che cosa si voleva sapere:** niente. È stata trovata cercando dell'altro, ed è il motivo per
+  cui è finita qui: `tools/failover-replicaset.sh` legge il log con `docker logs`, e in queste
+  condizioni non avrebbe stampato **niente**, senza dire perché.
+
+- **Esito, il fatto nudo.** Su `mongo-rs-1`, alle 08:12 del 2026-09-01:
+
+```
+docker inspect  → StartedAt = 2026-09-01T08:05:55.098Z   RestartCount = 0
+docker logs     → 13 944 righe, l'ultima delle quali del 2026-08-31T19:19:50.378
+getLog global   → totalLinesWritten = 2 548, righe da 08:08:31.096 a 08:12:03.430
+```
+
+  Il container è partito **stamattina**, mongod ha scritto **2 548 righe** da allora, e
+  `docker logs` non ne mostra una. Non dà errore: dà silenzio, che è la forma peggiore, perché
+  chi legge conclude che l'evento non ha lasciato traccia.
+
+- **Esito, il controllo.** Un container creato in quel momento (`docker run -d alpine …`) è stato
+  catturato normalmente. Quindi non è il demone a non catturare: è la cattura dei container
+  **preesistenti** al suo riavvio a non ripartire.
+
+- **Esito, e non è nemmeno stabile.** Ricontrollando un'ora dopo, la cattura era ripresa **da
+  sola** su due membri su tre, lasciando un buco:
+
+| membro | ultima riga di ieri | prima riga di oggi | buco |
+|---|---|---|---|
+| `mongo-rs-1` | 2026-08-31T19:19:50.378 | 2026-09-01T08:15:23.610 | 9 min 28 s dall'avvio |
+| `mongo-rs-2` | 2026-08-31T19:19:50.378 | 2026-09-01T08:20:01.936 | ripresa dopo un riavvio |
+| `mongo-rs-3` | 2026-08-31T19:20:05.557 | *nessuna* | tutta la mattina |
+
+  Le righe del buco non sono ricomparse più: per chi legge `docker logs`, sono perse. Su
+  `mongo-rs-3` la cattura è tornata solo dopo che `reset-demo.sh` ne ha ricreato l'esecuzione.
+  Nessun campanello: `docker ps` dice `healthy`, `docker inspect` dice `running`, l'healthcheck
+  passa. Lo stato del container non racconta niente dello stato del suo log.
+
+- **Conseguenza:** `tools/failover-replicaset.sh` non si fida più. Prima di leggere confronta
+  l'ultima riga catturata con l'istante di avvio del container: se il log è più vecchio
+  dell'avvio non può essere di quella esecuzione, e le righe si chiedono a **mongod**, che le
+  tiene in memoria e non dipende da Docker. Il confronto è coperto da
+  `tools/tests/test_failover_log.py`, costruito sugli istanti veri di questa verifica —
+  perché un rilevatore la cui condizione di scatto si presenta di rado può rompersi senza che
+  nessuno se ne accorga, fino alla sera in cui serve. Registrata in
+  [ADR-0045](Decision.md#adr-0045).
+- **Riserve:** **la causa non è stata identificata**, e nemmeno il motivo per cui la cattura
+  riprende. Un solo riavvio del demone osservato, non provocato apposta e non riprodotto: questa
+  voce dice *che succede*, non *quando*. Osservata su Docker Desktop, dove fra il container e il
+  file di log c'è una macchina virtuale in più; su un `dockerd` nativo di Linux il meccanismo è
+  diverso e non è stato provato. [S-033](#s-033) documenta il driver `json-file` e non nomina
+  questo caso — la pagina parla di rotazione e di dimensioni, mai di una cattura che si ferma.
+  Infine il ripiego ha un orizzonte suo: `getLog: "global"` è un anello di **1 024 righe**
+  (misurato: `totalLinesWritten` 2 548, `log.length` 1 023), quindi su un nodo chiacchierone le
+  righe che interessano possono esserne già uscite. Lo stesso vale, dall'altro lato, per il
+  `tail -600` con cui si legge `docker logs`: un ciclo d'attesa che riapre una `mongosh` ogni
+  mezzo secondo ha prodotto circa 800 righe di `NETWORK` e `ACCESS` in pochi minuti, e ha spinto
+  fuori dalla finestra proprio le righe di `REPL` che si cercavano.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0045
 
 ---
