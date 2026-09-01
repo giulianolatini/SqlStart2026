@@ -2729,3 +2729,55 @@ commit, e non si riscrive per ospitare un fatto successivo.
     Un errore che si presenta come un risultato valido non lo si scopre rileggendo l'output; lo si
     scopre solo cambiando posto e rifacendo la domanda. Vale oltre git: ogni volta che si verifica
     qualcosa «da sopra», conviene chiedersi se da lì si veda davvero.
+
+## 2026-09-01 — `feature/03`, avvio: due giorni restituiti, e un traguardo che non è arrivato
+
+Il branch è aperto e ha due decisioni da scrivere prima di toccare un file Compose: perché comincia
+adesso, e su quale versione.
+
+**Perché adesso.** Il calendario del design mette `feature/04-app-python` prima dello sharded, e lo
+motiva: l'applicazione è il pezzo più grande e meno comprimibile. Ma `feature/02` è stata unita il
+1º settembre invece che il 3, e il calendario non dice che cosa fare di due giorni guadagnati — dice
+un ordine, non come spendere l'anticipo. Il Product Owner ha deciso di spenderli qui, e le ragioni
+reggono: allo sharded ne sono assegnati due, quindi è l'unico branch che ci entra per intero, ed è
+quello che parte più avanti di tutti perché lo spike del 25 agosto ha già montato la topologia.
+[ADR-0057](Decision.md#adr-0057) mette la decisione per iscritto **con la sua clausola**:
+`feature/04` non si muove dal 4 settembre, e se il 3 lo sharded non è chiuso si sospende invece di
+sforare. Un branch aperto «perché c'è tempo» è il modo classico di trasformare margine in debito, e
+la difesa è una data, non una buona intenzione.
+
+**Su quale versione.** Il punto di ripresa metteva come primo passo la verifica della 8.0.30, e
+c'era una ragione pratica: montare il terzo stack su una versione e ripinnarlo il giorno dopo
+significa rigirare le registrazioni. La risposta è no ([V-051](Sources.md#v-051)). Su Docker Hub il
+filtro per nome esatto dà zero risultati e l'ultima 8.0 resta la 8.0.29; il feed ufficiale dei
+download elenca 8.3.8, 8.2.12, 8.0.29, 7.0.40, 6.0.29, 5.0.34, 4.4.31. Ventisette giorni dopo la
+scoperta del muro, la patch non è uscita — e non è un repository fermo: i tag mobili dell'immagine
+ufficiale risultano aggiornati il 31 agosto, il giorno prima. Si resta su 7.0.40, che nel frattempo
+è ancora la punta della sua linea, e [ADR-0058](Decision.md#adr-0058) trasforma la clausola
+«appena escono» in due date: il 3 settembre e il 16, giorno della release.
+
+**Una trappola schivata, che vale più della risposta.** La prima interrogazione chiedeva i tag con
+`name=8.0` e leggeva l'elenco, che finiva su `8.0.29`. Sembrava la conferma. Non lo era: la
+risposta è paginata a cento risultati su quattrocentotrentacinque, e l'ultimo della pagina era
+`8.0.29-windowsservercore-ltsc2025` — in ordine lessicografico la `8.0.30` sarebbe stata la prima
+della pagina dopo. Una risposta corretta a una domanda mal posta, con la forma esatta della
+risposta giusta.
+
+**Note di metodo.**
+
+90. **Una clausola condizionale senza una data non ha un esecutore.** ADR-0028 diceva «si ripinna
+    appena i binari escono», ed era una buona decisione con un buco: «appena» presuppone che
+    qualcuno stia guardando, e nessuno era incaricato di farlo. In ventisette giorni la verifica
+    non è stata fatta una volta — non per negligenza, ma perché non era il compito di nessun
+    giorno. Ha funzionato solo perché un punto di ripresa l'ha nominata come primo passo di un
+    branch, cioè perché per caso qualcosa l'ha agganciata a un momento. La regola: quando una
+    decisione dipende da un evento esterno, si scrive **quando si guarda**, non solo che cosa si
+    fa se è successo. Due date e un comando di un minuto costano meno di una decisione che aspetta
+    da sola.
+91. **Una risposta impaginata può avere la forma esatta della risposta che cerchi.** L'elenco dei
+    tag finiva su `8.0.29` perché la pagina finiva lì, non perché la 8.0.30 non ci fosse — e
+    l'elenco era corretto, completo per quel che prometteva, e leggibile come una conferma. È la
+    categoria di errore della nota 89: non un risultato sbagliato, ma un risultato **ben formato**
+    che risponde a una domanda diversa da quella posta. Con i servizi remoti ha una difesa
+    specifica: non leggere elenchi per cercare un elemento, ma **chiederlo per nome** e guardare il
+    conteggio. Un `count: 0` non dipende da dove cade il taglio della pagina.

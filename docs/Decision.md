@@ -3291,3 +3291,106 @@ elenca solo gli ignorati e non i non tracciati, e vive a un solo carattere di di
 `-fdX`, che cancella — un comando di verifica non dovrebbe avere quella forma).
 
 **Fonti:** [V-050](Sources.md#v-050)
+
+
+---
+
+<a id="adr-0057"></a>
+## ADR-0057 — Lo sharded cluster comincia adesso, con i due giorni che `feature/02` ha restituito
+
+**Data:** 2026-09-01 · **Stato:** Accettata — modifica il calendario del
+[design](00-progetto/2026-08-24-design.md)
+
+**Contesto:** il calendario del design assegna a `feature/02-stack-replicaset` il periodo dal 31
+agosto al 3 settembre, poi `feature/04-app-python` dal 4 all'11 con la PR #4, e
+`feature/03-stack-sharded` il 14 e il 15 con la PR #5. L'ordine non è casuale e il design lo
+motiva: «`feature/04` precede `feature/03` perché è il pezzo più grande e meno comprimibile».
+
+`feature/02` è stata unita il **1º settembre**, due giorni prima della sua scadenza. Il calendario
+non prevede che cosa farne: prevede un ordine, non un modo di spendere l'anticipo. Il Product
+Owner ha deciso di spenderlo aprendo `feature/03`.
+
+La scelta ha due ragioni che il calendario non contraddice. La prima è di dimensione: allo sharded
+sono assegnati due giorni, ed è quindi l'unico branch che entra per intero nella finestra
+guadagnata. La seconda è di preparazione: lo spike del 25 agosto ha già montato la topologia
+completa e l'ha misurata, e il file Compose che ha funzionato è dentro il verbale — è il branch che
+parte più vicino all'arrivo, non quello che parte da zero.
+
+**Decisione:** `feature/03-stack-sharded` si apre il 1º settembre e occupa il 2 e il 3, cioè i
+giorni restituiti da `feature/02`. **`feature/04-app-python` conserva la sua data di inizio, il 4
+settembre.** Se al 3 settembre lo sharded non è chiuso, non si sfora: si sospende scrivendo il
+punto di ripresa, e il lavoro riprende nella sua finestra originale del 14–15 settembre. Il 14 e il
+15 restano assegnati allo sharded finché non è chiuso; se si chiude prima, diventano margine prima
+della `release/1.0` del 16.
+
+**Conseguenze:** il ragionamento del design è preservato, perché ciò che protegge non è l'ordine in
+sé ma la data di inizio di `feature/04` — il pezzo grande e incomprimibile mantiene la sua finestra
+intera. Cambia soltanto che cosa succede nei due giorni che prima erano coda di `feature/02`.
+
+Il calendario del design **non viene riscritto**: questo ADR lo modifica, come ogni altra decisione
+di questo repository, per aggiunta e per rimando. Chi legge il design trova l'ordine originale e
+la sua motivazione, che restano validi; chi legge qui trova che cosa è successo dopo e perché.
+
+C'è un rischio, e conviene scriverlo invece di scoprirlo: aprire un branch «perché c'è tempo» è il
+modo classico di trasformare due giorni di margine in due giorni di debito, se il branch non si
+chiude. La clausola di sospensione sopra è la difesa, ed è vincolante: al 3 settembre si guarda
+l'orologio, non lo stato d'animo.
+
+**Alternative scartate:** rispettare l'ordine e restare fermi due giorni, che sarebbe stato
+difendibile ma butta via il margine invece di investirlo; anticipare `feature/04` al 2 settembre,
+che avrebbe usato l'anticipo sul pezzo grande — scartata perché l'applicazione ha bisogno di
+giorni consecutivi e pieni, e due giorni intestati a un branch di due settimane non lo accorciano,
+lo frammentano; iniziare lo sharded senza scrivere niente, lasciando che il ramo aperto raccontasse
+da solo la deviazione dal calendario, che è la forma peggiore perché lascia in piedi due verità in
+conflitto — un documento che dice una cosa e un repository che ne fa un'altra.
+
+**Fonti:** nessuna (decisione organizzativa)
+
+
+---
+
+<a id="adr-0058"></a>
+## ADR-0058 — La 8.0.30 non c'è: il lab resta su 7.0.40 e il controllo si ripete a data fissa
+
+**Data:** 2026-09-01 · **Stato:** Accettata — attua [ADR-0028](#adr-0028)
+
+**Contesto:** [ADR-0028](#adr-0028) adotta MongoDB 7.0.40 «con la 8.0.30 come traguardo», e la sua
+clausola è condizionale: si ripinna **appena i binari escono**. Una clausola così non ha un
+esecutore: «appena» non è una data, e nessuno è incaricato di guardare. Il punto di ripresa di
+`feature/03` l'aveva quindi messa come primo passo del branch, prima di montare il terzo stack —
+perché montarlo su una versione e ripinnarlo subito dopo significherebbe rigirare le
+registrazioni.
+
+La verifica è stata fatta ([V-051](Sources.md#v-051)): al 1º settembre 2026 la **8.0.30 non
+esiste** in nessuno dei canali che ADR-0028 aveva nominato. Su Docker Hub il filtro per nome esatto
+restituisce zero risultati e l'ultima patch della linea 8.0 resta la 8.0.29; nel feed ufficiale dei
+download le versioni correnti sono 8.3.8, 8.2.12, 8.0.29, 7.0.40, 6.0.29, 5.0.34 e 4.4.31. Nel
+frattempo la 7.0.40 è ancora la punta della propria linea: la versione del lab non sta invecchiando
+mentre la si usa.
+
+**Decisione:** il lab resta su **7.0.40** e `feature/03` monta lo sharded cluster su quella
+versione, senza aspettare e senza deviare. La clausola condizionale di ADR-0028 resta in piedi, ma
+smette di essere condizionale e basta: il controllo si ripete **a due date fisse** — il 3
+settembre, alla chiusura di `feature/03`, e il **16 settembre**, il giorno della `release/1.0`, che
+è l'ultimo momento utile per ripinnare e rigirare le registrazioni prima del talk. Il comando è
+scritto e sta in [V-051](Sources.md#v-051): due `curl`, meno di un minuto.
+
+**Conseguenze:** il terzo stack si scrive con `${MONGO_IMAGE}` come gli altri due, quindi un
+eventuale ripinnamento resta il cambio di una variabile e la rigenerazione di `tools/images.env`
+con `make images-pull` — è la ragione per cui [ADR-0008](#adr-0008) teneva la versione fuori dai
+file Compose, e continua a pagare.
+
+Va detto dal palco, e adesso c'è il numero per dirlo: il muro della 8.x su Docker Desktop non è una
+stranezza di agosto che nel frattempo è stata chiusa. A ventisette giorni dalla scoperta, e con
+l'immagine ufficiale aggiornata il giorno prima della verifica, la patch che lo risolve non è
+uscita. Chiunque in sala provi oggi MongoDB 8 su Docker Desktop incontra lo stesso errore, e non ha
+una versione a cui aggiornarsi.
+
+**Alternative scartate:** montare lo sharded sulla 8.2.12 per avere un «8» sulle slide, già
+scartata da ADR-0028 per due ragioni che non sono cambiate — non riceve più patch e si avvia solo
+perché precede il controllo; aspettare la 8.0.30 spostando `feature/03` più avanti, che
+subordinerebbe il calendario a una data che non esiste; lasciare la clausola come stava, cioè
+«appena escono», che in ventisette giorni non ha prodotto una sola verifica e non ne avrebbe
+prodotta nessuna nemmeno adesso senza un punto di ripresa che la nominasse.
+
+**Fonti:** [V-051](Sources.md#v-051)

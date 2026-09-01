@@ -5551,3 +5551,60 @@ $ git status --porcelain -uall
   Resta fuori dalla misura `git clean`, che è l'altro modo di arrivare alla stessa lista.
 - **Data:** 2026-09-01
 - **Usata da:** ADR-0056
+
+
+<a id="v-051"></a>
+### V-051 — La 8.0.30 non è pubblicata: il traguardo di ADR-0028 al 2026-09-01
+
+- **Comandi:** `curl` sull'API dei tag di Docker Hub (`/v2/repositories/library/mongo/tags`) e sul
+  feed ufficiale dei download (`https://downloads.mongodb.org/current.json`)
+- **Ambiente:** macOS 26.6.2 arm64, curl 8.7.1, interrogazione del 2026-09-01 alle 20:15 CEST
+- **Che cosa si voleva sapere:** [ADR-0028](Decision.md#adr-0028) adotta MongoDB 7.0.40 «con la
+  8.0.30 come traguardo», e ha la scadenza scritta dentro: si ripinna appena i binari escono. Il
+  punto di ripresa di `feature/03` mette questa verifica come primo passo, prima di montare il
+  terzo stack. La domanda è secca: la 8.0.30 esiste?
+
+- **Esito, primo punto — su Docker Hub non c'è.** Interrogando l'API filtrando per nome:
+
+```
+GET /v2/repositories/library/mongo/tags?page_size=100&name=8.0.30
+-> {"count": 0, "results": []}
+```
+
+  L'ultima patch pubblicata della linea 8.0 resta la **8.0.29**, la stessa nominata da ADR-0028
+  ventisette giorni fa. L'immagine ufficiale non è ferma: i tag mobili (`latest`, `8`, `noble`)
+  risultano aggiornati il **2026-08-31**, cioè ieri. Non è un repository abbandonato che non
+  pubblica: è un repository vivo in cui quella patch non è uscita.
+
+- **Esito, secondo punto — nel feed ufficiale nemmeno.** Il feed dei download elenca, per ogni
+  linea, la versione corrente:
+
+```
+8.3.8, 8.2.12, 8.0.29, 7.0.40, 6.0.29, 5.0.34, 4.4.31
+```
+
+  Sono i due dei tre canali che ADR-0028 aveva nominato, e concordano.
+
+- **Esito, terzo punto — la versione del lab è ancora la corrente della sua linea.** Filtrando per
+  `name=7.0.4` si ottengono `7.0.4`, `7.0.40` e le loro varianti, e nessuna `7.0.41`. La 7.0.40 non
+  è una versione che invecchia mentre il lab la usa: è la punta della 7.0.
+
+- **Una trappola metodologica, incontrata e schivata.** La prima interrogazione chiedeva i tag con
+  `name=8.0` e leggeva la risposta: l'elenco finiva su `8.0.29`, e sembrava una conferma. Non lo
+  era. La risposta è paginata a 100 risultati su **435**, e l'ultimo elemento della pagina era
+  `8.0.29-windowsservercore-ltsc2025`: in ordine lessicografico la `8.0.30` sarebbe stata la prima
+  della pagina successiva. Una risposta corretta a una domanda mal posta, con la forma di una
+  risposta alla domanda giusta. La verifica vale perché la seconda interrogazione ha filtrato per
+  nome esatto, dove il conteggio è `0` e non dipende da dove cade il taglio.
+
+- **Conseguenza:** [ADR-0058](Decision.md#adr-0058). Il lab resta su 7.0.40 e il controllo si
+  ripete a data fissa invece che a sensazione.
+- **Riserve:** il feed `current.json` elenca la versione corrente per linea, non l'elenco completo
+  delle patch pubblicate; l'assenza da lì e da Docker Hub non è una prova formale che la 8.0.30 non
+  esista in nessun canale, ma è esattamente il criterio che ADR-0028 si era dato. Non è stato
+  riletto il changelog per verificare che la correzione sia **ancora** attribuita alla 8.0.30 e non
+  spostata a una patch successiva: se fosse spostata cambierebbe il numero da attendere, non
+  l'esito di oggi. Non è stata interrogata l'immagine `mongodb/mongodb-community-server`, che è il
+  terzo canale nominato da ADR-0028.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0058
