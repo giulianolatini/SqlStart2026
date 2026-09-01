@@ -2321,13 +2321,13 @@ tempi dell'elezione, nel Blocco 2, e il dollaro mangiato da Compose, fra le trap
     perché la si sta scrivendo nello stesso commit, oppure si nomina il debito nel registro — che è
     l'unico posto dove qualcuno lo va a ricontrollare.
 
-**Consuntivo del branch, alla vigilia dell'unione.** Diciannove commit e trentatré file rispetto a
-`develop`: il piano, tredici di task, tre punti di ripresa, una nota di metodo isolata, e il Task 14
-che chiude il lavoro. Nessun file nuovo è stato toccato dal Task 14: le tre pagine che modifica
-erano già nel conto, e il numero è calcolato **includendo il commit che lo introduce**, come
-prescrive la nota 37 dopo che era stato sbagliato due volte. La riga diceva «diciotto» quando è
-stata scritta ed era esatta allora; il punto di ripresa qui sotto è il diciannovesimo commit, e la
-regola vale anche per lui. I quattro controlli sono verdi in locale, con gli stack
+**Consuntivo del branch, alla vigilia dell'unione.** Venti commit e trentaquattro file rispetto a
+`develop`: il piano, tredici di task, quattro punti di ripresa, una nota di metodo isolata, e il
+Task 14 che chiude il lavoro. Il numero è calcolato **includendo il commit che lo introduce**, come
+prescrive la nota 37 dopo che era stato sbagliato due volte — e questa riga è stata riscritta due
+volte proprio per rispettarla: diceva «diciotto» quando fu scritta, «diciannove» dopo il punto di
+ripresa di `feature/03`, e adesso conta anche quello di `feature/04`. Il trentaquattresimo file è
+il `README.md` alla radice, che dichiarava ancora `docker/02-replicaset` «in lavorazione». I quattro controlli sono verdi in locale, con gli stack
 fermi e con lo stack 02 acceso; su GitHub non ne gira nessuno, per scelta
 ([ADR-0038](Decision.md#adr-0038)).
 
@@ -2434,3 +2434,95 @@ funzionato.
     la reazione naturale a un dubbio è **rifare la misura**, che costa un giorno. La regola: quando
     fra due pezzi di lavoro correlati si sa già che passerà altro lavoro in mezzo, il punto di
     ripresa si scrive alla fine del primo, finché è gratis.
+
+## 2026-09-01 — Punto di ripresa: `feature/04-app-python`, che è la prossima davvero
+
+Il branch dell'applicazione apre il 4 settembre e chiude l'11, con la PR #4: è il pezzo più lungo
+del progetto e l'unico che non produce uno stack. Il design gli dedica un capitolo intero
+([§6](00-progetto/2026-08-24-design.md) e §7), scritto il 24 agosto — **prima** che esistesse
+qualunque stack. Da allora tre decisioni lo hanno corretto, e la prima cosa da sapere ripartendo è
+quali parti di quel capitolo non valgono più.
+
+**Quello che è deciso, e che il design non dice più com'era.**
+
+- **Niente `testcontainers`.** La §7 del design prescrive `testcontainers-python` per i test di
+  integrazione e dichiara come rischio numero uno che la libreria non regga i replica set, con la
+  verifica intestata al «primo passo di `feature/04`». Quel passo **è già stato fatto**:
+  [ADR-0020](Decision.md#adr-0020) sostituisce [ADR-0011](Decision.md#adr-0011) e decide che i test
+  di integrazione avviano gli **stack Compose del repository** e ci girano contro. `MongoDbContainer`
+  non conosce i replica set — il modulo non nomina mai `replSet` né `rs.initiate` — e `DockerCompose`
+  esiste nel codice della libreria ma non nella documentazione pubblicata. Il rischio è chiuso e la
+  dipendenza non va aggiunta.
+- **Cade con lui il piano delle fixture.** Il design vuole «un Compose minimale **proprio**» in
+  `app/tests/fixtures/`, comprato al prezzo di «una piccola duplicazione in cambio
+  dell'indipendenza». ADR-0020 compra l'opposto: i test verificano l'artefatto che il pubblico
+  eseguirà davvero, non un facsimile. In cambio l'integrazione è più lenta e vuole Docker, quindi
+  **due suite separate con due bersagli `make` distinti** — la veloce resta veloce.
+- **L'applicazione gira in un container sulla rete degli stack**
+  ([ADR-0012](Decision.md#adr-0012)) e si collega usando i nomi dei servizi.
+  `directConnection=true` solo nella demo dello standalone, dove non c'è nulla da scoprire.
+- **Il nucleo non conosce Rich** ([ADR-0007](Decision.md#adr-0007)): emette eventi verso un
+  `EventSink`, e la frequenza di aggiornamento si dichiara invece di lasciarla al valore
+  predefinito.
+- **Python e `pymongo`, con i listener di monitoraggio registrati per client**
+  ([ADR-0006](Decision.md#adr-0006)). Runtime `python:3.13-slim` e non l'interprete dell'host, che è
+  3.14.7; dipendenze con `uv`, che è già lo strumento di `tools/`.
+
+**Quello che è già misurato e non va rimisurato.** Una sola misura, e pesa: i callback di `pymongo`
+sono **sincroni**, e il thread dell'applicazione resta fermo finché l'handler non ritorna —
+«Application threads block waiting for event handlers to return» ([S-010](Sources.md#s-010)). È il
+motivo per cui `SdamBridge` non deve disegnare niente dentro il listener ma solo depositare un
+evento in coda: un handler lento non rallenta la grafica, rallenta il driver, e **falsa proprio le
+misure di failover che la demo sta cronometrando**. Vale anche il contorno già costruito: due stack
+che partono, gli strumenti di palco, i tre controllori, 108 test in `tools/tests/` come modello di
+come si prova uno script in questo repository.
+
+**Quello che è dovuto, e sta già scritto in pagina come debito.** Tre pagine promesse
+dall'[indice](README.md) e tre misure rimandate per nome.
+
+- `docs/06-sviluppo/architettura-app.md` e `docs/06-sviluppo/tdd-e-doppi.md` — la cartella
+  `06-sviluppo/` non esiste ancora.
+- `docs/03-amministrazione/statistiche-monitoraggio.md` — `serverStatus`, `dbStats`, metriche di
+  replica, che cosa guardare sotto carico.
+- **`j: true`**, che [ADR-0032](Decision.md#adr-0032) chiama «un debito onesto»: la misura di
+  [V-016](Sources.md#v-016) non l'ha provato, e dovrebbe azzerare la perdita al prezzo della
+  velocità.
+- **`retryWrites=false` e `maxStalenessSeconds`**, e qualunque confronto di prestazioni: hanno senso
+  solo sotto carico controllato. Le pagine [`standalone.md`](02-architetture/standalone.md) e
+  [`replica-set.md`](02-architetture/replica-set.md) lo scrivono entrambe con la stessa formula —
+  prima di allora «sarebbe aria».
+- Gli strumenti che stanno nell'immagine ma non sono `mongosh`, e il backup a caldo dal lato
+  applicativo ([`guida-mongosh.md`](04-mongosh/guida-mongosh.md)).
+
+C'è un avvertimento da leggere prima di rimandare qualcosa di questa lista, e sta nelle alternative
+scartate di [ADR-0046](Decision.md#adr-0046): «una decisione rimandata due volte è una decisione che
+non si prende». Il rimando di ADR-0032 è già stato spostato una volta. `feature/04` è il posto dove
+si salda, e non ce n'è un altro dopo.
+
+**Una cosa da decidere presto, perché tocca le registrazioni.** Il design (§6.4) prevede che gli
+scenari girino anche **senza** `--step`, e dice che è così che si producono le registrazioni di
+riserva, «che per costruzione mostrano esattamente ciò che si farà dal vivo». Nel frattempo
+[ADR-0050](Decision.md#adr-0050) ha deciso un'altra cosa: le riserve sono registrazioni di terminale
+in formato testo, prodotte da `tools/registra-terminale.py`, e quattro esistono già. Le due strade
+non si escludono — ma se `mongolab` sa girare da solo, le sue scene vanno registrate con lo
+strumento che c'è, non con un secondo meccanismo. Va deciso quando l'interfaccia a riga di comando
+prende forma, non alla fine.
+
+**Il prossimo passo.** Unita la PR #3, si apre `feature/04-app-python` da `develop` e si scrive il
+piano in `docs/00-progetto/` sul modello degli altri tre. Il primo task **non** è più la verifica di
+`testcontainers`, che ADR-0020 ha già chiuso: è la stratificazione di
+[§6.1](00-progetto/2026-08-24-design.md) con le porte come `typing.Protocol`, perché è la parte da
+cui dipende tutto il resto e l'unica che non si può aggiustare dopo.
+
+**Note di metodo.**
+
+82. **Il design invecchia, e il primo compito di un punto di ripresa è dire quali sue parti sono
+    morte.** Il capitolo sull'applicazione è del 24 agosto, scritto prima che esistesse un solo
+    stack. Da allora [ADR-0020](Decision.md#adr-0020) ha rovesciato la strategia dei test di
+    integrazione e con essa il piano delle fixture, e il «primo passo di `feature/04`» che il design
+    prescrive — verificare `testcontainers` — è un lavoro già fatto e già deciso. Chi aprisse il
+    branch leggendo il design come se fosse aggiornato aggiungerebbe una dipendenza scartata e
+    spenderebbe il primo giorno su un rischio chiuso. Il design **non si riscrive**, per la stessa
+    ragione per cui non si riscrivono gli ADR: è un documento datato e va letto per quello che era.
+    Ma allora qualcuno deve tenere il conto di che cosa lo ha superato, e il punto di ripresa è il
+    posto naturale perché è l'ultima cosa che si legge prima di ricominciare.
