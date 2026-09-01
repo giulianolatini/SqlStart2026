@@ -406,6 +406,97 @@ ridistribuire ovunque.
 
 ---
 
+### Il primario si dimette in otto millisecondi, e undici secondi dopo si riprende il posto
+
+> | come lo si toglie | quanto ci mette il set a darsi un primario |
+> |---|---:|
+> | `rs.stepDown()` | **8 ms** · 101 ms · 87 ms |
+> | `db.shutdownServer()` | ~500 ms |
+> | `docker kill` | ~10 000 ms |
+>
+> ```text
+> … e poi, da solo, senza che nessuno tocchi niente:
+> mongo-rs-1 (priorità 2) torna primario dopo  11 308 · 11 293 · 11 021 ms
+> ```
+
+Fonte: [V-042](Sources.md#v-042) — tre `rs.stepDown()` cronometrati sullo stack `02-replicaset`,
+con l'osservatore su un terzo nodo. Gli altri due tempi sono [V-029](Sources.md#v-029). Decisione
+in [ADR-0049](Decision.md#adr-0049).
+
+**Perché una slide:** perché completa la scala che le altre due misure lasciano a metà, e lo fa nel
+verso che sorprende. Il gesto brutale è il **più lento** — dieci secondi — e il gesto educato è
+mille volte più veloce, perché chi si dimette **avvisa**, e non c'è nessun timeout da far scadere.
+Detto in una riga: la velocità di un failover non dipende da quanto è potente il cluster, dipende
+da quanto è stato educato chi se n'è andato.
+
+La seconda riga della slide è quella che serve a chi la demo la deve *fare*. Nel lab `mongo-rs-1`
+ha priorità 2, quindi dopo undici secondi si riprende il posto **da solo**. È comodo — la scena si
+ripulisce, lo stack non resta storto per le prove successive — ed è una trappola da palco: chi
+proietta `rs.status()` e comincia a spiegare che «adesso il primario è mongo-rs-2» ha una decina di
+secondi prima che lo schermo lo smentisca. Se la spiegazione è lunga, il gesto giusto è
+`docker stop`, che non si annulla da sé.
+
+---
+
+### Tre modi di diventare primario, e solo la prima riga del log li distingue
+
+> ```text
+> id=4615652  «since we've seen no PRIMARY in election timeout period»  → è un GUASTO
+> id=4615661  «due to step up request»                                  → è MANUTENZIONE
+> id=4615660  «for a priority takeover»                                 → è la CONFIGURAZIONE
+>
+> id=21450    «Election succeeded, assuming primary role»               → identica in tutti e tre
+> ```
+
+Fonte: [V-044](Sources.md#v-044) — log di tre elezioni vere sullo stack `02-replicaset`. Decisione
+in [ADR-0049](Decision.md#adr-0049).
+
+**Perché una slide:** perché è la risposta alla domanda che si fa il lunedì mattina guardando un
+log, e perché questo repository ci aveva sbagliato. In `docs/03-amministrazione/log.md` stava
+scritto — ragionando sulla documentazione, senza aver visto un'elezione — che «la manutenzione
+ordinaria produce lo stesso tracciato nel log di un incidente». È falso, e si vede alla **prima
+riga**: le tre cause hanno tre `id` diversi, e il testo dice in chiaro che cosa è successo.
+
+Il punto da portare in sala è quale riga **non** proiettare. `21450` «Election succeeded» è la riga
+che tutti mostrano, ed è l'unica delle quattro che non insegna niente: è identica se il primario è
+morto, se si è dimesso o se un collega più titolato è tornato al suo posto. La riga che risponde è
+la prima, ed è quella che nei tutorial non c'è mai.
+
+Se c'è tempo, la coda: `id=4615601` «Scheduling priority takeover» compare **tre millisecondi dopo
+la dimissione** e porta nell'attributo l'ora esatta in cui il rientro avverrà. Chi legge il log sa
+dieci secondi prima che il primario sta per tornare — il log non racconta solo il passato.
+
+---
+
+### Il driver prova a raggiungere un host che nessuno ha scritto
+
+> ```text
+> $ mongosh "mongodb://…@host.docker.internal:27021/?replicaSet=rs0"
+> MongoNetworkError: getaddrinfo ENOTFOUND mongo-rs-2
+>                                          ^^^^^^^^^^
+>                        nella stringa non c'è. E al tentativo dopo il nome cambia.
+> ```
+
+Fonte: [V-043](Sources.md#v-043) — dallo host verso lo stack `02-replicaset`. Decisione in
+[ADR-0049](Decision.md#adr-0049), voce [13](02-architetture/trappole-mongodb-in-docker.md#t-13)
+della pagina delle trappole.
+
+**Perché una slide:** perché è il momento in cui si capisce che cos'è davvero un client di replica
+set. L'indirizzo che si scrive nella stringa **serve solo a bussare**: subito dopo il driver chiede
+al nodo com'è fatto il set, riceve `["mongo-rs-1:27017", "mongo-rs-2:27017", "mongo-rs-3:27017"]`,
+adotta quei nomi e butta via quello con cui era entrato. Da lì in poi parla a nomi che fuori dalla
+rete Docker non esistono. Non è un errore di configurazione: è il protocollo che funziona come
+deve, dentro una rete in cui chi si connette non sta.
+
+La seconda metà della slide è la mossa che peggiora le cose, e viene in mente a tutti: elencare
+**tutti e tre** gli indirizzi pubblicati. Stesso errore, perché una seed list con più di un host è
+una delle quattro eccezioni che spengono `directConnection` ([S-045](Sources.md#s-045)). Più
+indirizzi buoni si scrivono, più si convince il driver a scoprire la topologia e a buttarli via
+tutti e tre. È il caso raro in cui la soluzione è **scriverne uno solo**, e dire al driver di non
+guardarsi intorno.
+
+---
+
 ## Blocco 3 — Sharded cluster
 
 ### Shard e config server devono essere replica set

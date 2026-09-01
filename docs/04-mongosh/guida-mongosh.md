@@ -402,15 +402,17 @@ versione** senza aprire il browser — utile in sala, dove la rete non è garant
 <a id="3-comandi-di-amministrazione"></a>
 ## 3. Comandi di amministrazione
 
-> **Che cosa di questa sezione è stato eseguito.** [§3.1](#31-quello-che-gira-anche-qui) è stata
-> eseguita sullo stack `01-standalone`. [§3.2](#32-replica-set-non-eseguito-qui) e
-> [§3.3](#33-sharded-cluster-non-eseguito-qui) **no**: qui non esistono né un replica set né uno
-> sharded cluster, e gli unici output riportati sono i due errori che quei comandi restituiscono
-> su un'istanza singola — quelli sì, misurati. La verifica del resto è dovuta a
-> `feature/02-stack-replicaset` e `feature/03-stack-sharded`
+> **Che cosa di questa sezione è stato eseguito.** [§3.1](#31-quello-che-gira-anche-qui) sullo
+> stack `01-standalone`. [§3.2](#32-replica-set) sullo stack `02-replicaset`, con tre membri veri:
+> la marcatura «non eseguito» che stava qui è caduta, **e con lei due affermazioni che erano
+> sbagliate** ([V-042](../Sources.md#v-042), [ADR-0049](../Decision.md#adr-0049)). Restano marcate
+> due righe della tabella di §3.2 — `rs.add()` e `rs.remove()` nella forma che riesce, che
+> richiedono un quarto container — e tutta la
+> [§3.3](#33-sharded-cluster-non-eseguito-qui), dovuta a `feature/03-stack-sharded`
 > ([ADR-0036](../Decision.md#adr-0036), stessa regola di [ADR-0035](../Decision.md#adr-0035)).
-> La sezione si scrive completa adesso perché la guida è una sola; si marca perché una guida che
-> afferma cose non provate è peggio di una guida incompleta ([ADR-0024](../Decision.md#adr-0024)).
+> La sezione si scrive completa perché la guida è una sola; si marca ciò che non è stato provato,
+> perché una guida che afferma cose non provate è peggio di una guida incompleta
+> ([ADR-0024](../Decision.md#adr-0024)).
 
 <a id="31-quello-che-gira-anche-qui"></a>
 ### 3.1 Quello che gira anche su un'istanza singola
@@ -455,42 +457,129 @@ $ mongosh --quiet "mongodb://localhost:27017/lab" --eval '
 {"count":50000,"size":6094260,"storageSize":1937408,"nindexes":1}
 ```
 
-<a id="32-replica-set-non-eseguito-qui"></a>
-### 3.2 Replica set — **non eseguito su questo branch**
+<a id="32-replica-set"></a>
+### 3.2 Replica set
 
-Quello che succede se ci si prova qui, misurato:
+Su un'istanza singola l'errore è preciso e vale la pena riconoscerlo:
 
 ```console
 $ mongosh --quiet --eval 'try { rs.status() } catch (e) { print(e.codeName + ": " + e.message) }'
 NoReplicationEnabled: not running with --replSet
 ```
 
-L'errore è preciso e vale la pena riconoscerlo: non dice «comando sconosciuto», dice che
-*questo* processo non è stato avviato per replicare. I comandi che serviranno in `feature/02`:
+Non dice «comando sconosciuto»: dice che *questo* processo non è stato avviato per replicare.
+Tutto il resto di questa sezione è misurato sullo stack `02-replicaset`, tre membri con priorità
+2/1/1 ([V-042](../Sources.md#v-042)).
 
-| comando | a che cosa serve |
-| --- | --- |
-| `rs.initiate(<config>)` | crea il replica set. Si esegue **una volta sola**, su **un solo** nodo |
-| `rs.status()` | stato di ogni membro: `stateStr`, ritardo di replica, ultimo battito |
-| `rs.conf()` | la configurazione corrente, con priorità e voti |
-| `rs.add("nodo:27017")` / `rs.remove(…)` | aggiunge o toglie un membro |
-| `rs.reconfig(<config>)` | cambia la configurazione: si legge con `rs.conf()`, si modifica, si riscrive |
-| `rs.stepDown(<secondi>)` | il primario si dimette e provoca un'elezione — è il modo **pulito** di mostrare un failover |
-| `rs.printSecondaryReplicationInfo()` | il ritardo dei secondari, in forma leggibile |
-| `db.getMongo().setReadPref("secondaryPreferred")` | manda le letture ai secondari |
+| comando | a che cosa serve | eseguito |
+| --- | --- | --- |
+| `rs.initiate(<config>)` | crea il replica set. Si esegue **una volta sola**, su **un solo** nodo | sì, dallo script di avvio; rieseguito dà `AlreadyInitialized: already initialized` |
+| `rs.status()` | stato di ogni membro: `stateStr`, `health`, `syncSourceHost`, ultimo battito | sì |
+| `rs.conf()` | la configurazione corrente, con priorità, voti e `settings` | sì, anche da un secondario: la configurazione è replicata |
+| `rs.reconfig(<config>)` | cambia la configurazione: si legge con `rs.conf()`, si modifica, si riscrive | sì — con l'avvertenza qui sotto |
+| `rs.add("nodo:27017")` / `rs.remove(…)` | aggiunge o toglie un membro. Sono `rs.reconfig()` con un altro nome, e lo dicono nei loro errori | **no**: servirebbe un quarto container. Provata solo la forma che fallisce |
+| `rs.stepDown(<secondi>)` | il primario si dimette e provoca un'elezione | sì, tre volte |
+| `rs.printSecondaryReplicationInfo()` | il ritardo dei secondari, in forma leggibile | sì — con l'avvertenza qui sotto |
+| `db.getMongo().setReadPref("secondaryPreferred")` | dichiara che le letture possono andare ai secondari | sì |
 
-Due avvertenze che si possono già dare, perché vengono dalle fonti e non dalla prova:
+**Quello che si legge davvero.** `rs.conf()` sul lab restituisce i due numeri di
+[S-044](../Sources.md#s-044) — `heartbeatIntervalMillis: 2000`, `electionTimeoutMillis: 10000` —
+e conferma che non sono una scelta di questo repository ma i valori predefiniti. `rs.status()`
+aggiunge `majorityVoteCount: 2` e una sorpresa: `mongo-rs-3` ha
+`syncSourceHost: "mongo-rs-2:27017"`, **non il primario**. Il concatenamento della replica è
+attivo per impostazione predefinita, e chi si aspetta tre frecce verso il primario ne trova due in
+fila.
 
-- **Un secondario non risponde alle letture finché non glielo si dice.** Con
-  `directConnection=true` ([§1.5](#15-directconnection-e-le-sue-quattro-eccezioni)) si finisce su
-  un nodo che rifiuta le query fino a `db.getMongo().setReadPref(…)`.
-- **Durante l'elezione non si scrive.** [S-044](../Sources.md#s-044): «The replica set cannot
-  process write operations until the election completes successfully». Con i due secondi di
-  [§1.2](#12-tre-parametri-che-nessuno-ha-scritto) e i dodici dell'elezione, una `mongosh`
-  distratta dichiara morto un cluster che sta solo cambiando primario.
+**Correzione: un secondario risponde alle letture.** Fino al Task 12 di `feature/02` qui c'era
+scritto che «un secondario non risponde alle letture finché non glielo si dice». È falso, ed è
+falso anche rispetto alla [§1.5](#15-directconnection-e-le-sue-quattro-eccezioni) di questa stessa
+pagina, che dice giusto. Misurato su `mongo-rs-2`:
+
+```console
+$ mongosh --quiet --host mongo-rs-2:27017 … --eval 'print(db.getMongo().getReadPrefMode())'
+primary
+$ mongosh --quiet --host mongo-rs-2:27017 … lab --eval 'print(db.ordini.countDocuments({}))'
+50000
+$ mongosh --quiet --host mongo-rs-2:27017 … lab --eval 'db.ordini.insertOne({x: 1})'
+MongoServerError: not primary
+```
+
+Nessun `setReadPref`, `readPreference` a `primary`, e la lettura passa: con una connessione
+diretta si parla con **quel nodo**, come dice §1.5. Quello che il secondario rifiuta è la
+**scrittura**, con `NotWritablePrimary: not primary`. `setReadPref` serve a un'altra cosa — a dire
+a un client collegato al *replica set* che può mandare le letture altrove che al primario — e
+senza di esso, collegandosi al set, si finisce sul primario anche nominando un secondario:
+
+```console
+--host mongo-rs-2:27017         →  …?directConnection=true    servito da mongo-rs-2  (secondario)
+--host rs0/mongo-rs-2:27017     →  …?replicaSet=rs0           servito da mongo-rs-1  (primario)
+```
+
+**Avvertenza: `rs.printSecondaryReplicationInfo()` non stampa niente in uno script.** Non stampa:
+**restituisce** un oggetto, che la shell interattiva mostra da sé e `--file` no. Va avvolta:
+
+```console
+$ mongosh … --file /tmp/stato.js      # con dentro: rs.printSecondaryReplicationInfo()
+                                      # nessun output
+
+$ mongosh … --file /tmp/stato.js      # con dentro: print(rs.printSecondaryReplicationInfo())
+source: mongo-rs-2:27017
+{ syncedTo: '…', replLag: '0 secs (0 hrs) behind the primary ' }
+---
+source: mongo-rs-3:27017
+{ syncedTo: '…', replLag: '0 secs (0 hrs) behind the primary ' }
+```
+
+Vale anche per `rs.printReplicationInfo()`. È la stessa famiglia di sorprese della «regola
+dell'ultimo» di [§4.1](#41-eval-e-la-regola-dellultimo).
+
+**Avvertenza: `rs.reconfig()` toglie una protezione che il server offre.** Il ciclo
+leggi-modifica-riscrivi sembra proteggere dalle modifiche concorrenti, perché la configurazione
+porta un numero di versione. Il comando grezzo lo fa davvero:
+
+```console
+$ … --eval 'db.adminCommand({replSetReconfig: <configurazione con version: 1>})'
+NewReplicaSetConfigurationIncompatible: New replica set configuration version and term must be
+greater than old, but {version: 1, term: 38} is not greater than {version: 3, term: 38}
+```
+
+L'aiuto di `mongosh`, no: `rs.reconfig(<la stessa configurazione con version: 1>)` risponde `ok: 1`
+e porta la versione a 4, perché **riscrive il numero** con quello corrente più uno prima di
+spedire. Chi scrive automazione e vuole quel controllo deve usare `replSetReconfig`.
+
+**Gli stessi comandi dati a un secondario**, che è dove si finisce dopo un failover senza
+accorgersene:
+
+```
+rs.reconfig() / rs.add() / rs.remove()
+   → NotWritablePrimary: New config is rejected :: caused by ::
+     replSetReconfig should only be run on a writable PRIMARY. Current state SECONDARY;
+rs.stepDown(20)  → NotWritablePrimary: not primary so can't step down
+rs.stepDown(1)   → BadValue: stepdown period must be longer than secondaryCatchUpPeriodSecs
+```
+
+L'ultimo è il più insidioso, perché **non parla del ruolo**: il periodo predefinito di attesa dei
+secondari è dieci secondi, quindi `rs.stepDown(<meno di 10>)` fallisce ovunque, primario compreso,
+e l'errore fa cercare nella direzione sbagliata.
+
+**`rs.stepDown()` è la strada veloce, e si annulla da sola.** Cronometrato tre volte con
+l'osservatore su un terzo nodo: il set ha un primario nuovo dopo **8, 101 e 87 millisecondi**,
+contro i ~500 di uno `shutdown` e i ~10 000 di un `docker kill` ([V-029](../Sources.md#v-029),
+[V-042](../Sources.md#v-042)). E poiché nel lab `mongo-rs-1` ha priorità 2, undici secondi dopo si
+riprende il posto da sé: comoda perché non lascia lo stack storto, scomoda perché la scena finisce
+mentre la si sta ancora spiegando.
+
+**Durante l'elezione non si scrive.** [S-044](../Sources.md#s-044): «The replica set cannot
+process write operations until the election completes successfully». Con i due secondi di
+[§1.2](#12-tre-parametri-che-nessuno-ha-scritto) di attesa predefinita di `mongosh`, una shell
+distratta dichiara morto un cluster che sta solo cambiando primario — e con `docker kill`, dove
+l'attesa è di dieci secondi, lo dichiara di sicuro.
 
 Perché il failover del talk si provoca con `rs.stepDown()` o con `docker stop`, e non con
-`docker kill`, sta in [ADR-0034](../Decision.md#adr-0034).
+`docker kill`, sta in [ADR-0034](../Decision.md#adr-0034); i due bersagli del `Makefile` che li
+eseguono sono in [ADR-0044](../Decision.md#adr-0044). Le righe di log che distinguono un guasto da
+una dimissione stanno in
+[`03-amministrazione/log.md`](../03-amministrazione/log.md#33-la-sequenza-reale-riga-per-riga).
 
 <a id="33-sharded-cluster-non-eseguito-qui"></a>
 ### 3.3 Sharded cluster — **non eseguito su questo branch**
@@ -732,8 +821,9 @@ l'unica forma di verifica che sopravvive alla regola del §4.4: se il database f
 - **Non copre il driver Python.** L'applicazione della demo non userà `mongosh`: userà `pymongo`,
   con altre regole e altri valori predefiniti — a partire, presumibilmente, da un
   `serverSelectionTimeoutMS` diverso da due secondi.
-- **Non ha eseguito `rs.*` né `sh.*`.** Vale la riserva dichiarata all'inizio della
-  [sezione 3](#3-comandi-di-amministrazione).
+- **Ha eseguito `rs.*`, non `sh.*`.** I comandi del replica set sono misurati; quelli dello
+  sharded cluster no, e nemmeno `rs.add()`/`rs.remove()` nella forma che riesce. Vale la riserva
+  dichiarata all'inizio della [sezione 3](#3-comandi-di-amministrazione).
 
 ---
 
@@ -744,6 +834,8 @@ non è stato misurato), [ADR-0024](../Decision.md#adr-0024) (la gerarchia delle 
 [ADR-0004](../Decision.md#adr-0004) (i limiti di memoria che spiegano i tre numeri di §2.6),
 [ADR-0005](../Decision.md#adr-0005) (il lab senza autenticazione),
 [ADR-0026](../Decision.md#adr-0026) (le immagini pinnate e `--env-file`),
-[ADR-0034](../Decision.md#adr-0034) (come si provoca un failover).
+[ADR-0034](../Decision.md#adr-0034) (come si provoca un failover),
+[ADR-0044](../Decision.md#adr-0044) (i due bersagli del failover, e i loro tempi),
+[ADR-0049](../Decision.md#adr-0049) (la §3.2 eseguita, e le due frasi che erano sbagliate).
 
-**Fonti:** [S-044](../Sources.md#s-044), [S-045](../Sources.md#s-045), [S-046](../Sources.md#s-046), [S-047](../Sources.md#s-047), [V-009](../Sources.md#v-009), [V-010](../Sources.md#v-010), [V-013](../Sources.md#v-013), [V-018](../Sources.md#v-018), [V-019](../Sources.md#v-019), [V-020](../Sources.md#v-020)
+**Fonti:** [S-044](../Sources.md#s-044), [S-045](../Sources.md#s-045), [S-046](../Sources.md#s-046), [S-047](../Sources.md#s-047), [V-009](../Sources.md#v-009), [V-010](../Sources.md#v-010), [V-013](../Sources.md#v-013), [V-018](../Sources.md#v-018), [V-019](../Sources.md#v-019), [V-020](../Sources.md#v-020), [V-029](../Sources.md#v-029), [V-042](../Sources.md#v-042)

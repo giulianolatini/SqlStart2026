@@ -1960,3 +1960,133 @@ messo alla prova invece di limitarsi a citarle.
     [S-006](Sources.md#s-006). Solo il terzo ha prodotto la tabella. La tentazione, al secondo, era
     scrivere la sezione dalla documentazione e chiudere: sarebbe costato un'ora in meno e avrebbe
     perso due fatti su tre, entrambi arrivati proprio dai tentativi andati male.
+
+---
+
+## 2026-09-01 — `feature/02`, Task 12: quattro debiti si chiudono eseguendo, e due frasi erano sbagliate
+
+Il Task 12 chiede quattro passi: gli `id` dell'elezione in `log.md`, l'esecuzione dei comandi di
+amministrazione marcati «non eseguiti» nella guida a `mongosh`, le due trappole nuove, `docs-check`.
+Tutti e quattro eseguiti. Il risultato principale non è nessuno dei quattro: è che **due
+affermazioni in pagina erano false**, e si sono viste solo perché si è eseguito invece di smarcare.
+
+**Il piano non è stato modificato; le deviazioni sono dichiarate qui.** Il Passo 2 ammetteva la
+lettura minima — il replica set adesso c'è, i comandi «ovviamente funzionano», via la marcatura. È
+stata scelta di nuovo la lettura massima: eseguirli tutti, uno per uno, e correggere dove l'output
+smentisce il testo. Sono quattro ore in più e due errori in meno.
+
+**La prima frase sbagliata era una contraddizione interna.** La §3.2 della guida avvertiva che «un
+secondario non risponde alle letture finché non glielo si dice». Misurato su `mongo-rs-2`:
+`readPreference` a `primary`, nessun `setReadPref`, e `countDocuments` restituisce 50 000. Quello
+che il secondario rifiuta è la **scrittura**. Il punto grave non è l'errore: è che la **stessa
+pagina** lo diceva già giusto in §1.5, dove [S-045](Sources.md#s-045) spiega che una stringa con un
+solo host parla con quell'host «anche se è un secondario». Due frasi contraddittorie a quaranta
+righe di distanza, entrambe plausibili se lette da sole, sopravvissute a ogni rilettura
+([V-042](Sources.md#v-042)).
+
+**La seconda era una deduzione ragionevole.** `docs/03-amministrazione/log.md`, §3.1, sosteneva che
+«la manutenzione ordinaria produce lo stesso tracciato nel log di un incidente»: dedotta da
+[S-044](Sources.md#s-044), che elenca `rs.stepDown()` fra le cause di elezione, e mai verificata.
+Il Passo 1 chiedeva solo di incollare gli `id` sotto quella frase. Prima di incollarli si è
+controllata la frase, ed è falsa: le tre cause hanno tre `id` diversi e tre testi diversi alla
+**prima riga** — `4615652` per il guasto, `4615661` per la dimissione, `4615660` per il rientro per
+priorità ([V-044](Sources.md#v-044)). Entrambe le frasi restano in pagina, cancellate in un
+riquadro «Correzione» invece che rimosse: l'errore insegna accanto alla correzione.
+
+**La soglia del keyfile non è dove chiunque la metterebbe.** Il messaggio «too open» era misurato
+dal Task 2 ma non era mai entrato in [`Sources.md`](Sources.md) — «l'unico debito documentale
+aperto dai due task chiusi», rimasto tale per dieci task. Chiudendolo si è chiesto anche *dove passa
+la soglia*, con sei container usa-e-getta: `400` e `600` partono, `640` `644` `444` **e `401`** no.
+`401` non concede lettura a nessuno, eppure viene rifiutato: la regola è «nessun bit acceso fuori
+dal proprietario», non «non leggibile da tutti» ([V-041](Sources.md#v-041)). E la riga fatale del
+log — quella con `"s":"F"` — non nomina né il file né i permessi: chi guarda solo l'ultima riga di
+un container morto cerca nella direzione sbagliata.
+
+**Il driver riceve i nomi di dentro.** Da fuori, con `?replicaSet=rs0`, la connessione fallisce con
+`getaddrinfo ENOTFOUND mongo-rs-2` — un host che nella stringa non c'è, e che a ogni tentativo
+cambia. Tre ripetizioni identiche hanno nominato `mongo-rs-1`, `mongo-rs-2`, `mongo-rs-1`
+([V-043](Sources.md#v-043)). La voce 13 dice anche quale rimedio **non** funziona, che è quello che
+viene in mente per primo: elencare tutti e tre gli indirizzi pubblicati. Una seed list con più di un
+host è la terza delle quattro eccezioni che spengono `directConnection`, quindi più indirizzi buoni
+si scrivono e più si convince il driver a buttarli via.
+
+**Due misure che il piano non chiedeva.** `rs.stepDown()` cronometrato tre volte: primario nuovo
+dopo **8, 101 e 87 ms**, contro i ~500 di uno `shutdown` e i ~10 000 di un `docker kill` — è il
+terzo punto della scala che il Task 8 aveva lasciata a due. E `mongo-rs-1`, a priorità 2, si
+riprende il posto da solo dopo ~11 s: la scena è autopulente e per questo fragile da spiegare con
+calma. Terza, minore ma insidiosa: `rs.reconfig()` **riscrive** il numero di versione della
+configurazione prima di spedirla, quindi non protegge dalle modifiche concorrenti; il comando
+grezzo `replSetReconfig` sì, con `NewReplicaSetConfigurationIncompatible`.
+
+**Quello che non è stato eseguito, e perché.** `rs.add()` e `rs.remove()` nella forma che riesce:
+servirebbe un quarto container, e togliere un membro vivo romperebbe le prove successive. Provate
+solo nella forma che fallisce, su un secondario, dove sono innocue; le due righe restano marcate
+nella tabella. La terza via d'uscita della voce 13 — riconfigurare il set con nomi risolvibili da
+fuori — è descritta e **non presa**: cambierebbe lo stack del talk in modo permanente. Tutta la
+§3.3 sullo sharded cluster resta marcata, dovuta a `feature/03`.
+
+**Il conto delle trappole: due fatte, quattro ancora candidate.** Qui i due documenti non dicono la
+stessa cosa, e la differenza va lasciata visibile invece che risolta di nascosto. Il piano, Passo 3,
+nomina **due** trappole — permessi del keyfile, scoperta della topologia — e cita
+[ADR-0033](Decision.md#adr-0033), che per `feature/02` nomina esattamente quelle due. I punti di
+ripresa del Task 9 e del Task 10, scritti *dopo* il piano, elencano invece **sei** debiti della
+pagina: oltre al keyfile, `--env-file` che sostituisce e non aggiunge, `up --wait` che esce presto
+([V-025](Sources.md#v-025)), il `$$` di Compose, il congelamento di `docker logs`
+([V-032](Sources.md#v-032)) e l'`ENOTFOUND` che nel lab prende il posto di un errore di selezione
+del server perché un container fermo sparisce dal DNS ([V-031](Sources.md#v-031)).
+
+Le due liste hanno statuti diversi: quella del piano è un contratto e discende da un ADR, quella dei
+punti di ripresa è un inventario di candidati cresciuto misura dopo misura. Il Task 12 ha eseguito
+il contratto. **I quattro candidati restano aperti**, tutti già misurati e con la loro fonte —
+scriverli è trascrizione, non ricerca. Sono materia da decidere: o una coda del Task 14, o
+`feature/03`, che alla pagina deve comunque tornare. Il debito resta scritto qui perché una lista di
+candidati che sparisce senza che nessuno decida è esattamente il modo in cui le pagine restano
+incomplete.
+
+**Un effetto collaterale sullo stack, da sapere.** Tre `rs.stepDown()` e quattro `rs.reconfig()`
+hanno portato la versione della configurazione del replica set da **1 a 4**. Non è un guasto e non
+sopravvive a un `make down-02 && make up-02`, che ricrea il set da zero; ma chi legge `rs.conf()`
+sullo stack acceso trova un numero che il file Compose non spiega. `mongo-rs-1` è tornato primario
+da solo, e nessuna delle riconfigurazioni ha cambiato membri, priorità o `settings`.
+
+**Controlli.** `make docs-check` verde. `./tools/smoke-replicaset.sh` eseguito dopo la sequenza di
+`stepDown` e `reconfig`: **42 superati, 0 errori**, con il primario al suo posto. `make tools-test` e
+`make stack-check` rieseguiti a fine task.
+
+**Documentazione prodotta.** [V-041](Sources.md#v-041), [V-042](Sources.md#v-042),
+[V-043](Sources.md#v-043) e [V-044](Sources.md#v-044); [ADR-0049](Decision.md#adr-0049);
+`docs/03-amministrazione/log.md` §3.3 riscritta con i tre tracciati e §3.4 nuova;
+`docs/04-mongosh/guida-mongosh.md` §3.2 smarcata e corretta; le voci **12** e **13** di
+`docs/02-architetture/trappole-mongodb-in-docker.md`; il rinvio di
+`docs/03-amministrazione/sicurezza-keyfile-x509.md` puntato alla voce 12, che adesso mantiene quello
+che prometteva; tre righe dell'indice di `docs/README.md`; tre citazioni da slide nel Blocco 2.
+[S-045](Sources.md#s-045) acquisisce il terzo ADR che la cita, [V-029](Sources.md#v-029) e
+[V-030](Sources.md#v-030) il terzo.
+
+**Note di metodo.**
+
+70. **Prima di riempire una sezione, si legge la frase che le sta sopra.** Il Passo 1 chiedeva di
+    incollare gli `id` sotto una premessa già scritta. La premessa era falsa, e nessuno l'avrebbe mai
+    più guardata: sarebbe diventata *più* credibile, perché sotto ci sarebbero stati dei numeri veri
+    a farle da prova. Un dato misurato incollato sotto una deduzione sbagliata non la corregge, la
+    certifica.
+
+71. **Una guida può contraddirsi a quaranta righe di distanza, e la rilettura non lo trova mai.** Le
+    due frasi su cosa risponde un secondario erano entrambe plausibili prese da sole, e chi rilegge
+    legge una sezione alla volta. Non è una svista di attenzione: è che la coerenza fra parti distanti
+    non è una proprietà che si vede leggendo. Si vede solo eseguendo, perché l'esecuzione non sa in
+    quale sezione si trova.
+
+72. **Il rimedio che non funziona vale la stessa riga di quello che funziona.** La voce 13 poteva
+    fermarsi alle due strade buone. Ne dedica una terza a quella cattiva — elencare i tre indirizzi
+    pubblicati — perché è la prima che viene in mente e perché fallisce *più* silenziosamente: dà lo
+    stesso errore di prima, quindi chi la prova conclude di non aver capito il problema. Una pagina
+    di trappole che elenca solo i rimedi validi lascia al lettore il tempo che voleva risparmiargli.
+
+73. **Uno strumento che risponde sbagliato è peggio di uno che fallisce.**
+    `docker logs --since "$(date -u …)"` non ha filtrato niente — l'orologio del container e quello
+    dell'host non coincidono — e ha restituito cinquanta chilobyte di righe vecchie *senza errore*.
+    Per un attimo sono sembrate il tracciato dell'elezione appena provocata. Il ripiego è
+    `--tail N | grep | tail`, che conta righe invece di fidarsi di un orologio; la lezione è che
+    quando un filtro restituisce troppo, la prima ipotesi non è «è successo molto», è «il filtro non
+    ha filtrato».

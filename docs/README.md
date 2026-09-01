@@ -68,7 +68,7 @@ sono state eseguite qui, perché qui non c'è né un Ubuntu né un Windows
 | [`02-architetture/standalone.md`](02-architetture/standalone.md) | istanza singola: i quattro limiti con la fonte che li sostiene, quando basta davvero, il file Compose riga per riga | già nel repository |
 | [`02-architetture/replica-set.md`](02-architetture/replica-set.md) | replica set a tre membri: perché tre e non due, le elezioni cronometrate nelle tre scene, write concern e read preference come coppia, il confronto con l'istanza singola, il file Compose riga per riga | già nel repository |
 | `02-architetture/sharded-cluster.md` | mongos, config server, shard key, bilanciamento; i due profili dello stack | `feature/03-stack-sharded` |
-| [`02-architetture/trappole-mongodb-in-docker.md`](02-architetture/trappole-mongodb-in-docker.md) | i punti in cui MongoDB e Docker si fraintendono, una voce per sintomo: undici alla nascita, ampliata da `02` e `03` | già nel repository |
+| [`02-architetture/trappole-mongodb-in-docker.md`](02-architetture/trappole-mongodb-in-docker.md) | i punti in cui MongoDB e Docker si fraintendono, una voce per sintomo: undici alla nascita, tredici da `02` (permessi del keyfile, scoperta della topologia), ampliata ancora da `03` | già nel repository |
 
 ## 03-amministrazione — le procedure
 
@@ -77,13 +77,13 @@ sono state eseguite qui, perché qui non c'è né un Ubuntu né un Windows
 | [`03-amministrazione/backup-restore.md`](03-amministrazione/backup-restore.md) | `mongodump`/`mongorestore`, il dump a caldo con `--oplog` e quale punto nel tempo garantisce, il restore contato, e il fallimento per finestra di oplog mostrato mentre fallisce | già nel repository |
 | [`03-amministrazione/sicurezza-keyfile-x509.md`](03-amministrazione/sicurezza-keyfile-x509.md) | autenticazione interna: perché `--keyFile` porta con sé il controllo degli accessi, perché MongoDB riserva il keyfile a test e sviluppo, la sequenza verso X.509 eseguita con i suoi rifiuti, e dove vivono gli utenti di un replica set | già nel repository |
 | `03-amministrazione/statistiche-monitoraggio.md` | `serverStatus`, `dbStats`, metriche di replica, cosa guardare sotto carico | `feature/04-app-python` |
-| [`03-amministrazione/log.md`](03-amministrazione/log.md) | il formato JSON campo per campo, le severità e i componenti misurati, `logRotate` in container, cosa cercare durante un'elezione (mappa scritta qui, `id` verificati in `02`) | già nel repository |
+| [`03-amministrazione/log.md`](03-amministrazione/log.md) | il formato JSON campo per campo, le severità e i componenti misurati, `logRotate` in container, cosa cercare durante un'elezione: gli `id` delle tre cause, misurati su `02`, e le tre prime righe che distinguono un guasto da una manutenzione | già nel repository |
 
 ## 04-mongosh — la shell
 
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
-| [`04-mongosh/guida-mongosh.md`](04-mongosh/guida-mongosh.md) | connettersi da dentro il container e i tre parametri che `mongosh` sceglie da sé, comandi di uso quotidiano, comandi di amministrazione di replica set e sharded cluster (scritti qui, eseguiti in `02` e `03`), script non interattivi e la tabella dei codici di uscita | già nel repository |
+| [`04-mongosh/guida-mongosh.md`](04-mongosh/guida-mongosh.md) | connettersi da dentro il container e i tre parametri che `mongosh` sceglie da sé, comandi di uso quotidiano, comandi di amministrazione: quelli del replica set eseguiti su `02`, quelli dello sharded cluster ancora solo scritti (dovuti a `03`), script non interattivi e la tabella dei codici di uscita | già nel repository |
 
 ## 05-talk — il palco
 

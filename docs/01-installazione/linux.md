@@ -417,7 +417,7 @@ pieno di dati vecchi.
 - **Non copre replica set e sharding installati sul sistema operativo.** L'architettura sta in
   [`02-architetture/`](../02-architetture/standalone.md); la messa in opera passa da qui più
   `rs.initiate()`, e i comandi sono in
-  [`04-mongosh/guida-mongosh.md`](../04-mongosh/guida-mongosh.md#32-replica-set-non-eseguito-qui).
+  [`04-mongosh/guida-mongosh.md`](../04-mongosh/guida-mongosh.md#32-replica-set).
 - **Non dice quanto si guadagna** spegnendo THP o scegliendo XFS. Nessuna delle fonti dà un
   numero, e questa pagina non ne inventa uno.
 

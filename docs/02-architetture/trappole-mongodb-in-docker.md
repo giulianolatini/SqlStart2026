@@ -9,8 +9,9 @@ capita, e ha sempre le stesse quattro righe: *sintomo*, *causa*, *rimedio*, *fon
 della pagina è [ADR-0033](../Decision.md#adr-0033); le voci si aggiungono in coda e non si
 riscrivono, così la numerazione resta un riferimento stabile.
 
-La pagina nasce con `feature/01` e cresce: `feature/02` aggiungerà le trappole del replica set —
-permessi del keyfile, scoperta della topologia — e `feature/03` quelle dello sharded cluster.
+La pagina nasce con `feature/01` e cresce: `feature/02` ha aggiunto le due trappole del replica
+set — i **permessi del keyfile**, voce [12](#t-12), e la **scoperta della topologia**, voce
+[13](#t-13) — e `feature/03` aggiungerà quelle dello sharded cluster.
 
 **Indice dei sintomi**
 
@@ -27,6 +28,8 @@ permessi del keyfile, scoperta della topologia — e `feature/03` quelle dello s
 | [9](#t-09) | `logRotate` risponde `{ok: 1}` e non ruota niente |
 | [10](#t-10) | il disco si riempie durante la demo |
 | [11](#t-11) | chiunque raggiunga la porta è amministratore |
+| [12](#t-12) | `mongod` non parte e dice che il keyfile è «too open» |
+| [13](#t-13) | il driver prova a raggiungere un host che io non ho mai scritto |
 
 ---
 
@@ -376,10 +379,164 @@ rileggendolo. Per sapere con cosa sta girando davvero un `mongod` in container s
 
 ---
 
+<a id="t-12"></a>
+## 12. `mongod` non parte e dice che il keyfile è «too open»
+
+**Sintomo.** Il container esce subito, con codice **1**. Nel log ci sono due righe, e solo la
+prima dice qualcosa di utile:
+
+```json
+{"s":"I","c":"ACCESS","id":20254,"ctx":"main","msg":"Read security file failed",
+ "attr":{"error":{"code":30,"codeName":"InvalidPath",
+                  "errmsg":"permissions on /keyfile/mongo-keyfile are too open"}}}
+{"s":"F","c":"CONTROL","id":20575,"ctx":"main","msg":"Error creating service context",
+ "attr":{"error":"Location5579201: Unable to acquire security key[s]"}}
+```
+
+La riga fatale — quella con `"s":"F"` — **non nomina né il file né i permessi**. Chi guarda solo
+l'ultima riga, che è quello che si fa quando un container muore, legge «Unable to acquire security
+key[s]» e va a cercare un problema di contenuto o di percorso. La riga che spiega è la penultima,
+ed è di livello informativo.
+
+**Causa.** MongoDB pretende che il keyfile sia leggibile **solo** dal proprietario, e il
+proprietario dev'essere l'utente con cui gira `mongod`. La soglia non è dove la si immagina.
+Misurato provando sei permessi diversi su sei container usa-e-getta
+([V-041](../Sources.md#v-041)):
+
+| permessi | ottale | esito |
+| --- | ---: | --- |
+| `-r--------` | `400` | parte |
+| `-rw-------` | `600` | parte |
+| `-rw-r-----` | `640` | **rifiutato** |
+| `-rw-r--r--` | `644` | **rifiutato** |
+| `-r--r--r--` | `444` | **rifiutato** |
+| `-r-------x` | `401` | **rifiutato** |
+
+L'ultima riga è quella che smentisce l'intuizione: `401` non concede la lettura a nessuno, né al
+gruppo né agli altri, eppure viene rifiutato. La regola non è «non dev'essere leggibile da tutti»,
+è **«non dev'esserci nessun bit acceso fuori dal proprietario»** — nemmeno un bit di esecuzione che
+su un file di testo non significa niente.
+
+Fuori dai permessi c'è la seconda metà della causa, che dà lo stesso messaggio: il file può avere
+`400` e appartenere all'utente sbagliato. Nell'immagine ufficiale `mongod` gira come `mongodb`,
+uid **999** ([S-023](../Sources.md#s-023)); un keyfile con `400` e proprietario `root` è
+irraggiungibile, e il log dice «too open» anche in quel caso.
+
+In Docker la trappola scatta soprattutto con il **bind mount**: un file preso dall'host arriva nel
+container con i permessi e gli identificatori numerici che aveva fuori, che su macOS e su Windows
+non sono quelli che si sono scritti. Un `chmod 400` dato sull'host può non essere quello che il
+container vede.
+
+**Rimedio.** Non montare il keyfile dall'host: **generarlo dentro un volume nominato**, dove i
+permessi sono quelli che ci si scrive. È quello che fa questo repository
+([ADR-0014](../Decision.md#adr-0014)): un servizio one-shot `keyfile-init` scrive il file nel
+volume `keyfile`, e i tre membri lo montano in sola lettura.
+
+```bash
+openssl rand -base64 756 > /keyfile/mongo-keyfile
+chmod 400 /keyfile/mongo-keyfile
+chown 999:999 /keyfile/mongo-keyfile     # l'utente `mongodb` dell'immagine ufficiale
+```
+
+Due dettagli che valgono la loro riga. Il `chmod` e il `chown` stanno **fuori** dal ramo che
+genera: un volume ripristinato da un backup ha il contenuto giusto e può avere i permessi
+sbagliati, e in quel caso il ramo di generazione non passa mai. E la verifica si fa da dentro, con
+`ls -ln`, che stampa gli identificatori numerici invece dei nomi — perché il nome `mongodb` esiste
+nel container e sull'host quasi certamente no.
+
+La documentazione ufficiale usa `chmod 400` e basta ([S-005](../Sources.md#s-005)); «400 o 600» è
+una deduzione, corretta, che questa misura conferma.
+
+**Fonte.** [V-041](../Sources.md#v-041), [S-005](../Sources.md#s-005),
+[S-023](../Sources.md#s-023), [ADR-0014](../Decision.md#adr-0014),
+[ADR-0049](../Decision.md#adr-0049).
+
+---
+
+<a id="t-13"></a>
+## 13. Il driver prova a raggiungere un host che io non ho mai scritto
+
+**Sintomo.** Ci si connette a un replica set dall'host, nominando una porta pubblicata che
+risponde, e il driver fallisce nominando **un altro** nodo:
+
+```console
+$ mongosh "mongodb://admin:<password>@host.docker.internal:27021/?replicaSet=rs0"
+MongoNetworkError: getaddrinfo ENOTFOUND mongo-rs-2
+```
+
+`mongo-rs-2` non compare nella stringa. Rieseguendo, il nome cambia: tre tentativi identici hanno
+dato `mongo-rs-1`, `mongo-rs-2`, `mongo-rs-1` — e **non è mai** quello che si è scritto
+([V-043](../Sources.md#v-043)).
+
+**Causa.** È lo stesso messaggio della voce [5](#t-05) e una trappola diversa, perché lì il nome
+che non risolve l'aveva scritto l'utente e qui no. L'indirizzo della stringa serve solo a bussare;
+subito dopo il driver chiede al nodo com'è fatto il set, e riceve `hosts` così:
+
+```
+["mongo-rs-1:27017", "mongo-rs-2:27017", "mongo-rs-3:27017"]
+```
+
+Sono i nomi di servizio Compose, cioè quelli con cui i membri si conoscono **fra loro**. Il driver
+li adotta, butta via l'indirizzo con cui era entrato, e da lì in poi tenta su nomi che fuori dalla
+rete Docker non esistono. Il nome che compare nell'errore è semplicemente quello su cui è caduto
+per primo, e cambia da un tentativo all'altro perché l'ordine non è garantito.
+
+**Rimedio.** Due strade, e vanno scelte sapendo che cosa costano.
+
+*Da fuori: rinunciare al set.* Con `directConnection=true` il driver non fa la scoperta e resta
+sull'indirizzo scritto. Funziona, misurato: 50 000 documenti letti da `host.docker.internal:27021`.
+
+```console
+$ mongosh "mongodb://admin:<password>@host.docker.internal:27021/?directConnection=true"
+… servito da mongo-rs-1:27017
+```
+
+Il prezzo è che non è più un client di replica set: niente scoperta del primario, niente failover
+automatico. Se quel nodo diventa secondario, le scritture cominciano a fallire con
+`NotWritablePrimary` e nessuno le devia. Per un'ispezione va benissimo; per un'applicazione, no.
+
+*Da dentro: entrare nella rete.* Chi gira dentro `sqlstart-02-replicaset_default` risolve quei
+nomi, e la connessione al set funziona come da manuale:
+
+```bash
+docker run --rm --network sqlstart-02-replicaset_default mongo:7.0.40 \
+  mongosh "mongodb://admin:<password>@mongo-rs-1:27017/?replicaSet=rs0" --quiet --eval '…'
+```
+
+È la strada giusta per l'applicazione del talk, ed è il motivo per cui il client sta in un
+container invece che sull'host.
+
+*C'è una terza strada, e qui non è stata presa:* riconfigurare il set con `rs.reconfig()` perché
+pubblichi nomi risolvibili da fuori — `host.docker.internal:27021` e compagni. Funziona e cambia
+il set **in modo permanente**, quindi si fa su un lab dedicato, non su uno stack che deve reggere
+una demo.
+
+**Quello che invece non funziona, ed è la prima cosa che viene in mente:** elencare tutti e tre gli
+indirizzi pubblicati.
+
+```console
+$ mongosh "mongodb://…@host.docker.internal:27021,host.docker.internal:27022,host.docker.internal:27023/"
+MongoNetworkError: getaddrinfo ENOTFOUND mongo-rs-2
+```
+
+Stesso errore, e per una ragione precisa: una seed list con **più di un host** è la terza delle
+quattro eccezioni che spengono `directConnection` ([S-045](../Sources.md#s-045)). Più indirizzi
+buoni si scrivono, più si convince il driver a scoprire la topologia — e a buttarli via tutti e
+tre.
+
+Il modo rapido di riconoscere questa voce fra le tre che danno `ENOTFOUND`: se il nome
+nell'errore è uno che **non hai scritto tu**, è questa.
+
+**Fonte.** [V-043](../Sources.md#v-043), [S-045](../Sources.md#s-045),
+[ADR-0049](../Decision.md#adr-0049).
+
+---
+
 ## Cosa questa pagina non dice
 
 - **Non è un elenco completo.** È l'elenco di ciò che è stato incontrato *e misurato* qui. Le
-  trappole del replica set e dello sharded cluster arrivano con `feature/02` e `feature/03`.
+  due del replica set sono arrivate con `feature/02`; quelle dello sharded cluster — config server,
+  bilanciamento — arrivano con `feature/03`.
 - **Non copre le trappole di MongoDB fuori da Docker.** Quelle di un'installazione su sistema
   operativo — `ulimit`, transparent huge pages, filesystem — stanno nelle pagine di
   [installazione](../01-installazione/linux.md), con la riserva che le dichiara non eseguite.
@@ -394,11 +551,15 @@ rileggendolo. Per sapere con cosa sta girando davvero un `mongod` in container s
 [ADR-0034](../Decision.md#adr-0034) (`docker kill` non è un guasto),
 [ADR-0005](../Decision.md#adr-0005), [ADR-0021](../Decision.md#adr-0021),
 [ADR-0028](../Decision.md#adr-0028), [ADR-0030](../Decision.md#adr-0030),
-[ADR-0031](../Decision.md#adr-0031).
+[ADR-0031](../Decision.md#adr-0031), [ADR-0014](../Decision.md#adr-0014) (il keyfile nasce in
+un volume e non entra nel repository),
+[ADR-0049](../Decision.md#adr-0049) (le due voci del replica set).
 
 **Fonti:** [S-020](../Sources.md#s-020), [S-022](../Sources.md#s-022),
 [S-032](../Sources.md#s-032), [S-033](../Sources.md#s-033), [S-034](../Sources.md#s-034),
 [S-039](../Sources.md#s-039), [S-040](../Sources.md#s-040), [S-041](../Sources.md#s-041),
 [V-006](../Sources.md#v-006), [V-007](../Sources.md#v-007), [V-010](../Sources.md#v-010),
 [V-011](../Sources.md#v-011), [V-012](../Sources.md#v-012), [V-014](../Sources.md#v-014),
-[V-017](../Sources.md#v-017), [V-018](../Sources.md#v-018)
+[S-005](../Sources.md#s-005), [S-023](../Sources.md#s-023), [S-045](../Sources.md#s-045),
+[V-017](../Sources.md#v-017), [V-018](../Sources.md#v-018), [V-041](../Sources.md#v-041),
+[V-043](../Sources.md#v-043)

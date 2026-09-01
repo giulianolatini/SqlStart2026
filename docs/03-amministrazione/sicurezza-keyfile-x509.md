@@ -64,8 +64,9 @@ Una precisazione onesta sui permessi: l'esempio ufficiale usa **solo** `chmod 40
 è una deduzione corretta, non una citazione — e la frase «altrimenti `mongod` rifiuta di avviarsi»
 **non è scritta** nella fonte, che pone il requisito senza descrivere che cosa succeda a violarlo.
 Che cosa succeda davvero lo si vede in
-[`../02-architetture/trappole-mongodb-in-docker.md`](../02-architetture/trappole-mongodb-in-docker.md),
-dove il messaggio è riportato per intero.
+[`../02-architetture/trappole-mongodb-in-docker.md`](../02-architetture/trappole-mongodb-in-docker.md#t-12),
+dove il messaggio è riportato per intero — insieme alla soglia, che non è dove ci si aspetta: viene
+rifiutato anche `401`, che non concede lettura a nessuno ([V-041](../Sources.md#v-041)).
 
 ### `--keyFile` porta con sé il controllo degli accessi
 

@@ -9,13 +9,15 @@ Comincia con una misura scomoda: in un'istanza che **non sta facendo assolutamen
 controllo di salute che chiede «stai bene?» ([V-019](../Sources.md#v-019)). Un log così non si
 legge scorrendolo. Si interroga.
 
-> **Cosa è stato misurato e cosa no.** Le sezioni [1](#1-formato-e-componenti) e
+> **Cosa è stato misurato, e su quale stack.** Le sezioni [1](#1-formato-e-componenti) e
 > [2](#2-logrotate-e-perché-in-container-non-serve) sono state eseguite sullo stack
-> `01-standalone` di questo repository, immagine `mongo:7.0.40`, e ogni numero che riportano
-> viene da lì. La sezione [3](#3-cosa-cercare-durante-unelezione) è scritta **dal manuale e non
-> dalla misura**: su un'istanza singola non esistono elezioni. Gli identificatori delle righe che
-> compaiono davvero durante un'elezione saranno inseriti in `feature/02-stack-replicaset`, dopo
-> averne vista una. Il debito è dichiarato in [ADR-0035](../Decision.md#adr-0035) e va saldato là.
+> `01-standalone`, immagine `mongo:7.0.40`, e ogni numero che riportano viene da lì. La sezione
+> [3](#3-cosa-cercare-durante-unelezione) nasce dal manuale e **adesso è stata misurata** sullo
+> stack `02-replicaset`: gli `id` delle righe di elezione, che nessuna fonte nomina, vengono da tre
+> elezioni vere ([V-030](../Sources.md#v-030), [V-044](../Sources.md#v-044)). Il debito dichiarato
+> da [ADR-0035](../Decision.md#adr-0035) è saldato, e la §3.1 porta una correzione: il primo
+> tentativo di scrivere quella sezione senza vedere un log aveva concluso una cosa falsa
+> ([ADR-0049](../Decision.md#adr-0049)).
 
 ---
 
@@ -332,13 +334,12 @@ per quel caso stanno in [`01-installazione/linux.md`](../01-installazione/linux.
 <a id="3-cosa-cercare-durante-unelezione"></a>
 ## 3. Cosa cercare durante un'elezione
 
-> **Sezione non verificata su questo branch.** Qui non esiste un replica set, e quindi non esiste
-> un'elezione da guardare. Quanto segue viene da [S-044](../Sources.md#s-044) e da
-> [S-042](../Sources.md#s-042): il **meccanismo** e i **componenti** sono documentati, gli `id`
-> delle righe no — nessuna delle due fonti ne nomina uno. Verranno inseriti in
-> `feature/02-stack-replicaset` dopo aver provocato un'elezione vera e averla letta. Finché
-> questo riquadro è qui, la sezione è una mappa, non un resoconto
-> ([ADR-0035](../Decision.md#adr-0035)).
+> **Sezione misurata su `02-replicaset`.** Il meccanismo e i componenti vengono da
+> [S-044](../Sources.md#s-044) e [S-042](../Sources.md#s-042); gli `id` delle righe, che nessuna
+> delle due fonti nomina, vengono da tre elezioni provocate su tre membri veri — una per guasto
+> ([V-030](../Sources.md#v-030)), una per dimissione e una per rientro a priorità
+> ([V-044](../Sources.md#v-044)). Gli orari sono quelli osservati; i numeri di termine no, e la
+> [§3.4](#34-i-numeri-da-non-copiare) dice quali altri valori non vanno copiati.
 
 ### 3.1 Il meccanismo, e i tre numeri che lo governano
 
@@ -359,9 +360,16 @@ letture possono continuare, se il client è configurato per accettare un seconda
 scritture no.
 
 Un'elezione non parte solo per un guasto. [S-044](../Sources.md#s-044) elenca anche l'aggiunta di
-un nodo, `rs.initiate()`, `rs.reconfig()` e `rs.stepDown()`: il che significa che la
-manutenzione ordinaria produce lo stesso tracciato nel log di un incidente, e che leggere una
-riga di elezione non basta a sapere se c'è stato un problema.
+un nodo, `rs.initiate()`, `rs.reconfig()` e `rs.stepDown()`.
+
+> **Correzione.** Fino al Task 12 di `feature/02` qui c'era scritto che «la manutenzione ordinaria
+> produce lo stesso tracciato nel log di un incidente, e che leggere una riga di elezione non basta
+> a sapere se c'è stato un problema». Era un'inferenza ragionevole da [S-044](../Sources.md#s-044),
+> fatta senza aver mai letto un log di elezione, ed è **falsa**: il tracciato è diverso, e la
+> differenza sta nella **prima riga** ([V-044](../Sources.md#v-044)). La
+> [§3.3](#33-la-sequenza-reale-riga-per-riga) la riporta. La frase resta qui, cancellata invece che
+> rimossa, perché l'errore insegna quanto la correzione: una fonte che elenca le *cause* di un
+> fenomeno non dice niente su come quel fenomeno si *presenta*.
 
 ### 3.2 Dove guardare: quattro componenti
 
@@ -383,13 +391,100 @@ compare **42 volte** pur non essendoci alcuna replica ([V-019](../Sources.md#v-0
 inizializzazioni dei sottosistemi, che `mongod` costruisce comunque. Vedere righe `REPL` non
 prova che il nodo stia replicando qualcosa.
 
-### 3.3 Il debito, in chiaro
+<a id="33-la-sequenza-reale-riga-per-riga"></a>
+### 3.3 La sequenza reale, riga per riga
 
-Manca la parte più utile: la sequenza reale di `id`, in ordine, dal battito perso al nuovo
-primario, con i tempi misurati fra una riga e l'altra. Non è scritta qui perché non è stata
-vista. In `feature/02` verrà provocata un'elezione vera — con il gesto giusto, non con
-`docker kill`, che [ADR-0034](../Decision.md#adr-0034) ha dimostrato non essere un guasto — e
-questa sezione si riempirà di numeri, come le prime due.
+Gli `id` sono ciò che si cerca, perché non cambiano fra versioni; il testo accanto è ciò che si
+capisce, e cambia ([ADR-0035](../Decision.md#adr-0035), regola 1). Qui ci sono tutti e due, perché
+un elenco di numeri non insegna niente e un elenco di frasi non si ritrova.
+
+**Il guasto.** `docker kill` sul primario, log letto sul membro che è stato **eletto**
+([V-030](../Sources.md#v-030)). Gli orari sono veri e appartengono a una sola elezione:
+
+| ora | `id` | componente | che cosa dice, e che cosa significa |
+| --- | ---: | --- | --- |
+| `19:01:47.369` | `21216` | `REPL` | «Member is now in state DOWN», con `heartbeatMessage: "Connection refused"`. La caduta è **notata**, tre decimi di secondo dopo il colpo |
+| ↓ nove secondi | `23974` | `REPL_HB` | «Heartbeat failed after max retries», diciannove volte. È il rumore che riempie l'attesa, e non è un errore: è il timeout che scorre |
+| `19:01:56.558` | `4615652` | `ELECTION` | «Starting an election, since we've seen no PRIMARY in election timeout period», con `electionTimeoutPeriodMillis: 10000` nell'attributo |
+| `19:01:56.558` | `21438` | `ELECTION` | «Conducting a dry run election to see if we could be elected». Il giro a vuoto: chiedere i voti senza consumare un termine |
+| `19:01:56.560` | `51799` | `ELECTION` | «VoteRequester processResponse», `dryRun: true`, `vote: "yes"`, e il nome di chi ha votato |
+| `19:01:56.560` | `21444` | `ELECTION` | «Dry election run succeeded, running for election», con `newTerm` |
+| `19:01:56.560` | `6015300` | `ELECTION` | «Storing last vote document in local storage for my election». Il voto va su disco **prima** di essere chiesto |
+| `19:01:56.564` | `51799` | `ELECTION` | «VoteRequester processResponse», stavolta `dryRun: false`. È il voto vero |
+| `19:01:56.564` | `21450` | `ELECTION` | «Election succeeded, assuming primary role» |
+| `19:01:56.564` | `21358` | `REPL` | «Replica set state transition», `newState: "PRIMARY"`, `oldState: "SECONDARY"` |
+
+**Il numero che cambia il racconto: `56.558` → `56.564` sono sei millisecondi.** Giro a vuoto, voto
+su disco, richiesta, ruolo assunto: l'elezione dura quanto un battito di ciglia. I dieci secondi
+non sono l'elezione — sono l'**attesa prima di cominciarla**, e il log li scrive per esteso in un
+attributo. Il set sa che il primario è morto quasi subito e aspetta comunque, perché un membro
+irraggiungibile per un istante non è un membro morto, e indire un'elezione a ogni singhiozzo di
+rete costerebbe più di quello che salva.
+
+**La manutenzione.** `rs.stepDown()` sul primario, stesso stack, stesso punto di osservazione
+([V-044](../Sources.md#v-044)). Il tracciato è **un altro**:
+
+| ora | `id` | componente | che cosa dice |
+| --- | ---: | --- | --- |
+| `11:52:29.687` | `4615661` | `ELECTION` | «Starting an election due to step up request» |
+| `11:52:29.687` | `21437` | `ELECTION` | «Skipping dry run and running for election» |
+| `11:52:29.688` | `6015300` | `ELECTION` | «Storing last vote document in local storage for my election» |
+| `11:52:29.690` | `51799` | `ELECTION` | «VoteRequester processResponse», `dryRun: false` — **una volta sola** |
+| `11:52:29.690` | `21450` | `ELECTION` | «Election succeeded, assuming primary role» |
+| `11:52:29.690` | `21358` | `REPL` | «Replica set state transition» verso `PRIMARY` |
+| `11:52:29.692` | `21107` | `REPL` | «Stopping replication producer»: smette di copiare, perché adesso è lui l'originale |
+
+Niente `21216`, niente `23974`: nessun membro è mancato. E niente giro a vuoto — `21437` al posto
+della coppia `21438`/`21444` — perché chi riceve una richiesta di promozione non ha bisogno di
+chiedere se sarebbe eletto: glielo hanno appena chiesto. È il motivo per cui questa strada costa
+decine di millisecondi invece di diecimila ([V-042](../Sources.md#v-042)).
+
+**Il rientro.** Nel lab `mongo-rs-1` ha priorità 2, quindi dopo essersi dimesso **si riprende il
+posto**. È una terza elezione, con una terza prima riga:
+
+| ora | `id` | componente | che cosa dice |
+| --- | ---: | --- | --- |
+| `11:52:29.692` | `4615601` | `ELECTION` | «Scheduling priority takeover», con `when` = l'ora esatta del rientro, dieci secondi nel futuro |
+| `11:52:39.685` | `4764800` | `ELECTION` | «Not starting an election, since we are not an electable single node»: il periodo di `rs.stepDown()` che scorre |
+| `11:52:40.111` | `4615660` | `ELECTION` | «Starting an election for a priority takeover» |
+| `11:52:40.111` | `21438` | `ELECTION` | «Conducting a dry run election…» — qui il giro a vuoto **c'è**, perché nessuno lo ha invitato |
+| `11:52:40.116` | `21450` | `ELECTION` | «Election succeeded, assuming primary role» |
+
+`4615601` è la riga più utile di tutte per chi proietta un log dal vivo: compare **tre millisecondi
+dopo la dimissione** e annuncia, con l'ora scritta nell'attributo, che il primario tornerà. Dieci
+secondi di preavviso su ciò che sta per succedere sullo schermo.
+
+**Le tre prime righe, in una tabella sola.** È l'unica parte di questa sezione da ricordare a
+memoria:
+
+| `id` | primo messaggio | che cosa è successo |
+| ---: | --- | --- |
+| `4615652` | «…since we've seen no PRIMARY in election timeout period» | **guasto**: nessuno ha avvisato, il timeout è scaduto |
+| `4615661` | «…due to step up request» | **manutenzione**: qualcuno ha chiesto le dimissioni |
+| `4615660` | «…for a priority takeover» | **configurazione**: un nodo a priorità più alta si riprende il posto |
+
+`21450` «Election succeeded» è identica in tutti e tre i casi: è la riga che si è tentati di
+cercare, ed è l'unica che non dice niente su che cosa sia successo.
+
+**Il log del votante non serve.** Sul membro che ha votato e non è stato eletto compaiono
+`id: 23980` «Responding to vote request» — due volte con il guasto, una sola con la dimissione,
+perché il giro a vuoto non c'è — e `id: 21215` «Member is in new state». Chi guarda lì conclude
+che un'elezione non lasci quasi traccia, ed è l'errore più facile da commettere: **si legge il log
+dell'eletto**, e prima di leggerlo bisogna sapere chi è.
+
+<a id="34-i-numeri-da-non-copiare"></a>
+### 3.4 I numeri da non copiare
+
+- **Il termine.** In [V-030](../Sources.md#v-030) va da 13 a 14 perché quel set aveva già subìto
+  altre prove. Su un set appena creato sarebbe 1 → 2. Il termine conta solo relativamente: ciò che
+  importa è che salga di uno, non quanto valga.
+- **Gli orari.** Le due elezioni sono state lette in giorni diversi e su macchine scariche. I sei
+  millisecondi del voto reggono; i nove secondi di attesa sono un timeout di configurazione e
+  reggono ancora meglio; tutto il resto è tempo di questa macchina.
+- **Il numero di `23974`.** Diciannove ripetizioni sono nove secondi diviso il ritmo dei battiti su
+  tre membri. Con più membri sono di più, e non significa niente di diverso.
+- **L'elezione contesa non è stata osservata.** Due candidati nello stesso termine, con un giro a
+  vuoto che fallisce, è il caso in cui `21438` e `21444` divergono — e qui non è mai capitato.
 
 ---
 
@@ -403,14 +498,19 @@ questa sezione si riempirà di numeri, come le prime due.
   stato usato qui: alzarla senza sapere cosa si cerca produce rumore che nasconde il segnale.
 - **Non dice niente sull'audit log.** È una funzione di MongoDB Enterprise; `logRotate` la nomina
   (`"audit"`), il lab non ce l'ha.
-- **Non contiene gli `id` di un'elezione.** Vedi il riquadro della
-  [sezione 3](#3-cosa-cercare-durante-unelezione).
+- **Non contiene gli `id` di un rollback.** `ROLLBACK` è nella tabella dei componenti perché
+  è il caso che rende concreto `w: "majority"`, ma un rollback vero non è mai stato provocato qui:
+  le sue righe non sono state lette e la [§3.2](#32-dove-guardare-quattro-componenti) lo dice
+  nominando il componente e non i numeri.
+- **Non contiene il log di un `initial sync`.** `INITSYNC` esiste, e compare quando un membro
+  nuovo copia tutto da zero. Nel lab i tre membri nascono insieme e vuoti, quindi non si è mai
+  visto.
 - **Non dice come si spediscono i log altrove.** Driver di logging di Docker diversi da quello
   predefinito, raccoglitori, indicizzazione: legittimi, e a distanza di sicurezza da un talk che
   deve funzionare senza rete.
 
 ---
 
-**Decisioni correlate:** [ADR-0035](../Decision.md#adr-0035) (citare per `id`, e dichiarare cosa non è stato misurato), [ADR-0030](../Decision.md#adr-0030) (i log su `stdout` e il tetto alla loro crescita), [ADR-0005](../Decision.md#adr-0005) (il lab senza autenticazione, che il server segnala a ogni avvio), [ADR-0004](../Decision.md#adr-0004) (il tetto di memoria che genera due delle sei `W`), [ADR-0031](../Decision.md#adr-0031) (lo script di inizializzazione e le sue righe non-JSON), [ADR-0034](../Decision.md#adr-0034) (perché l'elezione non si provoca con `docker kill`).
+**Decisioni correlate:** [ADR-0035](../Decision.md#adr-0035) (citare per `id`, e dichiarare cosa non è stato misurato), [ADR-0049](../Decision.md#adr-0049) (il debito saldato eseguendo, e la frase di §3.1 corretta), [ADR-0030](../Decision.md#adr-0030) (i log su `stdout` e il tetto alla loro crescita), [ADR-0005](../Decision.md#adr-0005) (il lab senza autenticazione, che il server segnala a ogni avvio), [ADR-0004](../Decision.md#adr-0004) (il tetto di memoria che genera due delle sei `W`), [ADR-0031](../Decision.md#adr-0031) (lo script di inizializzazione e le sue righe non-JSON), [ADR-0034](../Decision.md#adr-0034) (perché l'elezione non si provoca con `docker kill`), [ADR-0044](../Decision.md#adr-0044) (le due morti di un primario, e i due bersagli del `Makefile`).
 
-**Fonti:** [S-042](../Sources.md#s-042), [S-043](../Sources.md#s-043), [S-044](../Sources.md#s-044), [V-010](../Sources.md#v-010), [V-011](../Sources.md#v-011), [V-012](../Sources.md#v-012), [V-017](../Sources.md#v-017), [V-019](../Sources.md#v-019)
+**Fonti:** [S-042](../Sources.md#s-042), [S-043](../Sources.md#s-043), [S-044](../Sources.md#s-044), [V-010](../Sources.md#v-010), [V-011](../Sources.md#v-011), [V-012](../Sources.md#v-012), [V-017](../Sources.md#v-017), [V-019](../Sources.md#v-019), [V-029](../Sources.md#v-029), [V-030](../Sources.md#v-030), [V-042](../Sources.md#v-042), [V-044](../Sources.md#v-044)

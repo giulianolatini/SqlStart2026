@@ -1282,7 +1282,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 - **Riserve:** la pagina è scritta pensando ad Atlas e a installazioni sull'host. Il caso di
   questo lab — `mongosh` che vive **dentro** il container a cui si connette — non è contemplato,
   e cambia il significato di «localhost» ([V-018](#v-018)).
-- **Usata da:** ADR-0036, ADR-0045
+- **Usata da:** ADR-0036, ADR-0045, ADR-0049
 
 ---
 
@@ -3956,7 +3956,7 @@ timeout da far scadere, e restano solo i millisecondi del voto.
   **secondario** — che non provoca nessuna elezione — non è cronometrato qui perché non ha niente
   da cronometrare.
 - **Data:** 2026-08-31
-- **Usata da:** ADR-0044, ADR-0046
+- **Usata da:** ADR-0044, ADR-0046, ADR-0049
 
 ---
 
@@ -4022,7 +4022,7 @@ di quello che salva.
   commettere. Infine non è stata osservata un'elezione *contesa* — due candidati nello stesso
   termine, con un `dry run` che fallisce — che è il caso in cui `21438` e `21444` divergono.
 - **Data:** 2026-08-31
-- **Usata da:** ADR-0044, ADR-0046
+- **Usata da:** ADR-0044, ADR-0046, ADR-0049
 
 ---
 
@@ -4676,3 +4676,367 @@ x509-san   tls=true   -> connessione chiusa
 - **Usata da:** ADR-0048
 
 ---
+
+<a id="v-041"></a>
+### V-041 — «Too open» non vuol dire leggibile da tutti: basta un bit fuori dal proprietario
+
+- **Comandi:** `openssl rand -base64 756 > /kf` · `chmod <permessi> /kf` ·
+  `gosu mongodb mongod --replSet rs0 --keyFile /kf --dbpath /data/db2 --bind_ip 127.0.0.1`
+- **Ambiente:** sei container usa-e-getta dall'immagine pinnata
+  `mongo@sha256:b6421fd6…`, `mongod` 7.0.40, keyfile di 1024 byte con proprietario `mongodb:mongodb`
+  in tutti i casi. L'unica variabile è il permesso.
+- **Che cosa si voleva sapere:** il messaggio esatto che `mongod` produce quando il keyfile ha
+  permessi larghi era stato preso al Task 2 di `feature/02` e trascritto nel
+  [registro](registro-operativo-sviluppo.md), ma **non era mai entrato in questo file**: era
+  l'unico debito documentale dichiarato aperto dai primi due task. Qui viene ripreso, e insieme si
+  chiede la cosa che il registro non diceva — **dove passa la soglia**.
+
+- **Esito, la soglia:**
+
+```
+-r--------  400   parte, arriva a «Listening on»
+-rw-------  600   parte, arriva a «Listening on»
+-rw-r-----  640   RIFIUTATO   uscita 1
+-rw-r--r--  644   RIFIUTATO   uscita 1
+-r--r--r--  444   RIFIUTATO   uscita 1
+-r-------x  401   RIFIUTATO   uscita 1
+```
+
+**La soglia non è «leggibile da tutti»: è «un bit qualsiasi acceso fuori dal proprietario».** `640`
+concede la lettura al solo gruppo e viene rifiutato come `644`. `401` non concede nessuna lettura a
+nessuno — concede il bit di *esecuzione* al mondo, che su un file di chiavi non significa niente — e
+viene rifiutato lo stesso. Le due combinazioni che passano sono `400` e `600`.
+
+- **Esito, le due righe di log** (identiche in tutti e quattro i casi rifiutati):
+
+```json
+{"s":"I",  "c":"ACCESS",  "id":20254, "ctx":"main", "msg":"Read security file failed",
+ "attr":{"error":{"code":30,"codeName":"InvalidPath",
+                  "errmsg":"permissions on /kf are too open"}}}
+{"s":"F",  "c":"CONTROL", "id":20575, "ctx":"main", "msg":"Error creating service context",
+ "attr":{"error":"Location5579201: Unable to acquire security key[s]"}}
+```
+
+**La riga che spiega è informativa; la riga fatale non spiega.** `"s":"I"` porta il nome del file e
+la parola `permissions`; `"s":"F"`, che è quella che il container stampa per ultima prima di
+morire, dice soltanto «Unable to acquire security key[s]» e non nomina né i permessi né il
+percorso. Chi filtra per severità — la prima cosa che si fa davanti a un container che esce subito
+— trova la riga muta e perde quella utile. I due identificatori sono `id: 20254` per la causa e
+`id: 20575` per l'effetto, e valgono più del testo perché il testo cambia fra versioni
+([ADR-0035](Decision.md#adr-0035), regola 1).
+
+- **Conseguenza:** entra come voce **12** in
+  [`02-architetture/trappole-mongodb-in-docker.md`](02-architetture/trappole-mongodb-in-docker.md#t-12),
+  con il sintomo per titolo. È anche la ragione per cui `docker/02-replicaset/init/01-keyfile.sh`
+  genera il keyfile **dentro un volume nominato** e non lo monta dall'host: su un bind mount da
+  macOS i permessi del file non sono quelli che si sono scritti.
+- **Riserve:** provato su `mongod` 7.0.40 su Linux dentro container. Il controllo dei permessi non
+  esiste su Windows, dove la documentazione del keyfile non lo nomina; qui non è stato verificato.
+  Non è stato provato il caso del **proprietario sbagliato** con permessi stretti (`400` ma
+  `root:root` mentre `mongod` gira come `mongodb`), che produce un errore diverso — di lettura, non
+  di permessi larghi — e che nel lab non può capitare perché lo script genera e assegna il file
+  nello stesso gesto.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0049
+
+---
+
+<a id="v-042"></a>
+### V-042 — I comandi di amministrazione del replica set, eseguiti: due righe della guida erano sbagliate
+
+- **Comandi:** `rs.status()` · `rs.conf()` · `rs.reconfig()` · `replSetReconfig` ·
+  `rs.printSecondaryReplicationInfo()` · `rs.stepDown()` · `rs.add()` · `rs.remove()` ·
+  `rs.initiate()` · `db.getMongo().setReadPref()`, dati sia al primario sia a un secondario
+- **Ambiente:** stack `docker/02-replicaset`, tre membri sani, `mongosh` 2.10.0 dentro
+  l'immagine pinnata, `lab.ordini` con 50 000 documenti.
+- **Che cosa si voleva sapere:** [ADR-0036](Decision.md#adr-0036), regola 6, aveva marcato
+  «**non eseguito su questo branch**» tutta la §3.2 della guida a `mongosh`. Questo è il branch che
+  la deve eseguire. La domanda non è «funzionano?» ma «la guida dice il vero?».
+
+- **Esito 1 — la lettura da un secondario funziona, e la guida diceva il contrario.** La §3.2
+  avvertiva: «un secondario non risponde alle letture finché non glielo si dice». Misurato su
+  `mongo-rs-2`, collegandosi al nodo e basta:
+
+```
+nodo=mongo-rs-2:27017  scrivo=false  secondario=true
+readPrefMode = primary
+countDocuments        -> 50000
+find().limit(1)       -> 1 documento
+runCommand({find:…})  -> 1 documento
+insertOne             -> NotWritablePrimary: not primary
+```
+
+Nessun `setReadPref`, nessun `secondaryOk`, e la lettura passa. La stessa pagina lo diceva già
+correttamente in §1.5 — «`mongodb://nodo1:27017/` parla con **quel nodo**, anche se è un
+secondario» — quindi la guida **contraddiceva se stessa**, e la misura sta con §1.5. Quello che
+resta vero è la seconda metà: la **scrittura** su un secondario è rifiutata, con
+`NotWritablePrimary: not primary`.
+
+- **Esito 2 — dire il nome di un secondario non basta a parlarci.** La stessa interrogazione, con
+  tre modi di scrivere «collegati a `mongo-rs-2`»:
+
+```
+--host mongo-rs-2:27017         uri …?directConnection=true      servito da mongo-rs-2  (secondario)
+--host rs0/mongo-rs-2:27017     uri …?replicaSet=rs0             servito da mongo-rs-1  (primario)
+…?directConnection=false        uri …&directConnection=false     servito da mongo-rs-1  (primario)
+```
+
+Nei due casi in cui il driver conosce il replica set, il nodo che si è nominato viene usato come
+*seme* e poi scartato: si finisce sul primario. È la conferma misurata delle quattro eccezioni di
+[S-045](#s-045), ed è la ragione per cui `readPreference` da sola non manda le letture a un
+secondario.
+
+- **Esito 3 — le funzioni `rs.print*` non stampano niente dentro `--file`.**
+
+```
+rs.printSecondaryReplicationInfo();          nessun output
+print(rs.printSecondaryReplicationInfo());   source: mongo-rs-2:27017
+                                             { syncedTo: '…', replLag: '0 secs (0 hrs) behind the primary ' }
+                                             ---
+                                             source: mongo-rs-3:27017
+                                             { syncedTo: '…', replLag: '0 secs (0 hrs) behind the primary ' }
+```
+
+Non stampano: **restituiscono un oggetto**, che nella shell interattiva viene stampato dal ciclo di
+valutazione e in uno script no. Vale per `rs.printSecondaryReplicationInfo()` e per
+`rs.printReplicationInfo()`. È la stessa famiglia di sorprese della «regola dell'ultimo» di
+[V-020](#v-020), su un'altra strada.
+
+- **Esito 4 — `rs.reconfig()` disarma il controllo che il server fa.** Il comando grezzo protegge:
+
+```
+replSetReconfig(version=1)  su una configurazione a version=3
+  -> NewReplicaSetConfigurationIncompatible: New replica set configuration version and term
+     must be greater than old, but {version: 1, term: 38} is not greater than
+     {version: 3, term: 38} for replica set rs0
+replSetReconfig(version+1)  -> ok=1
+```
+
+L'aiuto di `mongosh`, no:
+
+```
+rs.reconfig(<configurazione con version: 1>)  -> ok=1,  version finale 3
+```
+
+`rs.reconfig()` **riscrive il numero di versione** con quello corrente più uno prima di spedire, e
+quindi il rifiuto non arriva mai. Chi si fida del ciclo leggi-modifica-riscrivi come di una
+protezione contro le modifiche concorrenti si fida di una protezione che l'aiuto ha tolto.
+
+- **Esito 5 — gli stessi comandi dati a un secondario:**
+
+```
+rs.conf()                    -> version=4          (si legge: la configurazione è replicata)
+rs.reconfig(rs.conf())       -> NotWritablePrimary: New config is rejected :: caused by ::
+                                replSetReconfig should only be run on a writable PRIMARY.
+                                Current state SECONDARY;
+rs.add("mongo-rs-9:27017")   -> identico al precedente  (rs.add è un rs.reconfig)
+rs.remove("mongo-rs-3:27017")-> identico al precedente
+rs.initiate()                -> AlreadyInitialized: already initialized
+rs.stepDown(20)              -> NotWritablePrimary: not primary so can't step down
+rs.stepDown(1)               -> BadValue: stepdown period must be longer than
+                                secondaryCatchUpPeriodSecs
+```
+
+Due dettagli che si vedono solo eseguendo. `rs.add` e `rs.remove` non hanno un errore proprio:
+dicono `replSetReconfig`, perché sono `replSetReconfig`. E `rs.stepDown(1)` viene rifiutato **per
+l'argomento prima che per il ruolo** — il periodo predefinito di attesa dei secondari è 10 secondi,
+e un `rs.stepDown(<meno di 10>)` fallisce su qualunque nodo, primario compreso.
+
+- **Esito 6 — `rs.stepDown()` cronometrato, tre giri**, con la disciplina di [V-029](#v-029):
+  osservatore già caldo su `mongo-rs-3`, comando spedito al primario, `hello()` interrogato in un
+  ciclo stretto.
+
+```
+giro 1   nuovo primario mongo-rs-2:27017   dopo   8 ms     ritorno di mongo-rs-1 dopo 11308 ms
+giro 2   nuovo primario mongo-rs-2:27017   dopo 101 ms     ritorno di mongo-rs-1 dopo 11293 ms
+giro 3   nuovo primario mongo-rs-2:27017   dopo  87 ms     ritorno di mongo-rs-1 dopo 11021 ms
+```
+
+**Il terzo termine di paragone del Task 8, ed è il più veloce di tutti.** `docker kill` costa
+~10 000 ms, `shutdownServer()` ~500 ms ([V-029](#v-029)), `rs.stepDown()` fra 8 e 101. Il motivo è
+lo stesso in tutti e tre i casi e sta in [V-030](#v-030): quello che si paga non è l'elezione, sono
+i dieci secondi di `electionTimeoutMillis` che nessuno spende quando il primario **dice** che se ne
+va.
+
+**E poi torna indietro da solo.** Con `mongo-rs-1` a priorità 2, dopo il periodo di
+`rs.stepDown(10)` il nodo si ricandida e riprende il posto: undici secondi dopo il comando il set è
+com'era. Su un palco è una demo che si rimette a posto da sé, e insieme una demo che **si annulla
+mentre la si sta spiegando** se chi parla si dilunga.
+
+- **Esito 7 — la configurazione del lab, letta invece che dichiarata:**
+
+```
+rs.conf()  _id=rs0  members: mongo-rs-1/priority 2  mongo-rs-2/priority 1  mongo-rs-3/priority 1
+           settings.electionTimeoutMillis   = 10000
+           settings.heartbeatIntervalMillis = 2000
+           settings.catchUpTimeoutMillis    = -1
+rs.status() majorityVoteCount=2  writeMajorityCount=2
+            mongo-rs-2 syncSourceHost = mongo-rs-1:27017
+            mongo-rs-3 syncSourceHost = mongo-rs-2:27017
+```
+
+I due numeri di [S-044](#s-044) — due secondi di battito, dieci di attesa — non sono
+un'impostazione del lab: sono i valori predefiniti, e il lab non li ha toccati.
+`mongo-rs-3` **non si sincronizza dal primario** ma da `mongo-rs-2`: il concatenamento della
+replica è attivo per impostazione predefinita, e chi guarda `rs.status()` aspettandosi tre frecce
+verso il primario ne trova due in fila.
+
+- **Conseguenza:** la §3.2 della guida perde la marcatura «non eseguito» per tutto ciò che è
+  elencato qui, e la corregge dove la misura la smentisce. La §3.3, sullo sharded cluster, **resta
+  marcata**: è dovuta a `feature/03`. Registrato in [ADR-0049](Decision.md#adr-0049).
+- **Riserve:** `rs.add()` e `rs.remove()` sono stati eseguiti **solo nella forma che fallisce**, su
+  un secondario: aggiungere un quarto membro richiede un quarto container che questo stack non ha,
+  e togliere un membro vivo romperebbe le prove che vengono dopo. La riga della tabella resta, con
+  la marcatura. Il ritorno del primario a priorità 2 è una seconda elezione e non è stato
+  cronometrato a parte. Le tre esecuzioni di `rs.stepDown()` sono su una macchina sola e senza
+  carico: la distanza fra 8 e 101 ms è rumore di scheduling, non un fenomeno.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0049
+
+---
+
+<a id="v-043"></a>
+### V-043 — Il driver riceve i nomi di dentro: `ENOTFOUND` su un host che nessuno ha scritto
+
+- **Comandi:** `docker run --rm <immagine> mongosh "<stringa>"` da un container **fuori** dalla
+  rete Compose e da uno **dentro**, contro le porte pubblicate `27021`/`27022`/`27023`
+- **Ambiente:** stack `docker/02-replicaset` in esecuzione e sano, rete
+  `sqlstart-02-replicaset_default`, `mongosh` 2.10.0.
+- **Che cosa si voleva sapere:** [ADR-0033](Decision.md#adr-0033) aveva nominato, fra le trappole
+  che `feature/02` avrebbe aggiunto, la «scoperta della topologia». Questa è la misura che la
+  rende una voce.
+
+- **Esito:**
+
+```
+1. da FUORI, mongodb://…@host.docker.internal:27021/?replicaSet=rs0
+   -> MongoNetworkError: getaddrinfo ENOTFOUND mongo-rs-2
+
+2. da FUORI, mongodb://…@host.docker.internal:27021/?directConnection=true
+   -> servito da mongo-rs-1:27017
+      hosts   = ["mongo-rs-1:27017","mongo-rs-2:27017","mongo-rs-3:27017"]
+      primary = mongo-rs-1:27017
+      ordini  = 50000
+
+3. da FUORI, i tre indirizzi pubblicati e nessuna opzione
+   mongodb://…@host.docker.internal:27021,host.docker.internal:27022,host.docker.internal:27023/
+   -> MongoNetworkError: getaddrinfo ENOTFOUND mongo-rs-2
+
+4. da DENTRO la rete, mongodb://…@mongo-rs-1:27017/?replicaSet=rs0
+   -> servito da mongo-rs-1:27017, ordini = 50000
+```
+
+**Il caso 2 contiene la spiegazione dei casi 1 e 3.** La connessione diretta riesce, e la prima
+cosa che stampa è l'elenco `hosts`: tre nomi di servizio Compose, che dentro la rete risolvono e
+fuori no. Il replica set non conosce le porte pubblicate sull'host — conosce i nomi con cui i
+membri sono stati configurati — e li consegna a chiunque chieda. Il client li prende per buoni,
+butta via l'indirizzo che gli era stato dato e prova quelli.
+
+**Il caso 3 è quello che sorprende, e va provato prima di scriverlo.** Elencare tutti e tre gli
+indirizzi *pubblicati* sembra la mossa risolutiva e non lo è: una seed list con più host è la terza
+delle quattro eccezioni di [S-045](#s-045) che spengono `directConnection`, quindi il driver
+scopre il replica set e sostituisce i tre indirizzi buoni con i tre nomi che non risolvono. Più
+indirizzi si scrivono, più il fallimento è certo.
+
+**Il nome nel messaggio non è quello che si è scritto, e cambia a ogni tentativo.** Tre esecuzioni
+identiche del caso 1 hanno prodotto `ENOTFOUND mongo-rs-1`, `ENOTFOUND mongo-rs-2`,
+`ENOTFOUND mongo-rs-1`: il driver nomina uno dei tre membri, non necessariamente il primo e mai
+quello digitato. Cercare in rete il nome che compare nell'errore porta quindi fuori strada, perché
+quel nome è un dettaglio locale del `compose.yaml`.
+
+- **Conseguenza:** entra come voce **13** in
+  [`02-architetture/trappole-mongodb-in-docker.md`](02-architetture/trappole-mongodb-in-docker.md#t-13),
+  accanto alla voce [5](02-architetture/trappole-mongodb-in-docker.md#t-05) che ha lo stesso
+  messaggio e una causa diversa: là il nome non risolveva perché il client era fuori rete, qui il
+  nome non lo ha nemmeno scritto il client. Registrato in [ADR-0049](Decision.md#adr-0049).
+- **Riserve:** `host.docker.internal` è un nome di Docker Desktop; su un Docker Engine per Linux
+  l'equivalente si ottiene con `--add-host host.docker.internal:host-gateway`, e non è stato
+  provato. La terza via d'uscita — riconfigurare il replica set con nomi e porte risolvibili da
+  fuori, cioè `rs.reconfig()` sugli `host` dei membri — **non è stata eseguita**: cambierebbe in
+  modo permanente lo stack del lab, che deve restare quello del talk. Non è stato provato il caso
+  intermedio in cui i nomi risolvono ma le porte no, che dà un errore di connessione invece che di
+  risoluzione.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0049
+
+---
+
+<a id="v-044"></a>
+### V-044 — Tre modi di diventare primario, tre prime righe diverse: il log dice se è stato un guasto
+
+- **Comandi:** `rs.stepDown()` sul primario · `docker logs mongo-rs-2` e `docker logs mongo-rs-1`,
+  filtrati per componente `ELECTION` e per `id`
+- **Ambiente:** stack `docker/02-replicaset`, tre membri sani, `mongo-rs-1` a priorità 2 e quindi
+  destinato a riprendersi il posto da solo. Nessun carico.
+- **Che cosa si voleva sapere:** `docs/03-amministrazione/log.md`, §3.1, afferma — ragionando su
+  [S-044](#s-044) e senza aver visto un log — che «la manutenzione ordinaria produce lo stesso
+  tracciato nel log di un incidente, e che leggere una riga di elezione non basta a sapere se c'è
+  stato un problema». Il Task 12 doveva riempire quella sezione di `id`, e prima di riempirla ha
+  controllato la frase.
+
+- **Esito: la frase è falsa, e lo si vede alla prima riga.** Un solo `rs.stepDown(10)` produce
+  **due** elezioni — la dimissione e il rientro del nodo a priorità 2 — e nessuna delle due
+  assomiglia a quella del guasto di [V-030](#v-030).
+
+*Sul nodo che viene eletto al posto di chi si dimette* (`mongo-rs-2`):
+
+```
+11:52:29.687  id=4615661  ELECTION  Starting an election due to step up request
+11:52:29.687  id=21437    ELECTION  Skipping dry run and running for election
+                                    attr: newTerm=39
+11:52:29.688  id=6015300  ELECTION  Storing last vote document in local storage for my election
+11:52:29.690  id=51799    ELECTION  VoteRequester processResponse
+                                    attr: dryRun=false, vote="yes", from=mongo-rs-1:27017
+11:52:29.690  id=21450    ELECTION  Election succeeded, assuming primary role
+11:52:29.690  id=21358    REPL      Replica set state transition
+                                    attr: newState="PRIMARY", oldState="SECONDARY"
+11:52:29.692  id=21107    REPL      Stopping replication producer
+```
+
+*Sul nodo che si è dimesso e poi si riprende il posto* (`mongo-rs-1`, priorità 2):
+
+```
+11:52:29.685  id=21358    REPL      Replica set state transition  PRIMARY -> SECONDARY
+11:52:29.692  id=4615601  ELECTION  Scheduling priority takeover
+                                    attr: when=2026-09-01T11:52:39.958Z
+11:52:39.685  id=4764800  ELECTION  Not starting an election, since we are not an electable
+                                    single node
+11:52:40.111  id=4615660  ELECTION  Starting an election for a priority takeover
+11:52:40.111  id=21438    ELECTION  Conducting a dry run election to see if we could be elected
+11:52:40.112  id=21444    ELECTION  Dry election run succeeded, running for election
+11:52:40.116  id=21450    ELECTION  Election succeeded, assuming primary role
+```
+
+- **Le tre prime righe, che sono la risposta:**
+
+| `id` | messaggio | che cosa è successo |
+| ---: | --- | --- |
+| `4615652` | «Starting an election, since we've seen no PRIMARY in election timeout period» | **nessuno ha avvisato**: il timeout è scaduto. È un guasto ([V-030](#v-030)) |
+| `4615661` | «Starting an election due to step up request» | qualcuno ha chiesto a un altro nodo di dimettersi. È manutenzione |
+| `4615660` | «Starting an election for a priority takeover» | un nodo a priorità più alta si riprende il posto. È la configurazione che lavora |
+
+- **Due differenze che seguono dalla prima.** Nel caso del guasto compaiono `id: 21216` «Member is
+  now in state DOWN» e diciannove `id: 23974` «Heartbeat failed after max retries»; nel caso della
+  dimissione **non compare nessuna delle due**, perché nessun membro è mai mancato. E il giro a
+  vuoto viene saltato: `id: 21437` «Skipping dry run and running for election» invece della coppia
+  `21438`/`21444`, con un solo `VoteRequester processResponse` invece di due. È la spiegazione dei
+  millisecondi di [V-042](#v-042): chi riceve una richiesta di promozione non ha bisogno di
+  chiedere agli altri se sarebbe eletto, perché glielo hanno appena chiesto.
+- **`4615601` annuncia il futuro.** «Scheduling priority takeover» compare **tre millisecondi dopo
+  la dimissione** e porta nell'attributo l'ora esatta in cui il rientro avverrà. Chi legge il log
+  dal vivo sa già, dieci secondi prima, che il primario sta per tornare. E nel mezzo `4764800`
+  spiega perché non è ancora successo: «Not starting an election, since we are not an electable
+  single node», che è il periodo di `rs.stepDown()` che scorre.
+- **Conseguenza:** la frase di §3.1 viene corretta invece che confermata, e la §3.3 di
+  `docs/03-amministrazione/log.md` riporta tutte e tre le prime righe. Registrato in
+  [ADR-0049](Decision.md#adr-0049). Per chi prepara la demo: la riga da proiettare non è
+  `21450` «Election succeeded» — che è identica in tutti e tre i casi — ma la prima, che è l'unica
+  che distingue.
+- **Riserve:** letto su un set a tre membri con priorità 2/1/1; su un set a priorità tutte uguali
+  il rientro non avviene e `4615660` non compare mai. Non è stato osservato il caso di
+  `rs.stepDown()` con `force: true`, né quello di un `replSetStepUp` chiesto direttamente a un
+  secondario, che è il comando che `4615661` nomina e che qui è arrivato per conseguenza e non per
+  richiesta esplicita. Gli `id` sono di `mongod` 7.0.40: sono stabili, i testi molto meno
+  ([ADR-0035](Decision.md#adr-0035), regola 1).
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0049

@@ -2722,3 +2722,112 @@ la intesta a questa pagina per nome, e un debito si salda dove è scritto, marca
 manca.
 
 **Fonti:** [S-002](Sources.md#s-002), [S-005](Sources.md#s-005), [S-006](Sources.md#s-006), [S-061](Sources.md#s-061), [S-062](Sources.md#s-062), [S-063](Sources.md#s-063), [V-038](Sources.md#v-038), [V-039](Sources.md#v-039), [V-040](Sources.md#v-040)
+
+---
+
+<a id="adr-0049"></a>
+## ADR-0049 — Un debito si chiude eseguendo, e il primo esito è che due righe erano sbagliate
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto.** Tre pagine scritte in `feature/00` e `feature/01` portano una riserva che nomina
+questo branch come sede del saldo, e una di esse la scrive come clausola di non chiusura:
+[ADR-0035](#adr-0035) stabilisce che «la sezione sull'elezione resta con un debito scritto in
+chiaro» finché non si è vista un'elezione vera. [ADR-0036](#adr-0036), regola 6, marca
+«**non eseguito su questo branch**» i comandi di amministrazione del replica set nella guida a
+`mongosh`. [ADR-0033](#adr-0033) annuncia due trappole che `feature/02` dovrà aggiungere:
+**permessi del keyfile** e **scoperta della topologia**.
+
+C'è anche un debito più piccolo e più preciso, dichiarato nel
+[registro](registro-operativo-sviluppo.md) alla chiusura del Task 2: il messaggio d'errore del
+keyfile con permessi larghi era stato misurato ma non era mai entrato in
+[`Sources.md`](Sources.md). Era «l'unico debito documentale aperto dai due task chiusi», e lo è
+rimasto per dieci task.
+
+Chiudere questi debiti si può in due modi. Il modo breve è togliere le marcature, perché adesso il
+replica set c'è e i comandi «ovviamente funzionano». Il modo lungo è eseguirli e guardare
+l'output.
+
+**Decisione.**
+
+*Si esegue, e si accetta il rischio che la pagina avesse torto.* È successo due volte. La §3.2
+della guida a `mongosh` avvertiva che «un secondario non risponde alle letture finché non glielo si
+dice»: misurato, risponde — nessun `setReadPref`, `readPreference` a `primary`, e 50 000 documenti
+contati su `mongo-rs-2` ([V-042](Sources.md#v-042)). Peggio: la **stessa pagina** lo diceva già
+giusto in §1.5, dove [S-045](Sources.md#s-045) spiega che una stringa con un solo membro parla con
+quel membro «anche se è un secondario». La guida contraddiceva se stessa, e nessuna rilettura lo
+aveva notato perché entrambe le frasi, da sole, suonano ragionevoli. La correzione tiene §1.5 e
+riscrive §3.2, e la pagina dice **perché** era sbagliata invece di limitarsi a non esserlo più.
+
+*La marcatura si toglie a misura, non a sezione.* Di §3.2 escono dalla marcatura i comandi
+eseguiti; `rs.add()` e `rs.remove()` sono stati provati **solo nella forma che fallisce** — su un
+secondario, dove sono innocui — perché aggiungere un quarto membro richiede un container che questo
+stack non ha e togliere un membro vivo romperebbe le prove successive. Quelle due righe restano
+marcate. La §3.3, sullo sharded cluster, resta marcata per intero ed è dovuta a `feature/03`. È la
+stessa disciplina di [ADR-0048](#adr-0048): il debito si salda dove è scritto, marcando la parte
+che manca.
+
+*Gli `id` dell'elezione entrano nel log citati per numero e con il testo accanto.* La sequenza di
+[V-030](Sources.md#v-030) — da `id: 21216` «Member is now in state DOWN» a `id: 21358` «Replica set
+state transition» — sostituisce la §3.3 di `log.md`, che fino a ieri si intitolava «Il debito, in
+chiaro». La regola 1 di [ADR-0035](#adr-0035) vuole il numero, perché è quello che non cambia fra
+versioni; questa pagina aggiunge il testo accanto, perché un elenco di numeri non insegna a
+nessuno che cosa stia succedendo. Il numero serve a ritrovare, il testo a capire, e servono
+entrambi.
+
+*Il debito più utile era quello che nessuno aveva dichiarato.* Prima di riempire la §3.3 di
+`log.md` con gli `id`, si è controllata la frase che le stava sopra: [S-044](Sources.md#s-044)
+elenca fra le cause di un'elezione anche `rs.stepDown()`, e la pagina ne aveva concluso che «la
+manutenzione ordinaria produce lo stesso tracciato nel log di un incidente». Misurato: è falso, e
+si vede alla **prima riga**. `4615652` dice «since we've seen no PRIMARY in election timeout
+period» ed è un guasto; `4615661` dice «due to step up request» ed è una manutenzione; `4615660`
+dice «for a priority takeover» ed è la configurazione che lavora ([V-044](Sources.md#v-044)). La
+conclusione era ragionevole e sbagliata, e sarebbe rimasta in pagina se il Task si fosse limitato a
+incollare gli `id` che gli erano stati chiesti.
+
+*Le due trappole nuove portano il sintomo per titolo, e una delle due ha una soglia che nessuno si
+aspetta.* Voce 12: `mongod` non parte e dice che il keyfile è «too open». Il registro aveva il
+messaggio dal Task 2; qui si è chiesto anche **dove passa la soglia**, e la risposta è che non è
+«leggibile da tutti» ma «un bit qualsiasi acceso fuori dal proprietario»: `640` viene rifiutato
+come `644`, e `401` — che non concede lettura a nessuno — viene rifiutato lo stesso
+([V-041](Sources.md#v-041)). Voce 13: il driver riceve dalla topologia i nomi di servizio Compose e
+fallisce con `getaddrinfo ENOTFOUND` su un host che chi ha scritto la stringa non ha mai nominato
+([V-043](Sources.md#v-043)).
+
+*La voce 13 dice anche quale rimedio non funziona.* Elencare tutti e tre gli indirizzi pubblicati è
+la mossa che viene in mente per prima, ed è quella che peggiora le cose: una seed list con più host
+spegne `directConnection` — terza delle quattro eccezioni di [S-045](Sources.md#s-045) — quindi il
+driver scopre il replica set e butta via proprio gli indirizzi buoni. Una pagina di trappole che
+elenca solo i rimedi che funzionano lascia il lettore a scoprire da solo quello che non funziona,
+che è il tempo che gli si voleva risparmiare.
+
+*Quello che si misura per strada si tiene, anche se nessuno l'aveva chiesto.* `rs.stepDown()`
+cronometrato dà 8, 101 e 87 millisecondi ([V-042](Sources.md#v-042)): è il terzo termine di
+paragone accanto ai ~10 000 ms di `docker kill` e ai ~500 di `shutdownServer()`
+([V-029](Sources.md#v-029)), e completa la scala che il Task 8 aveva lasciata a due punti. Il
+`mongo-rs-1` a priorità 2 si riprende il posto undici secondi dopo, il che rende la scena
+autopulente e insieme fragile: chi la spiega con calma se la vede annullare a metà spiegazione.
+
+**Conseguenze.** `docs/03-amministrazione/log.md` perde due riquadri di riserva e la §3.3 cambia
+titolo; `docs/04-mongosh/guida-mongosh.md` perde la marcatura della §3.2 e ne corregge il testo;
+`docs/02-architetture/trappole-mongodb-in-docker.md` passa da undici a tredici voci e la sua
+premessa smette di promettere le trappole del replica set al futuro. Il debito documentale del
+Task 2 è chiuso: la misura del keyfile ha finalmente una voce in [`Sources.md`](Sources.md).
+[S-045](Sources.md#s-045) acquisisce il terzo ADR che la cita, [V-029](Sources.md#v-029) e
+[V-030](Sources.md#v-030) il terzo. [S-044](Sources.md#s-044) resta dov'era: la sua affermazione non è stata smentita, è stata smentita l'inferenza che questo repository ne aveva tratto.
+
+Resta aperto quello che è marcato: `rs.add()`/`rs.remove()` nella forma che riesce, tutta la §3.3
+sullo sharded cluster, e le trappole dei config server e del bilanciamento che
+[ADR-0033](#adr-0033) intesta a `feature/03`.
+
+**Alternative scartate:** togliere le marcature senza eseguire, perché adesso il replica set esiste
+— avrebbe lasciato in pagina le due frasi sbagliate, e sono esattamente le due che un lettore
+avrebbe copiato; eseguire e correggere **in silenzio**, riscrivendo la frase giusta senza dire che
+c'era quella sbagliata — costa una riga in meno e toglie al lettore l'unica cosa che gli insegna a
+diffidare, cioè che una guida può contraddirsi in due sezioni distanti quaranta righe; scrivere le
+due trappole nuove dal registro, che il messaggio del keyfile ce l'aveva già — non sarebbe emersa
+la soglia, che è la parte che non si indovina; riconfigurare il replica set con nomi risolvibili da
+fuori per mostrare la terza via d'uscita della voce 13 — cambierebbe in modo permanente lo stack
+del talk, e la via d'uscita si può descrivere senza prenderla.
+
+**Fonti:** [S-045](Sources.md#s-045), [V-029](Sources.md#v-029), [V-030](Sources.md#v-030), [V-041](Sources.md#v-041), [V-042](Sources.md#v-042), [V-043](Sources.md#v-043), [V-044](Sources.md#v-044)
