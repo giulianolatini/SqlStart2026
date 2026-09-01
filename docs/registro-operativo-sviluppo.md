@@ -3289,3 +3289,93 @@ residui contati a zero: nessun container, nessun volume, nessuna rete.
      regola operativa che ne esce: la fonte si rilegge **quando si scrive la voce in `Sources.md`**,
      non quando si copia la frase — sono due momenti diversi, e il secondo è l'unico in cui si sta
      guardando la pagina intera invece della frase che serviva.
+
+## Punto di ripresa — 2026-09-01, quarta sospensione: `feature/03` riparte dal Task 7
+
+**Deciso e chiuso.** I Task **1-6** del
+[piano di `feature/03`](00-progetto/2026-09-01-piano-feature-03-stack-sharded.md) sono chiusi, tutti
+verificati eseguendo. Lo stack 03 **è completo e funziona con un comando solo**: undici servizi nel
+profilo `palco`, diciotto in `completo`, e una catena di sei anelli — `keyfile-init` →
+(`cfg-init`, `shard1-init`, `shard2-init`) → `mongos` → `add-shard` → `seed` → sentinella `up-03`.
+Decisioni fino a **ADR-0065**, verifiche fino a **V-058**, fonti fino a **S-067**, note di metodo
+fino a **108**. Otto commit sul ramo, l'ultimo è `f15092b`, tutti spinti su
+`origin/feature/03-stack-sharded`.
+
+Quello che resta fuori dallo stack è **solo** ciò che non è topologia: i bersagli del `Makefile`
+(Task 7) e le pagine (Task 8-10). Il file Compose non ha altri servizi da ricevere.
+
+**Misurato oggi, e da non rimisurare.**
+
+- **I sei modi di sbagliare i ruoli** ([V-057](Sources.md#v-057)): cinque su sei danno un messaggio
+  che nomina l'opzione mancante. Il sesto — `cfgsr` per `cfgrs` dentro `--configdb` — è muto:
+  `up --wait` esce 1 dopo **94 secondi** e la stringa giusta non compare **zero volte** nel log del
+  router. È il caso che giustifica le cinque regole nuove di `check_stack.py`.
+- **La distribuzione** ([V-058](Sources.md#v-058)): con `{_id: "hashed"}` su collezione vuota,
+  **4 chunk** e **9860 / 10140** documenti, cioè 49,3 % / 50,7 %. **Identica nei due profili**, e i
+  quattro chunk sono il predefinito documentato di [S-066](Sources.md#s-066), non un numero
+  emergente.
+- **Il baratto della shard key**, misurato: `{_id: 42}` interroga **uno** shard,
+  `{_id: {$gte: 100, $lt: 200}}` li interroga **tutti e due**.
+- **Gli utenti stanno sui config server**: le credenziali del cluster danno `Authentication failed`
+  su uno shard interrogato in diretta, e funzionano su `cfg1`. Conseguenza operativa: le misure
+  interne dei nodi si leggono da `docker inspect` e dalla riga `cache_size=…` del log, **non** da
+  `hostInfo()`.
+- **`/data/db` risulta montato anche su `mongos`**, perché l'immagine dichiara `VOLUME /data/db`.
+  Il discriminante fra nodo e router è il volume **nominato**, non la destinazione.
+- **Tempi e impronte:** `up -d --wait` a uscita 0 in **23 s** (`palco`) e **36 s** (`completo`),
+  dataset compreso; secondo `up` idempotente. Impronta di `lab.ordini`:
+  **`20000 50083417.93 60278`** — sono i primi 20 000 dei 50 000 degli stack 01 e 02, quindi
+  **diversa** dall'impronta di `smoke-01` e `smoke-02`, e deve esserlo. Porte **27117** e **27118**.
+- **Le prove:** `tools/smoke-sharded.sh` a **62 controlli · 0 errori** su `palco` e **99 · 0** su
+  `completo`; `make tools-test` **125 passed**; `make stack-check` **tre stack conformi**;
+  `make docs-check` verde.
+
+**Prossimo passo, in ordine.**
+
+1. **Task 7** — `Makefile`, `tools/reset-demo.sh`, `tools/preflight.sh`. Tre avvertenze che valgono
+   più del passo: *(a)* lo stack 03 si avvia con **un** comando — `up -d --wait` e basta — mai con
+   i due di `up-02`, perché la sentinella rende `up --wait` onesto ([ADR-0062](Decision.md#adr-0062))
+   e `docker compose wait add-shard` dopo un `up` riuscito risponde «no containers for project» e
+   esce 1; *(b)* `seed-03` va scritto come `seed-02`, cioè
+   `$(COMPOSE_03) run --rm -e RICARICA=1 seed` (`Makefile:147` è il modello); *(c)* `STACK_03` e la
+   riga di `stack-check` **esistono già**, sono entrate al Task 5.
+2. **Task 8** — `docs/02-architetture/sharded-cluster.md`. Il materiale è già scritto e citato:
+   il blocco `LA SHARD KEY` di `docker/03-sharded/init/30-dati-demo.js`,
+   [ADR-0064](Decision.md#adr-0064) e le due fonti. La pagina lo raccoglie, non lo riscopre.
+3. **Task 9** — i debiti marcati, che si chiudono **eseguendo** ([ADR-0049](Decision.md#adr-0049)).
+4. **Task 10** — la riserva del Blocco 3.
+5. **Task 11** — ADR, fonti e chiusura del ramo **con la PR**. Mai `git flow feature finish`.
+
+**Un debito aperto, che il Task 7 dovrebbe guardare.** [ADR-0062](Decision.md#adr-0062) ha lasciato
+in sospeso se il pattern a due comandi di `up-02` sia fragile: funziona solo perché `up --wait`
+torna prima che `rs-init` abbia finito. Non è verificabile da questo worktree, perché il `.env`
+dello stack 02 vive nel checkout principale ([ADR-0056](Decision.md#adr-0056)).
+
+**Stato dell'ambiente alla sospensione, e come rimetterlo.** Dello stack 03 **non resta niente**:
+zero container, zero volumi, zero reti, e nessun `.env` — quello usato per le prove era di scarto ed
+è stato cancellato. Prima di qualunque avvio dello stack 03 va quindi **creato** il file:
+
+```
+cp docker/03-sharded/.env.example docker/03-sharded/.env   # poi riempire PASSWORD_AMMINISTRATORE
+```
+
+e per il profilo `completo` vanno **anche** scommentate le tre righe `MEMBRI_*` a tre membri, perché
+il profilo da solo accende i container ma non cambia il numero di membri che gli init configurano —
+si otterrebbero nove `mongod` accesi e tre replica set a un membro. Il file è ignorato da git e,
+a merge avvenuto, la sua sede è il **checkout principale** (ADR-0056): dentro un worktree è
+invisibile a `git status` e `git worktree remove` lo cancella in silenzio.
+
+Restano invece accesi i tre `mongod` dello **stack 02** (`sqlstart-02-replicaset`), avviati dal
+checkout principale e **lasciati deliberatamente dov'erano**: non appartengono a questa sessione, e
+su un progetto con più sessioni in parallelo smontare un `up` altrui non è una pulizia, è una
+perdita di dati per qualcun altro. Si fermano, volendo, con `make down-02` dal checkout principale.
+
+**Comandi per verificare che lo stato sia quello descritto.**
+
+```
+git -C .claude/worktrees/feature-03-stack-sharded log --oneline -1   # f15092b
+git status --porcelain                                              # vuoto
+docker ps -a --filter name=sh- -q | wc -l                           # 0
+docker volume ls --filter name=sqlstart-03 -q | wc -l               # 0
+make tools-test && make stack-check && make docs-check              # 125 · 3 · verde
+```
