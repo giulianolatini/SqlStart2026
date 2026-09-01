@@ -1702,9 +1702,16 @@ c'è, pausa di **10 155 ms** dovuta ai retryable write ([V-033](Sources.md#v-033
    non prima perché `mongodump --oplog` **richiede** un oplog. Il piano è netto su un punto: i
    comandi che finiscono nella pagina sono comandi **eseguiti**, e il restore si verifica contando
    i documenti e confrontando l'impronta, come fa `smoke-02`.
-2. **Task 12** — la pagina delle trappole, con i **sei** debiti già elencati nel punto di ripresa
+2. **Task 11** — `docs/03-amministrazione/sicurezza-keyfile-x509.md`. La cartella
+   `docs/04-sicurezza/` non esiste: la pagina va dove la mette il piano.
+3. **Task 12** — la pagina delle trappole, con i **sei** debiti già elencati nel punto di ripresa
    precedente, che restano tutti aperti.
-3. **Task 14** — la PR. **Mai `git flow feature finish`**.
+4. **Task 13** — `docs/05-talk/registrazioni/` e le prime registrazioni.
+5. **Task 14** — ADR, fonti e chiusura del branch con la PR. **Mai `git flow feature finish`**.
+
+Il punto di ripresa precedente nominava solo i Task 9, 12 e 14: era un elenco parziale, non una
+decisione di saltare gli altri. Del piano di `feature/02` restano aperti **tutti** i task dal 10 al
+14, e questa è la loro lista completa.
 
 **Attenzione per chi riprende.** Lo stack 02 è avviato e sano, impronta `50000 124861860.70 150281`,
 smoke 42/0 rieseguito a fine sessione. La prova di [V-033](Sources.md#v-033) crea una collezione di
