@@ -1713,7 +1713,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   arrivare alla conseguenza che serve qui, cioè che passando `--env-file` sparisce anche il `.env`
   che sta **accanto al file indicato con `-f`**. Sono due frasi distanti sulla stessa pagina, e la
   conclusione è una deduzione: la misura diretta è in [V-025](#v-025).
-- **Usata da:** ADR-0041, ADR-0042
+- **Usata da:** ADR-0041, ADR-0042, ADR-0052
 
 <a id="s-057"></a>
 ### S-057 — `docker compose wait` e `docker compose up --wait`: che cosa dichiarano di attendere
@@ -1741,7 +1741,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   suo lavoro ed esce.** La distinzione fra un container che resta su e uno che muore per
   progetto non compare da nessuna parte sulla pagina di `up`. Non è un dettaglio di lettura: è
   esattamente il buco in cui cade lo stack di questo repository, misurato in [V-025](#v-025).
-- **Usata da:** ADR-0041
+- **Usata da:** ADR-0041, ADR-0052
 
 ---
 
@@ -2006,6 +2006,92 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   registrata qui per il suo **costo**, che è il termine di paragone onesto con il keyfile: non è
   stata eseguita.
 - **Usata da:** ADR-0048
+
+<a id="s-064"></a>
+### S-064 — Compose file reference: Interpolation — il dollaro che Compose non deve mangiare
+
+- **URL:** https://docs.docker.com/reference/compose-file/interpolation/
+- **Editore:** Docker Inc. — Docker Docs, Compose file reference
+- **Versione documentata:** Compose Specification, riferimento corrente alla consultazione
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — come si scrive un dollaro che deve sopravvivere.** «You can use a
+  `$$` (double-dollar sign) when your configuration needs a literal dollar sign.» La pagina precisa
+  che il doppio dollaro serve anche a **impedire** l'interpolazione, e ne dà l'esempio:
+
+```yml
+web:
+  build: .
+  command: "$$VAR_NOT_INTERPOLATED_BY_COMPOSE"
+```
+
+- **Cosa afferma, secondo punto — le due forme e che cosa accettano.** «Compose files use a
+  Bash-like syntax `${VARIABLE}`. Both `$VARIABLE` and `${VARIABLE}` syntax is supported», ma solo
+  la forma con le graffe accetta i modificatori. Dopo il dollaro Compose interpola qualunque cosa
+  formi «a valid variable definition - either an alphanumeric name (`[_a-zA-Z][_a-zA-Z0-9]*`)»;
+  il resto lo lascia stare. Le sostituzioni di shell tipo `${VARIABLE/foo/bar}` «are not supported
+  by Compose», mentre l'annidamento `${VARIABLE:-${FOO:-default}}` funziona.
+- **Cosa afferma, terzo punto — i due punti cambiano la domanda.** `${VAR:-default}` dà «value of
+  `VAR` if set and non-empty, otherwise `default`»; `${VAR-default}` dà «value of `VAR` if set,
+  otherwise `default`». Lo stesso per il rifiuto: `${VAR:?error}` esce con errore se la variabile è
+  assente **o vuota**, `${VAR?error}` solo se è assente. È la differenza su cui poggia il
+  segnaposto vuoto di `.env.example`: senza i due punti, una password lasciata in bianco passerebbe.
+- **Cosa afferma, quarto punto — quando non c'è niente da sostituire.** «If Compose can't resolve a
+  substituted variable and no default value is defined, it displays a warning and substitutes» la
+  variabile con la stringa vuota. Un avviso, non un errore: il file resta valido e sbagliato.
+- **Cosa afferma, quinto punto — l'interpolazione tocca i valori, non le chiavi.** «Interpolation
+  applies only to YAML values, not to keys.» Per le mappe definite dall'utente — `labels`,
+  `environment` — serve la forma a lista con l'uguale perché la sostituzione avvenga.
+- **Cosa non afferma:** che l'interpolazione avvenga **prima** che il file arrivi al container. La
+  pagina colloca il momento rispetto alla fusione dei file — «interpolation is applied before a
+  merge on a per-file basis» — e non parla mai del container. Che il `$` di un comando `sh -c`
+  venga consumato da Compose e non arrivi alla shell è una **conseguenza** di questo, non una frase
+  della pagina.
+- **Riserve:** la frase sul `$$` non sta dove uno la cerca. La pagina «Environment variables —
+  Interpolation» ([S-056](#s-056)), che è quella raggiungibile dalla guida alle variabili
+  d'ambiente, non nomina mai il doppio dollaro: rimanda qui con un collegamento. Chi cerca l'escape
+  partendo da lì trova la regola delle virgolette singole nei file `.env`, che è un'altra cosa e
+  funziona in un altro modo.
+- **Usata da:** ADR-0052
+
+<a id="s-065"></a>
+### S-065 — MongoDB Manual 7.0: Adjust Priority for Replica Set Member
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/adjust-replica-set-member-priority/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — la priorità decide sia il quando sia il chi.** «The `priority`
+  settings of replica set members affect both the timing and the outcome of elections for primary.
+  Higher-priority members are more likely to call elections, and are more likely to win. Use this
+  setting to ensure that some members are more likely to become primary and that others can never
+  become primary.» E, sul numero: «The value of the member's `priority` setting determines the
+  member's `priority` in elections. The higher the number, the higher the priority.»
+- **Cosa afferma, secondo punto — l'intervallo e il valore predefinito.** «The value of `priority`
+  can be any floating point (i.e. decimal) number between `0` and `1000`. The default value for the
+  `priority` field is `1`.» Lo zero è un caso a sé: «To block a member from seeking election as
+  primary, assign it a priority of `0`.»
+- **Cosa afferma, terzo punto — cambiarla non è gratis.** «Adjust priority settings during a
+  scheduled maintenance window. Reconfiguring priority can force the current primary to step down,
+  leading to an election. Before an election, the primary closes all open client connections.» E
+  nell'avviso della procedura: «The `rs.reconfig()` shell method can force the current primary to
+  step down, which causes an election. When the primary steps down, the `mongod` closes all client
+  connections. While this typically takes 10-20 seconds, try to make these changes during scheduled
+  maintenance periods.»
+- **Cosa afferma, quarto punto — priorità e voti sono legati.** «Non-voting (i.e. `votes` is `0`)
+  members must have `priority` of 0», e «Members with `priority` greater than 0 cannot have 0
+  `votes`». Alzare la priorità di un membro non votante «*requires* setting `votes` to `1`».
+- **Cosa non afferma:** **quanto** un membro a priorità più alta sia più probabile, né dopo quanto
+  tempo si riprenda il posto quando rientra. La pagina descrive il meccanismo in termini di
+  probabilità e non dà nessun tempo. I dieci secondi con cui `mongo-rs-1` si riprende il ruolo nel
+  lab sono misurati ([V-042](#v-042)), non letti qui.
+- **Riserve:** la pagina è un tutorial di modifica a caldo, e il lab la priorità la scrive
+  **all'inizializzazione**, dove nessuna delle cautele sulla finestra di manutenzione si applica —
+  non c'è ancora un primario da far dimettere. Vale però al contrario, e vale per il talk: chi
+  volesse cambiare le priorità sullo stack acceso durante la demo provocherebbe un'elezione e la
+  chiusura di tutte le connessioni.
+- **Usata da:** ADR-0051
 
 ## Verifiche empiriche
 
@@ -3626,7 +3712,7 @@ set appena costruito. Questa è però una **spiegazione**, non una misura: vedi 
   fedelmente anche un codice diverso da zero è documentato ma non provato qui, e conviene provarlo
   al Task 7, dove quel codice diventa il verdetto di un bersaglio del Makefile.
 - **Data:** 2026-08-31
-- **Usata da:** ADR-0041
+- **Usata da:** ADR-0041, ADR-0052
 
 ---
 
@@ -3956,7 +4042,7 @@ timeout da far scadere, e restano solo i millisecondi del voto.
   **secondario** — che non provoca nessuna elezione — non è cronometrato qui perché non ha niente
   da cronometrare.
 - **Data:** 2026-08-31
-- **Usata da:** ADR-0044, ADR-0046, ADR-0049, ADR-0050
+- **Usata da:** ADR-0044, ADR-0046, ADR-0049, ADR-0050, ADR-0051
 
 ---
 
@@ -4125,7 +4211,7 @@ di quello che salva.
   misura: un set a due membri non è stato costruito, e la sua maggioranza sarebbe 2, cioè zero
   guasti tollerati in scrittura.
 - **Data:** 2026-09-01
-- **Usata da:** ADR-0045, ADR-0046
+- **Usata da:** ADR-0045, ADR-0046, ADR-0051, ADR-0052
 
 ---
 
@@ -4193,7 +4279,7 @@ getLog global   → totalLinesWritten = 2 548, righe da 08:08:31.096 a 08:12:03.
   mezzo secondo ha prodotto circa 800 righe di `NETWORK` e `ACCESS` in pochi minuti, e ha spinto
   fuori dalla finestra proprio le righe di `REPL` che si cercavano.
 - **Data:** 2026-09-01
-- **Usata da:** ADR-0045
+- **Usata da:** ADR-0045, ADR-0052
 
 ---
 
@@ -4891,7 +4977,7 @@ verso il primario ne trova due in fila.
   cronometrato a parte. Le tre esecuzioni di `rs.stepDown()` sono su una macchina sola e senza
   carico: la distanza fra 8 e 101 ms è rumore di scheduling, non un fenomeno.
 - **Data:** 2026-09-01
-- **Usata da:** ADR-0049
+- **Usata da:** ADR-0049, ADR-0051
 
 ---
 
@@ -5098,3 +5184,80 @@ file                                   durata   eventi   byte   il numero che po
   [V-031](#v-031) che le mediane le hanno.
 - **Data:** 2026-09-01
 - **Usata da:** ADR-0050
+
+---
+
+<a id="v-046"></a>
+### V-046 — Il dollaro che non arriva: Compose lo mangia, avvisa, e consegna una stringa vuota
+
+- **Comandi:** `docker compose config` · `docker compose up --abort-on-container-exit` su un file
+  Compose usa-e-getta di nove righe
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, immagine `alpine:3` dalla cache
+  locale
+- **Che cosa si voleva sapere:** `docker/02-replicaset/compose.yaml` scrive `$$NOME_REPLICA` e non
+  `$NOME_REPLICA` nel comando di `rs-init`, con un commento che spiega perché. La regola è
+  documentata ([S-064](#s-064)) ma qui non era mai stata **vista fallire**, e una trappola scritta
+  senza averne visto il sintomo è una previsione ([ADR-0052](Decision.md#adr-0052)). Il file di
+  prova mette le due forme una accanto all'altra:
+
+```yaml
+services:
+  prova:
+    image: alpine:3
+    environment:
+      DENTRO: valore-del-container
+    command:
+      - sh
+      - -c
+      - 'echo "singolo=[$DENTRO]  doppio=[$$DENTRO]"'
+```
+
+- **Esito, quello che il container stampa:**
+
+```
+prova-1  | singolo=[]  doppio=[valore-del-container]
+```
+
+  La variabile è dichiarata in `environment` **due righe sopra**, e nella forma con un dollaro solo
+  arriva vuota. Non è che la shell non la trovi: la shell non la vede nemmeno nominare, perché
+  Compose ha sostituito `$DENTRO` prima di consegnare il comando.
+
+- **Esito, dove lo si può vedere prima di avviare:** `docker compose config` mostra il file dopo
+  l'interpolazione, e la sostituzione è già avvenuta:
+
+```
+level=warning msg="The \"DENTRO\" variable is not set. Defaulting to a blank string."
+    command:
+      - sh
+      - -c
+      - echo "singolo=[]  doppio=[$$DENTRO]"
+```
+
+  **Uscita `0`.** L'avviso è un avviso: il file è valido, lo stack parte, il comando gira. È la
+  forma esatta descritta da [S-064](#s-064) — «it displays a warning and substitutes» con la stringa
+  vuota — e la ragione per cui il fenomeno sopravvive alle riletture.
+
+- **Esito, il caso peggiore — la variabile esiste sull'host:**
+
+```
+$ DENTRO=valore-dell-host docker compose … up
+prova-1  | singolo=[valore-dell-host]  doppio=[valore-del-container]
+```
+
+  Qui l'avviso **sparisce**, perché Compose la variabile l'ha trovata: nella shell di chi ha
+  digitato il comando. Il container riceve il valore dell'host al posto del proprio, senza che nulla
+  segnali niente. Due macchine con ambienti diversi eseguono lo stesso file Compose e ottengono
+  comportamenti diversi, ed è il modo in cui questo errore arriva fino in produzione.
+
+- **Conseguenza:** la voce **16** di `docs/02-architetture/trappole-mongodb-in-docker.md`. Conferma
+  per misura la scelta già scritta in `docker/02-replicaset/compose.yaml`, dove le tre variabili del
+  comando di `rs-init` sono `$$NOME_REPLICA`, `$$UTENTE_AMMINISTRATORE`, `$$PASSWORD_AMMINISTRATORE`.
+- **Riserve:** provato su `alpine:3` e non sullo stack del lab, di proposito: sullo stack la forma
+  giusta è già scritta, e per vedere il sintomo bisognerebbe romperla. Una sola esecuzione per
+  ciascuno dei tre casi — non ci sono tempi da mediare, i risultati sono testo e sono deterministici.
+  Il fenomeno riguarda `command` perché è lì che il lab lo incontra; vale identico per `entrypoint`,
+  `healthcheck` e per i valori di `environment`, che non sono stati provati. Infine `config` non
+  «disfa» il doppio dollaro: lo ristampa come `$$DENTRO`, perché quello che mostra è ancora un file
+  Compose, non ciò che vedrà la shell.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0052

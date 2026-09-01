@@ -497,6 +497,29 @@ guardarsi intorno.
 
 ---
 
+### La priorità non decide solo chi vince: decide anche quanto ci mette
+
+> «The `priority` settings of replica set members affect both the timing and the outcome of
+> elections for primary. Higher-priority members are more likely to call elections, and are more
+> likely to win. Use this setting to ensure that some members are more likely to become primary
+> and that others can never become primary.»
+
+Fonte: [S-065](Sources.md#s-065) — MongoDB Manual 7.0, Adjust Priority for Replica Set Member.
+
+E il campo ha un intervallo, con un valore predefinito che rende tutti i membri equivalenti:
+
+> «The value of `priority` can be any floating point (i.e. decimal) number between `0` and `1000`.
+> The default value for the `priority` field is `1`.»
+
+Fonte: [S-065](Sources.md#s-065).
+
+**Perché una slide:** spiega in una riga perché nel laboratorio il primario si può **nominare in
+anticipo** — `mongo-rs-1` ha `priority: 2`, gli altri due `1` ([ADR-0051](Decision.md#adr-0051)) — e
+prepara la sorpresa della demo di failover: il nodo che si è ucciso, quando torna, **si riprende il
+ruolo da solo**. Misurato: undici secondi dopo uno `rs.stepDown(10)`
+([V-042](Sources.md#v-042)). Va detto prima, altrimenti il pubblico vede una scena che si annulla
+mentre la si commenta e non capisce se ha appena assistito a un guasto o a una guarigione.
+
 ## Blocco 3 — Sharded cluster
 
 ### Shard e config server devono essere replica set
@@ -872,6 +895,31 @@ sempre la stessa riga di log: con lo `shutdown` il primario **avvisa**, quindi n
 timeout da far scadere.
 
 ---
+
+### Il dollaro se lo mangia Compose, e nel container arriva una stringa vuota
+
+> «You can use a `$$` (double-dollar sign) when your configuration needs a literal dollar sign.»
+
+Fonte: [S-064](Sources.md#s-064) — Docker Docs, Compose file reference: Interpolation.
+
+E quando non trova niente da sostituire, Compose non si ferma:
+
+> «If Compose can't resolve a substituted variable and no default value is defined, it displays a
+> warning and substitutes»
+
+— e ciò che sostituisce è la stringa vuota. Un avviso, non un errore: il file resta valido, e
+sbagliato.
+
+Fonte: [S-064](Sources.md#s-064).
+
+**Perché una slide:** è la trappola che si prende chiunque scriva un `command: sh -c` dentro un
+`compose.yaml` — e nel laboratorio di MongoDB capita subito, perché i `mongosh --eval` di
+inizializzazione ne sono pieni. La variabile è dichiarata due righe sopra, in `environment:`, e
+dentro il container risulta vuota: Compose ha interpolato il `$` prima ancora che il file
+diventasse un container, non ha trovato quella variabile **nel proprio ambiente** e ha messo una
+stringa vuota. Misurato: `singolo=[]  doppio=[valore-del-container]`, e con la stessa variabile
+esportata nella shell che lancia, il dollaro singolo stampa il valore **dell'host**
+([V-046](Sources.md#v-046)). `docker compose config` esce `0` e si limita a un avviso.
 
 ## Installazione su una macchina vera
 

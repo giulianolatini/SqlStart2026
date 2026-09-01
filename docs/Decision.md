@@ -2909,3 +2909,132 @@ possono fare adesso, e farle adesso è ciò che rende il resto un gesto di venti
 serata.
 
 **Fonti:** [S-021](Sources.md#s-021), [V-029](Sources.md#v-029), [V-045](Sources.md#v-045)
+
+---
+
+<a id="adr-0051"></a>
+## ADR-0051 — Il primario del lab si sa in anticipo: priorità 2/1/1, e lo si dice al pubblico
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto:** i tre membri di `rs0` sono identici — stessa immagine, stessa configurazione, stessi
+limiti di memoria e di CPU. Su un set così, chi diventa primario alla prima elezione lo decide
+l'ordine con cui i nodi si vedono, che dipende da quanto ci mettono a partire: cambia da un avvio
+all'altro e nessuno lo controlla. `10-rs-initiate.js` scrive invece `priority: 2` sul primo membro e
+`1` sugli altri due, e la scelta va giustificata perché la simmetria sarebbe la cosa ovvia.
+
+La ragione è di scena prima che tecnica. Le demo del talk nominano un container: `make failover-02`
+uccide **il primario**, la pagina del replica set stampa porte e ruoli, lo smoke verifica chi
+scrive. Se il primario cambiasse a ogni avvio, ogni comando andrebbe preceduto da «vediamo prima chi
+è» — venti secondi buttati per ciascuna delle tre scene, davanti a un pubblico che non impara
+niente da quell'attesa. Con la priorità, `mongo-rs-1` è primario e si può dire in anticipo, il che
+rende anche la registrazione di riserva sovrapponibile alla demo dal vivo.
+
+[S-065](Sources.md#s-065) documenta il meccanismo: la priorità «affect both the timing and the
+outcome of elections for primary», i valori vanno da `0` a `1000`, il predefinito è `1`, e con `0`
+un membro non si candida mai. Due sono quindi le forme possibili di questa decisione: alzare il
+primo a 2, oppure azzerare gli altri due.
+
+**Decisione:** priorità **2** su `mongo-rs-1`, **1** su `mongo-rs-2` e `mongo-rs-3`, scritte
+nell'`rs.initiate()` e non modificate a caldo. Tre conseguenze si accettano insieme alla scelta:
+
+1. **Il primario è prevedibile all'avvio**, e `docs/02-architetture/replica-set.md` può nominarlo.
+2. **Il nodo fermato si riprende il ruolo quando torna.** Non è un effetto collaterale da subire: è
+   una seconda elezione, misurata — undici secondi dopo uno `rs.stepDown(10)`
+   ([V-042](Sources.md#v-042)) — e va **detta al pubblico**, perché una scena che si rimette a posto
+   da sé mentre la si spiega sembra magia o sembra un errore, e non è né l'una né l'altra.
+3. **Le altre due restano a 1 e non a 0.** Un membro a priorità 0 non può diventare primario mai: il
+   set perderebbe la capacità di sopravvivere alla caduta di `mongo-rs-1`, che è precisamente la
+   scena che il talk mostra.
+
+Le priorità si scrivono all'inizializzazione e non si toccano dopo. S-065 avverte che cambiarle a
+caldo «can force the current primary to step down» chiudendo tutte le connessioni aperte, per 10–20
+secondi: sullo stack acceso durante una demo è un gesto da non fare.
+
+**Conseguenze:** ogni misura del branch è stata presa su un set 2/1/1 e lo dichiara nel proprio
+ambiente; chi la rifà su un set simmetrico può trovare tempi diversi nella scena del rientro, non in
+quella della caduta. Il ritorno automatico del primario rende la scena del failover **autopulente**
+— dopo un minuto lo stack è com'era — e per la stessa ragione fragile da spiegare con calma: se chi
+parla si dilunga, la dimostrazione si annulla mentre la si commenta. È il motivo per cui
+`tools/failover-replicaset.sh` cronometra invece di lasciar guardare
+([ADR-0044](#adr-0044)).
+
+Terza conseguenza, sulla scena della maggioranza persa: `reset-demo.sh 02` non si limita a rialzare
+i container fermati, **aspetta che le priorità si siano riassestate** prima di dichiarare lo stack
+pronto, altrimenti la prova successiva parte con un primario diverso da quello che dice di
+aspettarsi ([V-031](Sources.md#v-031)).
+
+**Alternative scartate:** priorità tutte a 1 (è il caso generale, ed è quello che un lettore
+troverà in produzione — ma rende ogni demo condizionata a un'ispezione preliminare, e la scena del
+rientro sparisce); priorità 0 sui due secondari (il primario sarebbe fisso davvero, e il set non
+tollererebbe più la caduta che il talk mostra); priorità decrescenti 3/2/1 (renderebbe prevedibile
+anche il **successore**, che è informazione utile una volta sola e costa una terza asimmetria da
+spiegare); decidere il primario dopo l'avvio con un `rs.stepDown()` mirato (un comando in più nella
+catena, che fa a caldo ciò che l'inizializzazione fa gratis).
+
+**Fonti:** [S-065](Sources.md#s-065), [V-029](Sources.md#v-029), [V-031](Sources.md#v-031), [V-042](Sources.md#v-042)
+
+---
+
+<a id="adr-0052"></a>
+## ADR-0052 — Una trappola già misurata si scrive nel branch che l'ha misurata
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto:** [ADR-0033](#adr-0033) stabilisce che la pagina delle trappole cresce **per aggiunta**
+e che i branch successivi ne mettono in coda di nuove. Non dice **quando**, e la differenza è
+emersa al Task 12. Il piano di `feature/02` prometteva due trappole — i permessi del keyfile e la
+scoperta della topologia — e sono state scritte. I punti di ripresa dei Task 9 e 10, redatti dopo il
+piano, avevano però accumulato un inventario più lungo: quattro fenomeni incontrati lungo la strada,
+tutti già misurati, nessuno ancora in pagina.
+
+- `--env-file` **sostituisce** il `.env` invece di aggiungersi ([V-025](Sources.md#v-025),
+  [S-056](Sources.md#s-056));
+- `up --wait` esce con successo mentre il replica set non esiste ancora
+  ([V-025](Sources.md#v-025), [S-057](Sources.md#s-057));
+- il `$` di un comando `sh -c` viene consumato da Compose e non arriva alla shell
+  ([S-064](Sources.md#s-064), misurato al Task 14 in [V-046](Sources.md#v-046));
+- `docker logs` si congela quando il demone Docker riparte, e tace invece di dare errore
+  ([V-032](Sources.md#v-032)).
+
+A questi il registro ne aggiungeva un quinto, di natura diversa: `ENOTFOUND` al posto di un errore
+di selezione del server, perché un container fermo sparisce dal DNS della rete Compose
+([V-031](Sources.md#v-031)). È un artefatto dei container, non di MongoDB, e la voce 13 della pagina
+lo aveva già dato per scritto — vi si legge «fra le tre che danno `ENOTFOUND`» quando le voci
+esistenti erano due.
+
+Il Task 12 le ha lasciate aperte e ha scritto perché: la lista del piano è un contratto, quella dei
+punti di ripresa è un inventario cresciuto misura dopo misura, e mescolarle di nascosto avrebbe
+tolto la differenza. Il Product Owner ha deciso di chiuderle qui, in coda al Task 14, invece di
+rimandarle a `feature/03`.
+
+**Decisione:** una trappola **già misurata** si scrive nel branch che l'ha misurata, anche quando il
+piano di quel branch non la nominava. Il criterio è la misura, non il piano: se esiste una voce in
+[`Sources.md`](Sources.md) che documenta il fenomeno, la trappola è già scritta per tre quarti e
+rimandarla costa più che farla.
+
+`feature/02` porta quindi la pagina da 13 a **18 voci**, aggiungendo in coda — nell'ordine —
+`--env-file`, `up --wait`, il dollaro di Compose, il congelamento di `docker logs` e il terzo
+`ENOTFOUND`. La numerazione esistente non si tocca, come prescrive ADR-0033.
+
+**Conseguenze:** il debito dichiarato nel registro al Task 12 è saldato dentro lo stesso branch, e
+il punto di ripresa che lo nominava non sopravvive alla feature — che è la forma in cui un debito
+dovrebbe finire. Tre delle cinque voci nuove non parlano di MongoDB affatto: sono trappole di
+Compose e del runtime, e stanno in una pagina intitolata «MongoDB in Docker» perché è lì che le
+incontra chi monta uno stack MongoDB. La pagina cambia leggermente natura, e la riga d'apertura lo
+dice.
+
+Il criterio ha un limite che conviene enunciare adesso, prima che qualcuno lo scopra applicandolo:
+vale per le trappole **misurate**, non per quelle previste. Un fenomeno letto in una fonte e mai
+riprodotto qui resta fuori, perché la pagina promette il sintomo così come si è visto e non come
+dovrebbe presentarsi ([ADR-0024](#adr-0024)).
+
+**Alternative scartate:** rimandare tutto a `feature/03`, che alla pagina deve comunque tornare (la
+trascrizione sarebbe costata uguale, e nel frattempo la voce 13 avrebbe continuato a rimandare a una
+voce inesistente); scrivere solo il terzo `ENOTFOUND`, cioè l'unica delle cinque che la pagina già
+promettesse (chiuderebbe l'incoerenza e lascerebbe l'inventario aperto, che è il modo in cui le
+liste di candidati muoiono); allargare invece il piano del Task 12 a posteriori (il piano non si
+riscrive quando l'esecuzione devia — la deviazione si spiega nel registro, ed è quello che è stato
+fatto).
+
+**Fonti:** [S-056](Sources.md#s-056), [S-057](Sources.md#s-057), [S-064](Sources.md#s-064), [V-025](Sources.md#v-025), [V-031](Sources.md#v-031), [V-032](Sources.md#v-032), [V-046](Sources.md#v-046)

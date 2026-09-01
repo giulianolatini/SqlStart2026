@@ -2189,3 +2189,148 @@ che la cita, [V-029](Sources.md#v-029) il quarto.
     fra le due scene — che è la cosa che il talk racconta — senza che nulla apparisse sbagliato. Le
     misure stanno in [`Sources.md`](Sources.md) con le mediane e le condizioni; una registrazione è
     una scena, e una scena porta un numero d'esempio, non una misura.
+
+## 2026-09-01 — `feature/02`, Task 14: le due decisioni che mancavano, e un criterio che ha dovuto obbedire a se stesso
+
+Il Task 14 è la chiusura del branch: i due ADR ancora dovuti, le fonti che li reggono, questa voce,
+il consuntivo, i quattro controlli e la PR. In coda ci è finita anche una decisione del Product
+Owner presa a Task 12 già scritto — i candidati a trappola rimasti aperti si chiudono qui, non in
+`feature/03` — e per rispettarla il Task 14 ha dovuto misurare una cosa che non aveva misurato.
+
+**La priorità 2/1/1 stava nel codice da undici commit, la ragione non stava scritta da nessuna
+parte.** `10-rs-initiate.js` scrive `priority: 2` sul primo membro dal Task 3, il design lo prescrive
+al §5.2, i tre container sono per tutto il resto identici — e nessun ADR diceva perché. È un debito
+di specie diversa da quelli soliti: il codice era giusto, mancava il motivo, e un motivo che non è
+scritto è un motivo che il prossimo che legge deve reinventare (e magari, trovandolo arbitrario,
+togliere). [ADR-0051](Decision.md#adr-0051) lo scrive, e il motivo è di scena prima che tecnico: le
+demo del talk **nominano un container**. `make failover-02` uccide il primario, la pagina del
+replica set stampa porte e ruoli, lo smoke verifica chi scrive. Su un set simmetrico il primario lo
+decide l'ordine con cui i nodi si vedono all'avvio, che cambia ogni volta: ogni comando andrebbe
+preceduto da «vediamo prima chi è», venti secondi buttati per ciascuna delle tre scene davanti a un
+pubblico che da quell'attesa non impara niente. [S-065](Sources.md#s-065) documenta il meccanismo con
+le parole della fonte — la priorità «affect both the timing and the outcome of elections for
+primary» — e dice anche perché le altre due restano a `1` e non a `0`: un membro a zero non si
+candida mai, e il set perderebbe la capacità di sopravvivere alla caduta di `mongo-rs-1`, che è
+esattamente la scena che il talk mostra.
+
+**Scrivere le conseguenze ha costretto a dire ad alta voce una cosa che si sapeva e si taceva.** Con
+la priorità asimmetrica, il nodo fermato **si riprende il ruolo quando torna**: non è un effetto
+collaterale da subire ma una seconda elezione, già misurata undici secondi dopo uno
+`rs.stepDown(10)` ([V-042](Sources.md#v-042)). La conseguenza pratica è doppia e va detta al
+pubblico. Da un lato la scena del failover è **autopulente** — dopo un minuto lo stack è com'era, e
+`reset-demo.sh 02` non deve rimettere a posto niente se non aspettare che le priorità si
+riassestino ([V-031](Sources.md#v-031)). Dall'altro è fragile da commentare con calma: se chi parla
+si dilunga, la dimostrazione si annulla mentre la si spiega, e quello che il pubblico vede è un
+primario che «non è mai caduto». È il motivo per cui
+[`tools/failover-replicaset.sh`](../tools/failover-replicaset.sh) cronometra invece di lasciar
+guardare ([ADR-0044](Decision.md#adr-0044)), ed è il tipo di frase che si scopre di dover scrivere
+solo quando si compila la sezione «conseguenze» di un ADR invece di dichiararla ovvia.
+
+**I candidati a trappola si chiudono nel branch che li ha misurati.** Il Task 12 aveva lasciato
+aperti quattro fenomeni raccolti nei punti di ripresa dei Task 9 e 10 e un quinto nominato nel
+registro, e aveva scritto perché li lasciava aperti: la lista del piano è un contratto, quella dei
+punti di ripresa è un inventario cresciuto misura dopo misura, e mescolarle di nascosto avrebbe
+tolto la differenza. Il Product Owner ha deciso di chiuderli qui.
+[ADR-0052](Decision.md#adr-0052) ne ricava il criterio generale — una trappola **già misurata** si
+scrive nel branch che l'ha misurata, anche quando il piano di quel branch non la nominava, perché il
+criterio è la misura e non il piano — e con esso la pagina passa da 13 a **18 voci**: `--env-file`
+che sostituisce il `.env` invece di aggiungersi, `up --wait` che esce con successo mentre il replica
+set non esiste ancora, il dollaro che Compose consuma, il congelamento di `docker logs`, e il terzo
+`ENOTFOUND`. Quest'ultimo chiude anche un'incoerenza che nessuno strumento poteva vedere: la voce
+13, scritta al Task 12, rimandava già «fra le tre che danno `ENOTFOUND`» quando le voci esistenti
+erano due. Tre delle cinque nuove non parlano di MongoDB affatto — sono trappole di Compose e del
+runtime — e la riga d'apertura della pagina adesso lo dichiara, perché stanno lì per il solo motivo
+che le incontra chi monta uno stack MongoDB.
+
+**Il criterio si è applicato per primo all'ADR che lo scriveva.** ADR-0052 dice «misurata, non
+prevista», e mentre lo si scriveva è saltato fuori che una delle cinque — il `$` di Compose — quella
+misura non ce l'aveva: veniva da una lettura, non da un'esecuzione. Le strade oneste erano due,
+indebolire il criterio o misurare. È stata presa la seconda, e costa quattro minuti: un `compose.yaml`
+di nove righe fuori dal repository, un solo servizio `alpine:3`, una variabile `DENTRO` dichiarata
+due righe sopra e un `sh -c 'echo "singolo=[$DENTRO]  doppio=[$$DENTRO]"'`. Risposta:
+`singolo=[]  doppio=[valore-del-container]`. Con la stessa variabile esportata nella shell che
+lancia, il singolo dollaro stampa **il valore dell'host**, non quello del container. `docker compose
+config` esce `0` e avvisa: `The "DENTRO" variable is not set. Defaulting to a blank string`. Lo
+stack è stato smontato a misura presa; il verbale è [V-046](Sources.md#v-046). Un criterio scritto
+in un ADR è la prima cosa che l'ADR stesso deve superare.
+
+**La fonte non stava nella pagina in cui la si sarebbe cercata.** La regola del dollaro doveva
+venire da [S-056](Sources.md#s-056), la pagina di Compose sull'interpolazione delle variabili, già
+citata da due ADR e apparentemente l'indirizzo giusto. Riletta per estrarne la frase, non contiene
+la regola: dell'`$$` non dice nulla e si limita a rimandare al riferimento del formato. La frase sta
+lì, in `/reference/compose-file/interpolation/`, che diventa [S-064](Sources.md#s-064). La
+discrepanza non è stata nascosta: è scritta come riserva dentro S-064, perché chiunque cerchi quella
+regola partirà dalla stessa pagina sbagliata, e sapere in anticipo che non ce la troverà vale quanto
+la regola.
+
+**Le «Usata da» si chiedono al controllore, non si indovinano.** I due ADR nuovi citano dieci fonti
+in tutto; tre nascono con il proprio rimando già scritto, sette esistevano già e andavano
+aggiornate. Aggiornate a mano ne sono state prese due, e cinque sono rimaste indietro:
+`check_citations.py` le ha elencate tutte e cinque in una passata sola, con nome e ADR mancante. La
+correzione è poi meccanica — si percorrono le ancore e si riscrive la riga con l'insieme ordinato —
+ma il punto è l'ordine delle operazioni: si scrive l'ADR con le sue fonti, si chiede allo strumento
+quali rimandi mancano, si correggono. Indovinare costa un giro in più e ne dimentica sempre qualcuno.
+
+**Quello che è stato verificato.** I quattro controlli sono stati eseguiti due volte, prima con gli
+stack **fermi** e poi con lo stack 02 avviato, con lo stesso esito. `make preflight`: uscita `0`,
+`Superati: 8 · Avvisi: 1 · Errori: 0` — l'avviso è quello dei filmati, che resta acceso per scelta
+([ADR-0050](Decision.md#adr-0050)). `make docs-check`: citazioni coerenti e collegamenti coerenti.
+`make stack-check`: `Stack conformi: 2`. `make tools-test`: **108 superati**. Verificato anche, con
+un `grep`, che in [`docs/README.md`](README.md) non resti alcuna riga che prometta `feature/02` come
+lavoro futuro.
+
+**Documentazione prodotta.** [ADR-0051](Decision.md#adr-0051) e
+[ADR-0052](Decision.md#adr-0052); [S-064](Sources.md#s-064), [S-065](Sources.md#s-065) e
+[V-046](Sources.md#v-046); cinque voci nuove in
+[`trappole-mongodb-in-docker.md`](02-architetture/trappole-mongodb-in-docker.md), che passa a 18 e
+guadagna una tabella a tre righe per distinguere i tre `ENOTFOUND` del laboratorio; le «Usata da» di
+sette fonti allineate; e due voci nuove in
+[`citazioni-riportare-slide.md`](citazioni-riportare-slide.md) — la priorità che decide anche i
+tempi dell'elezione, nel Blocco 2, e il dollaro mangiato da Compose, fra le trappole di Docker.
+
+**Note di metodo.**
+
+77. **Un criterio scritto dentro un ADR va applicato per primo a quell'ADR.** ADR-0052 pretende che
+    una trappola sia misurata e non prevista, e delle cinque che ammetteva quattro lo erano. La
+    quinta no. Se fosse passata, l'ADR sarebbe nato falso nel punto esatto in cui pretende rigore, e
+    la falsità sarebbe stata invisibile perché nessuno rilegge le premesse di una decisione appena
+    presa. La misura è costata quattro minuti; scoprirla fra sei mesi sarebbe costata la fiducia
+    nella regola. **Il primo caso di prova di una regola nuova è il documento che la introduce.**
+
+78. **Una pagina che parla di un argomento non è la fonte di ogni regola su quell'argomento.** La
+    pagina di Compose sull'interpolazione delle variabili non dice come si scrive un dollaro
+    letterale: lo dice il riferimento del formato. La citazione stava per andare su S-056 perché il
+    titolo combaciava, e sarebbe stata una citazione **plausibile e sbagliata** — la specie peggiore,
+    perché chi la verifica apre la pagina, la trova pertinente e non legge fino in fondo. Il rimedio
+    non è cercare meglio: è rileggere la pagina con l'obiettivo di **estrarne la frase esatta**. Se
+    la frase non si trova, la fonte non è quella. E la discrepanza si scrive come riserva, perché il
+    prossimo partirà dalla stessa pagina.
+
+79. **Un invariante bidirezionale si fa verificare, non si tiene a mente.** Aggiungere due ADR
+    significa aggiornare la riga «Usata da» di ogni fonte che citano; a mano ne sono state prese due
+    su sette. Non per distrazione: la metà che si scrive è quella dell'ADR, e la metà che si
+    dimentica è sempre l'altra. `check_citations.py` le ha elencate in una passata, e la correzione
+    è diventata meccanica. **Quando esiste uno strumento che conosce l'invariante, l'ordine giusto è
+    scrivere, chiedere, correggere** — non scrivere, ricordare, sperare.
+
+80. **Un rimando scritto in anticipo è un debito con la scadenza già dentro.** La voce 13 delle
+    trappole, al Task 12, parlava «fra le tre che danno `ENOTFOUND`» mentre le voci in pagina erano
+    due. Nessun controllo poteva accorgersene: non era un collegamento con un'ancora rotta, era una
+    frase in prosa, e si legge bene ad alta voce. È rimasta falsa per un intero task. Quando si
+    scrive una promessa che dipende da qualcosa che non c'è ancora, o la si scrive al presente
+    perché la si sta scrivendo nello stesso commit, oppure si nomina il debito nel registro — che è
+    l'unico posto dove qualcuno lo va a ricontrollare.
+
+**Consuntivo del branch, alla vigilia dell'unione.** Diciotto commit e trentatré file rispetto a
+`develop`: il piano, tredici di task, due punti di ripresa, una nota di metodo isolata — e questo,
+che chiude. Nessun file nuovo è stato toccato dal Task 14: le tre pagine che modifica erano già nel
+conto, e il numero è calcolato **includendo il commit che lo introduce**, come prescrive la nota 37
+dopo che era stato sbagliato due volte. I quattro controlli sono verdi in locale, con gli stack
+fermi e con lo stack 02 acceso; su GitHub non ne gira nessuno, per scelta
+([ADR-0038](Decision.md#adr-0038)).
+
+**Quello che resta aperto** non appartiene a questo branch e va scritto perché non si perda: i
+quattro filmati `.mp4`, che solo il relatore può girare, e l'avviso di `preflight` che li reclama —
+acceso oggi, bloccante dal 2026-09-18. Le registrazioni di terminale che fanno da riserva ci sono
+già ([ADR-0050](Decision.md#adr-0050)), e non sostituiscono i filmati: sostituiscono la demo dal
+vivo se lo stack non parte.
