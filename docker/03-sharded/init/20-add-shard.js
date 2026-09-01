@@ -18,8 +18,11 @@
 // comando da router. Dato a un `mongod` — anche a quello che tiene i metadati —
 // fallisce, perché è `mongos` a possedere la vista del cluster. È una delle
 // trappole che la pagina del Task 9 deve raccogliere, insieme al suo gemello: uno
-// shard avviato senza `--shardsvr` viene rifiutato qui, con un messaggio che
-// parla d'altro.
+// shard avviato senza `--shardsvr` viene rifiutato qui, e il messaggio nomina
+// esattamente l'opzione che manca — «Cannot run addShard on a node started without
+// --shardsvr». Fino al Task 5 qui c'era scritto che «parla d'altro»: misurato in
+// V-057, è falso, e la correzione vale anche come promemoria che un commento su un
+// altro programma è un'affermazione a termine (nota di metodo 104).
 
 const SHARD_1 = process.env.SHARD_1;
 const SHARD_2 = process.env.SHARD_2;

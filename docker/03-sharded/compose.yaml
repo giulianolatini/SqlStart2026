@@ -8,19 +8,22 @@
 # regole del repository addosso: profili, pinning per digest, healthcheck che
 # aspettano un servizio operativo e non un processo vivo.
 #
-# LO STACK È COMPLETO: nove `mongod`, due `mongos`, la registrazione degli shard.
-# `docker compose --profile palco up -d --wait` seguito dall'attesa dei quattro
-# servizi one-shot dà un cluster che serve.
+# LO STACK È COMPLETO: nove `mongod`, due `mongos`, la registrazione degli shard
+# e i dati di demo distribuiti. `docker compose --profile palco up -d --wait` dà
+# un cluster che serve, con dentro `lab.ordini`.
 #
 # Resta fuori solo ciò che non è topologia e ha una sede propria nei task
 # successivi del piano (docs/00-progetto/2026-09-01-piano-feature-03-stack-sharded.md):
-# i dati di demo con la loro shard key (Task 6) e i bersagli del Makefile che
-# risparmiano di scrivere due `--env-file` a mano (Task 7).
+# i bersagli del Makefile che risparmiano di scrivere due `--env-file` a mano
+# (Task 7). I dati sono entrati con il Task 6, come sesto anello della catena:
+# il one-shot `seed` distribuisce `lab.ordini` con shard key `{_id: "hashed"}` e
+# la riempie, e da lì in poi è lui che la sentinella aspetta.
 #
 # L'AVVIO È DI UN COMANDO SOLO, e questa è la differenza con lo stack 02. Lì
 # `up --wait` esce prima che la replica esista e il verdetto va chiesto con un
 # secondo comando (ADR-0041). Qui c'è `up-03`, un servizio sentinella che parte
-# solo quando `add-shard` è uscito 0: finché non parte, `up --wait` non torna.
+# solo quando `seed` è uscito 0, e `seed` solo dopo `add-shard`: finché la catena
+# non è finita, `up --wait` non torna.
 # Misurato nei due versi (V-056): senza sentinella `up --wait` esce 0 dopo 18
 # secondi con zero shard registrati, e esce 0 anche quando la catena è rotta.
 # Con la sentinella esce 0 a cluster fatto, oppure 1 dicendo quale servizio è
@@ -1060,7 +1063,7 @@ services:
         condition: service_completed_successfully
 
   # ---------------------------------------------------------------------------
-  # QUINTO E ULTIMO ANELLO — la registrazione degli shard nel cluster.
+  # QUINTO ANELLO — la registrazione degli shard nel cluster.
   #
   # È il comando che trasforma tre replica set che non si conoscono in uno
   # sharded cluster. Prima di `sh.addShard()` esistono cfgrs, shard1rs e
@@ -1126,6 +1129,77 @@ services:
       shard1-init:
         condition: service_completed_successfully
       shard2-init:
+        condition: service_completed_successfully
+
+  # ---------------------------------------------------------------------------
+  # SESTO ANELLO — i dati di demo, e la shard key che decide dove finiscono.
+  #
+  # È l'unico anello della catena che non riguarda la topologia. Dopo
+  # `add-shard` il cluster è fatto e non contiene niente: questo servizio
+  # distribuisce `lab.ordini` con shard key `{_id: "hashed"}` e ci mette dentro
+  # 20 000 documenti. Il perché di quella chiave — e perché una chiave monotona
+  # manderebbe ogni inserimento su un solo shard — sta scritto per esteso in
+  # `init/30-dati-demo.js`, che è il posto dove sta accanto al comando che la
+  # applica.
+  #
+  # PERCHÉ È UN ANELLO E NON SOLO UN BERSAGLIO DEL MAKEFILE. Perché negli stack
+  # 01 e 02 i dati ci sono appena l'avvio è finito, e una demo in cui il terzo
+  # stack pretende un comando in più è un comando in più da ricordare a memoria
+  # davanti al pubblico. `make seed-03` resta e serve a ricaricare, non a
+  # caricare la prima volta.
+  #
+  # PERCHÉ DOPO add-shard E NON PRIMA. Distribuire una collezione vuota crea i
+  # chunk in anticipo e li spalma **sugli shard registrati in quel momento**:
+  # due chunk per shard. Fatto prima di `add-shard` il cluster ne avrebbe zero,
+  # e `shardCollection` fallirebbe; fatto con un solo shard registrato darebbe
+  # due chunk su uno solo e un balancer da rincorrere.
+  #
+  # IDEMPOTENTE, come tutti gli altri anelli: al secondo `up` trova i 20 000
+  # documenti già lì e non fa niente, così `make up-03` su uno stack già
+  # seminato resta veloce.
+  #
+  # La memoria è più larga di quella di `add-shard` perché qui `mongosh` tiene
+  # in mano lotti da 5 000 documenti alla volta, mentre là spediva due stringhe.
+  # ---------------------------------------------------------------------------
+
+  seed:
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-seed
+    pull_policy: never
+    restart: "no"
+    profiles: ["palco", "completo"]
+
+    mem_limit: 256m
+    cpus: 0.5
+
+    network_mode: "service:mongos"
+
+    command:
+      - mongosh
+      - --quiet
+      - --host
+      - localhost
+      - -u
+      - ${UTENTE_AMMINISTRATORE:-admin}
+      - -p
+      - ${PASSWORD_AMMINISTRATORE:?assente — copiare docker/03-sharded/.env.example in .env e riempire la password}
+      - --authenticationDatabase
+      - admin
+      - --file
+      - /init/30-dati-demo.js
+
+    volumes:
+      - ./init/30-dati-demo.js:/init/30-dati-demo.js:ro
+
+    # `RICARICA` non è dichiarata qui, ed è deliberato: `make seed-03` rilancia
+    # QUESTO servizio con `run --rm -e RICARICA=1`, che è la forma già usata da
+    # `seed-02`. Dichiararla nel file con un valore predefinito aggiungerebbe una
+    # riga che non cambia niente e un posto in più dove cercarla.
+
+    # Basta questa: `add-shard` a sua volta aspetta `mongos` sano e i due
+    # shard-init finiti, che aspettano keyfile-init.
+    depends_on:
+      add-shard:
         condition: service_completed_successfully
 
   # ---------------------------------------------------------------------------
@@ -1204,15 +1278,21 @@ services:
       - bash
       - -c
       - |
-        echo "cluster pronto — i due shard sono registrati e mongos serve."
+        echo "cluster pronto — due shard registrati, lab.ordini distribuita e piena."
         echo "punto d'ingresso: mongodb://localhost:${PORTA_MONGOS:-27117}"
         exec sleep infinity
 
     depends_on:
-      # L'unica dipendenza che serve, e copre tutta la catena in transitiva:
-      # add-shard aspetta mongos sano e i due shard-init finiti, mongos aspetta
-      # cfg-init, e tutti e tre gli init aspettano keyfile-init.
-      add-shard:
+      # L'unica dipendenza che serve, e copre tutta la catena in transitiva: seed
+      # aspetta add-shard, add-shard aspetta mongos sano e i due shard-init
+      # finiti, mongos aspetta cfg-init, e tutti e tre gli init aspettano
+      # keyfile-init.
+      #
+      # Spostare la sentinella da add-shard a seed cambia che cosa promette
+      # `up --wait`: prima «i due shard sono registrati», adesso «c'è anche il
+      # dataset». È la promessa giusta, perché è quella che gli altri due stack
+      # fanno già.
+      seed:
         condition: service_completed_successfully
 
 volumes:

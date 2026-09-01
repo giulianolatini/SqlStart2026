@@ -3782,3 +3782,170 @@ config server, la regola darebbe un falso allarme — rumoroso e visibile, che �
 cui sbagliare, ma sarebbe da rivedere.
 
 **Fonti:** [V-057](Sources.md#v-057)
+
+---
+
+<a id="adr-0064"></a>
+## ADR-0064 — La shard key della demo è `{_id: "hashed"}`, e i ventimila documenti sono gli stessi nei due profili
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto.** La shard key è **il** contenuto del Blocco 3 del talk. Tutto il resto dello stack 03 —
+i tre ruoli, la catena di avvio, il router davanti — è impalcatura per arrivare qui: è la sola
+decisione di questa architettura che un partecipante porterà a casa e applicherà, e l'unica che, se
+sbagliata, non si corregge senza rifare la collezione.
+
+Il dataset da distribuire esiste già e non è in discussione: gli `ordini` generati dal seme
+`20260918` che gli stack 01 e 02 usano da `feature/01`. Sono documenti con `_id` interi consecutivi
+`0 … n-1`, cioè — non per caso, ma è una fortuna — **il caso peggiore possibile** per una chiave per
+intervalli, e quindi l'esempio migliore possibile per spiegare perché serve l'hash.
+
+Restavano da decidere tre cose: quale campo, con quale forma, e quanti documenti per profilo.
+
+**Decisione.** Shard key `{_id: "hashed"}`; 20 000 documenti sia in `palco` sia in `completo`.
+
+*Il campo.* `_id`, per tre ragioni in ordine di forza. È l'unico campo garantito presente e unico
+in ogni documento, il che elimina in partenza la classe di problemi che il manuale chiama frequenza
+e cardinalità. Tiene il dataset **identico** a quello degli altri due stack: questi 20 000 documenti
+sono i primi 20 000 dei 50 000 di `feature/01`, campo per campo, e la demo può quindi mostrare la
+stessa query su tre architetture senza che nessuno debba chiedersi se sono gli stessi dati. E, per
+onestà, è la scelta che il manuale **non** avalla in generale: [S-067](Sources.md#s-067) insiste sul
+verso opposto — la chiave si sceglie sul modo in cui si interroga la collezione — e nel materiale
+questa è detta per quello che è, una comodità didattica.
+
+L'alternativa scartata è `citta`, che sarebbe stata leggibile e sarebbe stata la peggiore
+disponibile: dieci valori distinti, e «the cardinality of a shard key determines the maximum number
+of chunks the balancer can create» (S-067). Dieci chunk al massimo per l'intero cluster, con la
+conseguenza che il manuale mette per iscritto sul suo esempio a sette valori — «this constrains the
+number of effective shards in the cluster to `7` as well».
+
+*La forma: hashed e non per intervalli.* Con `{_id: 1}` la partizione sarebbe per intervalli, e in
+ogni cluster esiste il chunk con estremo superiore `MaxKey`. Un `_id` che cresce sempre è sempre
+maggiore di tutti quelli già scritti, quindi ogni inserimento cade lì: «the shard containing that
+chunk becomes the bottleneck for write operations» (S-067). Con l'hash i valori contigui finiscono
+sparsi, e la misura lo conferma — 49,3 % / 50,7 % ([V-058](Sources.md#v-058)).
+
+Due precisazioni entrano nel materiale perché senza il racconto diventa una caricatura, e una
+caricatura dal palco si smonta alla prima domanda. La prima: il chunk caldo **non resta fermo**.
+«To optimize data distribution, the chunks that contain the global `maxKey` (or `minKey`) do not
+stay on the same shard» (S-067) — il collo di bottiglia cambia nodo man mano che i chunk si
+dividono. Non sparisce, perché in ogni istante le scritture vanno tutte in un posto solo e in più il
+cluster paga le migrazioni; ma non è il nodo unico e immobile che le spiegazioni brevi descrivono.
+La seconda: l'hash **non è una garanzia**. «A shard key that does not change monotonically does
+not, on its own, guarantee even distribution of data across the sharded cluster» (S-067) — qui
+funziona perché `_id` ha cardinalità massima e frequenza uniforme, non perché sia hashed.
+
+*Il prezzo, che si dice invece di nasconderlo.* Si perde la località. Il manuale: «post-hash,
+documents with "close" shard key values are unlikely to be on the same chunk or shard - the `mongos`
+is more likely to perform Broadcast Operations to fulfill a given ranged query. `mongos` can target
+queries with equality matches to a single shard» ([S-066](Sources.md#s-066)). Misurato sul lab: un
+`{_id: 42}` interroga **uno** shard, un `{_id: {$gte: 100, $lt: 200}}` li interroga **tutti e due**
+(V-058). Le due righe sono nello smoke apposta, perché è il baratto in forma eseguibile: si sceglie
+fra distribuire le scritture e tenere vicine le letture contigue, e non si ottengono tutte e due.
+
+*L'ordine: prima si distribuisce, poi si riempie.* Non è indifferente e non è una preferenza.
+Distribuendo una collezione **vuota**, «the sharding operation creates empty chunks to cover the
+entire range of the shard key values and performs an initial chunk distribution. By default, the
+operation creates 2 chunks per shard and migrates across the cluster» (S-066): due per shard, due
+shard, **quattro chunk** — il numero che lo spike §5 aveva misurato senza sapere che fosse un
+valore predefinito documentato. Sull'ordine inverso il manuale è altrettanto chiaro: su una
+collezione piena «the sharding operation creates an initial chunk to cover all of the shard key
+values», uno solo, e poi tocca al balancer. Funzionerebbe, ma l'avvio del lab diventerebbe una gara
+col balancer e la distribuzione al primo `sh.status()` sarebbe 100 % / 0 %.
+
+*Ventimila in tutti e due i profili.* Il piano fissa 20 000 per `palco` e lo spike aveva usato
+50 000 per `completo`. La scelta è di tenerne 20 000 anche lì: **i due profili differiscono nella
+topologia, non nei dati**. Un dataset che cambia col profilo renderebbe i numeri mostrati dal palco
+dipendenti da quale profilo sta girando, e la prima domanda del pubblico sarebbe sul numero
+sbagliato. La misura conferma che non si perde niente: la distribuzione è identica nei due profili —
+9860 e 10140 — perché dipende dall'hash delle chiavi e dai confini dei chunk, e i membri in più sono
+copie dello stesso shard (V-058).
+
+**Conseguenze.** `docker/03-sharded/init/30-dati-demo.js` porta il ragionamento accanto al comando
+che lo applica: è il file più commentato dello stack, e deliberatamente — è la pagina del Blocco 3.
+`lab.ordini` sullo stack 03 ha **due** indici e non uno, perché `shardCollection()` crea
+`_id_hashed` senza che nessuno lo chieda; è l'unica differenza rispetto agli altri due stack, dove
+la collezione ha il solo `_id_` per far vedere una query con e senza indice, e lo smoke la asserisce
+per iscritto perché non passi per un residuo.
+
+Restano due limiti dichiarati. Il primo: il 49,3 % / 50,7 % è una proprietà di questo dataset con
+questo seme, non una legge — lo smoke fissa la soglia al 40 % per shard proprio per non confondere
+una fluttuazione statistica con un guasto. Il secondo riguarda la versione: `_id_hashed` si può
+togliere solo dalla 7.0.3 in poi (S-066), e il lab ci rientra per la 7.0.40 pinnata da
+[ADR-0028](#adr-0028) — un vincolo che il giorno di un downgrade tornerebbe a mordere.
+
+**Fonti:** [S-066](Sources.md#s-066) · [S-067](Sources.md#s-067) · [V-058](Sources.md#v-058)
+
+---
+
+<a id="adr-0065"></a>
+## ADR-0065 — I dati entrano come sesto anello della catena, e la prova sa distinguere due shard da uno
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto.** Il Task 6 nominava due file: lo script che carica i dati e lo smoke. Scrivendoli è
+emerso che i due si tengono per un vincolo che nessuno dei due nomina.
+
+Il vincolo è questo: la sola asserzione che distingue uno sharded cluster funzionante da uno rotto è
+la **distribuzione dei documenti**, e per misurarla i documenti devono esserci. Se il dataset
+arrivasse da un comando separato, `make smoke-03` dopo `make up-03` fallirebbe — o peggio, andrebbe
+verde saltando l'unico controllo che conta.
+
+C'è poi una ragione che viene da fuori: negli stack 01 e 02 i dati ci sono appena l'avvio è finito.
+Un terzo stack che pretende un comando in più è un comando in più da ricordare davanti al pubblico,
+e [ADR-0062](#adr-0062) ha appena stabilito che lo stack 03 si avvia con **un** comando.
+
+**Decisione.** Due decisioni legate.
+
+*Il seed è il sesto anello della catena.* Il servizio one-shot `seed` entra nel file Compose dopo
+`add-shard`, con `service_completed_successfully`, e la sentinella `up-03` sposta la propria
+dipendenza da `add-shard` a `seed`. La catena diventa: `keyfile-init` → (`cfg-init`, `shard1-init`,
+`shard2-init`) → `mongos` → `add-shard` → `seed` → `up-03`. Quello che cambia è **che cosa promette
+`up --wait`**: prima «i due shard sono registrati», adesso «c'è anche il dataset» — che è la
+promessa che gli altri due stack fanno già. Dopo `add-shard` e non prima, perché distribuire una
+collezione vuota crea i chunk e li spalma sugli shard registrati **in quel momento**: fatto prima,
+`shardCollection()` fallirebbe per mancanza di shard; fatto con uno solo, darebbe due chunk su un
+nodo e un balancer da rincorrere. Il servizio è idempotente come tutti gli altri anelli — al secondo
+`up` trova i documenti e non fa niente — e `make seed-03` resterà per **ricaricare**, con
+`run --rm -e RICARICA=1`, non per caricare la prima volta.
+
+Questo è uno scostamento dall'elenco dei file del Task 6, che nominava solo lo script e lo smoke, ed
+è registrato come tale: il piano approvato non si tocca.
+
+*Lo smoke asserisce la distribuzione, e la asserisce in due modi.* `tools/smoke-sharded.sh` segue
+`smoke-replicaset.sh` nella forma — niente `set -e`, tutti i problemi in un giro solo, la password
+letta da `.env` e mai passata con `-e` al client `docker` ([ADR-0054](#adr-0054)) — e il profilo si
+sceglie con `PROFILO=palco|completo`, perché i controlli che contano i nodi hanno risposte diverse e
+uno smoke che ne sapesse una sola mentirebbe sull'altro profilo.
+
+Il criterio con cui i controlli sono stati scelti: **tutto quello che non riguarda la distribuzione
+passerebbe identico su un cluster che ha messo i ventimila documenti su un solo shard.** Un cluster
+così risponde, scrive, legge, e `sh.status()` gli mostra due shard. Quindi lo smoke verifica che
+ciascuno dei due shard contenga documenti e che nessuno stia sotto il 40 %, e in più mette alla
+prova il baratto della chiave: uguaglianza su `_id` → **uno** shard, intervallo sulla stessa chiave
+→ **tutti**. Se un giorno la seconda tornasse `1`, vorrebbe dire che la chiave non è più hashed, e
+sarebbe un guasto che nessun altro controllo vedrebbe.
+
+**Conseguenze.** Lo stack 03 nel profilo `palco` sale a **11** servizi e in `completo` a **18**.
+`up -d --wait` chiude a 0 in **23 secondi** su `palco` e in **36** su `completo`, dataset compreso
+([V-058](Sources.md#v-058)). Lo smoke chiude a **62 controlli e 0 errori** su `palco`, **99 e 0** su
+`completo`.
+
+Due cose sono state imparate scrivendolo e sono finite nei commenti del file, perché sono
+esattamente il genere di cosa che si riscopre a caro prezzo. La prima: **gli utenti di uno sharded
+cluster vivono sui config server**, e la stessa coppia utente/password che funziona sul router dà
+`Authentication failed` su uno shard interrogato in diretta. Non è un guasto, è la regola, e lo
+smoke la asserisce come tale — se un giorno passasse, vorrebbe dire che qualcuno ha creato utenti
+sugli shard e che da lì in poi ci sono due anagrafiche da tenere allineate. La conseguenza pratica è
+che le misure interne dei nodi si leggono da `docker inspect` e dalla riga `cache_size=…` del log,
+non da `hostInfo()`. La seconda: **`/data/db` risulta montato anche su `mongos`**, perché
+l'immagine di MongoDB dichiara `VOLUME /data/db` e Docker crea un volume anonimo su ogni container.
+Il controllo ovvio — «il router non monta `/data/db`» — è quindi falso su un cluster sano, ed è
+stato l'unico rosso dell'intera prova. Il discriminante vero è il volume **nominato**.
+
+Il limite da dichiarare: le costanti dello smoke sono numeri misurati su questo dataset e su questa
+versione, e il conteggio dei controlli dipende dal profilo. Il giorno in cui cambia il seme del
+generatore, l'impronta `20000 50083417.93 60278` va rimisurata — e lo smoke fallirà rumorosamente,
+che è il verso giusto in cui sbagliare.
+
+**Fonti:** [V-058](Sources.md#v-058)

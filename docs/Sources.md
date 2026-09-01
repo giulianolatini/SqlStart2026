@@ -2093,6 +2093,105 @@ web:
   chiusura di tutte le connessioni.
 - **Usata da:** ADR-0051
 
+<a id="s-066"></a>
+### S-066 — MongoDB Manual 7.0: Hashed Sharding
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/hashed-sharding/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — a che cosa serve una chiave hashed.** «Hashed keys are ideal for
+  shard keys with fields that change [monotonically] like [ObjectId] values or timestamps.» Il
+  meccanismo è che si partiziona sull'hash del valore e non sul valore: la pagina lo riassume nel
+  confronto con la partizione per intervalli.
+- **Cosa afferma, secondo punto — che cosa succede senza, e con parole sue.** «Since the value of
+  `X` is always increasing, the chunk with an upper bound of [`MaxKey`] receives the majority
+  incoming writes. This restricts insert operations to the single shard containing this chunk,
+  which reduces or removes the advantage of distributed writes in a sharded cluster.» È la frase
+  che giustifica l'intera scelta della demo, e va letta insieme a [S-067](#s-067), che sulla stessa
+  cosa è più esplicita.
+- **Cosa afferma, terzo punto — il prezzo, dichiarato.** «Post-hash, documents with "close" shard
+  key values are unlikely to be on the same chunk or shard - the `mongos` is more likely to perform
+  [Broadcast Operations] to fulfill a given ranged query. `mongos` can target queries with equality
+  matches to a single shard.» Distribuire le scritture e tenere vicine le letture contigue sono
+  due cose che non si ottengono insieme, e la pagina non finge il contrario.
+- **Cosa afferma, quarto punto — e qui c'è il numero che lo spike aveva misurato senza saperlo.**
+  Distribuendo una collezione **vuota**: «The sharding operation creates empty chunks to cover the
+  entire range of the shard key values and performs an initial chunk distribution. By default, the
+  operation creates 2 chunks per shard and migrates across the cluster. You can use
+  `numInitialChunks` option to specify a different number of initial chunks. This initial creation
+  and distribution of chunks allows for faster setup of sharding.» Due chunk per shard: con i due
+  shard del lab fanno **quattro**, che è esattamente il numero misurato dallo spike §5 e poi da
+  [V-058](#v-058). Non è un numero emergente, è un valore predefinito documentato.
+- **Cosa afferma, quinto punto — l'ordine inverso non è equivalente.** Distribuendo una collezione
+  **già piena**: «The sharding operation creates an initial chunk to cover all of the shard key
+  values», e «after the initial chunk creation, the balancer moves ranges of the initial chunk when
+  it needs to balance data». Un chunk solo, e poi si aspetta il balancer. È la ragione per cui nel
+  lab `sh.shardCollection()` viene prima dell'inserimento e non dopo.
+- **Cosa non afferma:** quanto uniforme sia la distribuzione risultante. La pagina descrive la
+  creazione dei chunk, non la ripartizione dei documenti fra di essi: il 49,3 % / 50,7 % del lab è
+  misurato ([V-058](#v-058)), non letto qui. E non dice niente sui tempi — quanto duri la
+  distribuzione iniziale, quanto costi la migrazione.
+- **Riserve:** due, tutte e due sui bordi del caso del lab. La prima è un avviso della pagina che
+  qui non morde ma altrove sì: «MongoDB `hashed` indexes truncate floating point numbers to 64-bit
+  integers before hashing. For example, a `hashed` index would store the same value for a field
+  that held a value of `2.3`, `2.2`, and `2.9`.» Gli `_id` del dataset sono interi, quindi il
+  problema non si presenta; su un campo `importo` si presenterebbe, e in silenzio. La seconda è che
+  l'indice `_id_hashed` che `shardCollection()` crea da sé si può togliere solo «starting in
+  MongoDB 7.0.3 (and 6.0.12 and 5.0.22)» — il lab è sulla 7.0.40 e quindi ci rientra, ma è un
+  dettaglio legato alla versione pinnata da [ADR-0028](Decision.md#adr-0028).
+- **Usata da:** ADR-0064
+
+<a id="s-067"></a>
+### S-067 — MongoDB Manual 7.0: Choose a Shard Key
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/sharding-choose-a-shard-key/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — perché una chiave che cresce sempre concentra le scritture.** «A
+  shard key on a value that increases or decreases monotonically is more likely to distribute
+  inserts to a single chunk within the cluster.» E il perché, che è geometrico e non statistico:
+  «This occurs because every cluster has a chunk that captures a range with an upper bound of
+  `MaxKey`. `maxKey` always compares as higher than all other values.» Quindi: «If the shard key
+  value is always increasing, all new inserts are routed to the chunk with `maxKey` as the upper
+  bound. If the shard key value is always decreasing, all new inserts are routed to the chunk with
+  `minKey` as the lower bound. The shard containing that chunk becomes the bottleneck for write
+  operations.»
+- **Cosa afferma, secondo punto — la mitigazione, che è la parte che quasi tutte le spiegazioni in
+  giro omettono.** «To optimize data distribution, the chunks that contain the global `maxKey` (or
+  `minKey`) do not stay on the same shard. When a chunk is split, the new chunk with the `maxKey`
+  (or `minKey`) chunk is located on a different shard.» Il collo di bottiglia **cambia nodo** man
+  mano che i chunk si dividono; non sparisce, perché in ogni istante gli inserimenti vanno tutti in
+  un posto solo, e in più il cluster paga le migrazioni che servono a spostare quel posto. Senza
+  questa riga il difetto raccontato dal palco sarebbe una caricatura.
+- **Cosa afferma, terzo punto — la cardinalità è un tetto, non una preferenza.** «The cardinality
+  of a shard key determines the maximum number of chunks the balancer can create.» E l'esempio, che
+  è il conto da rifare su qualunque campo candidato: con un campo `continent` da sette valori, «a
+  cardinality of `7` means there can be no more than `7` chunks within the sharded cluster, each
+  storing one unique shard key value», e «this constrains the number of effective shards in the
+  cluster to `7` as well - adding more than seven shards would not provide any benefit».
+- **Cosa afferma, quarto punto — l'hash non è una garanzia.** «A shard key that does not change
+  monotonically does not, on its own, guarantee even distribution of data across the sharded
+  cluster. The cardinality and frequency of the shard key also contribute to the distribution of
+  the data.» Nel lab distribuisce perché gli `_id` sono ventimila valori distinti, uno per
+  documento: cardinalità massima e frequenza uniforme, cioè le due condizioni che la frase mette
+  accanto. Su un campo da dieci valori l'hash non salverebbe niente.
+- **Cosa afferma, quinto punto — il rimando esplicito.** «If your data model requires sharding on a
+  key that changes monotonically, consider using Hashed Sharding.» Le due pagine si mandano l'una
+  all'altra, ed è la ragione per cui qui sono due fonti e non una.
+- **Cosa non afferma:** che una chiave hashed sia la scelta giusta in generale. La pagina insiste
+  sul verso opposto — la chiave si sceglie sul modo in cui si interroga la collezione — e il lab
+  usa `_id` per un motivo che il manuale non avalla e che va detto per quello che è: tenere il
+  dataset identico agli altri due stack.
+- **Riserve:** la pagina descrive anche l'analizzatore di shard key introdotto nella 7.0
+  (`analyzeShardKey`), che il lab non usa e che sarebbe lo strumento giusto in un caso vero. Non è
+  entrato nel materiale perché richiede un campione di query reali, che una demo con dati generati
+  non ha.
+- **Usata da:** ADR-0064
+
 ## Verifiche empiriche
 
 <a id="v-001"></a>
@@ -6173,3 +6272,101 @@ MongoServerError: Nodes being used for config servers must be started with the -
   chiuso con `down -v`, nessun container né volume residuo. Tutto su arm64.
 - **Data:** 2026-09-01
 - **Usata da:** ADR-0063
+
+<a id="v-058"></a>
+### V-058 — Ventimila documenti distribuiti: quattro chunk, 49,3 % / 50,7 %, e sei cose che il cluster non lascia fare
+
+- **Comandi:** `docker compose --profile palco up -d --wait` e `--profile completo up -d --wait`
+  su `docker/03-sharded/compose.yaml`; `mongosh` attraverso `mongos` con
+  `$shardedDataDistribution`, `config.shards`, `config.chunks`, `explain()`;
+  `mongosh` in diretta su `shard1a` e su `cfg1`; `docker inspect --format`; `docker logs`;
+  `tools/smoke-sharded.sh` nei due profili
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.4.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-01
+- **Che cosa si voleva sapere:** il Task 6 aggiunge i dati di demo e la prova end-to-end. Servivano
+  tre cose distinte: che la shard key scelta distribuisca davvero e non solo sulla carta; quali
+  costanti lo smoke può permettersi di asserire senza diventare fragile; e da dove si leggono le
+  misure interne dei nodi, dato che uno sharded cluster non si lascia interrogare come un replica
+  set.
+
+- **Esito, primo punto — la distribuzione, che è la misura per cui esiste tutto il resto.** Con
+  shard key `{_id: "hashed"}` su collezione vuota e poi 20 000 documenti inseriti a lotti di 5 000
+  con `w: "majority"`:
+
+```
+shard key: {"_id":"hashed"} · chunk: 4
+  shard1rs:  9860 documenti (49,3 %)
+  shard2rs: 10140 documenti (50,7 %)
+indici: _id_, _id_hashed
+```
+
+  I quattro chunk non sono un caso: [S-066](#s-066) documenta due chunk per shard come valore
+  predefinito quando si distribuisce una collezione vuota, e due shard fanno quattro. Lo spike §5
+  aveva misurato lo stesso numero senza sapere che fosse un predefinito. Gli orfani sono zero su
+  tutti e due gli shard.
+
+- **Esito, secondo punto — la distribuzione non dipende dal profilo.** Stessi identici numeri —
+  9860 e 10140 — su `palco` (un membro per insieme) e su `completo` (tre). Non è ovvio a chi guarda
+  ma lo è ripensandoci: la ripartizione dipende dall'hash delle chiavi e dai confini dei chunk, e i
+  membri in più sono copie dello stesso shard. Il tempo di caricamento è lo stesso a meno del
+  rumore, 1202 ms contro 1217 ms, perché `w: "majority"` su un set a tre membri con tutti i nodi
+  sani costa quanto su uno a un membro.
+
+- **Esito, terzo punto — il baratto della shard key, misurato invece che raccontato.** Tre
+  `explain()` attraverso il router, contando gli shard interrogati:
+
+```
+db.ordini.find({_id: 42})                       -> shard2rs                (1 shard)
+db.ordini.find({_id: {$gte: 100, $lt: 200}})    -> shard1rs, shard2rs      (2 shard)
+db.ordini.find({citta: "Ancona"})               -> shard1rs, shard2rs      (2 shard)
+```
+
+  È la conferma sperimentale di [S-066](#s-066): mirata l'uguaglianza sulla chiave, in broadcast
+  l'intervallo sulla **stessa** chiave. La terza riga è il caso normale di un campo qualsiasi e
+  serve da controprova, perché senza si potrebbe credere che il broadcast dipenda dall'intervallo e
+  non dall'hash.
+
+- **Esito, quarto punto — gli utenti di uno sharded cluster non stanno sugli shard, e la cosa si
+  scopre provando.** Le stesse credenziali che funzionano sul router, usate in diretta su
+  `shard1a`, danno `MongoServerError: Authentication failed`. Senza credenziali si ottiene
+  `not authorized on admin to execute command`. Su `cfg1` invece la stessa coppia entra e risponde
+  (`mem=512`, `cache=268435456`). Gli utenti vivono nel database `admin` dei config server, e uno
+  shard interrogato direttamente autentica contro i propri, che non esistono. Conseguenza pratica
+  per lo smoke: le misure interne dei nodi non si possono leggere con `hostInfo()` su tutti, e si
+  leggono da `docker inspect` e dalla riga `cache_size=…` del log di avvio.
+
+- **Esito, quinto punto — che cosa distingue davvero un router da un nodo, e che cosa no.** Su
+  `mongos` la sezione `wiredTiger` di `serverStatus()` **non esiste** — non è vuota, manca — e la
+  stringa `cache_size` compare **zero volte** nel log, contro le nove dei nove `mongod`. Ma il
+  controllo che sembrava ovvio è sbagliato: `docker inspect` mostra `/data/db` montato **anche su
+  `mongos`**, perché l'immagine di MongoDB dichiara `VOLUME /data/db` nel proprio Dockerfile e
+  Docker crea un volume anonimo su ogni container che ne nasce. Il discriminante vero è il volume
+  **nominato**: `sqlstart-03-sharded_dati-cfg1` su un nodo, nessun `dati-…` sul router. La prima
+  stesura dello smoke ha fallito proprio qui, ed è l'unico rosso dell'intera prova.
+
+- **Esito, sesto punto — i tempi e le costanti che lo smoke può asserire.** `up -d --wait` chiude
+  a **uscita 0 in 23 secondi** sul profilo `palco` e in **36** su `completo`, catena completa
+  compresa il seed. Il secondo `up` di seguito esce 0 e il seed stampa «lab.ordini ha già 20000
+  documenti: non ricarico»: idempotente. Impronta del dataset `20000 50083417.93 60278` (documenti,
+  somma degli importi a due decimali, somma delle righe), identica nei due profili — sono i primi
+  20 000 dei 50 000 degli stack 01 e 02, stesso generatore e stesso seme. Limiti di memoria letti
+  dai container: 536 870 912 sui config server, 671 088 640 sugli shard, 268 435 456 sui router.
+  Cache di WiredTiger `cache_size=256M` su tutti e nove i `mongod`. Porte pubblicate 27117 e 27118,
+  rotazione `10m`/`3` su tutti, keyfile identico e a `400` sugli undici container.
+
+- **Esito, settimo punto — la prova completa, nei due profili.** `tools/smoke-sharded.sh` chiude a
+  **62 controlli superati e 0 errori** su `palco` e **99 e 0** su `completo`. La differenza di
+  conteggio è tutta nel numero di nodi: i controlli per nodo si moltiplicano, quelli sul cluster no.
+  Una scrittura con `w: "majority"` attraverso il router viene accettata e riletta; la collezione
+  che la riceve **non** risulta distribuita e vive sullo shard primario del database (`shard2rs`),
+  che è la prova del concetto di shard primario.
+
+- **Riserve:** la distribuzione 49,3 % / 50,7 % è una proprietà di **questo** dataset con **questo**
+  seme, non una garanzia: la soglia dello smoke è fissata al 40 % per shard proprio per non
+  confondere una fluttuazione con un guasto. I quattro chunk valgono finché gli shard sono due e
+  nessuno passa `numInitialChunks`; lo smoke tratta un numero maggiore come informazione e non come
+  errore. Il conteggio dei controlli dipende dal numero di nodi del profilo e cambierà al primo
+  controllo aggiunto. Password di scarto, `.env` cancellato in coda, ogni giro chiuso con `down -v`
+  e residui verificati a zero: nessun container, nessun volume, nessuna rete. Tutto su arm64.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0064, ADR-0065

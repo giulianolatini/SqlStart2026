@@ -1321,3 +1321,61 @@ Fonte: nota di metodo 104 del [registro](registro-operativo-sviluppo.md).
 
 **Perché una slide:** se resta tempo, nel blocco sulla manutenzione. La contromossa costa poco —
 citare la misura accanto all'affermazione, così chi rilegge sa dove andare a verificare.
+
+---
+
+### Uno sharded cluster rotto risponde benissimo
+
+> Ho scritto sessantadue controlli. Sessantuno passerebbero identici su un cluster che ha messo
+> tutti i ventimila documenti su un solo shard: risponde, scrive, legge, e `sh.status()` gli mostra
+> due shard belli attivi. Uno solo se ne accorge, ed è quello che conta i documenti per shard.
+
+Fonte: [ADR-0065](Decision.md#adr-0065), [V-058](Sources.md#v-058) settimo punto.
+
+**Perché una slide:** è il Blocco 3 in una frase. Distingue «funziona» da «fa quello per cui l'hai
+messo in piedi», che in uno sharded cluster non sono la stessa cosa e non lo sembrano nemmeno.
+
+---
+
+### O distribuisci le scritture, o tieni vicine le letture
+
+> Con la chiave hashed, `{_id: 42}` interroga uno shard e `{_id: {$gte: 100, $lt: 200}}` li
+> interroga tutti e due. Stessa collezione, stessa chiave, due righe di distanza. Non è un difetto
+> della configurazione: è il prezzo, ed è scritto nel manuale.
+
+Fonte: [ADR-0064](Decision.md#adr-0064), [S-066](Sources.md#s-066), misurato in
+[V-058](Sources.md#v-058) terzo punto.
+
+**Perché una slide:** il baratto della shard key in due comandi che si possono eseguire dal vivo. È
+la cosa che chi torna in ufficio applicherà, e l'unica di questa architettura che non si corregge
+senza rifare la collezione.
+
+---
+
+### Il collo di bottiglia non sparisce: cambia nodo
+
+> La versione breve dice che una chiave che cresce sempre manda tutte le scritture su un nodo. Il
+> manuale aggiunge una riga che quasi nessuno riporta: il chunk caldo non resta fermo, quando si
+> divide il pezzo con `MaxKey` finisce su un altro shard. Quindi il nodo cambia. Quello che non
+> cambia è che in ogni istante stanno scrivendo tutti nello stesso posto — più il costo di
+> spostarlo.
+
+Fonte: [S-067](Sources.md#s-067) secondo punto, [ADR-0064](Decision.md#adr-0064).
+
+**Perché una slide:** perché la versione caricaturale si smonta alla prima domanda del pubblico, e
+questa no. Vale anche come metodo: la riga che rovina la spiegazione semplice è di solito quella che
+la rende vera.
+
+---
+
+### Le credenziali del cluster non aprono uno shard
+
+> Stessa utenza, stessa password. Sul router entra; su uno shard interrogato in diretta risponde
+> «Authentication failed». Non è un guasto: gli utenti di uno sharded cluster vivono nel database
+> `admin` dei config server, e uno shard autentica contro i propri, che non ci sono.
+
+Fonte: [V-058](Sources.md#v-058) quarto punto, [ADR-0065](Decision.md#adr-0065).
+
+**Perché una slide:** se resta tempo. È la sorpresa più pratica dello stack — chi prova a
+diagnosticare uno shard collegandocisi sopra la incontra al primo tentativo — e dice in un esempio
+dove sta davvero il centro di un cluster sharded.

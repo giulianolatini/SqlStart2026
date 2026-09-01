@@ -3181,3 +3181,111 @@ non una cascata: la regola che scatta è quella del difetto introdotto. Ogni avv
      che quella letterale lasciava passare. Quando la versione generale di una regola è anche
      quella che cattura di più, è un segnale che il caso particolare era la formulazione sbagliata
      della domanda.
+
+## 2026-09-01 — `feature/03`, Task 6: i dati distribuiti, e la prova che sa distinguere due shard da uno
+
+Il Task 6 mette dentro lo stack la cosa per cui il Blocco 3 esiste: la shard key. Tutto il resto —
+i tre ruoli, la catena, il router davanti — è impalcatura per arrivare a una riga,
+`sh.shardCollection("lab.ordini", {_id: "hashed"})`, e a una domanda: perché quella e non un'altra.
+
+**La fortuna del dataset.** Gli `ordini` generati dal seme `20260918` hanno `_id` interi
+consecutivi `0 … n-1`. È esattamente il **caso peggiore** per una chiave per intervalli, e quindi
+l'esempio migliore possibile per spiegare perché serve l'hash: con `{_id: 1}` ogni inserimento
+cadrebbe nel chunk con estremo superiore `MaxKey`, che sta su un nodo solo. Nessuno l'aveva scelto
+per questo — il generatore viene da `feature/01` e serviva a tutt'altro — ma il materiale del Blocco
+3 si è scritto quasi da sé.
+
+**Prima si distribuisce, poi si riempie, e il numero era già documentato.** Lo spike §5 aveva
+misurato quattro chunk e li aveva annotati come una curiosità. Rileggendo il manuale prima di
+scrivere il commento è venuto fuori che non è una curiosità: distribuendo una collezione **vuota**,
+«the sharding operation creates empty chunks … by default, the operation creates 2 chunks per shard
+and migrates across the cluster» ([S-066](Sources.md#s-066)). Due per shard, due shard, quattro. Da
+misura senza spiegazione a valore predefinito con una fonte, che dal palco è tutta un'altra frase.
+Sull'ordine inverso il manuale è altrettanto netto — su una collezione piena si crea **un** chunk
+solo e poi tocca al balancer — e l'avvio del lab diventerebbe una gara col balancer, con
+`sh.status()` che al primo colpo mostra 100 % / 0 %.
+
+**Il seed diventa il sesto anello, ed è uno scostamento dal piano.** Il Task 6 nominava due file. Ne
+è servito un terzo intervento, sul file Compose, per una ragione che si vede solo scrivendo lo
+smoke: l'unica asserzione che distingue uno sharded cluster funzionante da uno rotto è la
+distribuzione dei documenti, e per misurarla i documenti devono già esserci. Con il dataset affidato
+a un comando separato, `make smoke-03` dopo `make up-03` sarebbe fallito — o peggio, sarebbe andato
+verde saltando l'unico controllo che conta. Il one-shot `seed` entra dopo `add-shard`, la sentinella
+`up-03` sposta la dipendenza su di lui, e quello che cambia è **che cosa promette `up --wait`**: non
+più «i due shard sono registrati» ma «c'è anche il dataset», che è la promessa che gli altri due
+stack fanno già ([ADR-0065](Decision.md#adr-0065)). Il piano approvato non si tocca: lo scostamento
+si registra qui.
+
+**Ventimila anche in `completo`, contro lo spike.** Il piano fissa 20 000 per `palco`; lo spike
+usava 50 000 per `completo`. Sono 20 000 in tutti e due, perché i profili differiscono nella
+topologia e non nei dati, e un dataset che cambia col profilo renderebbe i numeri mostrati dal palco
+dipendenti da quale profilo sta girando. La misura dice che non si perde niente: distribuzione
+identica nei due profili, 9860 e 10140, perché dipende dall'hash delle chiavi e i membri in più sono
+copie dello stesso shard ([V-058](Sources.md#v-058)).
+
+**Lo smoke è stato scritto al contrario.** La domanda da cui è partito non era «che cosa posso
+controllare», era **«che cosa resterebbe verde su un cluster che ha messo tutti i ventimila
+documenti su un solo shard»**. La risposta è: tutto. Un cluster così risponde, scrive, legge, e
+`sh.status()` gli mostra due shard belli attivi. Da lì i controlli si sono scelti da soli — la
+distribuzione per shard con una soglia al 40 %, e il baratto della chiave in forma eseguibile:
+uguaglianza su `_id` → **uno** shard, intervallo sulla stessa chiave → **tutti e due**. Se un giorno
+la seconda tornasse 1, la chiave non sarebbe più hashed, e nessun altro controllo se ne
+accorgerebbe.
+
+**Due cose imparate provando, che nessuno aveva previsto.** La prima: gli utenti di uno sharded
+cluster vivono nel database `admin` dei **config server**, e la stessa coppia utente/password che
+funziona sul router dà `Authentication failed` su uno shard interrogato in diretta. Non è un guasto,
+è la regola, e lo smoke ora la asserisce come tale; la conseguenza pratica è che le misure interne
+dei nodi si leggono da `docker inspect` e dalla riga `cache_size=…` del log di avvio, non da
+`hostInfo()`. La seconda è l'unico rosso dell'intera prova: il controllo «il router non monta
+`/data/db`» **fallisce su un cluster sano**, perché l'immagine di MongoDB dichiara `VOLUME /data/db`
+nel proprio Dockerfile e Docker crea un volume anonimo su ogni container che ne nasce, `mongos`
+compreso. Il discriminante vero è il volume **nominato**, e ora lo smoke controlla tutti e due i
+versi: nessun `dati-…` sul router, uno per ciascun `mongod`.
+
+**Le citazioni sono state riverificate, e la verifica ha cambiato il contenuto.** Sei frasi del
+manuale erano state trascritte nel file dei dati attribuendole a una sola pagina. Rileggendo le
+pagine per scrivere `Sources.md` è saltato fuori che **due erano dell'altra** — il testo era
+verbatim, l'attribuzione no. La rilettura ha però portato anche una riga che nella prima stesura
+mancava, e che cambia il racconto: «to optimize data distribution, the chunks that contain the
+global `maxKey` (or `minKey`) do not stay on the same shard» ([S-067](Sources.md#s-067)). Il collo
+di bottiglia di una chiave monotona **cambia nodo** man mano che i chunk si dividono; non sparisce,
+ma non è il nodo unico e immobile che le spiegazioni brevi descrivono. Senza quella riga il Blocco 3
+avrebbe raccontato una caricatura, e una caricatura si smonta alla prima domanda del pubblico.
+
+**Verificato eseguendo, nei due profili.** `up -d --wait` a uscita 0 in **23 secondi** su `palco` e
+**36** su `completo`, dataset compreso; il secondo `up` di seguito esce 0 e il seed stampa «ha già
+20000 documenti: non ricarico». `tools/smoke-sharded.sh` chiude a **62 controlli superati e 0
+errori** su `palco` e **99 e 0** su `completo`. `make tools-test` 125 passed, `make stack-check` tre
+stack conformi, `make docs-check` verde. `.env` di scarto cancellato, `down -v` in coda a ogni giro,
+residui contati a zero: nessun container, nessun volume, nessuna rete.
+
+**Note di metodo.**
+
+106. **La prova utile non è quella che passa: è quella che sarebbe verde sul guasto vero.** Scrivendo
+     lo smoke la domanda produttiva è stata «che cosa resterebbe verde su un cluster rotto», e la
+     risposta ha riscritto l'ordine dei controlli. Sessantadue asserzioni, e **una sola** distingue
+     uno sharded cluster da un replica set travestito: la distribuzione. Le altre sessantuno sono
+     utili, ma se ci fossero solo quelle la prova andrebbe verde su un cluster che non partiziona
+     niente. Il modo in cui una suite cresce di solito è per aggiunta di controlli facili, che
+     danno la sensazione di essere più protetti senza spostare la copertura di un millimetro: il
+     controllo che vale è quello che si sa nominare **prima**, dicendo quale guasto lo farebbe
+     diventare rosso.
+107. **Quando un controllo ovvio fallisce su un sistema che hai ragione di credere sano, il primo
+     sospettato è il controllo.** «Un router non ha dati, quindi non monta `/data/db`»: ineccepibile
+     e falso, perché l'immagine dichiara `VOLUME /data/db` e Docker obbedisce su ogni container che
+     ne nasce. Il punto generale non è la sorpresa in sé, è che `docker inspect` mostra allo stesso
+     modo **quello che hai chiesto tu e quello che l'immagine ha imposto**, e i due si distinguono
+     solo guardando se il volume ha un nome. Vale oltre Docker: ogni strumento che riporta uno
+     stato mescola le tue dichiarazioni con i valori predefiniti di qualcun altro, e un controllo
+     scritto senza sapere quale delle due sta leggendo è un controllo che prima o poi accusa la
+     persona sbagliata.
+108. **Una citazione attribuita alla pagina sbagliata è peggio di nessuna citazione, e riverificarla
+     paga due volte.** Sei frasi verbatim, una sola fonte indicata, due in realtà venute da un'altra
+     pagina: chi fosse andato a controllare non le avrebbe trovate, e avrebbe avuto ragione di
+     dubitare anche delle altre quattro. Il costo della riverifica è stato due letture; il ricavo è
+     stato doppio, perché rileggendo per sistemare l'attribuzione è comparsa una riga che nella
+     prima stesura mancava e che ha cambiato il contenuto didattico, non la sua bibliografia. La
+     regola operativa che ne esce: la fonte si rilegge **quando si scrive la voce in `Sources.md`**,
+     non quando si copia la frase — sono due momenti diversi, e il secondo è l'unico in cui si sta
+     guardando la pagina intera invece della frase che serviva.
