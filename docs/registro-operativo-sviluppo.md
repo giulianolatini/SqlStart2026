@@ -2781,3 +2781,60 @@ risposta giusta.
     che risponde a una domanda diversa da quella posta. Con i servizi remoti ha una difesa
     specifica: non leggere elenchi per cercare un elemento, ma **chiederlo per nome** e guardare il
     conteggio. Un `count: 0` non dipende da dove cade il taglio della pagina.
+
+---
+
+## 2026-09-01 — `feature/03`, Task 1: lo scheletro, e un file di prova che portava due decisioni
+
+Il piano del branch è scritto ([`2026-09-01-piano-feature-03-stack-sharded.md`](00-progetto/2026-09-01-piano-feature-03-stack-sharded.md)),
+undici task, e la sua premessa è che questo branch non comincia dalla pagina bianca: lo spike del
+25 agosto ha già montato la topologia, misurato la distribuzione dei documenti e provato il
+failover di uno shard. Scrivendolo sono uscite quattro cose che il piano diceva male e sono state
+corrette prima del commit — fra queste, la più utile: il `--configdb` di `mongos` elenca tutti e
+tre i config server anche nel profilo `palco`, dove due non esistono, perché `mongos` li tratta da
+semi e ignora gli irraggiungibili. Il piano ordinava di parametrizzarlo per profilo. Lo spike lo
+aveva già misurato, e la misura toglie un ramo invece di aggiungerlo.
+
+**Il Task 1 è fatto e verificato** ([V-052](Sources.md#v-052)): `keyfile-init` senza profilo, il
+replica set dei config server, `.env.example`. I profili selezionano 2, 4 e 1 servizio come
+previsto; `up --wait` con il profilo `palco` esce 0 dopo `keyfile-init` `Exited` → `cfg1`
+`Healthy`; il keyfile risulta `-r-------- 1 999 999 1024`; `check_stack.py` lo trova già conforme
+senza regole nuove.
+
+**La misura che conta.** Su un config server avviato con `--replSet` e mai inizializzato,
+`db.hello()` risponde `isWritablePrimary: false`, `secondary: false`, `isreplicaset: true`. I primi
+due termini sono falsi. L'healthcheck che il design §5.4 suggerisce — la disgiunzione dei primi due
+— resterebbe rosso per sempre, e la catena non arriverebbe mai a `rs.initiate()`. È lo stesso
+risultato dello stack 02, ma su un ruolo diverso, con una porta predefinita diversa: valeva
+rimisurarlo invece di ereditarlo.
+
+**La decisione del task.** Il file dello spike usa gli ancoraggi YAML e risparmia duecento righe su
+undici servizi. Gli altri due stack non li usano. [ADR-0059](Decision.md#adr-0059) sceglie il per
+esteso anche qui, e non per coerenza: lo stack 03 esiste per mostrare che tre ruoli sono distinti —
+`--configsvr`, `--shardsvr`, un `mongos` che non è un `mongod` — e un file in cui tutti ereditano
+dallo stesso ancoraggio mette in evidenza ciò che hanno in comune e nasconde in una riga di
+override ciò che li distingue, cioè il contenuto del Blocco 3. Il prezzo è dichiarato: circa
+novecento righe a stack completo, e una manutenzione peggiore che tocca a `check_stack.py`
+sorvegliare.
+
+**Note di metodo.**
+
+92. **Un file che ha già funzionato porta dentro più decisioni di quante se ne stiano copiando.**
+    Il Compose dello spike si sarebbe potuto riportare così com'era: era la cosa ragionevole da
+    fare, ed è quello che il verbale suggerisce. Ma dentro c'erano due scelte, non una: gli
+    ancoraggi YAML — visibili, discutibili, discusse — e la sonda `db.adminCommand('ping').ok`,
+    che non aveva l'aria di una scelta e risponde anche a un `mongod` che non è entrato in nessun
+    replica set. La prima si vede aprendo il file. La seconda si sarebbe scoperta al primo avvio
+    che dichiara pronto un cluster senza cluster. Il codice che ha funzionato altrove non è
+    neutro: è un insieme di decisioni prese in un contesto diverso, e passa la frontiera tutto
+    insieme se nessuno lo ferma. La regola: quando si importa un artefatto che funziona, si elenca
+    che cosa decide, non solo che cosa fa. Le righe che nessuno commenterebbe sono quelle da
+    guardare.
+93. **Un permesso si prova al suo margine, non al suo centro.** L'eccezione localhost si racconta
+    così: ci si collega da dentro e si crea il primo utente. Provandola al centro — `db.hello()` —
+    passa, e la storia sembra confermata. Provandola al margine — `db.adminCommand({getCmdLineOpts:
+    1})` — risponde `not authorized on admin`. L'eccezione non apre il server: apre la creazione
+    del primo utente, e nient'altro. Sono due frasi che si assomigliano e descrivono superfici di
+    attacco diverse. Vale per qualunque permesso documentato in prosa: la prova che informa non è
+    quella che riesce, è quella che individua dove smette di riuscire. La pagina della sicurezza ha
+    un debito in più, e questa volta con il comando che lo dimostra.

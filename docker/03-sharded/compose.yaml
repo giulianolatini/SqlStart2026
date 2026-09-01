@@ -1,0 +1,362 @@
+# Stack 03 — sharded cluster a due profili.
+#
+# È il terzo e ultimo stack del lab, e l'unico che non è nato qui: la topologia è
+# stata montata e misurata dallo spike del 25 agosto
+# (docs/00-progetto/2026-08-25-spike-sharded.md), che ha verificato undici
+# container in piedi, la distribuzione dei documenti sui due shard e il failover
+# di un membro. Questo file porta quella topologia dentro il repository con le
+# regole del repository addosso: profili, pinning per digest, healthcheck che
+# aspettano un servizio operativo e non un processo vivo.
+#
+# ATTENZIONE — QUESTO FILE È INCOMPLETO. Contiene il primo anello della catena e
+# il replica set dei config server. Gli shard, `mongos` e la registrazione degli
+# shard nel cluster arrivano nei task successivi del piano
+# (docs/00-progetto/2026-09-01-piano-feature-03-stack-sharded.md). Così com'è
+# avvia un CSRS autenticato e nient'altro: non è ancora uno sharded cluster, e
+# non c'è nessun `mongos` a cui collegarsi. La riga è qui perché ADR-0037 vuole
+# che ciò che non c'è sia dichiarato, non lasciato scoprire.
+#
+# PERCHÉ DUE PROFILI (ADR-0010). Uno sharded cluster non è negoziabile nella
+# forma: ogni shard è un replica set, i config server sono un replica set, e
+# servono almeno due shard. Con tre membri per componente si arriva a undici
+# container, che su un portatile che intanto proietta non stanno in piedi. Il
+# tutorial di dispiegamento autorizza la via d'uscita due volte, per i config
+# server e per gli shard, con la stessa frase: «For testing purposes, you can
+# create a single-member replica set». Quindi:
+#
+#   --profile palco     un membro per componente. È il profilo del talk.
+#   --profile completo  tre membri per componente. Resta nel repository, è
+#                       documentato ed eseguibile su una macchina capiente.
+#
+# Senza `--profile` non parte quasi niente, ed è voluto: vedi il commento su
+# keyfile-init.
+#
+# IL NOME DEL REPLICA SET DEI CONFIG SERVER DEVE DIFFERIRE da quello di ogni
+# shard (ADR-0010). Qui `cfgrs` contro `shard1rs` e `shard2rs`. Non è una
+# convenzione estetica: è un requisito.
+#
+# Serve un file `.env` accanto a questo, copiato da `.env.example`: la password
+# dell'amministratore non ha un valore predefinito e senza di essa l'avvio si
+# ferma dicendolo.
+#
+# COME SI AVVIA — due --env-file, non uno (ADR-0041):
+#
+#   docker compose --env-file tools/images.env \
+#                  --env-file docker/03-sharded/.env \
+#                  -f docker/03-sharded/compose.yaml --profile palco up -d --wait
+#
+# Il secondo `--env-file` non è ridondante: la flag non AGGIUNGE un file, prende
+# il posto del `.env` implicito. Passandone uno solo, il `.env` qui accanto non
+# viene letto benché sia qui accanto (S-056, V-025).
+#
+# NESSUN ANCORAGGIO YAML, e qui la scelta costa più che nello stack 02. Il file
+# dello spike usava `x-mongo: &mongo` e undici `<<: *mongo`, e risparmiava
+# duecento righe. Questo file scrive i servizi per esteso perché è materiale
+# didattico proiettato: ADR-0003 ha scartato la fattorizzazione con la stessa
+# motivazione — «comoda per chi mantiene, ostile a chi legge una volta sola».
+# Il costo è contenuto ripetendo il CODICE e non i COMMENTI: il primo servizio di
+# ogni ruolo è commentato per intero, gli altri rimandano a lui.
+
+name: sqlstart-03-sharded
+
+services:
+  # ---------------------------------------------------------------------------
+  # Primo anello della catena. Gira una volta sola, prima di chiunque altro, e
+  # lascia dietro di sé un keyfile che i nove mongod e i due mongos monteranno in
+  # sola lettura.
+  # ---------------------------------------------------------------------------
+
+  keyfile-init:
+    # NON HA `profiles`, ed è la riga più importante del file.
+    #
+    # ADR-0010 ha dichiarato una riserva: la documentazione dei profili copre una
+    # sola direzione della relazione con `depends_on` — un servizio CON profilo
+    # verso le sue dipendenze, dove «Compose automatically starts the services
+    # that it depends on» (S-015). La direzione inversa, un servizio SENZA
+    # profilo che dipende da uno con un profilo non attivo, non è trattata in
+    # nessuna pagina.
+    #
+    # Lasciando keyfile-init fuori dai profili la relazione va sempre nella
+    # direzione documentata: cfg1 ha un profilo e dipende da keyfile-init, che
+    # non ne ha, e Compose lo avvia da sé. La riserva resta aggirata PER
+    # COSTRUZIONE, non per fortuna. Chi aggiunge un profilo a questo servizio la
+    # riapre, e il guasto si presenta come un mongod che non trova il keyfile.
+    #
+    # Conseguenza da conoscere: `docker compose up` senza `--profile` avvia
+    # questo servizio e nient'altro. Genera il keyfile e si ferma. Non è un
+    # difetto — è come si prepara il volume prima di scegliere il profilo.
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-keyfile-init
+    # `never` fisso, non parametrico: ADR-0039. Se l'immagine manca dalla cache
+    # l'avvio fallisce subito, invece di aprire una connessione che in sala non
+    # c'è.
+    pull_policy: never
+    # Obbligatorio su un one-shot. Con `unless-stopped` Compose rialzerebbe il
+    # servizio ogni volta che esce — e un servizio che ha finito esce sempre —
+    # quindi `service_completed_successfully` non scatterebbe per nessuno.
+    restart: "no"
+
+    # ADR-0004 chiede limiti espliciti a OGNI servizio. Questi 128 MiB non entrano
+    # nel bilancio del design §5.1, perché keyfile-init è già uscito quando il
+    # primo mongod parte.
+    mem_limit: 128m
+    cpus: 0.25
+
+    command: ["bash", "/init/01-keyfile.sh"]
+    volumes:
+      # Volume NOMINATO, non bind mount (ADR-0014): su macOS un file montato
+      # dall'host non conserva i permessi che gli si danno, e mongod rifiuta di
+      # partire con un keyfile che considera «too open».
+      - keyfile:/keyfile
+      # Lo script invece arriva dall'host, in sola lettura. Qui il bind mount va
+      # bene: il file viene passato a `bash` come argomento, quindi non gli serve
+      # il bit di esecuzione, che è appunto la cosa che macOS non garantisce.
+      - ./init/01-keyfile.sh:/init/01-keyfile.sh:ro
+
+  # ---------------------------------------------------------------------------
+  # I config server. Sono il replica set `cfgrs` e contengono i metadati del
+  # cluster: quali shard esistono, come è partizionata ogni collezione, dove sta
+  # ogni chunk. Non contengono dati applicativi. Se spariscono, gli shard hanno
+  # ancora tutti i dati e nessuno sa più dove siano.
+  #
+  # Su un config server NON si usa MONGO_INITDB_ROOT_USERNAME/PASSWORD: lo spike
+  # §2 lo ha misurato. L'entrypoint ufficiale avvia un mongod temporaneo per
+  # creare l'utente, e quel mongod parte senza --configsvr: l'utente nasce in un
+  # contesto che poi non esiste più. L'amministratore nasce invece sotto
+  # eccezione localhost nel Task 2, come nello stack 02 (ADR-0026, ADR-0040).
+  # ---------------------------------------------------------------------------
+
+  cfg1:
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-cfg1
+    # Il nome host non è una buona abitudine, è un requisito: `rs.initiate()`
+    # registra i membri con il nome con cui li si elenca, e quel nome finisce
+    # DENTRO la configurazione della replica. Nello sharded cluster ci finisce due
+    # volte — anche nella stringa `--configdb` di mongos. Nomi, mai indirizzi
+    # (ADR-0021).
+    hostname: cfg1
+    pull_policy: never
+    restart: unless-stopped
+    # Sempre presente: è l'unico config server del profilo `palco`, e senza di lui
+    # non esiste cluster.
+    profiles: ["palco", "completo"]
+
+    # 512 MiB per config server, dal bilancio del design §5.1. Meno dei 640 di un
+    # membro di shard perché i metadati sono pochi: sono nomi di collezioni e
+    # intervalli di chunk, non documenti.
+    mem_limit: ${MEMORIA_CFG:-512m}
+    cpus: ${CPU_CFG:-0.5}
+
+    command:
+      # `mongod` scritto per esteso, e non è pedanteria. L'entrypoint ufficiale lo
+      # antepone da sé quando il primo argomento comincia per trattino, quindi le
+      # due forme avviano lo stesso processo — ma `tools/check_stack.py` riconosce
+      # un mongod dal primo elemento del comando, e sulla forma abbreviata la
+      # regola sulla cache NON scatta.
+      - mongod
+      # Il ruolo. Un mongod con --configsvr rifiuta di essere aggiunto come shard:
+      # è il vincolo che tiene distinti i due ruoli, e il talk lo mostra proprio
+      # perché la 8.0 li può fondere (config shard) e la domanda arriva dal
+      # pubblico.
+      - --configsvr
+      - --replSet
+      # DIVERSO dal nome di ogni shard, per requisito (ADR-0010).
+      - ${NOME_REPLICA_CFG:-cfgrs}
+      # L'autenticazione interna. Con --keyFile MongoDB attiva anche
+      # l'autenticazione dei client: è la ragione per cui esiste tutta la catena
+      # — prima che un utente esista nessuno può inizializzare la replica, e senza
+      # replica inizializzata non si può creare un utente.
+      - --keyFile
+      - /keyfile/mongo-keyfile
+      # Dentro un container l'interfaccia utile non è `localhost`: i compagni di
+      # replica e i mongos arrivano dalla rete Compose.
+      - --bind_ip_all
+      # La porta, dichiarata. --configsvr porterebbe la predefinita a 27019; la si
+      # riporta a 27017 perché tutto il resto del lab — stringhe di connessione,
+      # `--configdb`, script — usa 27017 dentro la rete Compose, e una porta
+      # diversa qui sarebbe una differenza da ricordare senza guadagnarci niente.
+      - --port
+      - "27017"
+      # 0,25 GiB = 256 MiB di cache dentro 512 MiB di limite. Fisso mentre
+      # `mem_limit` è parametrico: chi abbassa MEMORIA_CFG sotto i 256 MiB
+      # configura una cache più grande della memoria che avrà, e mongod lo accetta
+      # senza un avviso. È il caso che `make stack-check` intercetta (ADR-0004).
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+
+    ports:
+      # 27131-27133 dalla mappa del design §5.2. Gli intervalli dei tre stack non
+      # si sovrappongono apposta: il 01 e il 02 devono poter restare accesi mentre
+      # questo gira (ADR-0003).
+      - "${PORTA_CFG_1:-27131}:27017"
+
+    volumes:
+      # In SOLA LETTURA. Un membro non ha ragione di riscrivere il keyfile, e il
+      # montaggio glielo impedisce invece di fidarsi che non lo faccia.
+      - keyfile:/keyfile:ro
+      # Un volume dati PER MEMBRO. Condividerne uno significherebbe più processi
+      # sullo stesso /data/db, che è il modo più rapido di corrompere un database.
+      - dati-cfg1:/data/db
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # La disgiunzione a tre termini dello stack 02, e i tre stati sono misurati.
+    # Su un membro appena avviato con --replSet e nessuna configurazione ricevuta,
+    # hello() risponde isWritablePrimary=false, secondary=false e
+    # **isreplicaset=true**: il terzo termine è l'unico vero, ed è quello che apre
+    # la strada a rs.initiate(). A replica formata isreplicaset sparisce e valgono
+    # i primi due. Un healthcheck con i soli primi due resta rosso per sempre.
+    #
+    # Lo spike usava `db.adminCommand('ping').ok`, che risponde anche a un mongod
+    # che non è entrato in nessun set. Il passaggio alla sonda più severa è
+    # VOLUTO: chi confronta i due file non lo prenda per una svista.
+    #
+    # `quit(0/1)` e non il valore stampato: mongosh esce 0 se lo script non
+    # solleva eccezioni, quindi un `--eval` che si limita a stampare `false`
+    # risulterebbe sano lo stesso (ADR-0036).
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "const h = db.hello(); quit(h.isWritablePrimary || h.secondary || h.isreplicaset === true ? 0 : 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      # Senza start_period i primi tentativi falliti contano come guasti e il
+      # membro risulta «unhealthy» mentre sta semplicemente ancora aprendo i file.
+      start_period: 20s
+
+    depends_on:
+      # Non «dopo che è partito» ma «dopo che ha finito bene»: il keyfile deve
+      # esistere e avere i permessi giusti PRIMA che mongod apra il file, e un
+      # one-shot che è partito non ha ancora fatto niente (ADR-0023).
+      keyfile-init:
+        condition: service_completed_successfully
+
+  cfg2:
+    # Identico a cfg1 salvo nome, porta, volume e profilo: vedi lì i commenti.
+    # Esiste solo nel profilo `completo`, dove i config server sono tre.
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-cfg2
+    hostname: cfg2
+    pull_policy: never
+    restart: unless-stopped
+    profiles: ["completo"]
+
+    mem_limit: ${MEMORIA_CFG:-512m}
+    cpus: ${CPU_CFG:-0.5}
+
+    command:
+      - mongod
+      - --configsvr
+      - --replSet
+      # Lo stesso nome di cfg1: è ciò che li rende compagni. Un membro avviato con
+      # un --replSet diverso non dà errore all'avvio, si limita a non partecipare.
+      - ${NOME_REPLICA_CFG:-cfgrs}
+      - --keyFile
+      - /keyfile/mongo-keyfile
+      - --bind_ip_all
+      - --port
+      - "27017"
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+
+    ports:
+      - "${PORTA_CFG_2:-27132}:27017"
+
+    volumes:
+      - keyfile:/keyfile:ro
+      - dati-cfg2:/data/db
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "const h = db.hello(); quit(h.isWritablePrimary || h.secondary || h.isreplicaset === true ? 0 : 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+    depends_on:
+      keyfile-init:
+        condition: service_completed_successfully
+
+  cfg3:
+    # Identico a cfg1 salvo nome, porta, volume e profilo: vedi lì i commenti.
+    # È il terzo membro, quello che rende il CSRS tollerante a un guasto: con due
+    # soli membri, fermarne uno lascia il superstite in minoranza e i metadati del
+    # cluster diventano di sola lettura — niente split di chunk e niente
+    # bilanciamento, mentre gli shard continuano a servire i dati. È una scena del
+    # Blocco 3, e non è la stessa cosa di uno shard che cade.
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-cfg3
+    hostname: cfg3
+    pull_policy: never
+    restart: unless-stopped
+    profiles: ["completo"]
+
+    mem_limit: ${MEMORIA_CFG:-512m}
+    cpus: ${CPU_CFG:-0.5}
+
+    command:
+      - mongod
+      - --configsvr
+      - --replSet
+      - ${NOME_REPLICA_CFG:-cfgrs}
+      - --keyFile
+      - /keyfile/mongo-keyfile
+      - --bind_ip_all
+      - --port
+      - "27017"
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+
+    ports:
+      - "${PORTA_CFG_3:-27133}:27017"
+
+    volumes:
+      - keyfile:/keyfile:ro
+      - dati-cfg3:/data/db
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "const h = db.hello(); quit(h.isWritablePrimary || h.secondary || h.isreplicaset === true ? 0 : 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+    depends_on:
+      keyfile-init:
+        condition: service_completed_successfully
+
+volumes:
+  keyfile:
+  dati-cfg1:
+  dati-cfg2:
+  dati-cfg3:

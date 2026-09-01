@@ -1044,3 +1044,40 @@ e per lo stesso motivo si può leggere con `cat`, confrontare con `diff` e ripro
 installare niente. Sono due riserve diverse, non due copie della stessa cosa: il filmato copre il
 caso «la demo non parte», la registrazione di terminale il caso «la demo parte ma il tempo è
 finito».
+
+---
+
+### Un config server sano che nessun healthcheck ragionevole vedrebbe
+
+> Su un `mongod` avviato con `--replSet` e mai inizializzato, `db.hello()` risponde:
+> `isWritablePrimary: false`, `secondary: false`, `isreplicaset: true`.
+> I primi due termini sono falsi. Il terzo è l'unico vero — ed è quello che apre la strada a
+> `rs.initiate()`.
+
+Fonte: [V-052](Sources.md#v-052) — lo scheletro dello stack 03, e prima
+[V-023](Sources.md#v-023) sullo stack 02.
+
+**Perché una slide:** è la trappola dell'healthcheck in tre righe, e si racconta come un
+indovinello. Un membro che deve ancora entrare nella replica non è primario e non è secondario:
+qualunque sonda scritta con «primario oppure secondario» — la forma che viene naturale, e che il
+design di questo progetto suggeriva — resta rossa per sempre, e la catena di avvio non arriva mai a
+inizializzare il set che renderebbe la sonda verde. Il guasto si presenta come un `up --wait` che
+non ritorna, e nessuno guarda l'healthcheck perché l'healthcheck «è giusto».
+
+---
+
+### Il codice che ha funzionato altrove non è neutro
+
+> Il file Compose dello spike si poteva riportare così com'era. Dentro c'erano due decisioni, non
+> una: gli ancoraggi YAML, visibili e discutibili, e una sonda `ping` che non aveva l'aria di una
+> scelta. La prima si vede aprendo il file. La seconda si sarebbe scoperta al primo avvio che
+> dichiara pronto un cluster senza cluster.
+
+Fonte: [ADR-0059](Decision.md#adr-0059) — la nota di metodo 92 del
+[registro](registro-operativo-sviluppo.md).
+
+**Perché una slide:** vale ben oltre MongoDB, e il pubblico di SqlStart la riconosce subito — è
+quello che succede ogni volta che si copia un `docker-compose.yml` trovato funzionante. Un
+artefatto che gira porta con sé tutte le scelte di chi l'ha scritto, comprese quelle che non ha
+saputo di prendere, e passa la frontiera tutto insieme se nessuno lo ferma. Le righe che nessuno
+commenterebbe sono quelle da guardare.

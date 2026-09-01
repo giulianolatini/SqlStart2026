@@ -5608,3 +5608,84 @@ GET /v2/repositories/library/mongo/tags?page_size=100&name=8.0.30
   terzo canale nominato da ADR-0028.
 - **Data:** 2026-09-01
 - **Usata da:** ADR-0058
+
+<a id="v-052"></a>
+### V-052 — Lo scheletro dello stack 03: i profili contati, e un config server sano per un termine solo
+
+- **Comandi:** `docker compose … config --services` con i tre profili possibili;
+  `docker compose … --profile palco up -d --wait`; `docker logs`; `docker inspect --format`;
+  `mongosh --eval` dentro il container; `tools/check_stack.py`
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, 11,66 GiB assegnati alla VM,
+  immagine `mongo` 7.0.40 pinnata per digest da `tools/images.env`, 2026-09-01
+- **Che cosa si voleva sapere:** se lo scheletro dello stack 03 — `keyfile-init` senza profilo
+  più il replica set dei config server — regge le tre affermazioni su cui è costruito: che i
+  profili selezionino esattamente i servizi previsti, che la catena dichiari «pronto» quando lo
+  è, e che l'healthcheck ereditato dallo stack 02 funzioni anche su un `mongod` con
+  `--configsvr`.
+
+- **Esito, primo punto — i profili selezionano quello che devono.** Contando i servizi:
+
+```
+--profile palco     -> keyfile-init, cfg1                    (2)
+--profile completo  -> keyfile-init, cfg1, cfg2, cfg3        (4)
+nessun profilo      -> keyfile-init                          (1)
+```
+
+  La terza riga è la conferma che conta: `keyfile-init` è **senza** `profiles`, quindi resta
+  selezionato sempre, e la relazione `depends_on` va da un servizio con profilo verso uno senza.
+  È la direzione documentata da [S-015](#s-015), l'unica delle due; la riserva dichiarata da
+  [ADR-0010](Decision.md#adr-0010) sull'altra direzione resta aggirata per costruzione.
+
+- **Esito, secondo punto — la catena a due anelli funziona.** `up -d --wait` con il profilo
+  `palco` esce **0** dopo aver percorso l'ordine per intero: `sh-keyfile-init` `Started` →
+  `Exited` → `sh-cfg1` `Started` → `Healthy`. Il keyfile risulta:
+
+```
+-r-------- 1 999 999 1024 /keyfile/mongo-keyfile
+```
+
+  cioè 400 e proprietà `999:999`, che è l'utente `mongodb` dell'immagine ufficiale
+  ([S-023](#s-023)). I 1024 byte sono i 756 di entropia in base64.
+
+- **Esito, terzo punto — e questo è quello che vale.** Su un config server avviato con
+  `--replSet` e mai inizializzato, `db.hello()` risponde:
+
+```json
+{"isWritablePrimary": false, "secondary": false, "isreplicaset": true}
+```
+
+  I primi due termini sono **falsi**. L'unico vero è il terzo. Un healthcheck scritto come
+  `isWritablePrimary || secondary` — la forma che il design §5.4 suggerisce — resterebbe rosso
+  per sempre, e la catena non arriverebbe mai a `rs.initiate()`. La disgiunzione a tre termini
+  dello stack 02 vale quindi anche su un `--configsvr`, e non era scontato: è un ruolo diverso,
+  con una porta predefinita diversa e vincoli propri.
+
+  Il ruolo è confermato dal server stesso, non dedotto dal file: il log di avvio riporta
+  `"clusterRole":"configsvr"`, e il comando del container è
+  `mongod --configsvr --replSet cfgrs --keyFile … --bind_ip_all --port 27017
+  --wiredTigerCacheSizeGB 0.25`.
+
+- **Esito, quarto punto — l'eccezione localhost è più stretta di come si racconta.** Dallo stesso
+  container, `db.adminCommand({getCmdLineOpts: 1})` **fallisce**:
+
+```
+MongoServerError: not authorized on admin to execute command { getCmdLineOpts: 1, … }
+```
+
+  mentre `db.hello()` passa. Su un nodo con `--keyFile` e nessun utente creato, l'eccezione non
+  apre il server: apre la creazione del primo utente. È un'informazione utile alla pagina della
+  sicurezza, che oggi la descrive in termini più larghi.
+
+- **Esito, quinto punto — lo scheletro è già conforme.** `tools/check_stack.py` sul solo file
+  dello stack 03 riporta `Stack conformi: 1.` senza che sia stata aggiunta nessuna regola nuova.
+
+- **Conseguenza:** [ADR-0059](Decision.md#adr-0059).
+- **Riserve:** il profilo `completo` è stato verificato solo con `config --services`, non avviato:
+  la misura non dice niente su undici container in piedi insieme, che è la domanda del §6 dello
+  spike e va rifatta nel repository. Il CSRS **non** è stato inizializzato, quindi `hello()`
+  misura lo stato che precede `rs.initiate()` e non quello che segue. Non esiste ancora nessun
+  `mongos`, quindi niente di ciò che riguarda il routing è coperto. Tutto su arm64: la
+  disponibilità dei tag e il comportamento dei limiti di memoria su amd64 non sono stati
+  riverificati qui.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0059

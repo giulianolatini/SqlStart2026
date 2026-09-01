@@ -3394,3 +3394,64 @@ subordinerebbe il calendario a una data che non esiste; lasciare la clausola com
 prodotta nessuna nemmeno adesso senza un punto di ripresa che la nominasse.
 
 **Fonti:** [V-051](Sources.md#v-051)
+
+---
+
+<a id="adr-0059"></a>
+## ADR-0059 — Lo stack 03 si scrive per esteso, e il file dello spike si traduce invece di essere copiato
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto:** lo spike del 25 agosto ha lasciato un file Compose che funziona, e il verbale dice
+di riportarlo in `docker/03-sharded/` quando la feature parte. Quel file usa gli ancoraggi YAML:
+`x-mongo: &mongo`, `x-sonda: &sonda`, e undici `<<: *mongo`. È una scelta ragionevole per un file
+di prova — undici servizi quasi identici, duecento righe risparmiate.
+
+Gli altri due stack del repository non li usano. Lo stack 02 scrive i suoi tre membri per esteso e
+lo dichiara nel commento: «la ripetizione è deliberata». La motivazione viene da
+[ADR-0003](#adr-0003), che ha scartato `include` e i frammenti condivisi perché la
+fattorizzazione è «comoda per chi mantiene, ostile a chi legge una volta sola». Ma ADR-0003 parla
+di file diversi, non di ancoraggi dentro un file, e lo stack 03 non è lo stack 02: sono nove
+`mongod` e due `mongos`, non tre membri. Copiare il criterio senza verificarlo sarebbe stato
+comodo in un verso e nell'altro.
+
+Il punto che decide non è il conteggio delle righe, è **cosa insegna il file sul proiettore**. Lo
+stack 03 esiste per mostrare che tre ruoli sono distinti: `--configsvr`, `--shardsvr`, e un
+`mongos` che non è un `mongod`. Un file in cui gli undici servizi ereditano dallo stesso ancoraggio
+mette in evidenza ciò che hanno in comune e nasconde in una riga di override ciò che li distingue —
+cioè esattamente il contenuto del Blocco 3.
+
+**Decisione.**
+
+1. **Nessun ancoraggio YAML e nessun `extends` in `docker/03-sharded/compose.yaml`.** Ogni
+   servizio è scritto per esteso, come nei due stack precedenti.
+2. **Si ripete il codice, non i commenti.** Il primo servizio di ogni ruolo — `cfg1`, poi
+   `shard1a`, poi `mongos` — porta la spiegazione completa; gli altri della stessa famiglia
+   aprono con una riga che rimanda a lui e commentano solo ciò che cambia. È già la forma dello
+   stack 02, dove i membri 2 e 3 dicono «identico a quello del membro 1: vedi lì il perché».
+3. **Il file dello spike si traduce, non si copia.** Oltre agli ancoraggi cambia la sonda: lo
+   spike usava `db.adminCommand('ping').ok`, che risponde anche a un `mongod` che non è entrato in
+   nessun replica set. Lo stack 03 adotta la disgiunzione a tre termini dello stack 02, e
+   [V-052](Sources.md#v-052) ha misurato perché serve il terzo — su un config server non ancora
+   inizializzato `isWritablePrimary` e `secondary` sono entrambi falsi, e una sonda a due termini
+   resterebbe rossa per sempre.
+4. **Il file dichiara in testa ciò che non contiene ancora.** Finché shard e `mongos` non ci sono,
+   l'intestazione lo dice: chi apre il file a metà branch non deve scoprirlo avviandolo
+   ([ADR-0037](#adr-0037)).
+
+**Conseguenze:** il file sarà lungo — dell'ordine delle novecento righe a stack completo — ed è il
+prezzo consapevole di un artefatto che è anche una slide. In cambio, ogni servizio si legge senza
+risalire a un ancoraggio in cima, e le tre differenze di ruolo sono visibili nel punto in cui
+capitano. La manutenzione peggiora: un cambiamento comune va ripetuto undici volte, e non c'è
+niente che lo imponga automaticamente. È `tools/check_stack.py` a dover fare da rete — le regole
+del Task 5 del piano esistono anche per questo.
+
+**Alternative scartate:** copiare il file dello spike così com'è (veloce, e avrebbe portato dentro
+la sonda debole insieme agli ancoraggi: due decisioni prese senza accorgersene); usare gli
+ancoraggi solo per i blocchi davvero identici come `logging` (difendibile, ma introduce la domanda
+«perché questo sì e quello no» in un file che deve rispondere a domande sullo sharding); generare
+il file Compose da un modello (toglie di mezzo la ripetizione e mette al suo posto uno strumento in
+più da spiegare, oltre a rendere il file non leggibile in un repository clonato senza eseguire
+niente).
+
+**Fonti:** [V-052](Sources.md#v-052)
