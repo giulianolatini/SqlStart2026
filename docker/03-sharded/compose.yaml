@@ -8,18 +8,21 @@
 # regole del repository addosso: profili, pinning per digest, healthcheck che
 # aspettano un servizio operativo e non un processo vivo.
 #
-# ATTENZIONE — QUESTO FILE È ANCORA INCOMPLETO. Ci sono i tre componenti che
-# tengono dati — il replica set dei config server e i due shard — e i tre servizi
-# che li inizializzano. Manca l'ultimo pezzo, ed è quello che li unisce: `mongos`
-# e `sh.addShard()` arrivano nel Task 3 del piano
-# (docs/00-progetto/2026-09-01-piano-feature-03-stack-sharded.md).
+# LO STACK È COMPLETO: nove `mongod`, due `mongos`, la registrazione degli shard.
+# `docker compose --profile palco up -d --wait` seguito dall'attesa dei quattro
+# servizi one-shot dà un cluster che serve.
 #
-# Così com'è, questo file avvia TRE REPLICA SET SEPARATI. Ognuno funziona, nessuno
-# sa degli altri, e non esiste nessun indirizzo a cui un'applicazione possa
-# collegarsi per vederli come una cosa sola: uno sharded cluster senza mongos non
-# è uno sharded cluster a cui manca un pezzo, è un insieme di replica set che non
-# si conoscono. La riga è qui perché ADR-0037 vuole che ciò che non c'è sia
-# dichiarato, non lasciato scoprire avviandolo.
+# Resta fuori solo ciò che non è topologia e ha una sede propria nei task
+# successivi del piano (docs/00-progetto/2026-09-01-piano-feature-03-stack-sharded.md):
+# la chiusura della catena di avvio (Task 4), i dati di demo con la loro shard key
+# (Task 6) e i bersagli del Makefile che rendono l'avvio un comando solo (Task 7).
+# I primi due passi del Task 4 — gli healthcheck dei `mongod` e quello di `mongos`
+# — sono già qui, perché scrivere un servizio senza decidere come si dichiara sano
+# non si può; il ragionamento sulla sonda di `mongos` è in ADR-0061.
+#
+# Finché il Makefile non ha i suoi bersagli, l'avvio va dato a mano come descritto
+# in `.env.example`, e va dato in DUE comandi: `up --wait` non aspetta i one-shot,
+# ed è una trappola misurata due volte (ADR-0041).
 #
 # PERCHÉ DUE PROFILI (ADR-0010). Uno sharded cluster non è negoziabile nella
 # forma: ogni shard è un replica set, i config server sono un replica set, e
@@ -860,6 +863,243 @@ services:
     depends_on:
       shard2a:
         condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # QUARTO ANELLO — `mongos`, e qui il file cambia argomento.
+  #
+  # Fin qui c'erano nove `mongod`: processi che tengono dati su disco, entrano in
+  # un replica set, eleggono un primario. `mongos` non è niente di tutto questo.
+  # È un ROUTER: riceve la query, chiede al config server dove stanno i documenti
+  # che servono, interroga solo gli shard che li hanno e ricompone la risposta.
+  #
+  # Tre assenze da leggere, perché sono il contenuto della slide:
+  #
+  #   niente --replSet     non è membro di niente e non elegge nessuno;
+  #   niente volume dati   non ha uno stato da conservare: spento e riacceso
+  #                        riparte identico leggendo il config server;
+  #   niente --wiredTigerCacheSizeGB
+  #                        non ha un motore di memorizzazione a cui dare una
+  #                        cache. Passarglielo lo fa fallire all'avvio.
+  #
+  # Sono tre righe che negli altri servizi ci sono e qui no. Il commento serve
+  # perché un'assenza non si vede leggendo: si vede solo confrontando.
+  #
+  # `--keyFile` invece SÌ, ed è lo stesso segreto degli altri nove. In un cluster
+  # sharded l'autenticazione interna è di cluster: `mongos` deve presentarsi ai
+  # config server e agli shard con la stessa chiave, o non gli parla nessuno.
+  #
+  # LA STRINGA `--configdb` ELENCA TUTTI E TRE I CONFIG SERVER, anche nel profilo
+  # `palco` dove cfg2 e cfg3 non esistono, e non è una svista. `mongos` li tratta
+  # da SEMI: ne contatta uno, si fa dire da lui la composizione reale del replica
+  # set, e degli irraggiungibili non gli importa. Misurato nello spike del 25
+  # agosto e riconfermato qui. Parametrizzarla per profilo aggiungerebbe un ramo
+  # per risolvere un problema che non c'è.
+  #
+  # Il nome del set davanti alla barra NON è decorativo: è il nome del replica
+  # set dei config server, e `mongos` rifiuta di partire se il set che trova si
+  # chiama diversamente. È il motivo per cui NOME_REPLICA_CFG compare qui dentro.
+  # ---------------------------------------------------------------------------
+
+  mongos:
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-mongos
+    hostname: mongos
+    pull_policy: never
+    restart: unless-stopped
+    profiles: ["palco", "completo"]
+
+    # 256 MiB: non tiene dati, tiene la mappa dei chunk e le connessioni aperte
+    # verso gli shard. È la voce più economica del bilancio del design §5.1, ed è
+    # il motivo per cui due router stanno in piedi anche su un portatile.
+    mem_limit: ${MEMORIA_MONGOS:-256m}
+    cpus: ${CPU_MONGOS:-0.5}
+
+    command:
+      - mongos
+      - --configdb
+      - ${NOME_REPLICA_CFG:-cfgrs}/cfg1:27017,cfg2:27017,cfg3:27017
+      - --keyFile
+      - /keyfile/mongo-keyfile
+      - --bind_ip_all
+      - --port
+      - "27017"
+
+    ports:
+      - "${PORTA_MONGOS:-27117}:27017"
+
+    # Solo il keyfile. Nessun `dati-mongos`, e l'assenza è la lezione.
+    volumes:
+      - keyfile:/keyfile:ro
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # QUESTA SONDA DICE «ACCETTA CONNESSIONI», NON «IL CLUSTER SERVE», ed è una
+    # scelta, non una scorciatoia. La differenza si vede provando a chiedere di
+    # più: un `mongos` senza nessuno shard registrato risponde a `hello()`,
+    # accetta connessioni e lascia leggere — e alla prima scrittura risponde che
+    # non c'è nessuno shard. Una sonda che pretendesse due shard registrati
+    # sarebbe più onesta e creerebbe uno stallo: `add-shard` gira dentro `mongos`
+    # e non potrebbe aspettarlo sano, perché è lui a doverlo rendere sano.
+    #
+    # Il verdetto «il cluster serve» lo dà quindi un'altra cosa: il codice di
+    # uscita di `add-shard`, che è un servizio one-shot e per definizione finisce
+    # solo quando ha finito. È la stessa forma di ADR-0041 sullo stack 02 —
+    # `up --wait` non è la prova, la prova è il one-shot che si ferma.
+    #
+    # `hello()` passa senza credenziali anche su un `mongos` con `--keyFile` e
+    # utenti già creati: è misurato, non dato per scontato. Vale la stessa
+    # ragione dello stack 02 per cui la password non si mette nella riga di un
+    # healthcheck: finirebbe in chiaro dentro `docker inspect`, per sempre, su
+    # una riga che nessuno rilegge.
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "quit(db.hello().ok === 1 ? 0 : 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+    # Il replica set dei config server deve ESISTERE, non solo essere in piedi:
+    # `mongos` interroga i metadati appena parte. Quindi si aspetta la fine di
+    # cfg-init, non la salute di cfg1.
+    depends_on:
+      cfg-init:
+        condition: service_completed_successfully
+
+  # Il secondo router, solo nel profilo `completo`. Non serve a reggere il carico
+  # del lab — non c'è carico — serve a mostrare mezza slide del Blocco 3: i
+  # router sono più d'uno, sono senza stato, e sono intercambiabili. Fermarne uno
+  # e continuare a lavorare sull'altro è una scena che dura dieci secondi e
+  # spiega cos'è un componente stateless meglio di un elenco puntato.
+  #
+  # È identico a mongos salvo nome, porta e profilo: nessuna riga di
+  # configurazione li distingue, ed è esattamente il punto.
+
+  mongos2:
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-mongos2
+    hostname: mongos2
+    pull_policy: never
+    restart: unless-stopped
+    profiles: ["completo"]
+
+    mem_limit: ${MEMORIA_MONGOS:-256m}
+    cpus: ${CPU_MONGOS:-0.5}
+
+    command:
+      - mongos
+      - --configdb
+      - ${NOME_REPLICA_CFG:-cfgrs}/cfg1:27017,cfg2:27017,cfg3:27017
+      - --keyFile
+      - /keyfile/mongo-keyfile
+      - --bind_ip_all
+      - --port
+      - "27017"
+
+    ports:
+      - "${PORTA_MONGOS_2:-27118}:27017"
+
+    volumes:
+      - keyfile:/keyfile:ro
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "quit(db.hello().ok === 1 ? 0 : 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+    depends_on:
+      cfg-init:
+        condition: service_completed_successfully
+
+  # ---------------------------------------------------------------------------
+  # QUINTO E ULTIMO ANELLO — la registrazione degli shard nel cluster.
+  #
+  # È il comando che trasforma tre replica set che non si conoscono in uno
+  # sharded cluster. Prima di `sh.addShard()` esistono cfgrs, shard1rs e
+  # shard2rs, tutti funzionanti, nessuno dei quali sa degli altri; dopo, il
+  # config server sa che shard1rs e shard2rs sono posti dove mettere documenti, e
+  # `mongos` sa a chi chiedere.
+  #
+  # Gira dentro `mongos` e NON dentro un config server: `sh.addShard()` è un
+  # comando che si dà al router. Ed è autenticato, a differenza dei tre init del
+  # Task 2: quelli lavoravano sotto eccezione localhost su nodi senza utenti,
+  # qui l'amministratore esiste già — l'ha creato cfg-init — e l'eccezione è
+  # chiusa da un pezzo.
+  # ---------------------------------------------------------------------------
+
+  add-shard:
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-add-shard
+    pull_policy: never
+    restart: "no"
+    profiles: ["palco", "completo"]
+
+    mem_limit: 128m
+    cpus: 0.25
+
+    network_mode: "service:mongos"
+
+    environment:
+      # Le stringhe di connessione dei due shard, nella forma che `sh.addShard()`
+      # vuole: `nome-set/host:porta,host:porta`. Dipendono dal profilo per la
+      # stessa ragione degli elenchi del Task 2, e valgono le stesse guardie.
+      SHARD_1: ${NOME_REPLICA_SHARD1:-shard1rs}/${MEMBRI_SHARD1:-shard1a:27017}
+      SHARD_2: ${NOME_REPLICA_SHARD2:-shard2rs}/${MEMBRI_SHARD2:-shard2a:27017}
+      UTENTE_AMMINISTRATORE: ${UTENTE_AMMINISTRATORE:-admin}
+      PASSWORD_AMMINISTRATORE: ${PASSWORD_AMMINISTRATORE:?assente — copiare docker/03-sharded/.env.example in .env e riempire la password}
+
+    command:
+      - mongosh
+      - --quiet
+      - --host
+      - localhost
+      - -u
+      - ${UTENTE_AMMINISTRATORE:-admin}
+      - -p
+      - ${PASSWORD_AMMINISTRATORE:?assente — copiare docker/03-sharded/.env.example in .env e riempire la password}
+      - --authenticationDatabase
+      - admin
+      - --file
+      - /init/20-add-shard.js
+
+    volumes:
+      - ./init/20-add-shard.js:/init/20-add-shard.js:ro
+
+    # `mongos` sano significa «accetta connessioni», che è quanto serve qui: è la
+    # sonda di liveness discussa sopra, e la ragione per cui non è più severa.
+    #
+    # I due shard NON compaiono qui, e questa volta non è per i profili: è che
+    # `sh.addShard()` vuole un replica set con un primario ELETTO, non un
+    # container in piedi. Il fatto giusto da aspettare è quindi la fine dei due
+    # init del Task 2, che si fermano solo dopo aver visto il primario.
+    depends_on:
+      mongos:
+        condition: service_healthy
+      shard1-init:
+        condition: service_completed_successfully
+      shard2-init:
+        condition: service_completed_successfully
 
 volumes:
   keyfile:

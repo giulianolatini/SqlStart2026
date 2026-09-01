@@ -2929,3 +2929,77 @@ nient'altro.
     funzionano, è che rompendole si legge `il membro «cfg2:27017» non risponde dopo 30 secondi`
     invece di uno stack verde e sbagliato. Il valore di un controllo si misura sul testo che
     produce quando fallisce, non sul fatto che passi quando tutto va bene.
+
+## 2026-09-01 — `feature/03`, Task 3: il router davanti, e una sonda che non poteva essere onesta
+
+Con i due `mongos` e `init/20-add-shard.js` la topologia dello stack 03 è finita: nove `mongod`,
+due router, e la riga in `config.shards` che trasforma tre replica set che non si conoscono in uno
+sharded cluster. `compose.yaml` passa da 874 a 1109 righe, `.env.example` da 146 a 163, e il nuovo
+script ne aggiunge 120.
+
+**Il deadlock trovato prima di scriverlo.** Il piano, al Passo 2 del Task 4, dice: «la domanda è se
+il router accetti connessioni prima che gli shard siano registrati. Se sì, l'healthcheck deve
+verificare la registrazione, altrimenti `up-03` dichiarerà pronto un cluster senza shard.» La
+misura risponde **sì** ([V-055](Sources.md#v-055)), e la conseguenza prescritta è impossibile.
+`add-shard` gira dentro `mongos` e lo aspetta sano; se `mongos` diventasse sano solo con gli shard
+registrati, il servizio che li registra non partirebbe mai. Lo stack si bloccherebbe indicando il
+colpevole sbagliato: Compose direbbe che `mongos` non diventa sano, mentre il vero fermo è il
+servizio in coda. Ho disegnato il grafo delle attese prima di scrivere l'healthcheck, e il cappio
+si vede a occhio. [ADR-0061](Decision.md#adr-0061): la sonda di `mongos` è di **vita** —
+`db.hello().ok === 1`, senza credenziali perché `hello()` non ne chiede — e il verdetto «il cluster
+serve» è l'uscita di `add-shard`. È la stessa forma di [ADR-0041](Decision.md#adr-0041) sullo stack
+02, non un'invenzione nuova. Il Passo 2 del Task 4 arriva quindi già risposto, con la conclusione
+rovesciata rispetto a come il piano la immaginava.
+
+**Un `mongos` senza shard è sano, e mente per omissione.** La misura completa è in V-055, e il
+punto che non mi aspettavo è il secondo: `hello()`, `ping`, `listDatabases` e persino una `find`
+passano. La `find` su un database inesistente risponde `[]` **senza errore**, identica alla
+risposta di un cluster sano con la collezione vuota. Solo la scrittura distingue, e allora sì che
+nomina la causa: `ShardNotFound — No shards found`. `sh.status()` intanto stampa `shards []` con
+il balancer `Currently enabled: yes`, che è un balancer acceso senza niente da bilanciare.
+
+**La catena si chiude.** `add-shard` esce **0**, registra i due shard e li rilegge; la scrittura
+che un minuto prima falliva viene accettata e riletta. `sh.status()` mostra i due shard con
+`state: 1`, `active mongoses [ { '7.0.40': 1 } ]` e il balancer attivo con zero giri falliti — è
+il Passo 4 del Task 3, rifatto dentro il repository come il piano chiedeva. Riesecuzione con
+`--force-recreate`: esce 0 e scrive `già registrato: non lo riaggiungo` per tutti e due.
+
+**Il profilo `completo`, e il router che non ha niente da perdere.** Sedici container, tutti sani o
+usciti 0. Con gli elenchi a tre membri `sh.addShard()` registra la composizione per intero, e
+`config.mongos` elenca tutti e due i router. Ho fermato `sh-mongos` con `docker stop` e dato la
+scrittura a `mongos2`: passa, e `mongos2` vede i due shard. Niente è andato perso perché su un
+`mongos` non c'è niente da perdere — è l'unico servizio dello stack **senza volume**, e insieme
+all'assenza di `--replSet` e di `--wiredTigerCacheSizeGB` (che passato a un `mongos` lo fa
+fallire: non ha uno storage engine) sono le tre assenze che spiegano che cos'è un router. Il
+`--keyFile` invece c'è: l'autenticazione interna è di tutto il cluster.
+
+**Note di metodo.**
+
+97. **Un `depends_on` verso una sonda che il dipendente stesso deve soddisfare è un cappio, e si
+    vede solo disegnando il grafo delle attese.** La regola generale, che vale oltre Compose:
+    quando B aspetta la sonda di A, e il lavoro di B è **cambiare ciò che quella sonda
+    misurerebbe**, la sonda di A può solo chiedere se A è vivo. Renderla più severa è una
+    tentazione che si presenta come rigore — «che `healthy` voglia dire davvero pronto» — e
+    produce uno stack che non parte. La difesa non è averci pensato: è che prima di scrivere un
+    `depends_on` con `service_healthy` guardo chi altro aspetta quella stessa sonda e che cosa fa
+    a valle. Costa un minuto e si fa sulla carta.
+98. **Un guasto che risponde bene costa più di uno che risponde male.** Un cluster senza shard
+    restituisce `[]` a una lettura, che è la risposta giusta alla domanda sbagliata: chi legge
+    conclude che il database è vuoto e va avanti. Se la verifica di prontezza che scriverò al Task
+    7 facesse una `find`, passerebbe su un cluster inservibile. Perciò lo smoke **deve scrivere**,
+    e il criterio non riguarda solo questo caso: una verifica che esercita solo il percorso di
+    lettura sta misurando che il processo è vivo, non che il sistema funziona. Vale anche per la
+    demo dal vivo, dove la prima scrittura arriva sempre dopo aver già detto al pubblico che il
+    cluster è pronto.
+99. **Un piano che decide in anticipo la conseguenza di una misura ha già smesso di misurare.** Il
+    Passo 2 del Task 4 è scritto bene per metà: «provare … e **scegliere misurando**» è la forma
+    giusta, e l'ho scritta io. Poi la frase dopo — «se sì, l'healthcheck deve verificare la
+    registrazione» — infila la conclusione dentro la premessa, e quella conclusione era
+    impossibile per una ragione che nessuna misura avrebbe mostrato, perché non stava nel
+    comportamento di `mongos` ma nella forma del grafo delle dipendenze. Il costo qui è stato
+    zero, perché la misura è caduta un task prima e il cappio si è visto. La regola: un passo di
+    piano che dice «misura X, e se esce così fai Y» va riscritto come «misura X» e basta, a meno
+    che Y non sia stato a sua volta verificato. Il piano approvato non si modifica quando
+    l'esecuzione se ne scosta — è la fotografia di che cosa si era deciso, e riscriverlo
+    cancellerebbe proprio lo scarto che vale la pena leggere. Lo scarto si registra qui, e il Task
+    4 troverà il suo Passo 2 già evaso con l'esito opposto.

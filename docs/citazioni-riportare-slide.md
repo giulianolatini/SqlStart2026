@@ -1146,3 +1146,65 @@ di metodo 93 e 95 del [registro](registro-operativo-sviluppo.md).
 relatore che corregge se stesso a distanza di poche ore con una misura in più. Il messaggio che
 resta non è su MongoDB: un permesso descritto in prosa va provato dove smette di funzionare, non
 dove funziona.
+
+---
+
+### Un cluster senza shard non dice di essere rotto: risponde `[]`
+
+> Un `mongos` a cui non è stato registrato nessuno shard è `healthy` per Docker, risponde a
+> `hello()`, a `ping`, a `listDatabases`. E a una lettura risponde `[]` — la stessa cosa che
+> risponderebbe un cluster sano con la collezione vuota. Solo la scrittura dice la verità:
+> `No shards found`. Il guasto che risponde bene costa più di quello che risponde male.
+
+Fonte: [V-055](Sources.md#v-055); [ADR-0061](Decision.md#adr-0061) e la nota di metodo 98 del
+[registro](registro-operativo-sviluppo.md).
+
+**Perché una slide:** è la slide che giustifica perché lo smoke del lab **scrive** invece di
+leggere, e vale ben oltre MongoDB. Si può mostrare dal vivo in venti secondi: `find` prima di
+`sh.addShard()`, `insertOne` subito dopo, e la stessa riga di codice che prima taceva e adesso
+parla.
+
+---
+
+### Fra tre replica set e uno sharded cluster c'è una riga scritta da qualche parte
+
+> Prima di `sh.addShard()` ci sono `cfgrs`, `shard1rs` e `shard2rs`: tre replica set funzionanti,
+> nessuno dei quali sa che gli altri esistono. Dopo, c'è un cluster. Sui nove `mongod` non è
+> cambiato niente — stessi processi, stessi dati, stessi file. È cambiata una riga in
+> `config.shards`.
+
+Fonte: [V-055](Sources.md#v-055) e `docker/03-sharded/init/20-add-shard.js`.
+
+**Perché una slide:** è il momento del Blocco 3 in cui lo sharding smette di sembrare un'altra
+tecnologia e torna a essere MongoDB con un registro in più. Serve a smontare l'idea che passare a
+sharded significhi rifare tutto.
+
+---
+
+### La sonda più severa non è sempre la più rigorosa
+
+> «Che `healthy` voglia dire davvero pronto» sembra rigore. Se l'healthcheck di `mongos` avesse
+> preteso gli shard registrati, il servizio che li registra — che gira dentro `mongos` e lo
+> aspetta sano — non sarebbe mai partito. E Compose avrebbe accusato `mongos`, che era innocente.
+
+Fonte: [ADR-0061](Decision.md#adr-0061), nota di metodo 97 del
+[registro](registro-operativo-sviluppo.md).
+
+**Perché una slide:** se resta tempo, come chiusura del Blocco 3. Non parla di MongoDB ma di come
+si progettano le catene di avvio, e la regola sta in una riga: quando B aspetta la sonda di A e il
+lavoro di B è cambiare ciò che quella sonda misura, la sonda di A può solo chiedere se A è vivo.
+
+---
+
+### Il router è l'unico pezzo del cluster che si può buttare via
+
+> Nove `mongod` hanno un volume ciascuno. I due `mongos` non ne hanno nessuno: niente `--replSet`,
+> niente cache dello storage engine — passargliela lo fa proprio fallire, perché uno storage
+> engine non ce l'ha. Ho fermato il primo router in mezzo a una demo e ho scritto sul secondo.
+> Non si è perso niente, perché non c'era niente da perdere.
+
+Fonte: [V-055](Sources.md#v-055), sesto punto.
+
+**Perché una slide:** è la mezza slide del Blocco 3 sui router, e si dimostra dal vivo con un
+`docker stop`. Le tre assenze — replica set, volume, cache — sono la definizione operativa di
+«senza stato» detta con tre righe di `compose.yaml` invece che con una definizione.

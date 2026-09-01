@@ -5872,3 +5872,91 @@ insert su una raccolta NEGATO    Unauthorized
   è stato riverificato su un `--configsvr` senza utenti.
 - **Data:** 2026-09-01
 - **Usata da:** ADR-0060
+
+<a id="v-055"></a>
+### V-055 — `mongos` senza shard: sano, interrogabile, e muto quando dovrebbe gridare
+
+- **Comandi:** `docker compose --profile … up -d --wait`; `docker compose wait add-shard`;
+  `docker inspect --format`; `docker logs`; `mongosh --eval` dentro i container; `docker stop` /
+  `docker start`
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.4.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-01
+- **Che cosa si voleva sapere:** che cosa risponde un `mongos` a cui non è stato ancora registrato
+  nessuno shard. La domanda non è oziosa: decide che cosa può chiedere il suo healthcheck. Se la
+  sonda pretendesse un cluster completo, il servizio one-shot che registra gli shard — che gira
+  **dentro** `mongos` e quindi lo aspetta sano — non partirebbe mai, e lo stack si bloccherebbe
+  su se stesso. Serviva sapere se la sonda può essere onesta e restare una sonda di vita.
+
+- **Esito, primo punto — con zero shard `mongos` è sano e risponde a quasi tutto.** Autenticati come
+  amministratore, su un router appena avviato e nessuno shard nel cluster:
+
+```
+hello()                OK      ok=1 msg=isdbgrid
+ping                   OK      ok=1
+config.shards count    OK      0
+listDatabases          OK      ["admin","config"]
+lettura su demo        OK      []
+SCRITTURA su demo      ERRORE  ShardNotFound — Database demo could not be created :: caused by :: No shards found
+enableSharding demo    ERRORE  ShardNotFound — Database demo could not be created :: caused by :: No shards found
+```
+
+  Il container è `Up (healthy)` per Docker, `sh.status()` stampa `shards []` con il balancer
+  `Currently enabled: yes`, e `hello()` risponde `ok=1 msg=isdbgrid` **anche senza credenziali** —
+  che è la ragione per cui la sonda dell'healthcheck può restare una riga sola senza password
+  dentro il file Compose.
+
+- **Esito, secondo punto — la lettura tace, la scrittura no.** È il punto didattico della misura, e
+  non era scontato: `find()` su una collezione di un database inesistente risponde `[]` **senza
+  nessun errore**, esattamente come risponderebbe un cluster sano con la collezione vuota. Le due
+  situazioni sono indistinguibili dal lato del client. Solo la scrittura distingue, e lo fa con un
+  messaggio che nomina la causa vera: `No shards found`. Un cluster senza shard non è rotto in
+  modo visibile: è rotto in modo che si nota alla prima scrittura, e a una demo dal vivo la prima
+  scrittura arriva dopo che si è già detto al pubblico che il cluster è pronto.
+
+- **Esito, terzo punto — `sh.addShard()` chiude la catena, e i due shard entrano.** Il one-shot
+  esce **0**, `docker compose wait add-shard` risponde 0, e il registro dice:
+
+```
+shard già registrati: nessuno
+registro lo shard «shard1rs» -> shard1rs/shard1a:27017
+registro lo shard «shard2rs» -> shard2rs/shard2a:27017
+shard nel cluster: shard1rs -> shard1rs/shard1a:27017
+shard nel cluster: shard2rs -> shard2rs/shard2a:27017
+cluster pronto: 2 shard registrati
+```
+
+  Subito dopo, la stessa scrittura che un minuto prima falliva viene accettata e riletta:
+  `insertOne` risponde `acknowledged: true`, `find` restituisce `[{"x":1}]`. È la differenza fra
+  tre replica set e uno sharded cluster, ed è **una riga scritta in `config.shards`**: sui nove
+  `mongod` non è cambiato niente, stessi processi e stessi dati.
+
+- **Esito, quarto punto — `sh.status()` dopo la registrazione.** Due shard con `state: 1`,
+  `active mongoses [ { '7.0.40': 1 } ]`, autosplit `Currently enabled: yes`, balancer
+  `Currently enabled: yes` e `Failed balancer rounds in last 5 attempts: 0`;
+  `sh.getBalancerState()` risponde `true`. È la misura chiesta dal piano del Task 3, rifatta qui
+  dentro il repository e non nella directory di prova dello spike.
+
+- **Esito, quinto punto — la riesecuzione non rompe niente.** Ricreato il one-shot con
+  `up -d --force-recreate add-shard`, esce **0** e scrive
+  `shard «shard1rs» già registrato: non lo riaggiungo` per tutti e due. Serviva perché un
+  `make up-03` dato due volte davanti al pubblico non deve fallire la seconda.
+
+- **Esito, sesto punto — il profilo `completo`, e il router che non ha niente da perdere.** Sedici
+  container, tutti `healthy` o `Exited (0)`. Con gli elenchi a tre membri, `sh.addShard()` registra
+  la composizione per intero — `shard1rs/shard1a:27017,shard1b:27017,shard1c:27017` — e
+  `config.mongos` elenca tutti e due i router: `["mongos2:27017","mongos:27017"]`. Fermato
+  `sh-mongos` con `docker stop`, la scrittura data a `mongos2` passa (`acknowledged: true`) e
+  `mongos2` vede i due shard. Nessun dato è andato perso perché **su un `mongos` non ce n'è**: è
+  l'unico servizio dello stack senza volume, e la sua morte è un dettaglio operativo, non un
+  incidente.
+
+- **Conseguenza:** [ADR-0061](Decision.md#adr-0061).
+- **Riserve:** nessuna collezione è stata distribuita — `shardCollection`, la shard key e la
+  distribuzione dei chunk restano fuori (Task 6). La misura del secondo punto vale per un database
+  che non esiste; non è stato provato che cosa risponde una lettura su un database **esistente**
+  ma con gli shard tolti a posteriori, che è un caso che questo stack non sa produrre. Il quinto
+  punto ricrea il container, non riesegue lo script dentro lo stesso container. Le password usate
+  nelle prove sono di scarto e ogni caso si è chiuso con `down -v`, senza container né volumi
+  residui. Tutto su arm64.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0061

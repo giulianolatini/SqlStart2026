@@ -3535,3 +3535,78 @@ mano, è anzi lo scopo); leggere il profilo attivo da dentro lo script (Compose 
 container, e `COMPOSE_PROFILES` non arriva nell'ambiente del processo).
 
 **Fonti:** [V-053](Sources.md#v-053), [V-054](Sources.md#v-054)
+
+---
+
+<a id="adr-0061"></a>
+## ADR-0061 — La sonda di `mongos` chiede se è vivo, non se il cluster serve
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto:** con il Task 3 lo stack acquista i due `mongos` e il servizio one-shot `add-shard`,
+che è il quinto e ultimo anello della catena di avvio. `add-shard` gira **dentro** `mongos`
+(`network_mode: "service:mongos"`, come i tre init del Task 2 girano dentro il primo membro del
+loro set) e quindi lo aspetta con `condition: service_healthy`.
+
+Qui nasce la domanda. La tentazione, guardando gli altri healthcheck dello stack, è di rendere
+onesta anche questa sonda: un `mongos` senza shard non serve a niente, quindi che `healthy`
+significhi «il cluster ha i suoi shard». È un ragionamento che si morde la coda. `add-shard` è il
+servizio che **registra** gli shard, aspetta `mongos` sano, e `mongos` non diventerebbe sano finché
+`add-shard` non ha finito. Lo stack si bloccherebbe su se stesso, e — peggio — si bloccherebbe con
+una diagnosi che punta al posto sbagliato: Compose direbbe che `mongos` non diventa sano, quando
+il colpevole è il servizio che sta aspettando.
+
+[V-055](Sources.md#v-055) ha misurato il terreno. Un `mongos` con zero shard è perfettamente vivo:
+`hello()` risponde `ok=1` con `msg=isdbgrid`, `ping` passa, `listDatabases` elenca `admin` e
+`config`, `sh.status()` stampa `shards []` con il balancer attivo. `hello()` passa **anche senza
+credenziali**. Quello che non passa è la scrittura, con `ShardNotFound — No shards found`. E una
+lettura risponde `[]` in silenzio, indistinguibile da un cluster sano con la collezione vuota.
+
+Questa è la stessa forma già decisa da [ADR-0041](#adr-0041) per lo stack 02, dove `up --wait`
+risponde 0 mentre gli init sono ancora in corsa e il verdetto vero è l'uscita del one-shot. Non è
+un'invenzione nuova: è la regola vecchia applicata a un servizio nuovo.
+
+**Decisione:**
+
+1. **L'healthcheck di `mongos` è una sonda di vita, non di prontezza:**
+   `quit(db.hello().ok === 1 ? 0 : 1)`. Non guarda `config.shards`, non conta gli shard, non prova
+   a scrivere. Dice una cosa sola e la dice vera: il processo di routing risponde. Gira senza
+   credenziali perché `hello()` non ne chiede, il che tiene la password fuori dal file Compose in
+   un punto in più.
+
+2. **Il verdetto «il cluster serve» è l'uscita di `add-shard`**, non lo stato di un container.
+   Lo script controlla il risultato — `config.shards` alla fine ha almeno due righe — e non gli
+   esiti dei singoli comandi, ed esce **7** se il cluster è incompleto. Chi vuole sapere se il
+   cluster è pronto guarda quel codice, esattamente come nello stack 02 si guarda l'uscita di
+   `rs-init`.
+
+3. **Perciò l'avvio dello stack 03 resta in due comandi**, `up -d --wait` e poi
+   `compose wait` sui one-shot, come ADR-0041 impone allo stack 02 e come
+   [ADR-0060](#adr-0060) ha già stabilito debba avvenire **con il flag di profilo acceso**, che
+   senza risponde `no containers for project` ed esce 1.
+
+4. **`add-shard` dichiara tutte e tre le attese che gli servono**: `mongos` sano, e i due
+   `shard{N}-init` completati con successo. La seconda parte non è ridondante: un `mongos` sano
+   non implica che gli shard esistano, e `sh.addShard()` su un replica set senza primario eletto
+   fallisce. Restano fuori i config server, che sono già coperti in transitiva — `mongos` non
+   diventa sano senza `cfg-init`.
+
+**Conseguenze:** fra `up --wait` che torna e `add-shard` che finisce esiste una finestra di qualche
+secondo in cui lo stack è verde e le scritture falliscono con `ShardNotFound`. È esattamente la
+finestra che ADR-0041 aveva già descritto per lo stack 02, ed è la ragione per cui il secondo
+comando non è una raffinatezza. La pagina delle trappole del Task 9 deve raccoglierla insieme al
+suo sintomo peggiore, che è la lettura muta: chi in quella finestra fa una `find` invece di una
+`insert` riceve `[]` e conclude che il database è vuoto.
+
+Il costo didattico è che l'healthcheck di `mongos` è il meno informativo dello stack, e uno
+studente che lo legga da solo potrebbe crederlo pigro. Il commento accanto al servizio spiega
+perché non può essere altro, e il ragionamento del deadlock è materiale per il Blocco 3.
+
+**Alternative scartate:** una sonda che conta gli shard (il deadlock descritto sopra); una sonda
+che prova una scrittura (stesso deadlock, più un documento scritto a ogni giro di healthcheck);
+`add-shard` senza `depends_on` verso `mongos`, lasciandolo riprovare a collegarsi (rende l'avvio
+un'attesa cieca, e i tre init del Task 2 avevano già scelto il contrario); un healthcheck di
+prontezza su `mongos2` soltanto, dove il deadlock non ci sarebbe perché `add-shard` gira nel primo
+(due sonde diverse per lo stesso ruolo, e `mongos2` non esiste nel profilo `palco`).
+
+**Fonti:** [V-055](Sources.md#v-055)
