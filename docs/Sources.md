@@ -5409,3 +5409,72 @@ comando assente       -> uscita 127, «comando non trovato: …», nessun .cast 
   resta la parte più delicata del programma e non è coperta da altro che da questi test.
 - **Data:** 2026-09-01
 - **Usata da:** ADR-0053
+
+
+<a id="v-049"></a>
+### V-049 — Il difetto che macOS nasconde: Linux non chiude il pty, e il codice di uscita diventava 0
+
+- **Comandi:** `tools/registra-terminale.py … -- <comando che lascia un discendente>` su macOS e
+  dentro un container `alpine:3`, prima e dopo la correzione
+- **Ambiente:** macOS 26.6.2 arm64, Python 3.14.7 · container `alpine:3` con `python3` 3.14.7,
+  Docker 29.7.2
+- **Che cosa si voleva sapere:** una seconda review esterna sulla PR #3 ha segnalato che il ciclo di
+  cattura di `registra-terminale.py` ha **due** uscite, e che la seconda perde lo stato. Quando il
+  comando registrato finisce senza chiudere lo pseudo-terminale — succede se lascia dietro di sé un
+  discendente — il ramo non bloccante `os.waitpid(pid, os.WNOHANG)` lo **raccoglie** e ne butta via
+  lo stato; la `waitpid` finale non trova più nessuno, solleva `ChildProcessError`, e il ripiego
+  `stato = 0` fa riportare **successo**. Il rilievo proponeva anche un caso di prova. Chi lo ha
+  scritto non ha potuto eseguirlo — la propria sandbox glielo ha impedito.
+
+- **Esito, primo punto — su macOS non si riproduce, e non per caso.** Tre costruzioni diverse,
+  tutte con il comando che esce `7` lasciando un discendente attaccato al pty:
+
+```
+sh -c 'sleep 5 & exit 7'                        -> uscita 7, in 0,068 s
+sh -c '(trap "" HUP; sleep 5) & exit 7'         -> uscita 7, in 0,075 s
+python3 …  (figlio con os.setsid(), sleep 3)    -> uscita 7, in 0,087 s
+```
+
+  Nessuna arriva al ramo non bloccante: se ci arrivasse, il ciclo aspetterebbe almeno il timeout di
+  `select`, cioè 0,2 s. Il pty si chiude subito lo stesso, e la registrazione risulta vuota anche
+  quando il discendente stampa (`echo TARDI` dopo un secondo non compare nel `.cast`). È il
+  comportamento BSD: quando muore il processo di controllo, il kernel **revoca** il terminale di
+  controllo, e i descrittori del lato schiavo che i discendenti si portano dietro non lo tengono
+  più aperto.
+
+- **Esito, secondo punto — su Linux si riproduce alla prima.** Stesso strumento, stesso comando,
+  dentro `alpine:3`:
+
+```
+$ python3 /strumenti/registra-terminale.py /prova/linux.cast -- python3 /prova/tiene_il_pty.py
+registrato: /prova/linux.cast · 0.0 s · uscita 0
+real  0m 0.25s
+codice riportato su Linux: 0  (atteso 7)
+```
+
+  Il tempo lo conferma: **0,25 s**, cioè il timeout di `select` più il giro non bloccante. Linux non
+  revoca niente, il discendente tiene aperto il lato schiavo, il pty non dà EOF, e si finisce
+  esattamente nel ramo che perde lo stato.
+
+- **Esito, terzo punto — dopo la correzione.** Lo stato raccolto dal ramo non bloccante viene
+  conservato e riusato al posto della `waitpid` finale:
+
+```
+codice riportato su Linux dopo la correzione: 7  (atteso 7)
+```
+
+  La suite del file passa **14 su 14** su tutte e due le piattaforme.
+
+- **Conseguenza:** [ADR-0055](Decision.md#adr-0055), e un test in più in
+  `tools/tests/test_registra_terminale.py`. Il test è scritto in modo che su macOS passi per
+  l'altra strada — il pty si chiude comunque, il codice arriva dalla `waitpid` finale — e su Linux
+  provi davvero il ramo corretto: prima della correzione, là, riportava 0.
+- **Riserve:** il container è `alpine:3` con `musl`, non `glibc`, e non è una delle immagini pinnate
+  del laboratorio: serviva un Linux qualsiasi, non quello del lab. La revoca del terminale su macOS
+  è dedotta dal comportamento osservato — tre costruzioni, tutte con EOF immediato, compresa quella
+  con `setsid()` che al SIGHUP è immune — e non da una pagina di manuale citata qui. Non è stato
+  provato WSL2, che è Linux e dovrebbe comportarsi come il container. Resta fuori dalla misura la
+  domanda vicina: in quel ramo l'output prodotto **dopo** l'uscita del comando non viene registrato,
+  ed è per costruzione, non un difetto.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0055

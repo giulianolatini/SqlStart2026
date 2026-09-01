@@ -2321,15 +2321,16 @@ tempi dell'elezione, nel Blocco 2, e il dollaro mangiato da Compose, fra le trap
     perché la si sta scrivendo nello stesso commit, oppure si nomina il debito nel registro — che è
     l'unico posto dove qualcuno lo va a ricontrollare.
 
-**Consuntivo del branch, alla vigilia dell'unione.** Ventun commit e trentaquattro file rispetto a
-`develop`: il piano, tredici di task, quattro punti di ripresa, una nota di metodo isolata, il
-Task 14 che chiude il lavoro e il giro di review della PR #3. Il numero è calcolato **includendo il
-commit che lo introduce**, come prescrive la nota 37 dopo che era stato sbagliato due volte — e
-questa riga è stata riscritta tre volte proprio per rispettarla: diceva «diciotto» quando fu
-scritta, «diciannove» dopo il punto di ripresa di `feature/03`, «venti» dopo quello di
-`feature/04`, e adesso conta anche la review. Il conto dei file non si muove: la review ha toccato
-sei pagine e tre strumenti, tutti già dentro. Il trentaquattresimo file resta il `README.md` alla
-radice, che dichiarava ancora `docker/02-replicaset` «in lavorazione». I quattro controlli sono verdi in locale, con gli stack
+**Consuntivo del branch, alla vigilia dell'unione.** Ventidue commit e trentaquattro file rispetto
+a `develop`: il piano, tredici di task, quattro punti di ripresa, una nota di metodo isolata, il
+Task 14 che chiude il lavoro e **due** giri di review della PR #3. Il numero è calcolato
+**includendo il commit che lo introduce**, come prescrive la nota 37 dopo che era stato sbagliato
+due volte — e questa riga è stata riscritta quattro volte proprio per rispettarla: diceva
+«diciotto» quando fu scritta, «diciannove» dopo il punto di ripresa di `feature/03`, «venti» dopo
+quello di `feature/04`, «ventuno» dopo la prima review, e adesso conta anche la seconda. Il conto
+dei file non si muove: le review hanno toccato sei pagine e tre strumenti, tutti già dentro. Il
+trentaquattresimo file resta il `README.md` alla radice, che dichiarava ancora
+`docker/02-replicaset` «in lavorazione». I quattro controlli sono verdi in locale, con gli stack
 fermi e con lo stack 02 acceso; su GitHub non ne gira nessuno, per scelta
 ([ADR-0038](Decision.md#adr-0038)).
 
@@ -2615,3 +2616,55 @@ a `compose exec` è una modifica al codice e non al commento.
     registratore» — e senza scriverle si sarebbe rifatta la stessa indagine al primo dubbio. La
     proporzione giusta di un repository didattico non è fra righe di codice e righe di prosa: è fra
     quello che si è imparato e quello che resta scritto.
+
+## 2026-09-01 — Seconda review della PR #3: un rilievo solo, e la macchina di sviluppo lo nascondeva
+
+Chiusa la prima review, il Product Owner ne ha chiesta una seconda a un revisore diverso — la
+`codex` CLI, `codex review --base develop`, cioè esattamente il diff della PR. Ha prodotto **un solo
+rilievo**, sullo stesso file dei tre precedenti e in un punto che nessuno dei tre aveva guardato: il
+ciclo di cattura di `registra-terminale.py` ha due uscite, e la seconda perdeva lo stato del
+processo.
+
+**Che cosa perdeva.** Quando il comando registrato finisce **senza** chiudere lo pseudo-terminale —
+succede se lascia dietro di sé un discendente — il ramo non bloccante
+`os.waitpid(pid, os.WNOHANG)` si accorgeva che era finito e buttava via lo stato in un `_`. Ma il
+processo a quel punto era già raccolto: la `waitpid` finale sollevava `ChildProcessError`, il
+ripiego `stato = 0` entrava in funzione, e lo strumento riportava **successo**. Contraddice per
+intero la promessa scritta nel proprio docstring, e il test che quella promessa la verifica
+esisteva già dal Task 13 senza accorgersi di niente — perché prova un comando che esce `3` e
+chiude il pty, cioè l'altra strada.
+
+**La parte che vale più del rilievo.** Il revisore proponeva un caso di prova e non era riuscito a
+eseguirlo: la sua sandbox glielo ha impedito. Provandolo qui, **non si riproduce**. Tre costruzioni
+diverse — un `sleep` in background, un sottoshell immune a SIGHUP, un figlio che fa `setsid()` —
+riportano tutte `7` correttamente, in meno di un decimo di secondo. Con tre esecuzioni verdi in
+mano, la conclusione naturale era archiviarlo come falso positivo.
+
+È BSD. Su macOS, quando muore il processo di controllo il kernel **revoca** il terminale di
+controllo, e il pty si chiude anche se un discendente ne tiene ancora un descrittore: il ramo
+difettoso non si raggiunge. Dentro un container `alpine:3` lo stesso identico comando riporta **0**
+invece di `7`, e ci mette 0,25 secondi — il timeout di `select` più il giro non bloccante, cioè la
+firma di quel ramo. Misura in [V-049](Sources.md#v-049), correzione e criterio in
+[ADR-0055](Decision.md#adr-0055).
+
+**Controlli.** `make tools-test` verde, e la suite del file eseguita **due volte**: 14 su 14 su
+macOS e 14 su 14 dentro il container Linux. `make docs-check` verde.
+
+**Note di metodo.**
+
+86. **Un rilievo che non si riproduce sulla macchina di sviluppo non è ancora smentito.** La nota 83
+    diceva di verificare eseguendo, e nel primo giro è bastata: `mktemp` si smonta con una riga di
+    terminale. Qui la stessa regola, applicata con la stessa diligenza, avrebbe prodotto la
+    conclusione opposta a quella giusta — tre prove, tutte eseguite davvero, tutte verdi, tutte
+    sulla piattaforma sbagliata. La regola completa è: si esegue, e **quando l'esito può dipendere
+    dal sistema operativo si esegue due volte**. Costa un `docker run` e dieci righe. Il laboratorio
+    lo eseguirà gente su Linux e su WSL2 almeno quanto su macOS, e un difetto invisibile qui è
+    visibile a loro — è l'unico tipo di difetto che chi scrive non può trovare rileggendo.
+87. **Due revisori diversi trovano cose diverse nello stesso file, e il secondo non è ridondante.**
+    Il primo giro ha trovato tre difetti in `registra-terminale.py` e non ha guardato il ciclo di
+    cattura; il secondo ha guardato solo quello. Il costo di chiedere la seconda opinione è stato
+    un comando; il difetto che ha trovato era il più grave dei quattro, perché è **silenzioso** —
+    gli altri tre urlano un traceback, questo riporta successo. Vale la pena notare anche il
+    contrario, per non trarne la lezione sbagliata: il secondo revisore non ha ritrovato nessuno
+    dei tre difetti del primo giro, che a quel punto erano già corretti, e non ha prodotto rumore.
+    Un rilievo, vero.

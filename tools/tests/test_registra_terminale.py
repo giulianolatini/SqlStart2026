@@ -192,3 +192,27 @@ def test_riproduci_con_un_comando_da_registrare_si_ferma_invece_di_ignorarlo(tmp
 
     assert esito.returncode == 2
     assert "riproduci" in esito.stderr
+
+
+def test_il_codice_di_uscita_sopravvive_a_un_figlio_che_tiene_aperto_il_pty(tmp_path):
+    """Il ciclo di cattura ha due uscite: il pty che si chiude, e il comando che finisce
+    **senza** chiuderlo perché ha lasciato dietro di sé un discendente. La seconda
+    raccoglieva il processo e ne buttava via lo stato, e la `waitpid` finale — che non
+    trovava più nessuno — ripiegava su 0: una demo fallita veniva riportata riuscita.
+
+    Il caso non si vede su macOS, dove il kernel revoca il terminale di controllo appena
+    il leader di sessione muore e il pty si chiude comunque. Si vede su Linux, dove il
+    discendente lo tiene aperto: là questo test falliva riportando 0 al posto di 7."""
+    lascia_un_discendente = (
+        "import os, sys, time\n"
+        "if os.fork() == 0:\n"
+        "    os.setsid()\n"  # fuori dalla sessione del terminale: niente SIGHUP
+        "    time.sleep(2)\n"  # e intanto tiene aperto il lato schiavo che ha ereditato
+        "    os._exit(0)\n"
+        "sys.exit(7)\n"
+    )
+    destinazione = tmp_path / "prova.cast"
+
+    esito = esegui(str(destinazione), "--", sys.executable, "-c", lascia_un_discendente)
+
+    assert esito.returncode == 7

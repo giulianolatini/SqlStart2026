@@ -3160,3 +3160,69 @@ quella che faceva smettere di guardare); toglierli entrambi senza scrivere nient
 riga senza spiegazione invita il prossimo lettore a «sistemarla» rimettendo un `-e`).
 
 **Fonti:** [V-047](Sources.md#v-047)
+
+
+---
+
+<a id="adr-0055"></a>
+## ADR-0055 — Il codice di uscita si conserva dove viene raccolto, e un rilievo che macOS nasconde si prova su Linux
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto:** chiuso il primo giro di review sulla PR #3 ([ADR-0053](#adr-0053),
+[ADR-0054](#adr-0054)), ne è stato chiesto un secondo a un revisore diverso. Ha prodotto **un solo
+rilievo**, sullo stesso file dei tre precedenti e in un punto che nessuno dei tre aveva guardato.
+
+Il ciclo di cattura di `registra-terminale.py` ha due uscite. La prima è il pty che si chiude: si
+esce dal ciclo e la `waitpid` finale raccoglie il comando e ne legge lo stato. La seconda serve al
+caso in cui il comando finisce **senza** chiudere il pty, perché ha lasciato dietro di sé un
+discendente che lo tiene aperto: lì un `os.waitpid(pid, os.WNOHANG)` accorgeva che era finito, e
+buttava via lo stato in un `_`. Il processo però a quel punto era già raccolto: la `waitpid` finale
+sollevava `ChildProcessError`, il ripiego `stato = 0` entrava in funzione, e lo strumento riportava
+**successo** qualunque cosa fosse successo. Contraddice per intero la promessa scritta nel suo
+docstring — «restituisce il codice di uscita del comando: una registrazione di una demo fallita è
+ancora una registrazione, ma chi la produce deve saperlo subito» — e il test che quella promessa la
+verifica esisteva già, senza accorgersi di niente.
+
+Il rilievo arrivava con un caso di prova, e chi lo aveva scritto **non era riuscito a eseguirlo**.
+Su questa macchina il caso non si riproduce: tre costruzioni diverse riportano tutte `7`
+correttamente, in meno di un decimo di secondo ([V-049](Sources.md#v-049)). Non è fortuna, è BSD —
+quando muore il processo di controllo, macOS **revoca** il terminale di controllo, e il pty si
+chiude anche se un discendente ne tiene un descrittore. Il ramo difettoso, su macOS, non si
+raggiunge.
+
+Dentro un container Linux lo stesso comando riporta **0** invece di `7`, e ci mette 0,25 secondi —
+il timeout di `select` più il giro non bloccante, cioè la firma esatta di quel ramo.
+
+**Decisione:** lo stato del processo si conserva **dove viene raccolto**. Il ramo non bloccante
+salva quello che `waitpid` gli restituisce in una variabile, e la `waitpid` finale si esegue solo
+se quella variabile è ancora vuota. Il ripiego a `0` resta, ma da qui in avanti copre solo il caso
+per cui esiste — un processo raccolto da qualcun altro — e non più il caso normale.
+
+**Conseguenze:** un test in più, il quattordicesimo del file, scritto in modo da passare su macOS per
+l'altra strada e da provare davvero il ramo corretto su Linux, dove prima della correzione
+falliva. La suite passa 14 su 14 su tutte e due le piattaforme.
+
+Il criterio generale, che vale oltre questo file: **un rilievo che non si riproduce sulla macchina
+di sviluppo non è ancora smentito.** Si prova su Linux, in un container qualsiasi, prima di
+respingerlo. Costa un `docker run` e una decina di righe, e qui era la differenza fra correggere un
+difetto e archiviarlo come falso positivo con tre prove a sostegno — tutte e tre eseguite, tutte e
+tre verdi, tutte e tre sulla piattaforma sbagliata. È il rovescio esatto del criterio del primo
+giro: là eseguire bastava a smentire un rilievo inventato ([ADR-0053](#adr-0053)), qui eseguire
+**sulla sola macchina di sviluppo** avrebbe confermato un difetto come inesistente. La regola
+completa è quindi: si esegue, e quando l'esito dipende dal sistema operativo si esegue due volte.
+
+Il laboratorio è distribuito a un pubblico che lo eseguirà su Linux e su WSL2 almeno quanto su
+macOS ([ADR-0001](#adr-0001)); un difetto invisibile qui è visibile a loro, ed è l'unico tipo di
+difetto che chi scrive non può trovare rileggendo.
+
+**Alternative scartate:** togliere del tutto il ramo non bloccante e affidarsi alla chiusura del pty
+(su macOS funzionerebbe, ed è esattamente il ragionamento che ha prodotto il difetto: su Linux il
+ciclo resterebbe appeso finché il discendente non finisce, e il commento che quel ramo lo spiega
+descrive un caso reale); chiamare `waitpid` con `WNOWAIT` per sbirciare lo stato senza raccogliere
+il processo (funziona, ma lascia uno zombie fino alla `waitpid` finale e sposta la complessità
+invece di toglierla); respingere il rilievo perché il caso di prova proposto non si riproduce
+(sarebbe stato difendibile con tre esecuzioni a sostegno, ed è l'errore che questa decisione esiste
+per non ripetere).
+
+**Fonti:** [V-049](Sources.md#v-049)

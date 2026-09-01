@@ -122,6 +122,10 @@ def registra(destinazione: str, comando: list[str], titolo: str, righe: int, col
         "title": titolo,
     }
 
+    # Lo stato del comando, se a raccoglierlo è il ramo non bloccante qui sotto: da
+    # quel momento il processo non esiste più, e la `waitpid` finale non lo troverebbe.
+    raccolto = None
+
     with open(destinazione, "w", encoding="utf-8") as uscita:
         uscita.write(json.dumps(intestazione, ensure_ascii=False) + "\n")
         while True:
@@ -143,16 +147,21 @@ def registra(destinazione: str, comando: list[str], titolo: str, righe: int, col
                 uscita.flush()
             else:
                 # Nessun output: si controlla se il comando è finito senza chiudere
-                # il pty — succede quando lascia dietro di sé un figlio.
-                finito, _ = os.waitpid(pid, os.WNOHANG)
+                # il pty — succede quando lascia dietro di sé un figlio. Lo stato si
+                # tiene: questa `waitpid` il processo lo ha già raccolto, e buttarlo
+                # via qui significava riportare 0 qualunque cosa fosse successo.
+                finito, stato = os.waitpid(pid, os.WNOHANG)
                 if finito == pid:
+                    raccolto = stato
                     break
 
     os.close(figlio)
-    try:
-        _, stato = os.waitpid(pid, 0)
-    except ChildProcessError:
-        stato = 0
+    if raccolto is None:
+        try:
+            _, raccolto = os.waitpid(pid, 0)
+        except ChildProcessError:
+            raccolto = 0
+    stato = raccolto
 
     if os.WIFSIGNALED(stato):
         return 128 + os.WTERMSIG(stato)
