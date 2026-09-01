@@ -308,6 +308,35 @@ server a cui parlare.
 
 ---
 
+### Cento contro zero, misurato sulla stessa prova
+
+> | | istanza singola, `w: 1` | replica set, `w: "majority"` |
+> |---|---:|---:|
+> | scritture confermate all'applicazione | 41 558 | 12 901 |
+> | **confermate e perdute** | **100** | **0** |
+
+Fonte: [V-016](Sources.md#v-016) e [V-033](Sources.md#v-033) — stesso gesto, `docker kill` sul
+processo che scrive, sulle due architetture. Decisione in [ADR-0046](Decision.md#adr-0046).
+
+**Perché una slide:** perché è il numero che l'alta disponibilità di solito non porta. Si parla di
+failover in secondi, che è la parte visibile, e quasi mai di quante scritture già confermate
+all'applicazione svaniscono nel frattempo — che è la parte che finisce in un ticket sei mesi dopo.
+Cento è un numero piccolo e concreto: sta in una riga, e chi lo sente pensa subito ai propri cento.
+
+Ma la slide va detta intera, perché la metà scomoda è la lezione vera. Nel caso a destra
+l'applicazione **un errore l'ha visto**: uno, per il documento `n=2698` — che nel database **c'è**.
+Scritto, e mai confermato. La bugia non sparisce, **cambia verso**: sull'istanza singola il client
+crede di avere dati che non ha, sul replica set crede di non avere dati che ha. Il secondo caso si
+sopravvive, a una condizione da dire ad alta voce: che la scrittura si possa rifare senza danno.
+
+E una precisazione di onestà, perché la scena sembra più bella di com'è: quasi tutta l'invisibilità
+del guasto la fanno i **retryable write**, attivi per impostazione predefinita nel driver, che hanno
+tenuto appesa una `insertOne` per dieci secondi invece di farla fallire. La replica ha salvato i
+dati; il driver ha salvato la faccia all'applicazione. Sono due cose diverse, e vale la pena non
+attribuirle alla stessa.
+
+---
+
 ## Blocco 3 — Sharded cluster
 
 ### Shard e config server devono essere replica set

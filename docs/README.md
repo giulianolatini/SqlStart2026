@@ -66,7 +66,7 @@ sono state eseguite qui, perché qui non c'è né un Ubuntu né un Windows
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
 | [`02-architetture/standalone.md`](02-architetture/standalone.md) | istanza singola: i quattro limiti con la fonte che li sostiene, quando basta davvero, il file Compose riga per riga | già nel repository |
-| `02-architetture/replica-set.md` | topologia, elezioni, read preference, write concern, ritardo di replica | `feature/02-stack-replicaset` |
+| [`02-architetture/replica-set.md`](02-architetture/replica-set.md) | replica set a tre membri: perché tre e non due, le elezioni cronometrate nelle tre scene, write concern e read preference come coppia, il confronto con l'istanza singola, il file Compose riga per riga | già nel repository |
 | `02-architetture/sharded-cluster.md` | mongos, config server, shard key, bilanciamento; i due profili dello stack | `feature/03-stack-sharded` |
 | [`02-architetture/trappole-mongodb-in-docker.md`](02-architetture/trappole-mongodb-in-docker.md) | i punti in cui MongoDB e Docker si fraintendono, una voce per sintomo: undici alla nascita, ampliata da `02` e `03` | già nel repository |
 

@@ -1592,3 +1592,120 @@ congelamento di `docker logs` dopo un riavvio del demone ([V-032](Sources.md#v-0
 ricrea; se ci fossero ma malmessi dopo una prova, `./tools/reset-demo.sh 02` è più veloce. E se una
 sezione «righe di log» stampasse il nulla, non è la scena che non è successa: è
 [V-032](Sources.md#v-032), e lo script ora lo dice da sé.
+
+---
+
+## 2026-09-01 — `feature/02`, Task 9: la pagina del replica set, e il numero gemello che mancava
+
+Il Task 9 chiede una pagina che risponda alla domanda lasciata aperta dallo stack 01 — **cosa si
+ottiene** in più, e a quale prezzo. Cinque passi: topologia ed elezioni, write concern e read
+preference come coppia, il confronto con l'istanza singola, il file Compose riga per riga,
+`docs-check` e commit. Tutti e cinque sono stati eseguiti; due di essi hanno prodotto materiale che
+il piano non prevedeva, e vale la pena dire perché.
+
+**Il piano non è stato modificato, e la deviazione è dichiarata qui.** Il Passo 2 dà per scontato
+che la read preference si possa spiegare con quello che il repository ha già. Non era vero: fra le
+fonti registrate non ce n'era **nessuna** sulla read preference. Scriverla a memoria avrebbe
+violato la regola di `Sources.md` — ogni affermazione tecnica cita almeno una voce — quindi la fonte
+è stata cercata e registrata come [S-058](Sources.md#s-058), MongoDB Manual 7.0. Il ritrovamento
+utile è che la frase del manuale sul modo `primary` — «If the primary is unavailable, read
+operations produce an error or throw an exception» — è la controparte in prosa esatta di quello che
+[V-031](Sources.md#v-031) aveva misurato il giorno prima senza saperlo.
+
+**Il Passo 3 è stato misurato invece che argomentato.** [ADR-0032](Decision.md#adr-0032) rimanda a
+questo branch il confronto sulla perdita di dati, e sull'istanza singola quel confronto ha un numero
+che fa male: **100 scritture confermate al client e sparite** ([V-016](Sources.md#v-016)). Il numero
+gemello non esisteva, e una pagina che avesse scritto «sul replica set i dati sono al sicuro»
+sarebbe stata esattamente il tipo di frase che questo repository non scrive. La prova è stata
+rifatta identica sullo stack 02 — scrittore con `w: "majority"`, `docker kill` sul primario a metà
+corsa — ed è [V-033](Sources.md#v-033): **12 901 confermate, 0 perdute**, collezione completa senza
+buchi.
+
+**E la metà scomoda, che sta nella pagina con la stessa evidenza dell'altra.** Su 12 902 tentativi
+l'applicazione ha visto **un** errore, `ERR 2698 connection … closed` — e il documento `n=2698` nel
+database **c'è**. Scritto e mai confermato: l'immagine speculare della perdita sullo standalone. Là
+il client crede di avere dati che non ha, qui crede di non avere dati che ha; la differenza è che il
+secondo caso si sopravvive, **a patto che la scrittura si possa rifare senza danno**, e la
+condizione va detta. Registrata anche la ragione per cui la scena sembra più bella di com'è: quasi
+tutta l'invisibilità del guasto la fanno i **retryable write**, attivi per impostazione predefinita,
+che hanno tenuto appesa una `insertOne` per **10 155 ms** invece di farla fallire. La prova con
+`retryWrites=false` non è stata fatta, ed è dichiarata fra le cose che la pagina non dice.
+
+**La pagina.** `docs/02-architetture/replica-set.md`, nella forma di `standalone.md`: sei sezioni,
+«Cosa questa pagina non dice» in coda, piè di pagina con decisioni e fonti. Apre con la
+sottrazione — tre membri, maggioranza due, **un** guasto tollerato — perché è la domanda a cui la
+scena risponde senza dirla. Ogni numero porta la riserva sulla stessa riga e non in nota: il
+millisecondo di `w: "majority"` è un salto su un bridge locale, i 9,3 secondi sono una forbice 8–10,
+e i dieci secondi dell'elezione sono attesa deliberata, non elezione — che dura **sei
+millisecondi**.
+
+**I rimandi sono in tutte e due le direzioni.** `standalone.md` riceve cinque collegamenti nei punti
+in cui prometteva un seguito: il failover che non c'è, `w: "majority"` che mente, il paragrafo dei
+cento documenti persi — dove ora compare il numero gemello — la manutenzione che vuole una finestra
+di fermo, e la domanda finale «quanto costa il tempo in cui non risponde nessuno». In `docs/README.md`
+la riga passa da promessa a collegamento.
+
+**Controlli.** `make docs-check` verde su citazioni e collegamenti — che qui conta più del solito,
+perché `check_links.py` verifica anche le ancore generate dai titoli, e le quattro usate nei rimandi
+inversi (`#1-perché-i-membri-sono-tre`, `#2-le-elezioni-cronometrate`,
+`#31-qui-w-majority-vuol-dire-qualcosa`, `#4-il-confronto-con-listanza-singola`) sono state scritte
+a mano e confermate dalla macchina. `make tools-test` **100 passed**. `make stack-check` → 2 stack
+conformi. `./tools/smoke-replicaset.sh` → **42 · 0**. Lo stack è stato rimesso a posto dopo la prova
+distruttiva: collezione di scarto `prova_perdita` rimossa, impronta `50000 124861860.70 150281`.
+
+**Documentazione prodotta.** [S-058](Sources.md#s-058) e [V-033](Sources.md#v-033);
+[ADR-0046](Decision.md#adr-0046), che le cita insieme a [S-035](Sources.md#s-035),
+[S-037](Sources.md#s-037), [S-044](Sources.md#s-044), [V-016](Sources.md#v-016),
+[V-027](Sources.md#v-027), [V-029](Sources.md#v-029), [V-030](Sources.md#v-030) e
+[V-031](Sources.md#v-031); `docs/02-architetture/replica-set.md`; una citazione da slide nel
+Blocco 2 — «cento contro zero, misurato sulla stessa prova».
+
+**Note di metodo.**
+
+61. **Il numero gemello vale il doppio del numero.** Cento scritture perse, da sole, sono un
+    aneddoto sullo standalone. Zero scritture perse, da sole, sono pubblicità per il replica set.
+    Le due misure **accanto**, ottenute con lo stesso gesto nello stesso pomeriggio, sono l'unica
+    forma in cui il confronto significa qualcosa. Il costo è rifare una prova che si era già fatta
+    una volta; il guadagno è che nessuno debba fidarsi di un aggettivo. Quando una pagina confronta
+    due architetture, la domanda da farsi è se il secondo numero esiste o è sottinteso.
+
+62. **La buona notizia si pubblica insieme al suo prezzo, o non è una notizia.** «Zero perse» era
+    vero e sarebbe stato incompleto: nella stessa prova un documento è finito nel database senza che
+    il client lo sapesse, e l'invisibilità del guasto era merito di un meccanismo del driver, non
+    della replica. Tenere le tre cose sulla stessa pagina costa qualche riga e toglie alla slide un
+    po' di brillantezza. La alternativa è che a scoprire il prezzo sia il pubblico, sei mesi dopo,
+    in produzione — e a quel punto il costo lo paga qualcun altro.
+
+63. **Una regola che vieta di scrivere senza fonte è una regola che manda a cercare la fonte.** Il
+    vincolo di `Sources.md` avrebbe potuto essere aggirato in tre modi: non parlare di read
+    preference, parlarne senza citare, o citare una fonte vicina fingendo che dicesse la stessa
+    cosa. Il quarto modo — cercare la fonte che manca — è costato mezz'ora e ha prodotto la frase
+    che tiene insieme la sezione. Le regole che ostacolano vanno usate come indice di ciò che
+    manca, non come ostacoli da aggirare.
+
+---
+
+## Punto di ripresa — 2026-09-01, seconda sospensione
+
+**Deciso e chiuso.** Il Task 9 di `feature/02` è chiuso: `docs/02-architetture/replica-set.md`
+esiste, con i numeri misurati e le riserve accanto ai numeri. `standalone.md` ha i cinque rimandi
+inversi e il rimando di [ADR-0032](Decision.md#adr-0032) è **saldato**. ADR da 0038 a **0046**,
+verifiche da V-020 a **V-033**, fonti fino a **S-058**.
+
+**Misurato oggi, e da non rimisurare.** Perdita di dati sul replica set con `w: "majority"` e
+primario ucciso: **0 su 12 901 confermate**, un errore per il documento `n=2698` che nel database
+c'è, pausa di **10 155 ms** dovuta ai retryable write ([V-033](Sources.md#v-033)).
+
+**Prossimo passo, in ordine.**
+
+1. **Task 10** — `docs/03-amministrazione/backup-restore.md`. La pagina esiste in questo branch e
+   non prima perché `mongodump --oplog` **richiede** un oplog. Il piano è netto su un punto: i
+   comandi che finiscono nella pagina sono comandi **eseguiti**, e il restore si verifica contando
+   i documenti e confrontando l'impronta, come fa `smoke-02`.
+2. **Task 12** — la pagina delle trappole, con i **sei** debiti già elencati nel punto di ripresa
+   precedente, che restano tutti aperti.
+3. **Task 14** — la PR. **Mai `git flow feature finish`**.
+
+**Attenzione per chi riprende.** Lo stack 02 è avviato e sano, impronta `50000 124861860.70 150281`,
+smoke 42/0 rieseguito a fine sessione. La prova di [V-033](Sources.md#v-033) crea una collezione di
+scarto `prova_perdita`: se ricomparisse, `./tools/reset-demo.sh 02` la toglie.

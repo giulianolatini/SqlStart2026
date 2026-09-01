@@ -2466,3 +2466,68 @@ una stranezza di Docker Desktop da ignorare — è successo alla prima mattina u
 talk non c'è tempo per scoprire perché il log è vuoto.
 
 **Fonti:** [S-033](Sources.md#s-033), [S-035](Sources.md#s-035), [S-044](Sources.md#s-044), [S-045](Sources.md#s-045), [V-031](Sources.md#v-031), [V-032](Sources.md#v-032)
+
+<a id="adr-0046"></a>
+## ADR-0046 — Il replica set si presenta con i numeri che ha, e il confronto con l'istanza singola si misura
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto.** [ADR-0032](#adr-0032) ha dato all'istanza singola una forma precisa — quattro limiti
+citabili invece di un aggettivo — e ha lasciato scritto un rimando: il confronto sulla **perdita di
+dati** si sarebbe fatto in `feature/02`, «adesso c'è un replica set con cui farlo». La pagina
+dell'istanza singola porta un numero che fa male: 100 scritture confermate al client e sparite dopo
+un `SIGKILL` ([V-016](Sources.md#v-016)). Il numero gemello non esisteva.
+
+Adesso esiste, ed è **zero** su 12 901 scritture confermate con `w: "majority"` mentre il primario
+veniva ucciso ([V-033](Sources.md#v-033)). Con esso arrivano gli altri numeri che la pagina
+aspettava: le tre scene di failover ([V-029](Sources.md#v-029), [V-030](Sources.md#v-030),
+[V-031](Sources.md#v-031)), il ritardo di replica e il prezzo della maggioranza
+([V-027](Sources.md#v-027)).
+
+**Decisione.**
+
+*La pagina risponde a «quanti guasti regge», e la risposta è una sottrazione.* Tre membri,
+maggioranza due, **un** guasto tollerato in scrittura. Sta in cima, prima delle elezioni e prima del
+file Compose, perché è la domanda che l'istanza singola lascia aperta e perché è l'unica risposta
+che non si possa dare con un aggettivo.
+
+*Le tre scene stanno in una tabella, con i loro numeri e i loro comandi.* `docker kill` ~10 s,
+`shutdown` ~0,5 s, maggioranza persa ~9,3 s. Chi legge la pagina deve poterle rifare, e chi le rifà
+deve trovare i numeri accanto al comando che li produce, non in fondo.
+
+*Il confronto con l'istanza singola si misura, e si mostra anche la parte scomoda.* Zero perse
+contro cento è la riga che si ricorda; da sola sarebbe pubblicità. Va con l'altro esito della stessa
+prova: il documento `n=2698`, per cui il client ha ricevuto un **errore** e che nel database **c'è**
+([V-033](Sources.md#v-033)). Lo scambio vero non è «niente si perde», è «la bugia cambia verso»: là
+il client crede di avere dati che non ha, qui crede di non avere dati che ha. Il secondo si
+sopravvive se le scritture si possono rifare, e questa condizione va detta.
+
+*Write concern e read preference si trattano come una coppia, non come due sezioni.* Sono i due capi
+dello stesso scambio: `w: "majority"` costa un millisecondo in più e compra la durabilità
+([V-027](Sources.md#v-027)); leggere dai secondari distribuisce il carico e costa freschezza, con la
+frase del manuale citata alla lettera — «All read preference modes except `primary` may return stale
+data» ([S-058](Sources.md#s-058)). Separarle produce due elenchi corretti e nessuna decisione.
+
+*Ogni numero porta la sua riserva addosso, sulla stessa riga.* Il millisecondo di `w: "majority"` è
+un salto su un bridge locale, non fra due datacenter. I 9,3 secondi sono una forbice 8–10. I 10
+secondi dell'elezione sono attesa, non elezione. Le riserve stanno accanto ai numeri e non in una
+nota in fondo, perché la nota in fondo non arriva sulle slide.
+
+**Conseguenze.** Nasce `docs/02-architetture/replica-set.md`. In `docs/README.md` la riga passa da
+promessa a collegamento. La pagina dell'istanza singola riceve i rimandi nei tre punti in cui
+prometteva un seguito — il failover che non c'è, `w: "majority"` che mente, la manutenzione che
+vuole una finestra di fermo — e il rimando di [ADR-0032](#adr-0032) è saldato.
+
+Resta dichiarato, nella sezione «cosa questa pagina non dice», ciò che non è stato misurato: la
+stessa prova con `retryWrites=false`, `maxStalenessSeconds`, e qualunque confronto di prestazioni,
+che ha senso solo sotto carico controllato e quindi non prima di `feature/04`.
+
+**Alternative scartate:** argomentare il confronto invece di misurarlo — ci sarebbe voluta mezza
+giornata in meno e la pagina avrebbe detto «i dati sono al sicuro», che è esattamente il tipo di
+frase che questo repository non scrive; mostrare solo lo zero perse — un confronto che riporta
+soltanto la buona notizia non è un confronto; elencare i cinque modi di read preference e fermarsi
+lì — l'elenco è nel manuale, e ripeterlo senza il prezzo non aggiunge niente; rimandare tutto a
+`feature/04`, dove ci sarà l'applicazione — il rimando di [ADR-0032](#adr-0032) è già stato spostato
+una volta, e una decisione rimandata due volte è una decisione che non si prende.
+
+**Fonti:** [S-035](Sources.md#s-035), [S-037](Sources.md#s-037), [S-044](Sources.md#s-044), [S-058](Sources.md#s-058), [V-016](Sources.md#v-016), [V-027](Sources.md#v-027), [V-029](Sources.md#v-029), [V-030](Sources.md#v-030), [V-031](Sources.md#v-031), [V-033](Sources.md#v-033)

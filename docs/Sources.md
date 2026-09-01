@@ -956,7 +956,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 - **Riserve:** la tabella dello standalone descrive il momento dell'*acknowledgement*, non la
   durabilità. Quanto dura la finestra fra l'ack in memoria e il disco non sta qui: sta in
   [S-036](#s-036), ed è il numero che rende la finestra misurabile.
-- **Usata da:** ADR-0032, ADR-0043, ADR-0045
+- **Usata da:** ADR-0032, ADR-0043, ADR-0045, ADR-0046
 
 ---
 
@@ -1013,7 +1013,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   dedotta dalla pagina e **verificata eseguendo**, come impone la gerarchia di
   [ADR-0024](Decision.md#adr-0024). Chi ripete l'affermazione senza la verifica sta citando un
   titolo.
-- **Usata da:** ADR-0032
+- **Usata da:** ADR-0032, ADR-0046
 
 ---
 
@@ -1244,7 +1244,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   `docs/03-amministrazione/log.md`, che per questa ragione è **dichiarata non verificata** su
   questo branch: qui non esiste un replica set. La verifica è dovuta a `feature/02`
   ([ADR-0035](Decision.md#adr-0035)).
-- **Usata da:** ADR-0035, ADR-0036, ADR-0044, ADR-0045
+- **Usata da:** ADR-0035, ADR-0036, ADR-0044, ADR-0045, ADR-0046
 
 ---
 
@@ -1742,6 +1742,44 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   progetto non compare da nessuna parte sulla pagina di `up`. Non è un dettaglio di lettura: è
   esattamente il buco in cui cade lo stack di questo repository, misurato in [V-025](#v-025).
 - **Usata da:** ADR-0041
+
+---
+
+<a id="s-058"></a>
+### S-058 — MongoDB Manual 7.0: Read Preference
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/read-preference/
+- **Editore:** MongoDB, Inc. — MongoDB Manual, versione v7.0 (la stessa dell'immagine pinnata)
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma:** definisce il read preference come il modo in cui «MongoDB clients route read
+  operations to the members of a replica set», ed elenca i cinque modi. Il predefinito è
+  esplicito: «By default, an application directs its read operations to the primary member in a
+  replica set (that is, read preference mode `primary`)», e per quel modo «All read operations use
+  only the current replica set primary. This is the default read mode. **If the primary is
+  unavailable, read operations produce an error or throw an exception.**» Gli altri quattro:
+  `primaryPreferred` — «In most situations, operations read from the primary but if it is
+  unavailable, operations read from secondary members»; `secondary` — «All operations read from the
+  secondary members of the replica set»; `secondaryPreferred` — «Operations typically read data from
+  secondary members of the replica set. If the replica set has only one single primary member and no
+  other members, operations read data from the primary member»; `nearest` — «Operations read from a
+  random eligible replica set member, irrespective of whether that member is a primary or secondary,
+  based on a specified latency threshold».
+
+  La frase che conta più di tutte sta nella sezione *Behavior*: «**All read preference modes except
+  `primary` may return stale data** because secondaries replicate operations from the primary in an
+  asynchronous process. Ensure that your application can tolerate stale data if you choose to use a
+  non-`primary` mode.» E subito dopo, un avvertimento che si legge di rado: «Read preference does
+  not affect the visibility of data. Clients can see the results of writes before they are
+  acknowledged or have propagated to a majority of replica set members.» Il rimedio nominato dalla
+  pagina, per ciascuno dei modi non predefiniti, è sempre lo stesso: «Use the `maxStalenessSeconds`
+  option to avoid reading from secondaries that the client estimates are overly stale.»
+- **Riserve:** la pagina descrive il **contratto**, non il costo: non dà nessun numero sul ritardo
+  di replica, che dipende dalla distribuzione e va misurato dove gira ([V-027](#v-027)). Le
+  descrizioni dei modi nominano più volte gli *hedged read*, che valgono sugli sharded cluster e
+  non su un replica set: non riguardano lo stack 02 e non sono stati provati. `maxStalenessSeconds`
+  è citato dalla pagina come rimedio ma **non è stato usato né misurato** in questo repository.
+- **Usata da:** ADR-0046
 
 ---
 
@@ -2415,7 +2453,7 @@ sorprendente, misurato nella stessa sessione e registrato dove gli compete, in
   della velocità: è la misura naturale da aggiungere quando l'applicazione Python
   (`feature/04`) potrà farla sotto carico controllato.
 - **Data:** 2026-08-28
-- **Usata da:** ADR-0032
+- **Usata da:** ADR-0032, ADR-0046
 
 ---
 
@@ -3512,7 +3550,7 @@ apre e si autentica. Una media su dieci giri di cui uno è il riscaldamento non 
   set è a riposo e la collezione di prova è vuota; sotto il carico della demo dell'applicazione i
   numeri saranno altri, e vanno rimisurati là invece che estrapolati da qui.
 - **Data:** 2026-08-31
-- **Usata da:** ADR-0043
+- **Usata da:** ADR-0043, ADR-0046
 
 ---
 
@@ -3694,7 +3732,7 @@ timeout da far scadere, e restano solo i millisecondi del voto.
   **secondario** — che non provoca nessuna elezione — non è cronometrato qui perché non ha niente
   da cronometrare.
 - **Data:** 2026-08-31
-- **Usata da:** ADR-0044
+- **Usata da:** ADR-0044, ADR-0046
 
 ---
 
@@ -3760,7 +3798,7 @@ di quello che salva.
   commettere. Infine non è stata osservata un'elezione *contesa* — due candidati nello stesso
   termine, con un `dry run` che fallisce — che è il caso in cui `21438` e `21444` divergono.
 - **Data:** 2026-08-31
-- **Usata da:** ADR-0044
+- **Usata da:** ADR-0044, ADR-0046
 
 ---
 
@@ -3863,7 +3901,7 @@ di quello che salva.
   misura: un set a due membri non è stato costruito, e la sua maggioranza sarebbe 2, cioè zero
   guasti tollerati in scrittura.
 - **Data:** 2026-09-01
-- **Usata da:** ADR-0045
+- **Usata da:** ADR-0045, ADR-0046
 
 ---
 
@@ -3932,5 +3970,81 @@ getLog global   → totalLinesWritten = 2 548, righe da 08:08:31.096 a 08:12:03.
   fuori dalla finestra proprio le righe di `REPL` che si cercavano.
 - **Data:** 2026-09-01
 - **Usata da:** ADR-0045
+
+---
+
+<a id="v-033"></a>
+### V-033 — La controprova di V-016: dodicimila scritture confermate, il primario ucciso, zero perse
+
+- **Comandi:** uno scrittore `mongosh` collegato con l'URI del replica set che inserisce documenti
+  uno alla volta con `w: "majority"` e stampa l'`_id` **dopo** la conferma del server; a metà corsa
+  `docker kill` sul primario; a membro rialzato, si verifica quali dei confermati esistano ancora,
+  leggendo con `readConcern: "majority"`
+- **Ambiente:** stack `docker/02-replicaset`, MongoDB 7.0.40, tre membri con priorità 2/1/1, macOS
+  26.6.2 arm64, Docker 29.7.2. Lo scrittore gira **dentro un membro che non verrà ucciso**, così il
+  colpo non porta via anche il cliente. Due esecuzioni da 45 secondi.
+- **Che cosa si voleva sapere:** [ADR-0032](Decision.md#adr-0032) rimanda esplicitamente a
+  `feature/02` il confronto sulla perdita di dati, e la pagina dell'istanza singola ha un numero che
+  fa male: **100 scritture confermate al client e sparite** dopo un `SIGKILL`, con la write concern
+  predefinita ([V-016](#v-016)). Il confronto senza il numero gemello è una discussione; con il
+  numero gemello è una misura.
+
+- **Esito, il numero gemello.**
+
+| | istanza singola ([V-016](#v-016)) | replica set, `w: "majority"` |
+|---|---:|---:|
+| scritture confermate al client | 41 558 | 12 901 |
+| **confermate e perdute** | **100** | **0** |
+
+  E non è che siano sopravvissute «quasi tutte»: nella collezione ci sono **12 902** documenti e il
+  massimo `n` scritto è **12 902**, quindi l'insieme è completo, senza buchi. Prima esecuzione,
+  senza istanti nei documenti: 11 937 confermate, 11 937 sopravvissute, zero errori.
+
+- **Esito, che cosa ha visto l'applicazione.** Quasi niente, ed è il secondo risultato. Su 12 902
+  tentativi, **un solo errore**:
+
+```
+ERR 2698 connection 1 to 172.18.0.3:27017 closed
+```
+
+  Poi lo scrittore è ripartito da sé, senza che nessuno lo toccasse. Il prezzo è stato una **pausa**,
+  e si vede negli istanti che il client scrive dentro i documenti:
+
+```
+n=2697  t=08:49:50.524
+n=2698  t=08:49:50.527   ← l'errore, e il colpo: docker kill alle 08:49:50
+n=2699  t=08:49:50.669
+n=2700  t=08:50:00.824   ← 10 155 ms dopo
+```
+
+  **Varco massimo 10 155 ms**; i quattro salti successivi per grandezza sono 142, 132, 99 e 92 ms.
+  Un'unica `insertOne` è rimasta appesa dieci secondi dentro il driver e poi è riuscita: è
+  l'elezione di [V-029](#v-029) vista dal lato dell'applicazione, che non sa niente di elezioni e si
+  limita ad aspettare. Su 45 secondi di corsa, 12 902 scritture: circa **287 al secondo**, con dieci
+  secondi buttati in mezzo.
+
+- **Esito, il caso incerto — e vale il resto della voce.** Il documento `n=2698`, quello per cui il
+  client ha ricevuto un **errore**, nel database **c'è**. Scritto e mai confermato. È l'immagine
+  speculare esatta di [V-016](#v-016): là il client aveva in mano un `acknowledged: true` per dati
+  che non esistevano, qui ha in mano un errore per dati che esistono. In tutti e due i casi ciò che
+  il client crede non coincide con ciò che il database ha, e la differenza fra i due è che **questo
+  si sopravvive** — a patto che la scrittura si possa rifare senza danno. Un'applicazione che
+  reagisce a un errore riscrivendo, e la cui riscrittura non è idempotente, qui si fa un duplicato.
+- **Conseguenza:** chiude il rimando di [ADR-0032](Decision.md#adr-0032). Il numero va in
+  `docs/02-architetture/replica-set.md` accanto al suo gemello, registrato in
+  [ADR-0046](Decision.md#adr-0046).
+- **Riserve:** **la quasi invisibilità del guasto non è merito della replica, è merito dei
+  retryable write**, che nel driver sono attivi per impostazione predefinita: senza di essi
+  l'applicazione avrebbe visto una raffica di errori e avrebbe dovuto decidere lei che fare. La
+  prova con `retryWrites=false` **non è stata fatta**, e sarebbe la naturale da aggiungere. Poi:
+  gli istanti nei documenti li scrive il **client** quando costruisce il documento, cioè all'inizio
+  della chiamata — il varco fra due istanti consecutivi è quindi la durata della chiamata in mezzo,
+  che è proprio quello che si voleva, ma è un orologio di client e non del server. Due esecuzioni
+  sole. In tutte e due è stato ucciso il **primario mentre gli altri due erano sani**, cioè con la
+  maggioranza superstite: non dice niente sul caso di [V-031](#v-031), dove le scritture si fermano
+  del tutto. E `w: "majority"` qui vuol dire «due container su tre sullo stesso portatile»: la
+  garanzia è la stessa che si avrebbe altrove, il costo no ([V-027](#v-027)).
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0046
 
 ---
