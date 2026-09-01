@@ -573,7 +573,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 - **Riserve:** le unità sono **MiB**, non MB: scrivere «100 MB» in slide è impreciso ed è
   esattamente il dettaglio che viene fatto notare. I valori valgono per GitHub.com; su
   GitHub Enterprise Server «a site administrator can configure a different limit».
-- **Usata da:** ADR-0016, ADR-0031
+- **Usata da:** ADR-0016, ADR-0031, ADR-0050
 
 <a id="s-022"></a>
 ### S-022 — `docker-library/mongo`: `8.0/docker-entrypoint.sh`
@@ -3956,7 +3956,7 @@ timeout da far scadere, e restano solo i millisecondi del voto.
   **secondario** — che non provoca nessuna elezione — non è cronometrato qui perché non ha niente
   da cronometrare.
 - **Data:** 2026-08-31
-- **Usata da:** ADR-0044, ADR-0046, ADR-0049
+- **Usata da:** ADR-0044, ADR-0046, ADR-0049, ADR-0050
 
 ---
 
@@ -5040,3 +5040,61 @@ quel nome è un dettaglio locale del `compose.yaml`.
   ([ADR-0035](Decision.md#adr-0035), regola 1).
 - **Data:** 2026-09-01
 - **Usata da:** ADR-0049
+
+---
+
+<a id="v-045"></a>
+### V-045 — Le quattro scene registrate: tredici kilobyte di testo, e una misura fuori dall'intervallo
+
+- **Comandi:** `python3 tools/registra-terminale.py <file>.cast -- make smoke-02` ·
+  `… -- make failover-02` · `… -- make failover-02-termina` ·
+  `… -- make failover-02-maggioranza`, con `./tools/reset-demo.sh 02` fra una scena e l'altra
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, stack `docker/02-replicaset` con i tre membri
+  sani prima di ogni scena, nessun carico applicativo. Terminale registrato a 100×30.
+- **Che cosa si voleva sapere:** se una registrazione di terminale in formato asciinema v2 basti
+  come materiale di riserva del talk, e quanto pesi.
+
+- **Esito, le quattro scene:**
+
+```
+file                                   durata   eventi   byte   il numero che porta
+01-smoke-replica-set.cast              16,9 s      49    4630   Superati: 42 · Errori: 0
+02-failover-docker-kill.cast           17,2 s      17    2556   elezione in 8617 ms
+                                                                 exited, RestartCount=0, ExitCode=137
+03-failover-terminazione-pulita.cast   25,1 s      23    2589   elezione in 1039 ms
+                                                                 running, RestartCount=1, ExitCode=0
+04-maggioranza-persa.cast              15,6 s      29    3714   SECONDARY dopo 8634 ms
+```
+
+- **Tredici kilobyte per quattro scene.** Il formato è JSON su righe: un'intestazione e poi un
+  evento per blocco di output, `[secondi, "o", testo]`. Si legge con `cat`, si cerca con `grep`, si
+  confronta con `diff`, e sta in un repository senza le cautele che
+  [S-021](#s-021) impone ai file grandi. Un `.mp4` delle stesse quattro scene starebbe fra le
+  decine e le centinaia di megabyte.
+- **Una misura cade fuori dall'intervallo noto, e conferma la riserva che c'era.** La scena della
+  terminazione pulita ha dato **1039 ms**, contro i 574, 480 e 486 ms dei tre giri di
+  [V-029](#v-029) — circa il doppio del massimo osservato. Il metodo è lo stesso, non un altro:
+  `tools/failover-replicaset.sh` usa l'osservatore preriscaldato dentro un membro superstite che
+  interroga `hello()` ogni 20 ms, cioè esattamente lo strumento di V-029. La differenza è il
+  contesto — la macchina aveva appena eseguito tre scene e tre ripristini — ed è precisamente ciò
+  che V-029 aveva messo nelle riserve: «tre esecuzioni per scena sono poche per parlare di
+  distribuzione; bastano per dire che i due ordini di grandezza non si sovrappongono». Il singolo
+  numero è instabile, il rapporto no: 1039 contro 8617 ms nella stessa sessione restano un ordine
+  di grandezza.
+- **Il `docker kill` è invece stabile e sotto i dieci secondi.** 8617 ms qui, contro 9812, 10 619 e
+  10 943 di V-029. Anche questo è coerente con la spiegazione: il conto dei 10 000 ms parte
+  dall'ultimo battito riuscito e non dal colpo, i battiti vanno ogni 2000 ms, quindi la misura cade
+  fra 8 e 10 secondi a seconda di dove il colpo capita nell'intervallo — ed è quello che la scena
+  stessa stampa a schermo.
+- **Conseguenza:** le quattro registrazioni stanno in
+  `docs/05-talk/registrazioni/`, il formato e lo strumento sono decisi in
+  [ADR-0050](Decision.md#adr-0050). Non sostituiscono i filmati `.mp4` di
+  [ADR-0016](Decision.md#adr-0016), che restano dovuti: una registrazione di terminale non mostra
+  la faccia di chi parla né si proietta senza un terminale.
+- **Riserve:** le scene sono registrate senza voce e senza pause di scena — sono il tracciato di
+  ciò che il terminale ha fatto, non una prova generale. La riproduzione richiede un terminale che
+  interpreti le sequenze ANSI: dentro una pipe i colori diventano caratteri. Una sola esecuzione per
+  scena: i numeri sopra sono singoli, non mediane, e vanno letti accanto a [V-029](#v-029) e
+  [V-031](#v-031) che le mediane le hanno.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0050

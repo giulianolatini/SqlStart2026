@@ -2831,3 +2831,81 @@ fuori per mostrare la terza via d'uscita della voce 13 — cambierebbe in modo p
 del talk, e la via d'uscita si può descrivere senza prenderla.
 
 **Fonti:** [S-045](Sources.md#s-045), [V-029](Sources.md#v-029), [V-030](Sources.md#v-030), [V-041](Sources.md#v-041), [V-042](Sources.md#v-042), [V-043](Sources.md#v-043), [V-044](Sources.md#v-044)
+
+---
+
+<a id="adr-0050"></a>
+## ADR-0050 — Le registrazioni di riserva si producono con quello che c'è, e il formato è testo
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto.** [ADR-0016](#adr-0016) stabilisce che i filmati di riserva stanno sul canale YouTube
+del relatore **con copia locale obbligatoria**, perché «la connettività in sala non è garantita, e
+un piano B che richiede rete non è un piano B». `tools/preflight.sh` lo verifica: cerca file `.mp4`
+in `${DEMO_VIDEOS_DIR:-~/SqlStart2026-registrazioni}`, oggi come avviso e dal 18 settembre 2026 come
+errore bloccante.
+
+Il Task 13 di `feature/02` chiede le prime registrazioni, e le chiede adesso perché la scena del
+failover è la prima che valga la pena filmare: è la prima che possa fallire in modo interessante.
+
+Qui però si incontrano due cose diverse che il piano nomina insieme. Un **filmato** mostra lo
+schermo e porta la voce di chi parla: lo gira il relatore, e nessun altro può girarlo al posto suo.
+Una **registrazione di terminale** è il tracciato di ciò che il terminale ha fatto, con i tempi: si
+produce eseguendo. L'indice di [`docs/README.md`](README.md) le distingueva già — «indice dei
+filmati di riserva **e delle registrazioni di terminale**» — senza che nessuna decisione dicesse
+come si fanno le seconde.
+
+**Decisione.**
+
+*Le registrazioni di terminale si producono adesso; i filmati restano dovuti al relatore.* Quattro
+scene sono registrate ed entrano nel repository: la prova completa dello stack, i due failover, la
+maggioranza persa ([V-045](Sources.md#v-045)). I `.mp4` non sono stati prodotti e **non sono stati
+sostituiti da un segnaposto**: `make preflight` continua ad avvisare, ed è giusto che avvisi, perché
+il controllo verifica una cosa che davvero manca. Mettere un file `.mp4` finto in cartella per far
+tacere il controllo trasformerebbe la mattina del talk in una brutta sorpresa, che è esattamente lo
+scenario che quel controllo esiste per evitare.
+
+*Il formato è asciinema v2, e lo strumento è nel repository.* Il formato è JSON su righe: si legge
+con `cat`, si cerca con `grep`, si confronta con `diff`, e quattro scene pesano tredici kilobyte
+contro le decine di megabyte dei filmati equivalenti — il che le mette dentro il repository invece
+che accanto, senza le cautele di [S-021](Sources.md#s-021). Lo strumento è
+[`tools/registra-terminale.py`](../tools/registra-terminale.py), centosettanta righe di libreria
+standard, e non `asciinema` installato con un gestore di pacchetti: lo stesso ragionamento di
+ADR-0016 applicato un livello più in basso. Una registrazione di riserva che per essere **prodotta**
+o **vista** richiede di installare qualcosa non è una registrazione di riserva, e per questo lo
+strumento sa anche riprodurre — `--riproduci`, che rispetta i tempi originali, perché in queste
+scene i tempi *sono* il contenuto.
+
+*Il comando gira dentro uno pseudo-terminale.* In una pipe i programmi smettono di colorare
+l'output, e la scena registrata non sarebbe quella che il pubblico vede. Costa venti righe di
+`pty`, e senza di esse le registrazioni mostrerebbero un terminale che non esiste.
+
+*I tempi registrati non diventano la misura di riferimento.* Le quattro scene portano numeri veri —
+8617 ms, 1039 ms, 8634 ms — ma sono **una** esecuzione ciascuna, girata di seguito su una macchina
+che aveva appena fatto le altre. Le misure del branch restano quelle di [V-029](Sources.md#v-029) e
+[V-031](Sources.md#v-031), con le loro mediane e i loro giri ripetuti. La registrazione mostra una
+scena, non la certifica.
+
+**Conseguenze.** Nasce `docs/05-talk/registrazioni/` con il proprio indice, quattro file `.cast` e
+la procedura per rifarli. `tools/registra-terminale.py` entra nel repository. L'indice di
+[`docs/README.md`](README.md) smette di promettere quella cartella a `feature/02` e la collega.
+`make preflight` resta con un avviso, e il criterio 8 di completamento del branch — «almeno una
+registrazione di riserva esiste in locale e `make preflight` non avvisa più» — è **soddisfatto a
+metà e dichiarato tale**: le registrazioni esistono, l'avviso no. Chiuderlo tocca al relatore, e la
+procedura per farlo è scritta nell'indice.
+
+Una misura è caduta fuori dall'intervallo di [V-029](Sources.md#v-029) — 1039 ms contro un massimo
+osservato di 574 — e non ha prodotto una correzione, perché conferma la riserva che V-029 aveva già
+scritto: il singolo numero è instabile, il rapporto fra le due scene no.
+
+**Alternative scartate:** girare un `.mp4` sintetico rendendo il tracciato in fotogrammi con
+`ffmpeg` — è producibile e sarebbe passato il controllo di `preflight`, ma sarebbe un filmato che
+nessun essere umano ha visto mentre accadeva, e chiuderebbe l'avviso senza chiudere il debito;
+installare `asciinema` come dipendenza — un pacchetto in più fra la mattina del talk e il piano B, e
+il formato lo si scrive in cinquanta righe; mettere le registrazioni fuori dal repository, accanto
+ai filmati — tredici kilobyte di testo versionabile non hanno ragione di stare dove non si vedono
+nei diff; rimandare tutto il Task 13 al relatore — l'indice, la procedura e le scene di terminale si
+possono fare adesso, e farle adesso è ciò che rende il resto un gesto di venti minuti invece che una
+serata.
+
+**Fonti:** [S-021](Sources.md#s-021), [V-029](Sources.md#v-029), [V-045](Sources.md#v-045)

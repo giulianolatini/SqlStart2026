@@ -2090,3 +2090,102 @@ che prometteva; tre righe dell'indice di `docs/README.md`; tre citazioni da slid
     `--tail N | grep | tail`, che conta righe invece di fidarsi di un orologio; la lezione è che
     quando un filtro restituisce troppo, la prima ipotesi non è «è successo molto», è «il filtro non
     ha filtrato».
+
+---
+
+## 2026-09-01 — `feature/02`, Task 13: la riserva si gira con quello che c'è, e l'avviso resta acceso
+
+Il Task 13 chiede l'indice delle registrazioni, le registrazioni del failover nelle due varianti, la
+verifica con `preflight` e il commit. I primi due passi sono fatti. Il terzo **non dà il risultato
+che il piano si aspettava**, e non per un intoppo: perché il piano chiedeva una cosa che questa
+macchina non può produrre.
+
+**Il piano non è stato modificato; la deviazione è dichiarata qui.** Il Passo 3 scrive: «Atteso:
+l'avviso sui filmati sparisce». Non sparisce. `make preflight` esce `0` con `Superati: 8 · Avvisi: 1
+· Errori: 0`, e l'avviso è sempre lo stesso: `cartella dei filmati assente:
+/Users/giulianolatini/SqlStart2026-registrazioni`.
+
+**Il motivo è che «registrazione» in questo repository sono due cose diverse.** Un filmato `.mp4` è
+lo schermo *e la voce* del relatore, sta sul canale YouTube con copia locale obbligatoria
+([ADR-0016](Decision.md#adr-0016)), e lo può girare solo il relatore. Una registrazione di terminale
+è il tracciato di ciò che il terminale ha fatto, con i tempi dentro, e si produce eseguendo. Il
+piano le chiama entrambe «registrazioni» perché al momento della scrittura la distinzione non
+serviva; al momento dell'esecuzione serve, perché una delle due si può fare adesso e l'altra no.
+Ne è nato [ADR-0050](Decision.md#adr-0050).
+
+**Quattro scene girate, tredici kilobyte in tutto** ([V-045](Sources.md#v-045)): lo smoke completo
+(16,9 s, `Superati: 42 · Errori: 0`), `docker kill` sul primario (17,2 s, elezione in 8617 ms,
+`exited` `RestartCount=0` `ExitCode=137`), la terminazione pulita (25,1 s, elezione in 1039 ms,
+`running` `RestartCount=1` `ExitCode=0`), la maggioranza persa (15,6 s, `SECONDARY` dopo 8634 ms).
+Fra una scena e l'altra `./tools/reset-demo.sh 02`, sempre, con i tre membri `healthy` e l'impronta
+del dataset ricontrollata: registrare una scena su uno stack reduce dalla precedente significa
+registrare un'altra scena.
+
+**Lo strumento sta nel repository invece di essere installato.** `tools/registra-terminale.py`,
+duecento righe di sola libreria standard, scrive e rilegge il formato asciinema v2. Il formato è di
+`asciinema` — chi ce l'ha usa quello — ma non serve averlo, ed è il punto: una riserva che per
+essere vista richiede un `brew install` con la rete della sala non è una riserva. Il comando gira
+dentro uno pseudo-terminale e non in una pipe, perché in una pipe i programmi smettono di colorare e
+la scena registrata non sarebbe quella che il pubblico vede. Il formato è JSON su righe: si legge
+con `cat`, si confronta con `diff`, e sta in tredici kilobyte invece che nei megabyte contro cui
+[S-021](Sources.md#s-021) mette in guardia.
+
+**Nessun `.mp4` finto per far tacere l'avviso.** Sarebbe bastato un file vuoto con l'estensione
+giusta. L'avviso verifica una cosa che manca davvero e dal 18 settembre 2026 diventa errore
+bloccante: zittirlo adesso significa scoprire il buco la mattina del talk, che è esattamente lo
+scenario per cui il controllo esiste. Il criterio 8 di completamento del branch resta quindi
+**soddisfatto a metà**, dichiarato per iscritto in [ADR-0050](Decision.md#adr-0050) e nella pagina
+delle registrazioni invece che nascosto dietro un controllo verde.
+
+**Un numero fuori posto, e non è un errore di misura.** La terminazione pulita ha segnato 1039 ms,
+contro i 574, 480 e 486 di [V-029](Sources.md#v-029) — il doppio del massimo, con lo *stesso*
+strumento: `tools/failover-replicaset.sh` avvia l'osservatore prima del colpo, lo aspetta finché non
+dice `PRONTO`, e interroga `hello()` ogni 20 ms. Non contraddice V-029: ne conferma la riserva
+scritta a suo tempo, che quel mezzo secondo è tempo di rete e di voto e non un timeout di
+configurazione, quindi balla con il carico della macchina. La scena era la terza di quattro girate
+di seguito. V-029 non è stata toccata: il numero nuovo sta in V-045, dove si può leggere accanto
+alle condizioni che lo hanno prodotto.
+
+**Controlli.** `make docs-check` verde dopo che il collegamento nuovo di `docs/README.md` ha trovato
+la pagina che indica. `make preflight`: uscita `0`, otto controlli superati, un avviso, zero errori.
+`make tools-test`: **108 superati**, otto dei quali nuovi. Le quattro registrazioni riprodotte tutte
+con `--riproduci` prima di essere committate: una riserva che non è stata riletta non è una riserva.
+Due titoli sono stati corretti a mano nell'intestazione JSON — dicevano «esce da se» e «tre giu» —
+senza rigirare le scene: il titolo è metadato, non è il tracciato, e si vede proiettato.
+
+**Documentazione prodotta.** `tools/registra-terminale.py` con
+`tools/tests/test_registra_terminale.py`, otto casi sulla riga di comando — il primo è la
+regressione del `--titolo` inghiottito, l'ultimo verifica che un comando inesistente non lasci
+dietro di sé una registrazione da zero byte; le quattro registrazioni in
+`docs/05-talk/registrazioni/`; `docs/05-talk/registrazioni/README.md` con le due specie di riserva,
+i quattro filmati ancora dovuti e la procedura per rigirare le scene;
+[V-045](Sources.md#v-045); [ADR-0050](Decision.md#adr-0050); la riga di `docs/README.md` che adesso
+è un collegamento e dice «già nel repository». [S-021](Sources.md#s-021) acquisisce il secondo ADR
+che la cita, [V-029](Sources.md#v-029) il quarto.
+
+**Note di metodo.**
+
+74. **Un avviso che si può spegnere con un file finto non stava controllando niente.** La tentazione
+    era di un minuto: `touch` di un `.mp4` vuoto nella cartella giusta, `preflight` verde, Passo 3
+    chiuso come il piano lo descrive. Il controllo però non esiste per essere verde: esiste per
+    ricordare al relatore, ogni volta che lancia `preflight`, che i filmati non ci sono ancora. Un
+    controllo aggirato non diventa silenzioso, diventa **bugiardo**, e la bugia scade il giorno in
+    cui serviva la verità. Quando un passo del piano non si può soddisfare, la cosa da produrre è la
+    motivazione scritta, non il verde.
+
+75. **`argparse.REMAINDER` inghiotte le opzioni del programma, non solo quelle del comando.** La
+    prima registrazione è morta con `comando non trovato: --titolo`: dopo il primo argomento
+    posizionale, `REMAINDER` raccoglie *tutto*, comprese le opzioni dichiarate poche righe sopra.
+    Il rimedio è dividere `sys.argv` a mano sul `--` letterale prima di chiamare `parse_args`, e sta
+    nel file con il commento che spiega perché non si usa la scorciatoia. Nota accessoria dello
+    stesso errore: il programma ha poi provato a leggere il `.cast` che non aveva scritto ed è
+    esploso con `FileNotFoundError`, seppellendo il messaggio utile sotto uno inutile. Chi fallisce
+    a metà deve fermarsi lì, non proseguire fino a inciampare in un secondo modo.
+
+76. **Un numero preso una volta sola non è una misura, nemmeno con lo strumento giusto.** I 1039 ms
+    della terza scena sono il doppio del peggiore dei tre giri di V-029, con metodo, harness e stack
+    identici: cambiava solo che la macchina aveva appena girato altre due scene. Se quel numero
+    fosse finito in pagina come «il tempo della terminazione pulita», avrebbe dimezzato il rapporto
+    fra le due scene — che è la cosa che il talk racconta — senza che nulla apparisse sbagliato. Le
+    misure stanno in [`Sources.md`](Sources.md) con le mediane e le condizioni; una registrazione è
+    una scena, e una scena porta un numero d'esempio, non una misura.

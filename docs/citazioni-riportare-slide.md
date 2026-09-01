@@ -957,3 +957,20 @@ Fonte: [S-021](Sources.md#s-021) — GitHub Docs, About large files on GitHub.
 
 **Perché una slide:** giustifica in tre numeri la scelta di tenere i filmati fuori dal
 repository. Le unità sono **MiB**, non MB: vedi i [limiti noti](00-progetto/limiti-noti.md).
+
+---
+
+### La riserva della demo pesa tredici kilobyte
+
+> Quattro scene registrate — lo smoke completo, `docker kill` sul primario, la terminazione
+> pulita, la maggioranza persa — occupano **13 KB** in tutto: 118 righe di JSON con accanto
+> il secondo in cui ogni cosa è comparsa sullo schermo.
+
+Fonte: [V-045](Sources.md#v-045) — le quattro registrazioni del branch `feature/02`.
+
+**Perché una slide:** sta subito dopo i numeri di [S-021](Sources.md#s-021) e li ribalta. I filmati
+restano fuori dal repository perché pesano; il tracciato del terminale ci sta dentro perché è testo,
+e per lo stesso motivo si può leggere con `cat`, confrontare con `diff` e riprodurre senza
+installare niente. Sono due riserve diverse, non due copie della stessa cosa: il filmato copre il
+caso «la demo non parte», la registrazione di terminale il caso «la demo parte ma il tempo è
+finito».
