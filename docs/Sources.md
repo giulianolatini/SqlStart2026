@@ -335,7 +335,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   in time» e «does not guarantee» non compaiono: il paradosso dello standalone — senza oplog
   `--oplog` non è utilizzabile, quindi il dump non può essere coerente a un istante — è vero
   ma **non è scritto**.
-- **Usata da:** ADR-0022
+- **Usata da:** ADR-0022, ADR-0047
 
 <a id="s-012"></a>
 ### S-012 — Docker Docs: `depends_on`
@@ -1780,6 +1780,87 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   non su un replica set: non riguardano lo stack 02 e non sono stati provati. `maxStalenessSeconds`
   è citato dalla pagina come rimedio ma **non è stato usato né misurato** in questo repository.
 - **Usata da:** ADR-0046
+
+---
+
+<a id="s-059"></a>
+### S-059 — MongoDB Database Tools: `mongorestore`
+
+- **URL:** https://www.mongodb.com/docs/database-tools/mongorestore/
+- **Editore:** MongoDB, Inc. — MongoDB Database Tools (prodotto distinto dal server)
+- **Versione documentata:** Database Tools 100.18.0 — la stessa versione dei binari dentro
+  l'immagine pinnata di questo repository ([V-035](#v-035))
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma:** `--oplogReplay` «After restoring the database dump, replays the oplog entries
+  from an `oplog.bson` file», e la coppia è dichiarata esplicitamente: «You can use `mongodump
+  --oplog` together with `mongorestore --oplogReplay` to ensure the data is current and has all the
+  writes that occurred during the dump operation.» Il vincolo è netto e sta in una nota: «When using
+  `mongorestore` with `--oplogReplay` to restore a replica set, you must restore a **full dump** of
+  a replica set member created using `mongodump --oplog`. `mongorestore` with `--oplogReplay` fails
+  if you use any of the following options to limit the data to be restored» — e l'elenco è `--db`,
+  `--collection`, `--nsInclude`, `--nsExclude`, `--nsFrom`, `--nsTo`.
+
+  Su `--drop`: «Before restoring the collections from the dumped backup, drops the collections from
+  the target database. `--drop` does not drop collections that are not in the backup.» E
+  l'avvertimento che riguarda chiunque ripristini un dump completo su uno stack autenticato: «When
+  the restore includes the `admin` database, `mongorestore` with `--drop` removes all user
+  credentials and replaces them with the users defined in the dump file. […] If `mongorestore` can't
+  authenticate to a user defined in the dump file, the restoration process will fail, leaving an
+  empty database.»
+
+  Su `--oplogLimit`: «Prevents `mongorestore` from applying oplog entries with timestamp newer than
+  or equal to `<timestamp>`», con l'obbligo «You must use `--oplogLimit` in conjunction with the
+  `--oplogReplay` option» e un avviso in riquadro: «Use `oplogLimit` with caution: manually
+  specifying the oplog entries to apply might cause corruption and inconsistencies in the restored
+  data.»
+
+  Sulla compatibilità di versione: «You can restore the BSON files generated from `mongodump` into
+  MongoDB deployments running the **same major version or feature compatibility version** as the
+  source deployment.»
+- **Riserve:** la frase «to ensure the data is current» è la più ottimista della pagina e non regge
+  alla misura. Il punto di ripristino non è «adesso»: è l'istante dell'**ultima voce di oplog
+  catturata**, che cade dentro l'esecuzione del comando e non alla sua ultima riga di log — sullo
+  stack di questo repository il restore si ferma a 740 documenti mentre alla fine del dump ce
+  n'erano 741 ([V-035](#v-035)). La pagina non dice che cosa succede se si passa `--oplogReplay` a
+  un dump privo di `oplog.bson`, e **non è stato provato**. `--oplogLimit` **non è stato provato**.
+  Il vincolo di versione **non è stato provato**: qui sorgente e destinazione sono lo stesso
+  processo.
+- **Usata da:** ADR-0047
+
+---
+
+<a id="s-060"></a>
+### S-060 — MongoDB Manual 7.0: Backup Methods for a Self-Managed Deployment
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/backups/
+- **Editore:** MongoDB, Inc. — MongoDB Manual, versione v7.0 (la stessa dell'immagine pinnata)
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma, ed è la fonte che dichiara i limiti che `mongodump` non dichiara
+- **Cosa afferma:** l'ambito è nella prima riga della sezione, e non è un dettaglio: «`mongodump`
+  and `mongorestore` are tools for backing up and restoring **small** MongoDB deployments.» La
+  tabella di confronto fra i metodi assegna alla coppia `mongodump`/`mongorestore` valori che vale
+  la pena riportare per intero: RTO **High**, RPO **High**, costo di archiviazione **High**, tempo
+  del personale **High**, ripristino continuo a un punto nel tempo **No**, complessità del ripristino
+  **Low**, backup di uno sharded cluster «**High, requires extra steps**», impatto sulla sorgente
+  «**High, requires write lock**», coerenza «**Not guaranteed**», incrementale **No**, possibilità
+  di scegliere l'ambito **Yes**.
+
+  Sulla copia dei file di dati, che è l'alternativa che viene sempre proposta: «Backups produced by
+  copying the underlying data do not support point in time recovery for replica sets and are
+  difficult to manage for larger sharded clusters. Additionally, these backups are larger because
+  they include the indexes and duplicate underlying storage padding and fragmentation. `mongodump`,
+  by contrast, creates smaller backups.»
+- **Riserve:** la tabella è qualitativa. «High» e «Low» non hanno soglie, e «small deployments» non
+  è quantificato da nessuna parte nella pagina: chi deve decidere se il proprio database è «small»
+  non trova qui il numero per farlo. La riga «impact on source: High, requires write lock» **non
+  corrisponde a ciò che si osserva** su questo stack: durante i 50 ms del dump le scritture sono
+  proseguite senza interruzione, e i documenti scritti in quella finestra sono nel database
+  ([V-035](#v-035)) — la voce della tabella resta citabile come dichiarazione dell'editore, non come
+  descrizione del comportamento misurato qui. Il resto della pagina descrive Atlas, Ops Manager e
+  gli snapshot di filesystem, che sono **fuori dall'ambito** di questo repository e non sono stati
+  provati.
+- **Usata da:** ADR-0047
 
 ---
 
@@ -4046,5 +4127,213 @@ n=2700  t=08:50:00.824   ← 10 155 ms dopo
   garanzia è la stessa che si avrebbe altrove, il costo no ([V-027](#v-027)).
 - **Data:** 2026-09-01
 - **Usata da:** ADR-0046
+
+---
+
+<a id="v-034"></a>
+### V-034 — La finestra dell'oplog dello stack 02: quindici ore dentro due gigabyte
+
+- **Comandi:** `rs.printReplicationInfo()` e `db.getSiblingDB("local").oplog.rs.stats()` sul
+  primario, dopo una giornata di prove sullo stack.
+- **Ambiente:** stack `docker/02-replicaset`, MongoDB 7.0.40, tre membri con priorità 2/1/1,
+  macOS 26.6.2 arm64, Docker 29.7.2.
+- **Che cosa si voleva sapere:** l'oplog è il pezzo che rende possibile il backup a caldo coerente,
+  ed è **finito**. Prima di scrivere una pagina che dice «attenzione alla finestra» serviva sapere
+  quanto è larga la finestra qui.
+- **Esito:**
+
+```text
+configuredLogSizeMB : 2032.35
+usedMB              :  120.39
+timeDiff            : 54339 s   →  15,09 ore
+tFirst              : Mon Aug 31 2026 18:43:29 GMT+0000
+tLast               : Tue Sep 01 2026 09:49:08 GMT+0000
+```
+
+  Due gigabyte di oplog, riempiti per il 6 %, che coprono **quindici ore** di storia. I 2 032 MB non
+  sono stati scelti da nessuno: sono il 5 % dello spazio libero al primo avvio, che è il valore
+  predefinito dell'immagine.
+- **Conseguenza:** la finestra dell'oplog di questo stack è troppo larga perché un dump la superi.
+  Per mostrare il fallimento è servita un'istanza usa-e-getta ([V-036](#v-036)).
+- **Riserve:** **le quindici ore non sono una proprietà dello stack, sono una proprietà del
+  traffico.** La stessa configurazione sotto la scrittura di [V-036](#v-036) — documenti da 100 KB —
+  scenderebbe a minuti. Il numero da guardare non è mai la dimensione dell'oplog: è
+  `timeDiff`, e va guardato **sotto il carico vero**. Misura singola, su una macchina che quel
+  giorno faceva quasi solo prove di failover.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0047
+
+---
+
+<a id="v-035"></a>
+### V-035 — Un dump a caldo mentre si scrive, e due restore dello stesso file: sette documenti di differenza
+
+- **Comandi:** uno scrittore `mongosh` che inserisce in `lab.movimenti` per 30 secondi, un documento
+  alla volta, con un istante `t` messo dal client; a metà corsa, sul primario,
+  `mongodump --oplog --out /tmp/dump-02` con l'URI del replica set e l'autenticazione di
+  amministratore; poi, due volte, `lab.dropDatabase()` seguito da `mongorestore` sullo stesso dump —
+  la prima senza `--oplogReplay`, la seconda con.
+- **Ambiente:** stack `docker/02-replicaset`, MongoDB 7.0.40, `mongodump`/`mongorestore` 100.18.0
+  presi da `/usr/bin` dentro l'immagine pinnata (non installati a parte), macOS 26.6.2 arm64,
+  Docker 29.7.2. Il dataset di partenza è quello di `reset-demo.sh 02`: `lab.ordini`, 50 000
+  documenti, impronta `50000 124861860.70 150281`.
+- **Che cosa si voleva sapere:** `--oplog` promette coerenza a un punto nel tempo. Serviva sapere
+  **quale** punto, e quanto valga davvero la riproduzione dell'oplog: se la differenza fra i due
+  restore fosse zero, l'opzione sarebbe cerimonia.
+- **Esito, il dump.** È durato **50 ms**, dalle 09:51:48.369 alle 09:51:48.419, e in quel mezzo
+  decimo di secondo le scritture non si sono fermate:
+
+```text
+lab.movimenti     733 documenti
+lab.ordini      50 000 documenti
+oplog catturato     12 voci
+```
+
+  Lo scrittore ha messo giù **6 107** documenti in tutto, dalle 09:51:44.079 alle 09:52:14.054.
+  Contati sull'istante scritto dal client: **732** esistevano all'inizio del dump, **741** alla fine,
+  **5 366** sono arrivati dopo che il dump era finito.
+- **Esito, i due restore.** Stesso file, stessa destinazione svuotata prima con `dropDatabase()`:
+
+| | senza `--oplogReplay` | con `--oplogReplay` |
+|---|---:|---:|
+| documenti ripristinati | 50 733 | 50 733 |
+| falliti | 0 | 0 |
+| impronta di `lab.ordini` | `50000 124861860.70 150281` ✓ | `50000 124861860.70 150281` ✓ |
+| `lab.movimenti` | **733** | **740** |
+| ultimo movimento | `n=733  t=09:51:48.370` | `n=740  t=09:51:48.388` |
+
+  La seconda esecuzione dice a voce alta che cosa ha fatto in più: `replaying oplog`, poi
+  `applied 12 oplog entries`. **Sette documenti**: è quanto vale la riproduzione dell'oplog su un
+  dump durato cinquanta millisecondi. Su un dump che dura mezz'ora vale mezz'ora di scritture.
+- **Esito, il punto nel tempo — ed è la ragione della voce.** Il restore completo si ferma a **740**;
+  alla fine del dump i documenti erano **741**. Il punto di ripristino **non è l'ultima riga di log
+  del comando**: è l'istante dell'ultima voce di oplog catturata, e cade **dentro** l'esecuzione. Un
+  documento scritto fra la cattura dell'ultima voce e il ritorno del comando è nel database e non è
+  nel backup. Nessuna delle due esecuzioni ha ricostruito gli indici — `no indexes to restore for
+  collection lab.ordini` — perché il dataset di demo non ne ha oltre a `_id_`.
+- **Conseguenza:** la pagina `docs/03-amministrazione/backup-restore.md` può dire «coerente a un
+  punto nel tempo» indicando **quale** punto, e può quantificare `--oplogReplay` invece di
+  raccomandarlo. Registrato in [ADR-0047](Decision.md#adr-0047).
+- **Riserve:** gli istanti `t` li scrive il **client** quando costruisce il documento, non il server
+  quando lo applica: il confine 740/741 è approssimato al millisecondo di due orologi diversi, non
+  dimostrato confrontando i timestamp dell'oplog. Una sola esecuzione. Il dump è girato **sul
+  primario**: `--readPreference=secondary` toglierebbe carico alla sorgente e **non è stato
+  provato**. Il dump è completo — `--oplog` lo impone ([S-011](#s-011)) — e quindi contiene
+  `admin/system.users.bson`: il restore ha stampato `restoring users from …`, il che significa che
+  **il file di backup vale quanto le credenziali del database** e va trattato come tale
+  ([ADR-0014](Decision.md#adr-0014)). Nessun restore è stato fatto su uno stack **diverso** da
+  quello di origine, che è il caso vero di un ripristino.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0047
+
+---
+
+<a id="v-036"></a>
+### V-036 — L'oplog che rotola sotto il dump: «oplog overflow», uscita 1, e 1,8 GB di BSON senza `oplog.bson`
+
+- **Comandi:** un'istanza usa-e-getta con l'immagine pinnata, senza keyfile e senza autenticazione,
+  avviata con `--replSet mini --oplogSize 1 --bind_ip_all`; carico di dati; uno scrittore che
+  inserisce documenti da 100 KB senza sosta; `mongodump --oplog --out /tmp/dump-mini` durante la
+  scrittura. Il container è stato rimosso con `docker rm -f -v` a prova finita.
+- **Ambiente:** `mongo@sha256:b6421fd6…`, MongoDB 7.0.40, macOS 26.6.2 arm64, Docker 29.7.2.
+  Istanza separata: lo stack del lab ha una finestra di **15 ore** ([V-034](#v-034)) e non può
+  mostrare questo guasto.
+- **Che cosa si voleva sapere:** `--oplog` funziona finché l'oplog conserva le voci prodotte durante
+  il dump. Se il dump dura più della finestra, la garanzia salta. Il piano di questa feature chiede
+  di mostrarlo **mentre fallisce**, non di raccontarlo.
+- **Esito, il primo tentativo — fallito, e istruttivo.** Con `--oplogSize 1` l'oplog **non** si è
+  fermato a 1 MB: è arrivato a **429,86 MB** con una finestra di **131 secondi**, e il dump da
+  2,2 GB, durato 4,8 secondi, è riuscito con 857 voci catturate. Il motivo sta nel log del server:
+
+```text
+id 22402  OplogCapMaintainerThread-local.oplog.rs
+"WiredTiger record store oplog truncation finished"
+pinnedOplogTimestamp: 09:59:44   numRecords: 1835   dataSize: 188 494 870   durationMillis: 3751
+```
+
+  Il taglio dell'oplog è limitato da un **timestamp bloccato**: WiredTiger non può buttare via voci
+  che servirebbero a ripartire dopo un crash, e quel confine è l'ultimo checkpoint. I checkpoint,
+  per impostazione predefinita, sono ogni **60 secondi**. Ne segue una conseguenza che vale la pena
+  scrivere: **la finestra dell'oplog non può scendere sotto l'intervallo di checkpoint, per quanto
+  si rimpicciolisca l'oplog.** Un oplog da 1 MB con checkpoint ogni minuto tiene comunque un minuto
+  di storia, e centinaia di megabyte.
+- **Esito, il secondo tentativo — il fallimento vero.** Stessa istanza, avviata in più con
+  `--syncdelay 1`, cioè un checkpoint al secondo. La finestra è crollata dove serviva:
+
+```text
+oplog configurato MB = 1.00
+oplog usato MB       = 27.63
+finestra secondi     = 1
+voci nell'oplog      = 287
+```
+
+  Con 1,5 GB da scaricare e la scrittura in corso, il dump ha impiegato **3,4 secondi** — tre volte
+  la finestra — ed è finito così:
+
+```text
+10:03:43.261  writing `lab.grandi` to /tmp/dump-mini/lab/grandi.bson
+10:03:46.673  done dumping `lab.grandi` (15000 documents)
+10:03:46.678  Failed: oplog overflow: mongodump was unable to capture all new oplog entries during execution
+USCITA=1
+```
+
+- **Esito, il pezzo che si dimentica.** Il comando è fallito **dopo** aver scritto tutto:
+
+```text
+/tmp/dump-mini/lab/grandi.bson     1 536 555 000 byte
+/tmp/dump-mini/lab/disturbo.bson     320 525 373 byte
+/tmp/dump-mini/oplog.bson                  assente
+/tmp/dump-mini/prelude.json                assente
+```
+
+  Un dump riuscito ha `oplog.bson` e `prelude.json` in cima alla cartella; questo ha 1,8 GB di BSON
+  e nessuno dei due. Sul disco resta qualcosa che **assomiglia** a un backup, pesa come un backup, e
+  non è coerente a nessun punto nel tempo. L'unico segnale è il codice di uscita **1**: uno script
+  di backup che non lo controlla conserva l'oggetto sbagliato.
+- **Conseguenza:** il fallimento entra nella pagina con il suo testo esatto, insieme alla regola che
+  ne discende — si controlla il codice di uscita, e si controlla che `oplog.bson` esista. Registrato
+  in [ADR-0047](Decision.md#adr-0047).
+- **Riserve:** **la prova è forzata, e va detto come.** Nessuno mette in produzione un oplog da 1 MB
+  con un checkpoint al secondo: il caso vero è l'opposto — un oplog normale e un dump che dura ore.
+  Qui i due termini sono stati compressi per farli stare in tre secondi; il meccanismo e il messaggio
+  d'errore sono quelli veri, la scala no. `--syncdelay` è un parametro che il manuale sconsiglia di
+  toccare, ed è stato toccato **solo** su un'istanza usa-e-getta, mai sullo stack del lab. Infine:
+  **la pagina di `mongodump` non nomina questo guasto.** Elenca le combinazioni vietate e le
+  operazioni che lo fanno fallire ([S-011](#s-011)), ma non dice da nessuna parte che l'oplog possa
+  rotolare via sotto il dump. Il limite è reale, il messaggio d'errore esiste nel programma, e la
+  fonte primaria tace.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0047
+
+---
+
+<a id="v-037"></a>
+### V-037 — `--oplogReplay` con `--nsInclude`: il rifiuto arriva prima di toccare i dati
+
+- **Comando:** `mongorestore --oplogReplay --nsInclude 'lab.*' /tmp/dump-02` sullo stack del lab,
+  sullo stesso dump completo di [V-035](#v-035).
+- **Ambiente:** stack `docker/02-replicaset`, `mongorestore` 100.18.0.
+- **Che cosa si voleva sapere:** [S-059](#s-059) dichiara che `--oplogReplay` non convive con le
+  opzioni che restringono l'ambito del restore. Restava da sapere **quando** se ne accorge: prima o
+  dopo aver scritto.
+- **Esito:**
+
+```text
+Failed: cannot use --oplogReplay with includes specified
+0 document(s) restored successfully. 0 document(s) failed to restore.
+USCITA=1
+```
+
+  Prima. **Zero documenti** toccati: il controllo è a monte, non a metà strada.
+- **Conseguenza:** il limite dichiarato dalla fonte si può mostrare in due righe, e la coppia
+  «dump completo obbligatorio / restore completo obbligatorio» diventa una regola verificata invece
+  che una nota a piè di pagina. Registrato in [ADR-0047](Decision.md#adr-0047).
+- **Riserve:** provata **solo** la combinazione con `--nsInclude`. Le altre cinque dell'elenco —
+  `--db`, `--collection`, `--nsExclude`, `--nsFrom`, `--nsTo` — non sono state provate, e il
+  messaggio d'errore potrebbe essere diverso. Non è stato provato il caso simmetrico e più insidioso:
+  un restore **parziale senza** `--oplogReplay`, che non dà nessun errore e produce un ripristino
+  incoerente in silenzio.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0047
 
 ---

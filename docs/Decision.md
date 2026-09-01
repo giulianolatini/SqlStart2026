@@ -2531,3 +2531,94 @@ lì — l'elenco è nel manuale, e ripeterlo senza il prezzo non aggiunge niente
 una volta, e una decisione rimandata due volte è una decisione che non si prende.
 
 **Fonti:** [S-035](Sources.md#s-035), [S-037](Sources.md#s-037), [S-044](Sources.md#s-044), [S-058](Sources.md#s-058), [V-016](Sources.md#v-016), [V-027](Sources.md#v-027), [V-029](Sources.md#v-029), [V-030](Sources.md#v-030), [V-031](Sources.md#v-031), [V-033](Sources.md#v-033)
+
+---
+
+<a id="adr-0047"></a>
+## ADR-0047 — Il backup si documenta dopo averlo rotto, e il dump che fallisce resta sul disco
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto.** [ADR-0022](#adr-0022) ha registrato un paradosso e lo ha lasciato aperto: `--oplog`
+funziona solo dove c'è un oplog, cioè su un replica set, quindi su un'istanza singola **non esiste
+un dump coerente a un istante**. La fonte era già in casa da `feature/01` ([S-011](Sources.md#s-011))
+e la pagina no, perché non c'era lo stack su cui provarla. Adesso c'è.
+
+Una pagina di backup è il posto dove è più facile scrivere il falso senza accorgersene. «`--oplog`
+rende il dump coerente» è vero e non dice niente: non dice **rispetto a quale istante**, non dice
+quanto valga in documenti, non dice quando smette di funzionare. E la documentazione di `mongodump`,
+che pure elenca sei combinazioni vietate, **non nomina** il modo in cui `--oplog` fallisce davvero:
+l'oplog che rotola via sotto il dump ([V-036](Sources.md#v-036)).
+
+**Decisione.**
+
+*Il punto nel tempo si indica, non si evoca.* Il dump è durato 50 ms; il restore completo si ferma a
+740 documenti mentre alla fine del comando ce n'erano 741 ([V-035](Sources.md#v-035)). Il punto di
+ripristino è l'istante dell'**ultima voce di oplog catturata**, e cade dentro l'esecuzione del
+comando, non alla sua ultima riga di log. La pagina scrive questo, con il numero, invece di
+«coerente a un punto nel tempo».
+
+*`--oplogReplay` si quantifica invece di raccomandarlo.* Stesso file, due restore: **733** documenti
+senza, **740** con. Sette. Su un dump da cinquanta millisecondi sette documenti sono un aneddoto; la
+pagina lo dice, e dice che su un dump da mezz'ora sono mezz'ora di scritture. Un'opzione
+raccomandata senza un numero è cerimonia, e chi legge la salta.
+
+*Il fallimento si mostra mentre fallisce, e si dichiara che è forzato.* Lo stack del lab ha una
+finestra di oplog di **quindici ore** ([V-034](Sources.md#v-034)): riempirla non è una demo. Il
+guasto è stato riprodotto su un'istanza usa-e-getta con oplog da 1 MB e checkpoint al secondo, e la
+pagina riporta il testo esatto — `Failed: oplog overflow: mongodump was unable to capture all new
+oplog entries during execution` — **insieme** all'ammissione che la scala è compressa: in produzione
+il caso è un oplog normale e un dump lungo, non un oplog assurdo e un dump breve. Riprodurre il
+meccanismo è onesto; far credere che siano le stesse grandezze non lo sarebbe.
+
+*Il fallimento lascia 1,8 GB sul disco, e questa è la riga che va sulle slide.* `mongodump` si
+ferma **dopo** aver scritto tutte le collezioni: sul disco resta un albero che assomiglia a un
+backup, senza `oplog.bson` e senza `prelude.json`. L'unico segnale è il codice di uscita **1**. La
+pagina ne ricava una regola operativa in due righe — si controlla l'uscita, si controlla che
+`oplog.bson` esista — perché la regola è la sola parte che sopravvive alla lettura.
+
+*Il limite dello strumento si cita dalla fonte che lo dichiara.* Non è `mongodump`: è la pagina dei
+metodi di backup, che apre con «`mongodump` and `mongorestore` are tools for backing up and
+restoring **small** MongoDB deployments» e mette in tabella RTO alto, RPO alto, nessun ripristino
+continuo, coerenza «Not guaranteed» ([S-060](Sources.md#s-060)). La riserva della sezione «cosa
+questa pagina non copre» non è un'opinione dell'autore: è una citazione.
+
+*Dove fonte e misura non coincidono, si scrivono tutte e due.* La stessa tabella dichiara «impact on
+source: High, requires write lock», e su questo stack le scritture non si sono fermate per i 50 ms
+del dump ([V-035](Sources.md#v-035)). La fonte resta citata come dichiarazione dell'editore, la
+misura resta accanto come osservazione, e la contraddizione resta visibile invece di essere risolta
+scegliendo la versione più comoda.
+
+*Il restore si verifica contando, con la disciplina di `smoke-02`.* Impronta di `lab.ordini`
+identica prima e dopo, in entrambe le esecuzioni: `50000 124861860.70 150281`. Un backup che nessuno
+ha mai ripristinato non è un backup, e un ripristino che nessuno ha mai contato non è una verifica.
+
+*Il file di dump è un segreto.* `--oplog` impone il dump completo ([S-011](Sources.md#s-011)),
+il dump completo contiene `admin/system.users.bson`, e il restore lo dice a voce alta —
+`restoring users from …`. La pagina lo scrive accanto al comando, non in fondo, e rimanda alla
+regola che questo repository già applica al keyfile ([ADR-0014](#adr-0014)).
+
+**Conseguenze.** Nasce `docs/03-amministrazione/backup-restore.md`, la prima pagina della sezione
+`03-amministrazione` scritta in questo branch; in `docs/README.md` la riga passa da promessa a
+collegamento. [S-011](Sources.md#s-011), che dal `feature/01` era citata dal solo
+[ADR-0022](#adr-0022), acquisisce il secondo ADR che la usa. Il paradosso di [ADR-0022](#adr-0022)
+resta vero e adesso ha il suo rovescio scritto: dove l'oplog c'è, il dump a caldo coerente si fa, e
+si è fatto.
+
+Resta dichiarato ciò che non è stato provato: `--oplogLimit`, `--readPreference=secondary` per
+scaricare da un secondario, il restore su uno stack **diverso** da quello di origine — che è il caso
+vero di un ripristino — e il restore parziale **senza** `--oplogReplay`, che non dà nessun errore e
+produce un ripristino incoerente in silenzio.
+
+**Alternative scartate:** descrivere il fallimento invece di provocarlo — sarebbe costato un'ora in
+meno e avrebbe prodotto la frase «attenzione alla finestra dell'oplog», che non ha mai fermato
+nessuno; rimpicciolire l'oplog dello stack del lab per mostrarlo lì — `replSetResizeOplog` non
+scende sotto ~990 MB e avrebbe comunque sporcato lo stack che serve alle altre demo; usare
+`--oplogSize 1` e basta — provato, e non funziona: il taglio è vincolato al timestamp dell'ultimo
+checkpoint, e senza `--syncdelay` la finestra resta di minuti ([V-036](Sources.md#v-036)); tacere la
+riga «requires write lock» perché contraddetta dalla misura — la fonte va citata per quello che
+dice, e il disaccordo con la misura è informazione, non imbarazzo; rimandare la pagina a un branch
+di amministrazione — `--oplog` esiste solo qui, e una pagina di backup senza `--oplog` sarebbe la
+pagina dello standalone, cioè [ADR-0022](#adr-0022) un'altra volta.
+
+**Fonti:** [S-011](Sources.md#s-011), [S-059](Sources.md#s-059), [S-060](Sources.md#s-060), [V-034](Sources.md#v-034), [V-035](Sources.md#v-035), [V-036](Sources.md#v-036), [V-037](Sources.md#v-037)

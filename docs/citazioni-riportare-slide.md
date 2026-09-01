@@ -406,6 +406,76 @@ segnalare con onestà: le espressioni «point in time» e «does not guarantee»
 nella documentazione, e il caso dello standalone — dove `--oplog` non è nemmeno utilizzabile —
 non è trattato esplicitamente.
 
+### Il dump fallito pesa 1,8 GB e non è un backup
+
+> ```text
+> 10:03:46.673  done dumping `lab.grandi` (15000 documents)
+> 10:03:46.678  Failed: oplog overflow: mongodump was unable to capture
+>                       all new oplog entries during execution
+> uscita = 1
+> ```
+>
+> ```text
+> /tmp/dump-mini/lab/grandi.bson     1 536 555 000 byte
+> /tmp/dump-mini/lab/disturbo.bson     320 525 373 byte
+> /tmp/dump-mini/oplog.bson                  assente
+> /tmp/dump-mini/prelude.json                assente
+> ```
+
+Fonte: [V-036](Sources.md#v-036), riprodotto su un'istanza usa-e-getta con oplog da 1 MB.
+Decisione in [ADR-0047](Decision.md#adr-0047).
+
+**Perché una slide:** perché il fallimento non ha l'aspetto di un fallimento. `mongodump` si ferma
+**dopo** aver scritto tutte le collezioni: sul disco resta un albero completo, pesante, che si apre
+senza errori e non è coerente rispetto a nessun istante. Mancano due file soli — `oplog.bson` e
+`prelude.json` — e nessuno li guarda. L'unico segnale è il codice di uscita **1**, cioè la cosa che
+gli script di backup scritti in fretta non controllano mai. In sala la domanda da fare prima di
+mostrare la seconda schermata è: «quanti di voi controllano il valore di ritorno di `mongodump`?».
+
+Da dire nello stesso respiro, perché altrimenti è un trucco: la prova è **forzata**. Un oplog da
+1 MB con un checkpoint al secondo non esiste in produzione. Il caso vero è l'opposto — un oplog
+normale e un dump che dura ore — e qui i due termini sono stati compressi per farli stare in tre
+secondi. Il meccanismo e il messaggio sono quelli veri; la scala no.
+
+### `mongodump` è dichiarato per installazioni piccole, dalla sua stessa documentazione
+
+> «`mongodump` and `mongorestore` are tools for backing up and restoring **small** MongoDB
+> deployments.»
+
+> Nella tabella di confronto, la stessa pagina assegna alla coppia: RTO **High**, RPO **High**,
+> ripristino continuo a un punto nel tempo **No**, coerenza **Not guaranteed**, backup di uno
+> sharded cluster «High, requires extra steps».
+
+Fonte: [S-060](Sources.md#s-060) — MongoDB Manual 7.0, *Backup Methods for a Self-Managed
+Deployment*.
+
+**Perché una slide:** perché la riserva più importante di una demo di backup non è un'opinione di
+chi parla, è una riga del manuale. Chiude in anticipo la domanda «e in produzione?» senza doverla
+argomentare. Va però detto anche il buco: «small» **non è quantificato da nessuna parte**, quindi la
+frase orienta e non decide. E una riga della tabella — «impact on source: High, requires write lock»
+— **non corrisponde** a quello che si vede sullo stack: durante i cinquanta millisecondi del dump le
+scritture sono proseguite ([V-035](Sources.md#v-035)).
+
+### Il punto nel tempo cade dentro il comando, non alla sua ultima riga
+
+> | | senza `--oplogReplay` | con `--oplogReplay` |
+> |---|---:|---:|
+> | `lab.movimenti` ripristinati | **733** | **740** |
+> | documenti presenti a fine dump | | **741** |
+
+Fonte: [V-035](Sources.md#v-035), stesso file di dump ripristinato due volte.
+Decisione in [ADR-0047](Decision.md#adr-0047).
+
+**Perché una slide:** perché sostituisce una formula con un numero. «Coerente a un punto nel tempo»
+non dice quale punto; questi tre numeri lo dicono. I **sette** documenti fra 733 e 740 sono quanto
+vale `--oplogReplay` su un dump di cinquanta millisecondi — su un dump di mezz'ora sono mezz'ora di
+scritture. E il documento che manca fra 740 e 741 è la definizione operativa del punto di
+ripristino: **l'ultima voce di oplog catturata**, che cade dentro l'esecuzione del comando. Chi
+scrive durante quel respiro finale ha il dato nel database e non nel backup.
+
+Riserva da tenere sulla slide, non a voce: gli istanti nei documenti li scrive il **client**, quindi
+il confine 740/741 è approssimato al millisecondo fra due orologi diversi.
+
 ---
 
 ## Docker e Compose

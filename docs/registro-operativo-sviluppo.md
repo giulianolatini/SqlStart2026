@@ -1716,3 +1716,145 @@ decisione di saltare gli altri. Del piano di `feature/02` restano aperti **tutti
 **Attenzione per chi riprende.** Lo stack 02 è avviato e sano, impronta `50000 124861860.70 150281`,
 smoke 42/0 rieseguito a fine sessione. La prova di [V-033](Sources.md#v-033) crea una collezione di
 scarto `prova_perdita`: se ricomparisse, `./tools/reset-demo.sh 02` la toglie.
+
+---
+
+## 2026-09-01 — `feature/02`, Task 10: il backup si documenta dopo averlo rotto
+
+Il Task 10 chiede cinque passi: `mongodump` e `mongorestore` **eseguiti**, che cosa `--oplog`
+garantisce e cosa no — con il fallimento per finestra di oplog mostrato **mentre fallisce** — il
+restore verificato contando, le riserve dichiarate con la fonte, e `docs-check`. Tutti e cinque
+eseguiti. Tre punti sono andati diversamente da come il piano se li aspettava, e vale la pena
+scrivere quali.
+
+**Il piano non è stato modificato; le deviazioni sono dichiarate qui.** Il Passo 2 chiede di
+mostrare il fallimento sullo stack del lab. Non si può: la finestra dell'oplog di questo stack è di
+**15,09 ore** dentro 2 032 MB riempiti al 6 % ([V-034](Sources.md#v-034)), e per superarla servirebbe
+un dump di ore. Ridurre l'oplog dello stack non è una strada — `replSetResizeOplog` non scende sotto
+~990 MB, e sporcherebbe lo stack che serve alle altre demo. Il guasto è stato quindi riprodotto su
+un'**istanza usa-e-getta**, con l'immagine pinnata, senza keyfile e senza autenticazione, rimossa a
+prova finita con `docker rm -f -v`.
+
+**Il primo tentativo non è fallito, ed è la cosa più utile della giornata.** Con `--oplogSize 1` e
+nient'altro, l'oplog **non** si è fermato a 1 MB: è arrivato a 429 MB con una finestra di 131
+secondi, e il dump è passato. La spiegazione sta nel log del server, id **22402**: il taglio
+dell'oplog è vincolato da un `pinnedOplogTimestamp`, cioè dall'ultimo checkpoint, perché il motore
+non butta via voci che servirebbero a ripartire dopo un crash. I checkpoint sono ogni **60 secondi**.
+Ne discende una cosa che nessuna pagina consultata dice: **la finestra dell'oplog non scende sotto
+l'intervallo di checkpoint**, per quanto piccolo si faccia l'oplog. Con `--syncdelay 1` la finestra è
+crollata a **1 secondo**, e il dump da 1,5 GB durato 3,4 secondi è finito come doveva:
+`Failed: oplog overflow: mongodump was unable to capture all new oplog entries during execution`,
+uscita **1** ([V-036](Sources.md#v-036)).
+
+**Il pezzo che nessuno si aspetta.** Il comando fallisce **dopo** aver scritto tutte le collezioni:
+sul disco restano 1,8 GB di BSON, completi e apribili, senza `oplog.bson` e senza `prelude.json`.
+Non è un backup e ne ha tutto l'aspetto. L'unico segnale è il codice di uscita, cioè la cosa che gli
+script di backup scritti in fretta non controllano. È la riga più utile della pagina, ed è finita
+anche fra le citazioni da slide.
+
+**Il Passo 4 chiedeva la riserva «con la fonte», e la fonte non era quella prevista.** Il piano dà
+per scontato che il limite di `mongodump` per i database grandi sia dichiarato dalla pagina di
+`mongodump`. Non lo è. Quella pagina elenca le combinazioni vietate e le operazioni che fanno
+fallire il dump ([S-011](Sources.md#s-011)), ma **non nomina** il rotolamento dell'oplog e non dice
+niente sulla dimensione del database. La dichiarazione sta altrove, nella pagina dei metodi di
+backup — «tools for backing up and restoring **small** MongoDB deployments», con RTO alto, RPO alto e
+coerenza «Not guaranteed» — registrata come [S-060](Sources.md#s-060). Registrata insieme alla
+pagina di `mongorestore`, [S-059](Sources.md#s-059), che mancava del tutto.
+
+**Dove la fonte e la misura non vanno d'accordo, si scrivono tutte e due.** La tabella di
+[S-060](Sources.md#s-060) assegna a `mongodump` «impact on source: High, requires write lock». Sullo
+stack, durante i **50 ms** del dump, le scritture sono proseguite e i documenti scritti in quella
+finestra sono nel database ([V-035](Sources.md#v-035)). La dichiarazione dell'editore resta citata,
+l'osservazione resta accanto, e la contraddizione resta visibile: risolverla scegliendo la versione
+più comoda sarebbe stato più ordinato e meno vero.
+
+**Il numero che dà senso a `--oplogReplay`.** Stesso file di dump, ripristinato due volte su una
+destinazione svuotata: **733** documenti senza l'opzione, **740** con, `applied 12 oplog entries`.
+Sette. Su un dump da cinquanta millisecondi sette documenti sono un aneddoto — e la pagina lo dice —
+ma su un dump da mezz'ora sono mezz'ora di scritture. Più interessante è il terzo numero: alla fine
+del dump i documenti erano **741**. Il punto di ripristino non è l'ultima riga di log del comando, è
+l'istante dell'**ultima voce di oplog catturata**, e cade dentro l'esecuzione. Un documento scritto
+in quel respiro finale è nel database e non nel backup ([V-035](Sources.md#v-035)).
+
+**Una misura in più, che il piano non chiedeva.** [S-059](Sources.md#s-059) dichiara che
+`--oplogReplay` non convive con le opzioni che restringono l'ambito del restore. Restava da sapere
+**quando** se ne accorge: `mongorestore --oplogReplay --nsInclude 'lab.*'` risponde
+`cannot use --oplogReplay with includes specified` con **zero documenti** toccati
+([V-037](Sources.md#v-037)). Due righe di prova trasformano una nota della documentazione in un
+fatto mostrato, ed è il rapporto costo/valore migliore della sessione.
+
+**Controlli.** `make docs-check` verde — al primo giro ha bocciato cinque collegamenti perché
+l'ancora esplicita `<a id="adr-0047"></a>` mancava: la convenzione degli ADR non si deduce dal
+titolo, e il controllo l'ha ricordato al posto mio. `make tools-test` **100 passed**.
+`make stack-check` → 2 stack conformi. `./tools/smoke-replicaset.sh` → **42 · 0**. Prima dello
+smoke: istanza usa-e-getta rimossa, `/tmp/dump-02` cancellato da dentro `mongo-rs-1`,
+`./tools/reset-demo.sh 02` eseguito due volte — collezione di scarto `movimenti` rimossa, impronta
+`50000 124861860.70 150281`.
+
+**Documentazione prodotta.** [S-059](Sources.md#s-059) e [S-060](Sources.md#s-060);
+[V-034](Sources.md#v-034), [V-035](Sources.md#v-035), [V-036](Sources.md#v-036) e
+[V-037](Sources.md#v-037); [ADR-0047](Decision.md#adr-0047), che le cita insieme a
+[S-011](Sources.md#s-011) — la quale, citata dal solo [ADR-0022](Decision.md#adr-0022) dai tempi di
+`feature/01`, acquisisce il suo secondo ADR; `docs/03-amministrazione/backup-restore.md`, prima
+pagina della sezione `03-amministrazione` scritta in questo branch; tre citazioni da slide nella
+sezione «Backup e restore».
+
+**Note di metodo.**
+
+64. **Quando la fonte primaria tace, il limite esiste lo stesso.** La pagina di `mongodump` non
+    nomina il modo in cui `--oplog` fallisce davvero, e il programma ha il messaggio d'errore
+    pronto. Di fronte a un silenzio del genere ci sono tre mosse: dedurlo e scriverlo come se fosse
+    documentato, tacerlo perché non c'è la citazione, oppure provocarlo e registrare **due** cose —
+    il comportamento misurato e il fatto che la fonte non lo dichiari. La terza costa un
+    esperimento e produce l'unica affermazione difendibile. Il silenzio di una fonte è
+    un'informazione, e va scritto come tale.
+
+65. **Un esperimento forzato si pubblica con il suo fattore di compressione.** Per far fallire il
+    dump in tre secondi sono serviti un oplog da 1 MB e un checkpoint al secondo: due valori che in
+    produzione non esistono. Il meccanismo e il messaggio d'errore sono quelli veri; la scala no. Se
+    lo si dice, la dimostrazione resta onesta e insegna. Se non lo si dice, il pubblico torna a casa
+    convinto che `mongodump` fallisca dopo tre secondi, cioè con un'idea peggiore di quella che
+    aveva prima. La differenza fra le due versioni sono due righe.
+
+66. **Il tentativo che non funziona è materiale, non scarto.** `--oplogSize 1` non ha fatto fallire
+    niente, e nel capire perché è venuto fuori il fatto più utile della giornata: la finestra
+    dell'oplog ha un pavimento, ed è l'intervallo di checkpoint. Chi rimpicciolisce l'oplog per
+    risparmiare spazio scoprirà che sotto una certa soglia non risparmia niente. Quel fatto non era
+    nell'obiettivo, non è in nessuna pagina consultata, ed è finito in [V-036](Sources.md#v-036) e
+    nella pagina. La tentazione, in quel momento, era cancellare il tentativo fallito e rifarlo
+    meglio.
+
+---
+
+## Punto di ripresa — 2026-09-01, terza sospensione
+
+**Deciso e chiuso.** Il Task 10 di `feature/02` è chiuso:
+`docs/03-amministrazione/backup-restore.md` esiste, con i comandi eseguiti, i numeri misurati e il
+fallimento mostrato mentre fallisce. ADR da 0038 a **0047**, verifiche fino a **V-037**, fonti fino
+a **S-060**.
+
+**Misurato oggi, e da non rimisurare.** Finestra dell'oplog dello stack 02: **15,09 ore** in
+2 032 MB al 6 % ([V-034](Sources.md#v-034)). Dump a caldo sotto scrittura: **50 ms**, 12 voci di
+oplog; restore **733** senza `--oplogReplay` e **740** con, contro **741** presenti a fine dump
+([V-035](Sources.md#v-035)). Fallimento «oplog overflow» riprodotto con oplog da 1 MB e
+`--syncdelay 1`, che lascia 1,8 GB di BSON senza `oplog.bson` e uscita **1**
+([V-036](Sources.md#v-036)). `--oplogReplay` con `--nsInclude`: rifiuto a monte, zero documenti
+toccati ([V-037](Sources.md#v-037)).
+
+**Prossimo passo, in ordine.**
+
+1. **Task 11** — `docs/03-amministrazione/sicurezza-keyfile-x509.md`. La cartella
+   `docs/04-sicurezza/` non esiste: la pagina va dove la mette il piano.
+2. **Task 12** — la pagina delle trappole, con i **sei** debiti aperti: il keyfile a 644,
+   `--env-file` che sostituisce invece di aggiungere, `up --wait` che esce presto, la trappola del
+   `$` in Compose, il congelamento di `docker logs` ([V-032](Sources.md#v-032)) e l'artefatto
+   `getaddrinfo ENOTFOUND` di [V-031](Sources.md#v-031); più la rimozione della riserva di
+   [ADR-0035](Decision.md#adr-0035) da `docs/03-amministrazione/log.md`.
+3. **Task 13** — `docs/05-talk/registrazioni/` e le prime registrazioni.
+4. **Task 14** — ADR, fonti e chiusura del branch con la PR. **Mai `git flow feature finish`**.
+
+**Attenzione per chi riprende.** Lo stack 02 è avviato e sano, impronta `50000 124861860.70 150281`,
+smoke **42 · 0** rieseguito a fine sessione. Non restano container usa-e-getta né dump dentro i
+container. Se una prova futura avesse bisogno di una finestra di oplog stretta, la ricetta è in
+[V-036](Sources.md#v-036) e va usata **solo** su un'istanza separata: `--syncdelay` non si tocca
+sullo stack del lab.

@@ -74,7 +74,7 @@ sono state eseguite qui, perché qui non c'è né un Ubuntu né un Windows
 
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
-| `03-amministrazione/backup-restore.md` | `mongodump`/`mongorestore`, backup a caldo con `--oplog` e i suoi limiti, restore verificato | `feature/02-stack-replicaset` |
+| [`03-amministrazione/backup-restore.md`](03-amministrazione/backup-restore.md) | `mongodump`/`mongorestore`, il dump a caldo con `--oplog` e quale punto nel tempo garantisce, il restore contato, e il fallimento per finestra di oplog mostrato mentre fallisce | già nel repository |
 | `03-amministrazione/sicurezza-keyfile-x509.md` | autenticazione interna: perché il lab usa il keyfile, perché MongoDB lo riserva a test e sviluppo, e come si passa a X.509 in produzione | `feature/02-stack-replicaset` |
 | `03-amministrazione/statistiche-monitoraggio.md` | `serverStatus`, `dbStats`, metriche di replica, cosa guardare sotto carico | `feature/04-app-python` |
 | [`03-amministrazione/log.md`](03-amministrazione/log.md) | il formato JSON campo per campo, le severità e i componenti misurati, `logRotate` in container, cosa cercare durante un'elezione (mappa scritta qui, `id` verificati in `02`) | già nel repository |
