@@ -45,6 +45,7 @@ produrrà. Un indice che promette senza datare invecchia male.
 | [`2026-08-24-design.md`](00-progetto/2026-08-24-design.md) | il documento di design: vincoli, architetture, applicazione, impianto documentale, piano di lavoro | già nel repository |
 | [`2026-08-25-piano-feature-00-fondamenta.md`](00-progetto/2026-08-25-piano-feature-00-fondamenta.md) | il piano di implementazione della prima feature, passo per passo | già nel repository |
 | [`2026-08-28-piano-feature-01-stack-standalone.md`](00-progetto/2026-08-28-piano-feature-01-stack-standalone.md) | il piano della seconda feature: lo stack a istanza singola, la verifica eseguibile sui file Compose e le sei pagine di documentazione dovute | già nel repository |
+| [`2026-08-31-piano-feature-02-stack-replicaset.md`](00-progetto/2026-08-31-piano-feature-02-stack-replicaset.md) | il piano della terza feature: il replica set a tre membri, la catena di inizializzazione sotto keyfile, la demo di failover e i quattro debiti che i due branch precedenti gli hanno intestato | già nel repository |
 | [`2026-08-25-spike-sharded.md`](00-progetto/2026-08-25-spike-sharded.md) | il verbale dello spike: il file Compose che ha funzionato, la memoria misurata sugli undici container, i tre punti in cui il design si era sbagliato, e la versione di MongoDB che su Docker Desktop non parte | già nel repository |
 | [`limiti-noti.md`](00-progetto/limiti-noti.md) | i confini dichiarati: dove il lab semplifica, dove la documentazione ufficiale non copre, quali affermazioni diffuse non risultano scritte | già nel repository |
 
@@ -65,31 +66,31 @@ sono state eseguite qui, perché qui non c'è né un Ubuntu né un Windows
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
 | [`02-architetture/standalone.md`](02-architetture/standalone.md) | istanza singola: i quattro limiti con la fonte che li sostiene, quando basta davvero, il file Compose riga per riga | già nel repository |
-| `02-architetture/replica-set.md` | topologia, elezioni, read preference, write concern, ritardo di replica | `feature/02-stack-replicaset` |
+| [`02-architetture/replica-set.md`](02-architetture/replica-set.md) | replica set a tre membri: perché tre e non due, le elezioni cronometrate nelle tre scene, write concern e read preference come coppia, il confronto con l'istanza singola, il file Compose riga per riga | già nel repository |
 | `02-architetture/sharded-cluster.md` | mongos, config server, shard key, bilanciamento; i due profili dello stack | `feature/03-stack-sharded` |
-| [`02-architetture/trappole-mongodb-in-docker.md`](02-architetture/trappole-mongodb-in-docker.md) | i punti in cui MongoDB e Docker si fraintendono, una voce per sintomo: undici alla nascita, ampliata da `02` e `03` | già nel repository |
+| [`02-architetture/trappole-mongodb-in-docker.md`](02-architetture/trappole-mongodb-in-docker.md) | i punti in cui MongoDB e Docker si fraintendono, una voce per sintomo: undici alla nascita, tredici da `02` (permessi del keyfile, scoperta della topologia), ampliata ancora da `03` | già nel repository |
 
 ## 03-amministrazione — le procedure
 
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
-| `03-amministrazione/backup-restore.md` | `mongodump`/`mongorestore`, backup a caldo con `--oplog` e i suoi limiti, restore verificato | `feature/02-stack-replicaset` |
-| `03-amministrazione/sicurezza-keyfile-x509.md` | autenticazione interna: perché il lab usa il keyfile, perché MongoDB lo riserva a test e sviluppo, e come si passa a X.509 in produzione | `feature/02-stack-replicaset` |
+| [`03-amministrazione/backup-restore.md`](03-amministrazione/backup-restore.md) | `mongodump`/`mongorestore`, il dump a caldo con `--oplog` e quale punto nel tempo garantisce, il restore contato, e il fallimento per finestra di oplog mostrato mentre fallisce | già nel repository |
+| [`03-amministrazione/sicurezza-keyfile-x509.md`](03-amministrazione/sicurezza-keyfile-x509.md) | autenticazione interna: perché `--keyFile` porta con sé il controllo degli accessi, perché MongoDB riserva il keyfile a test e sviluppo, la sequenza verso X.509 eseguita con i suoi rifiuti, e dove vivono gli utenti di un replica set | già nel repository |
 | `03-amministrazione/statistiche-monitoraggio.md` | `serverStatus`, `dbStats`, metriche di replica, cosa guardare sotto carico | `feature/04-app-python` |
-| [`03-amministrazione/log.md`](03-amministrazione/log.md) | il formato JSON campo per campo, le severità e i componenti misurati, `logRotate` in container, cosa cercare durante un'elezione (mappa scritta qui, `id` verificati in `02`) | già nel repository |
+| [`03-amministrazione/log.md`](03-amministrazione/log.md) | il formato JSON campo per campo, le severità e i componenti misurati, `logRotate` in container, cosa cercare durante un'elezione: gli `id` delle tre cause, misurati su `02`, e le tre prime righe che distinguono un guasto da una manutenzione | già nel repository |
 
 ## 04-mongosh — la shell
 
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
-| [`04-mongosh/guida-mongosh.md`](04-mongosh/guida-mongosh.md) | connettersi da dentro il container e i tre parametri che `mongosh` sceglie da sé, comandi di uso quotidiano, comandi di amministrazione di replica set e sharded cluster (scritti qui, eseguiti in `02` e `03`), script non interattivi e la tabella dei codici di uscita | già nel repository |
+| [`04-mongosh/guida-mongosh.md`](04-mongosh/guida-mongosh.md) | connettersi da dentro il container e i tre parametri che `mongosh` sceglie da sé, comandi di uso quotidiano, comandi di amministrazione: quelli del replica set eseguiti su `02`, quelli dello sharded cluster ancora solo scritti (dovuti a `03`), script non interattivi e la tabella dei codici di uscita | già nel repository |
 
 ## 05-talk — il palco
 
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
 | `05-talk/runbook-demo.md` | documento unico del talk: scaletta, comandi, tempi, piani di ripiego, criteri di rinuncia in appendice ([ADR-0015](Decision.md#adr-0015)) | `release/1.0` |
-| `05-talk/registrazioni/` | indice dei filmati di riserva e delle registrazioni di terminale. I filmati stanno sul canale YouTube del relatore, con copia locale obbligatoria ([ADR-0016](Decision.md#adr-0016)) | `feature/02-stack-replicaset` |
+| [`05-talk/registrazioni/`](05-talk/registrazioni/README.md) | indice dei filmati di riserva e delle registrazioni di terminale. Quattro scene di terminale sono nel repository; i filmati stanno sul canale YouTube del relatore, con copia locale obbligatoria ([ADR-0016](Decision.md#adr-0016), [ADR-0050](Decision.md#adr-0050)) | già nel repository |
 
 ## 06-sviluppo — come è fatto il lab
 

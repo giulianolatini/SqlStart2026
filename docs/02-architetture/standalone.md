@@ -43,6 +43,10 @@ Con `restart: unless-stopped` nel file Compose il container riparte da solo in m
 in tutti, e i casi scoperti non sono quelli che si immaginano: vedi
 [la voce 6 delle trappole](trappole-mongodb-in-docker.md#t-06).
 
+Il seguito è misurato. Su un replica set a tre membri lo stesso colpo costa **~10 secondi** fino al
+nuovo primario, e **mezzo secondo** se il primario saluta invece di essere ucciso: le tre scene,
+cronometrate, stanno in [«Le elezioni, cronometrate»](replica-set.md#2-le-elezioni-cronometrate).
+
 ### 1.2 `w: 1` è tutto ciò che si può chiedere — e `w: "majority"` è la stessa cosa travestita
 
 Qui la pagina rallenta, perché è il punto in cui il repository ha trovato qualcosa che il manuale
@@ -82,6 +86,10 @@ puntata su un'istanza singola — in sviluppo, in un ambiente di collaudo, in un
 metà — e **continua a funzionare**. Il codice crede di avere una garanzia che non ha. Non c'è niente
 che glielo dica, e il giorno in cui si scopre non è un giorno tranquillo.
 
+Su un replica set la stessa istruzione smette di essere una bugia — la conferma arriva quando due
+membri su tre hanno la scrittura — e il prezzo, misurato, è **un millisecondo**:
+[«Qui `w: "majority"` vuol dire qualcosa»](replica-set.md#31-qui-w-majority-vuol-dire-qualcosa).
+
 #### La finestra, misurata
 
 Le due frasi del manuale descrivono una finestra. Aprirla richiede un `SIGKILL` e cinque minuti
@@ -111,6 +119,12 @@ E una cosa che nella stessa prova **non** è andata persa: il dataset di demo. C
 impronta invariata dopo il kill e il recovery [V-016](../Sources.md#v-016). Erano in un checkpoint
 da tempo; a cadere è solo ciò che stava nella finestra. La differenza fra i due esiti, sulla stessa
 macchina e nello stesso istante, è la lezione dell'intero paragrafo.
+
+Il numero gemello, quello che [ADR-0032](../Decision.md#adr-0032) rimandava a `feature/02`, adesso
+esiste: la stessa prova su un replica set, con `w: "majority"` e il primario ucciso, perde **zero**
+scritture su 12 901 confermate — al prezzo di una pausa di dieci secondi e di un errore per un
+documento che nel database **c'è** ([V-033](../Sources.md#v-033)). Il confronto per righe è in
+[«Il confronto con l'istanza singola»](replica-set.md#4-il-confronto-con-listanza-singola).
 
 ### 1.3 Nessun oplog: niente change stream, niente backup a caldo coerente
 
@@ -167,6 +181,9 @@ servizio sempre in piedi. È la differenza pratica che più spesso decide l'adoz
 quella di cui si parla meno: si discute di alta disponibilità pensando ai guasti, mentre la maggior
 parte delle fermate è pianificata.
 
+Quanto costa quel «sempre in piedi» — in memoria, in porte e in complessità di avvio — è la prima
+sezione di [replica set a tre membri](replica-set.md#1-perché-i-membri-sono-tre).
+
 ---
 
 ## 2. Quando basta davvero
@@ -198,6 +215,10 @@ La domanda onesta da farsi non è «standalone o replica set», ma: **quanto cos
 risponde nessuno, e quanto costa il dato scritto negli ultimi cento millisecondi.** Se entrambe le
 risposte sono «poco», un'istanza singola è la scelta giusta e le altre due architetture sono
 complessità che non serve.
+
+Se invece una delle due risposte è «molto», la pagina successiva è
+[replica set a tre membri](replica-set.md): tre processi, un guasto tollerato, e ogni numero
+misurato su questo stack.
 
 ---
 
@@ -455,6 +476,7 @@ e sulla slide sta da sola. L'ultima è il valore dell'ultima istruzione, che `mo
 ---
 
 **Decisioni correlate:** [ADR-0032](../Decision.md#adr-0032) (i quattro limiti citabili),
+[ADR-0046](../Decision.md#adr-0046) (il seguito: il replica set con i suoi numeri),
 [ADR-0005](../Decision.md#adr-0005) (lo stack senza autenticazione come esempio negativo),
 [ADR-0030](../Decision.md#adr-0030) (i log su stdout),
 [ADR-0031](../Decision.md#adr-0031) (il dataset deterministico),
@@ -465,4 +487,5 @@ e sulla slide sta da sola. L'ultima è il valore dell'ultima istruzione, che `mo
 [S-035](../Sources.md#s-035), [S-036](../Sources.md#s-036), [S-037](../Sources.md#s-037),
 [S-038](../Sources.md#s-038), [V-009](../Sources.md#v-009), [V-010](../Sources.md#v-010),
 [V-011](../Sources.md#v-011), [V-012](../Sources.md#v-012), [V-014](../Sources.md#v-014),
-[V-015](../Sources.md#v-015), [V-016](../Sources.md#v-016)
+[V-015](../Sources.md#v-015), [V-016](../Sources.md#v-016),
+[V-033](../Sources.md#v-033)

@@ -9,8 +9,15 @@ capita, e ha sempre le stesse quattro righe: *sintomo*, *causa*, *rimedio*, *fon
 della pagina è [ADR-0033](../Decision.md#adr-0033); le voci si aggiungono in coda e non si
 riscrivono, così la numerazione resta un riferimento stabile.
 
-La pagina nasce con `feature/01` e cresce: `feature/02` aggiungerà le trappole del replica set —
-permessi del keyfile, scoperta della topologia — e `feature/03` quelle dello sharded cluster.
+La pagina nasce con `feature/01` e cresce: `feature/02` ha aggiunto le due trappole del replica
+set — i **permessi del keyfile**, voce [12](#t-12), e la **scoperta della topologia**, voce
+[13](#t-13) — più le quattro incontrate lungo la strada, voci da [14](#t-14) a [17](#t-17), e il
+terzo `ENOTFOUND`, voce [18](#t-18). `feature/03` aggiungerà quelle dello sharded cluster.
+
+Le voci da 14 a 17 non parlano di MongoDB: sono trappole di **Compose e del runtime**, e stanno qui
+perché è qui che le incontra chi monta uno stack MongoDB. Il criterio con cui sono entrate è
+[ADR-0052](../Decision.md#adr-0052): una trappola già misurata si scrive nel branch che l'ha
+misurata, anche quando il piano di quel branch non la nominava.
 
 **Indice dei sintomi**
 
@@ -27,6 +34,13 @@ permessi del keyfile, scoperta della topologia — e `feature/03` quelle dello s
 | [9](#t-09) | `logRotate` risponde `{ok: 1}` e non ruota niente |
 | [10](#t-10) | il disco si riempie durante la demo |
 | [11](#t-11) | chiunque raggiunga la porta è amministratore |
+| [12](#t-12) | `mongod` non parte e dice che il keyfile è «too open» |
+| [13](#t-13) | il driver prova a raggiungere un host che io non ho mai scritto |
+| [14](#t-14) | la password è nel `.env` accanto al file Compose, e Compose dice che manca |
+| [15](#t-15) | `up --wait` è uscito con successo, e il replica set non esiste |
+| [16](#t-16) | la variabile è dichiarata due righe sopra, e dentro il container è vuota |
+| [17](#t-17) | il container lavora e `docker logs` è fermo a ieri sera |
+| [18](#t-18) | «getaddrinfo ENOTFOUND» quando il problema non è il nome |
 
 ---
 
@@ -376,10 +390,433 @@ rileggendolo. Per sapere con cosa sta girando davvero un `mongod` in container s
 
 ---
 
+<a id="t-12"></a>
+## 12. `mongod` non parte e dice che il keyfile è «too open»
+
+**Sintomo.** Il container esce subito, con codice **1**. Nel log ci sono due righe, e solo la
+prima dice qualcosa di utile:
+
+```json
+{"s":"I","c":"ACCESS","id":20254,"ctx":"main","msg":"Read security file failed",
+ "attr":{"error":{"code":30,"codeName":"InvalidPath",
+                  "errmsg":"permissions on /keyfile/mongo-keyfile are too open"}}}
+{"s":"F","c":"CONTROL","id":20575,"ctx":"main","msg":"Error creating service context",
+ "attr":{"error":"Location5579201: Unable to acquire security key[s]"}}
+```
+
+La riga fatale — quella con `"s":"F"` — **non nomina né il file né i permessi**. Chi guarda solo
+l'ultima riga, che è quello che si fa quando un container muore, legge «Unable to acquire security
+key[s]» e va a cercare un problema di contenuto o di percorso. La riga che spiega è la penultima,
+ed è di livello informativo.
+
+**Causa.** MongoDB pretende che il keyfile sia leggibile **solo** dal proprietario, e il
+proprietario dev'essere l'utente con cui gira `mongod`. La soglia non è dove la si immagina.
+Misurato provando sei permessi diversi su sei container usa-e-getta
+([V-041](../Sources.md#v-041)):
+
+| permessi | ottale | esito |
+| --- | ---: | --- |
+| `-r--------` | `400` | parte |
+| `-rw-------` | `600` | parte |
+| `-rw-r-----` | `640` | **rifiutato** |
+| `-rw-r--r--` | `644` | **rifiutato** |
+| `-r--r--r--` | `444` | **rifiutato** |
+| `-r-------x` | `401` | **rifiutato** |
+
+L'ultima riga è quella che smentisce l'intuizione: `401` non concede la lettura a nessuno, né al
+gruppo né agli altri, eppure viene rifiutato. La regola non è «non dev'essere leggibile da tutti»,
+è **«non dev'esserci nessun bit acceso fuori dal proprietario»** — nemmeno un bit di esecuzione che
+su un file di testo non significa niente.
+
+Fuori dai permessi c'è la seconda metà della causa, che dà lo stesso messaggio: il file può avere
+`400` e appartenere all'utente sbagliato. Nell'immagine ufficiale `mongod` gira come `mongodb`,
+uid **999** ([S-023](../Sources.md#s-023)); un keyfile con `400` e proprietario `root` è
+irraggiungibile, e il log dice «too open» anche in quel caso.
+
+In Docker la trappola scatta soprattutto con il **bind mount**: un file preso dall'host arriva nel
+container con i permessi e gli identificatori numerici che aveva fuori, che su macOS e su Windows
+non sono quelli che si sono scritti. Un `chmod 400` dato sull'host può non essere quello che il
+container vede.
+
+**Rimedio.** Non montare il keyfile dall'host: **generarlo dentro un volume nominato**, dove i
+permessi sono quelli che ci si scrive. È quello che fa questo repository
+([ADR-0014](../Decision.md#adr-0014)): un servizio one-shot `keyfile-init` scrive il file nel
+volume `keyfile`, e i tre membri lo montano in sola lettura.
+
+```bash
+openssl rand -base64 756 > /keyfile/mongo-keyfile
+chmod 400 /keyfile/mongo-keyfile
+chown 999:999 /keyfile/mongo-keyfile     # l'utente `mongodb` dell'immagine ufficiale
+```
+
+Due dettagli che valgono la loro riga. Il `chmod` e il `chown` stanno **fuori** dal ramo che
+genera: un volume ripristinato da un backup ha il contenuto giusto e può avere i permessi
+sbagliati, e in quel caso il ramo di generazione non passa mai. E la verifica si fa da dentro, con
+`ls -ln`, che stampa gli identificatori numerici invece dei nomi — perché il nome `mongodb` esiste
+nel container e sull'host quasi certamente no.
+
+La documentazione ufficiale usa `chmod 400` e basta ([S-005](../Sources.md#s-005)); «400 o 600» è
+una deduzione, corretta, che questa misura conferma.
+
+**Fonte.** [V-041](../Sources.md#v-041), [S-005](../Sources.md#s-005),
+[S-023](../Sources.md#s-023), [ADR-0014](../Decision.md#adr-0014),
+[ADR-0049](../Decision.md#adr-0049).
+
+---
+
+<a id="t-13"></a>
+## 13. Il driver prova a raggiungere un host che io non ho mai scritto
+
+**Sintomo.** Ci si connette a un replica set dall'host, nominando una porta pubblicata che
+risponde, e il driver fallisce nominando **un altro** nodo:
+
+```console
+$ mongosh "mongodb://admin:<password>@host.docker.internal:27021/?replicaSet=rs0"
+MongoNetworkError: getaddrinfo ENOTFOUND mongo-rs-2
+```
+
+`mongo-rs-2` non compare nella stringa. Rieseguendo, il nome cambia: tre tentativi identici hanno
+dato `mongo-rs-1`, `mongo-rs-2`, `mongo-rs-1` — e **non è mai** quello che si è scritto
+([V-043](../Sources.md#v-043)).
+
+**Causa.** È lo stesso messaggio della voce [5](#t-05) e una trappola diversa, perché lì il nome
+che non risolve l'aveva scritto l'utente e qui no. L'indirizzo della stringa serve solo a bussare;
+subito dopo il driver chiede al nodo com'è fatto il set, e riceve `hosts` così:
+
+```
+["mongo-rs-1:27017", "mongo-rs-2:27017", "mongo-rs-3:27017"]
+```
+
+Sono i nomi di servizio Compose, cioè quelli con cui i membri si conoscono **fra loro**. Il driver
+li adotta, butta via l'indirizzo con cui era entrato, e da lì in poi tenta su nomi che fuori dalla
+rete Docker non esistono. Il nome che compare nell'errore è semplicemente quello su cui è caduto
+per primo, e cambia da un tentativo all'altro perché l'ordine non è garantito.
+
+**Rimedio.** Due strade, e vanno scelte sapendo che cosa costano.
+
+*Da fuori: rinunciare al set.* Con `directConnection=true` il driver non fa la scoperta e resta
+sull'indirizzo scritto. Funziona, misurato: 50 000 documenti letti da `host.docker.internal:27021`.
+
+```console
+$ mongosh "mongodb://admin:<password>@host.docker.internal:27021/?directConnection=true"
+… servito da mongo-rs-1:27017
+```
+
+Il prezzo è che non è più un client di replica set: niente scoperta del primario, niente failover
+automatico. Se quel nodo diventa secondario, le scritture cominciano a fallire con
+`NotWritablePrimary` e nessuno le devia. Per un'ispezione va benissimo; per un'applicazione, no.
+
+*Da dentro: entrare nella rete.* Chi gira dentro `sqlstart-02-replicaset_default` risolve quei
+nomi, e la connessione al set funziona come da manuale:
+
+```bash
+docker run --rm --network sqlstart-02-replicaset_default mongo:7.0.40 \
+  mongosh "mongodb://admin:<password>@mongo-rs-1:27017/?replicaSet=rs0" --quiet --eval '…'
+```
+
+È la strada giusta per l'applicazione del talk, ed è il motivo per cui il client sta in un
+container invece che sull'host.
+
+*C'è una terza strada, e qui non è stata presa:* riconfigurare il set con `rs.reconfig()` perché
+pubblichi nomi risolvibili da fuori — `host.docker.internal:27021` e compagni. Funziona e cambia
+il set **in modo permanente**, quindi si fa su un lab dedicato, non su uno stack che deve reggere
+una demo.
+
+**Quello che invece non funziona, ed è la prima cosa che viene in mente:** elencare tutti e tre gli
+indirizzi pubblicati.
+
+```console
+$ mongosh "mongodb://…@host.docker.internal:27021,host.docker.internal:27022,host.docker.internal:27023/"
+MongoNetworkError: getaddrinfo ENOTFOUND mongo-rs-2
+```
+
+Stesso errore, e per una ragione precisa: una seed list con **più di un host** è la terza delle
+quattro eccezioni che spengono `directConnection` ([S-045](../Sources.md#s-045)). Più indirizzi
+buoni si scrivono, più si convince il driver a scoprire la topologia — e a buttarli via tutti e
+tre.
+
+Il modo rapido di riconoscere questa voce fra le tre che danno `ENOTFOUND`: se il nome
+nell'errore è uno che **non hai scritto tu**, è questa.
+
+**Fonte.** [V-043](../Sources.md#v-043), [S-045](../Sources.md#s-045),
+[ADR-0049](../Decision.md#adr-0049).
+
+---
+
+<a id="t-14"></a>
+## 14. La password è nel `.env` accanto al file Compose, e Compose dice che manca
+
+**Sintomo.** Il file `.env` sta nella stessa cartella del file Compose, contiene la variabile, ed è
+proprio quello che Compose leggerebbe da solo. Si aggiunge un secondo file d'ambiente sulla riga di
+comando — il pin dell'immagine, per esempio — e l'avvio muore su una variabile che non c'entra:
+
+```console
+$ docker compose -f docker/02-replicaset/compose.yaml --env-file tools/images.env config
+error while interpolating services.rs-init.environment.PASSWORD_AMMINISTRATORE: required variable
+PASSWORD_AMMINISTRATORE is missing a value: assente — copiare docker/02-replicaset/.env.example in
+.env e riempire la password
+```
+
+Il `.env` non è stato toccato. Il comando prima funzionava.
+
+**Causa.** `--env-file` non **aggiunge** un file: ne prende il posto. «Passing the `--env-file`
+argument overrides the default file path» ([S-056](../Sources.md#s-056)). Dall'istante in cui la
+flag compare una volta, il `.env` implicito — quello accanto al file indicato con `-f` — smette di
+essere letto, e con lui spariscono tutte le variabili che conteneva.
+
+La flag non nomina il file che sta silenziando, e il messaggio d'errore nomina la variabile
+mancante ma non la ragione per cui manca. Nel lab il fenomeno è stato misurato in questa forma
+esatta ([V-025](../Sources.md#v-025)).
+
+**Rimedio.** Passare **tutti** i file d'ambiente, esplicitamente, ogni volta:
+
+```bash
+docker compose -f docker/02-replicaset/compose.yaml \
+  --env-file tools/images.env \
+  --env-file docker/02-replicaset/.env \
+  up -d --wait
+```
+
+«You can use multiple `--env-file` options to specify multiple environment files, and Docker Compose
+reads them in order», e «Later files can override variables from earlier files»: l'ordine conta, e
+l'ultimo vince. Nel lab la forma completa è dentro il `Makefile`, che è il motivo per cui i bersagli
+si usano al posto dei comandi a mano ([ADR-0041](../Decision.md#adr-0041)).
+
+**Il dettaglio che ha salvato questa dimenticanza:** l'errore è arrivato *come errore*, non come un
+utente creato con la password vuota. Merito della forma `${PASSWORD_AMMINISTRATORE:?assente — …}`,
+che rifiuta anche il valore vuoto e stampa il rimedio. Con `${PASSWORD_AMMINISTRATORE}` la stessa
+dimenticanza sarebbe passata in silenzio, perché una variabile irrisolta diventa una stringa vuota e
+produce solo un avviso ([S-064](../Sources.md#s-064)). Vale per ogni variabile che non abbia un
+valore predefinito sensato: i due punti nel `:?` sono ciò che distingue «assente» da «vuota».
+
+**Fonte.** [V-025](../Sources.md#v-025), [S-056](../Sources.md#s-056),
+[S-064](../Sources.md#s-064), [ADR-0041](../Decision.md#adr-0041).
+
+---
+
+<a id="t-15"></a>
+## 15. `up --wait` è uscito con successo, e il replica set non esiste
+
+**Sintomo.** Il comando è quello che si usa apposta per non dover indovinare i tempi:
+
+```console
+$ docker compose … up -d --wait
+$ echo $?
+0
+```
+
+Uscita zero dopo otto secondi. Ci si collega, e il server risponde `NotYetInitialized (94)`. Il
+container di inizializzazione è ancora `running`: ha appena cominciato.
+
+**Causa.** `--wait` fa quello che dichiara: «Wait services be running|healthy»
+([S-057](../Sources.md#s-057)). Per un servizio con healthcheck la soglia è **sano**; per un
+servizio senza healthcheck la soglia è **in esecuzione**. Il container che inizializza il replica
+set è un one-shot: nasce, lavora, muore. Non ha healthcheck, quindi la soglia applicabile è
+`running` — ed è `running` **nell'istante esatto in cui comincia**.
+
+Per quel servizio «pronto» significa *finito*, cioè il contrario di *in esecuzione*. Misurato: lo
+scarto fra «`up` dice fatto» e «la replica c'è» era di 14 secondi, salito a 22 quando dentro lo
+stesso container è entrato anche il caricamento dei dati di demo ([V-025](../Sources.md#v-025),
+[V-028](../Sources.md#v-028)).
+
+**Rimedio.** Un secondo comando, perché le due attese sono di due generi diversi:
+
+```bash
+docker compose … up -d --wait        # i tre membri devono essere SANI
+docker compose … wait rs-init        # il servizio one-shot deve essere FINITO
+```
+
+`docker compose wait` «blocks until containers of all (or specified) services stop» e ne riporta il
+codice di uscita, che diventa così il verdetto dell'avvio. Non sono alternative e non si
+sostituiscono: uno stack che contiene entrambi i generi di servizio ha bisogno di entrambe le
+attese, ed è la forma obbligatoria del `Makefile` ([ADR-0041](../Decision.md#adr-0041)).
+
+**Da non fare:** mettere un `sleep` al posto del secondo comando. Un'attesa tarata sulla macchina di
+chi sviluppa è lunga in sala e corta sul portatile scarico, e sbaglia in tutte e due le direzioni
+senza dirlo.
+
+**Da sapere per il giorno della demo:** il riavvio **a caldo** dello stack è risultato più lento
+dell'avvio da volumi vuoti — 24 secondi contro 19÷21 — perché dopo uno spegnimento completo il set
+deve rieleggere un primario. È una sola osservazione contro tre giri, quindi non è una regola; ma
+non conviene fare `down` e `up` sperando che «tanto i dati ci sono già».
+
+**Fonte.** [V-025](../Sources.md#v-025), [V-028](../Sources.md#v-028),
+[S-057](../Sources.md#s-057), [ADR-0041](../Decision.md#adr-0041).
+
+---
+
+<a id="t-16"></a>
+## 16. La variabile è dichiarata due righe sopra, e dentro il container è vuota
+
+**Sintomo.** Un servizio dichiara una variabile in `environment` e la usa nel proprio comando. Il
+comando la riceve vuota:
+
+```yaml
+    environment:
+      DENTRO: valore-del-container
+    command: ["sh", "-c", 'echo "singolo=[$DENTRO]  doppio=[$$DENTRO]"']
+```
+
+```
+prova-1  | singolo=[]  doppio=[valore-del-container]
+```
+
+**Causa.** Il dollaro singolo non arriva mai alla shell del container: lo consuma **Compose**, che
+interpola il file prima di consegnarlo. `DENTRO` non è definita nell'ambiente di *chi lancia il
+comando* — è definita dentro il servizio, che a Compose non interessa — quindi la sostituzione dà la
+stringa vuota. `$$` è il modo di scrivere un dollaro che deve sopravvivere: «You can use a `$$`
+(double-dollar sign) when your configuration needs a literal dollar sign»
+([S-064](../Sources.md#s-064)).
+
+Non c'è nessun errore. C'è un avviso, che scorre via insieme alle righe di avvio:
+
+```
+level=warning msg="The \"DENTRO\" variable is not set. Defaulting to a blank string."
+```
+
+**Il caso peggiore è quando la variabile esiste anche fuori.** Se chi lancia il comando ha
+`DENTRO` nella propria shell, Compose la trova, l'avviso sparisce, e il container riceve **il valore
+dell'host** al posto del proprio:
+
+```
+$ DENTRO=valore-dell-host docker compose … up
+prova-1  | singolo=[valore-dell-host]  doppio=[valore-del-container]
+```
+
+Due macchine con ambienti diversi eseguono lo stesso file e si comportano in modo diverso, senza che
+nulla lo segnali ([V-046](../Sources.md#v-046)).
+
+**Rimedio.** Nei `command`, negli `entrypoint` e negli `healthcheck`, scrivere `$$` per ogni
+variabile che deve essere risolta **dal container** e `$` solo per quelle che devono essere risolte
+**da Compose**. La distinzione è chi deve leggerla, non dove è scritta. Lo stack del replica set la
+applica alle tre variabili di `rs-init`: `$$NOME_REPLICA`, `$$UTENTE_AMMINISTRATORE`,
+`$$PASSWORD_AMMINISTRATORE`.
+
+Per vedere il risultato prima di avviare c'è `docker compose config`, che stampa il file **dopo**
+l'interpolazione: se una variabile è già sparita lì, è sparita. Attenzione a non leggere di sfuggita
+il doppio dollaro, che `config` ristampa tale e quale — quello che mostra è ancora un file Compose,
+non ciò che vedrà la shell.
+
+**Fonte.** [V-046](../Sources.md#v-046), [S-064](../Sources.md#s-064),
+[ADR-0052](../Decision.md#adr-0052).
+
+---
+
+<a id="t-17"></a>
+## 17. Il container lavora e `docker logs` è fermo a ieri sera
+
+**Sintomo.** Il database risponde, l'healthcheck è verde, `docker inspect` dice `running` con
+`StartedAt` di stamattina. `docker logs` restituisce migliaia di righe, e l'ultima è **del giorno
+prima**:
+
+```
+docker inspect  → StartedAt = 2026-09-01T08:05:55.098Z   RestartCount = 0
+docker logs     → 13 944 righe, l'ultima delle quali del 2026-08-31T19:19:50.378
+getLog global   → totalLinesWritten = 2 548, righe da 08:08:31.096 a 08:12:03.430
+```
+
+Il server ha scritto 2 548 righe da quando è partito, e `docker logs` non ne mostra una.
+
+**Causa.** La **cattura** del log si è congelata quando il demone Docker è ripartito. I container
+preesistenti al riavvio tornano su — `restart: unless-stopped` funziona — ma il loro flusso non
+viene più raccolto. Un container creato *dopo* il riavvio viene catturato normalmente, il che
+esclude il demone in generale e isola i preesistenti ([V-032](../Sources.md#v-032)).
+
+Il fenomeno non dà errore: dà **silenzio**. Ed è instabile — su due membri su tre la cattura è
+ripresa da sola circa dieci minuti dopo, lasciando un buco di righe che non sono più ricomparse; sul
+terzo è tornata solo dopo aver ricreato l'esecuzione del container.
+
+**Non confondere con la voce [8](#t-08).** Lì il log non c'è mai stato, perché `--logpath` lo aveva
+deviato su un file. Qui il log c'è, è stato scritto, e a mancare è la sua cattura. Il modo di
+distinguerle in un secondo: se `docker logs` è **vuoto** è la voce 8; se contiene righe ma vecchie,
+è questa.
+
+**Rimedio.** Non fidarsi di `docker logs` senza averlo datato. Il controllo costa una riga:
+
+```bash
+docker inspect --format '{{.State.StartedAt}}' <container>   # quando è partito
+docker logs --tail 1 <container>                             # l'ultima riga catturata
+```
+
+Se l'ultima riga è **più vecchia** dell'avvio, non può essere di questa esecuzione: le righe si
+chiedono a `mongod`, che le tiene in memoria e non dipende da Docker.
+
+```javascript
+db.adminCommand({ getLog: "global" })
+```
+
+`tools/failover-replicaset.sh` fa esattamente questo confronto prima di leggere, e il confronto ha
+un test suo (`tools/tests/test_failover_log.py`) perché un rilevatore la cui condizione di scatto si
+presenta di rado può rompersi senza che nessuno se ne accorga.
+
+**Il ripiego ha un limite da conoscere:** `getLog: "global"` è un anello di **1 024 righe**. Su un
+nodo chiacchierone le righe che interessano possono esserne già uscite — misurato:
+`totalLinesWritten` 2 548 contro `log.length` 1 023.
+
+**Fonte.** [V-032](../Sources.md#v-032), [ADR-0045](../Decision.md#adr-0045).
+
+---
+
+<a id="t-18"></a>
+## 18. «getaddrinfo ENOTFOUND» quando il problema non è il nome
+
+**Sintomo.** Un membro del replica set è fermo. Ci si collega al set con un URI che contiene
+`replicaSet=rs0`, e l'errore parla di risoluzione di nomi:
+
+```console
+MongoServerSelectionError: getaddrinfo ENOTFOUND mongo-rs-2
+```
+
+Il nome è scritto giusto, la rete è a posto, e nulla nel messaggio dice la cosa vera: che non c'è
+un primario da selezionare.
+
+**Causa.** Un container fermo **sparisce dal DNS** della rete Compose. Il driver, non trovando un
+primario, tenta gli altri membri della topologia che ha scoperto; quei nomi non risolvono più, e
+l'ultimo errore che raccoglie è di risoluzione. Il messaggio racconta l'ultimo inciampo, non il
+motivo per cui stava inciampando ([V-031](../Sources.md#v-031)).
+
+Su macchine vere il sintomo sarebbe diverso: il nome risolverebbe e la connessione verrebbe
+rifiutata. **È un artefatto dei container**, e chi impara a riconoscere la situazione dal testo
+dell'errore sbaglierà appena la stessa cosa succederà altrove.
+
+**Come distinguerla dalle altre due `ENOTFOUND` di questa pagina:**
+
+| voce | chi ha scritto il nome che non risolve | che cosa sta succedendo davvero |
+|---|---|---|
+| [5](#t-05) | l'utente | si sta chiedendo da fuori la rete dove quel nome esiste |
+| [13](#t-13) | il driver, dopo la scoperta della topologia | i nomi interni non sono risolvibili da fuori |
+| **18** | il driver, mentre cerca un primario | **un membro è fermo**, e il set non ha un primario |
+
+**Rimedio.** Non è un problema di rete e non si ripara sulla rete: si guarda lo stato del set.
+
+```bash
+docker compose … ps                      # chi è fermo
+```
+
+```javascript
+rs.status()   // i membri irraggiungibili compaiono come «(not reachable/healthy)»
+```
+
+Se i membri fermi sono tanti da togliere la maggioranza, il superstite si è retrocesso da solo e le
+scritture rispondono `NotWritablePrimary` (code 10107): è la scena di `make failover-02-maggioranza`,
+e la pagina che la racconta è [`replica-set.md`](replica-set.md).
+
+**Una lettura che inganna, e va evitata durante una demo:** con `mongosh --host localhost`, cioè in
+connessione **diretta**, lo stesso superstite risponde e restituisce i 50 000 documenti. Chi prova
+così conclude che il set funziona ancora. L'applicazione, che usa l'URI del replica set, no.
+
+**Fonte.** [V-031](../Sources.md#v-031), [S-045](../Sources.md#s-045),
+[ADR-0045](../Decision.md#adr-0045), [ADR-0035](../Decision.md#adr-0035).
+
+---
+
 ## Cosa questa pagina non dice
 
-- **Non è un elenco completo.** È l'elenco di ciò che è stato incontrato *e misurato* qui. Le
-  trappole del replica set e dello sharded cluster arrivano con `feature/02` e `feature/03`.
+- **Non è un elenco completo.** È l'elenco di ciò che è stato incontrato *e misurato* qui. Le sei
+  di `feature/02` sono arrivate una alla volta, mentre lo stack veniva costruito; quelle dello
+  sharded cluster — config server, bilanciamento — arrivano con `feature/03`. Un fenomeno letto in
+  una fonte e mai riprodotto qui resta **fuori**: la pagina promette il sintomo così come si è
+  visto ([ADR-0052](../Decision.md#adr-0052)).
 - **Non copre le trappole di MongoDB fuori da Docker.** Quelle di un'installazione su sistema
   operativo — `ulimit`, transparent huge pages, filesystem — stanno nelle pagine di
   [installazione](../01-installazione/linux.md), con la riserva che le dichiara non eseguite.
@@ -394,11 +831,20 @@ rileggendolo. Per sapere con cosa sta girando davvero un `mongod` in container s
 [ADR-0034](../Decision.md#adr-0034) (`docker kill` non è un guasto),
 [ADR-0005](../Decision.md#adr-0005), [ADR-0021](../Decision.md#adr-0021),
 [ADR-0028](../Decision.md#adr-0028), [ADR-0030](../Decision.md#adr-0030),
-[ADR-0031](../Decision.md#adr-0031).
+[ADR-0031](../Decision.md#adr-0031), [ADR-0014](../Decision.md#adr-0014) (il keyfile nasce in
+un volume e non entra nel repository),
+[ADR-0049](../Decision.md#adr-0049) (le due voci del replica set),
+[ADR-0041](../Decision.md#adr-0041) (i due `--env-file` e le due attese dell'avvio),
+[ADR-0045](../Decision.md#adr-0045) (la maggioranza persa, e il log che non si crede),
+[ADR-0052](../Decision.md#adr-0052) (una trappola misurata si scrive nel branch che l'ha misurata).
 
 **Fonti:** [S-020](../Sources.md#s-020), [S-022](../Sources.md#s-022),
 [S-032](../Sources.md#s-032), [S-033](../Sources.md#s-033), [S-034](../Sources.md#s-034),
 [S-039](../Sources.md#s-039), [S-040](../Sources.md#s-040), [S-041](../Sources.md#s-041),
 [V-006](../Sources.md#v-006), [V-007](../Sources.md#v-007), [V-010](../Sources.md#v-010),
 [V-011](../Sources.md#v-011), [V-012](../Sources.md#v-012), [V-014](../Sources.md#v-014),
-[V-017](../Sources.md#v-017), [V-018](../Sources.md#v-018)
+[S-005](../Sources.md#s-005), [S-023](../Sources.md#s-023), [S-045](../Sources.md#s-045),
+[V-017](../Sources.md#v-017), [V-018](../Sources.md#v-018), [V-041](../Sources.md#v-041),
+[V-043](../Sources.md#v-043), [S-056](../Sources.md#s-056), [S-057](../Sources.md#s-057),
+[S-064](../Sources.md#s-064), [V-025](../Sources.md#v-025), [V-028](../Sources.md#v-028),
+[V-031](../Sources.md#v-031), [V-032](../Sources.md#v-032), [V-046](../Sources.md#v-046)

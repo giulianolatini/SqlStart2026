@@ -157,20 +157,129 @@ def cache_in_mib(comando: object) -> float | None:
     return None
 
 
+def pezzi_del_comando(comando: object) -> list[str]:
+    """Il comando del servizio come lista di parole, vuota se non ce n'è uno."""
+    if isinstance(comando, str):
+        return comando.split()
+    if isinstance(comando, list):
+        return [str(pezzo) for pezzo in comando]
+    return []
+
+
+def valore_opzione(comando: object, opzione: str) -> str | None:
+    """Il valore di un'opzione del comando, nelle due forme che Compose ammette.
+
+    `--opzione valore` e `--opzione=valore` sono la stessa cosa per il processo:
+    riconoscerne una sola vorrebbe dire avere una regola che si aggira scrivendo
+    la stessa riga in un altro modo.
+    """
+    pezzi = pezzi_del_comando(comando)
+    for indice, pezzo in enumerate(pezzi):
+        if pezzo == opzione and indice + 1 < len(pezzi):
+            return pezzi[indice + 1]
+        if pezzo.startswith(opzione + "="):
+            return pezzo.split("=", 1)[1]
+    return None
+
+
 def avvia_mongod(comando: object) -> bool:
     """Vero se il servizio avvia un `mongod`.
 
     Il bersaglio della regola sulla cache sono i processi che hanno storage. Un
     `mongos` instrada e basta: pretendere una cache da lui sarebbe una regola che
     sbaglia bersaglio.
+
+    Le forme riconosciute sono **due**, e la seconda è la ragione per cui questa
+    funzione è stata riscritta. L'entrypoint dell'immagine ufficiale antepone
+    `mongod` da sé quando il primo argomento comincia per trattino (S-022):
+
+        if [ "${1:0:1}" = '-' ]; then set -- mongod "$@"; fi
+
+    Per Docker `[mongod, --replSet, rs0]` e `[--replSet, rs0]` avviano lo stesso
+    identico processo. Finché qui se ne riconosceva una sola, un file scritto
+    nella forma abbreviata passava il controllo senza dichiarare la cache: la
+    regola c'era e non poteva fallire, che è il modo peggiore in cui un controllo
+    può essere sbagliato (misurato al Task 3 di feature/02).
+
+    Il prezzo è un'assunzione dichiarata: che l'immagine sia quella ufficiale di
+    MongoDB. In questo repository lo è dappertutto, e un falso positivo qui
+    chiederebbe una cache a un servizio che non ne ha bisogno — rumoroso e
+    innocuo, cioè il verso giusto in cui sbagliare.
     """
-    if isinstance(comando, str):
-        pezzi = comando.split()
-    elif isinstance(comando, list):
-        pezzi = [str(pezzo) for pezzo in comando]
-    else:
+    pezzi = pezzi_del_comando(comando)
+    if not pezzi:
         return False
-    return bool(pezzi) and pezzi[0].rsplit("/", 1)[-1] == "mongod"
+    return pezzi[0].startswith("-") or pezzi[0].rsplit("/", 1)[-1] == "mongod"
+
+
+def montaggi(servizio: dict) -> list[tuple[str, str]]:
+    """Le coppie (sorgente, destinazione) dei volumi dichiarati dal servizio."""
+    coppie: list[tuple[str, str]] = []
+    for voce in servizio.get("volumes") or ():
+        if isinstance(voce, str):
+            pezzi = voce.split(":")
+            if len(pezzi) >= 2:
+                coppie.append((pezzi[0], pezzi[1]))
+        elif isinstance(voce, dict):
+            sorgente, destinazione = voce.get("source"), voce.get("target")
+            if sorgente and destinazione:
+                coppie.append((str(sorgente), str(destinazione)))
+    return coppie
+
+
+def e_volume_nominato(sorgente: str) -> bool:
+    """Vero per `keyfile:`, falso per `./keyfile:` e `/tmp/keyfile:`.
+
+    È la stessa distinzione che fa Compose: una sorgente che comincia per punto,
+    barra o tilde è un percorso dell'host, tutto il resto è un volume nominato.
+    """
+    return not sorgente.startswith((".", "/", "~")) and "/" not in sorgente
+
+
+def e_restart_no(servizio: dict) -> bool:
+    """Vero se il servizio dichiara `restart: "no"`.
+
+    Le virgolette servono davvero: in YAML un `no` nudo è il booleano falso, non
+    la stringa. Qui si accettano entrambi perché l'intenzione è la stessa, ma il
+    messaggio d'errore continua a consigliare la forma con le virgolette, che è
+    quella che Compose documenta.
+    """
+    valore = servizio.get("restart")
+    return valore is False or str(valore).strip().lower() == "no"
+
+
+def problemi_keyfile(nome: str, servizio: dict) -> list[str]:
+    """Il keyfile deve arrivare da un volume nominato, non dall'host.
+
+    ADR-0014 nasce da una misura: su macOS un bind mount non conserva i permessi
+    del file, e `mongod` rifiuta un keyfile che altri possano leggere. Il sintomo
+    è un membro che non parte; la causa è in un'altra riga di un altro file, e
+    nessun messaggio collega le due cose.
+    """
+    percorso = valore_opzione(servizio.get("command"), "--keyFile")
+    if percorso is None:
+        return []
+
+    for sorgente, destinazione in montaggi(servizio):
+        copre = percorso == destinazione or percorso.startswith(
+            destinazione.rstrip("/") + "/"
+        )
+        if not copre:
+            continue
+        if e_volume_nominato(sorgente):
+            return []
+        return [
+            f"{nome}: il keyfile «{percorso}» arriva da «{sorgente}», che è un "
+            "percorso dell'host. Un bind mount non conserva i permessi del file e "
+            "mongod rifiuta un keyfile leggibile da altri: serve un volume "
+            "nominato (ADR-0014)"
+        ]
+
+    return [
+        f"{nome}: dichiara «--keyFile {percorso}» ma nessun volume monta quel "
+        "percorso. Il processo parte e muore, e il file Compose sembra a posto "
+        "perché la riga c'è (ADR-0014)"
+    ]
 
 
 def verifica(
@@ -185,6 +294,17 @@ def verifica(
     """
     problemi: list[str] = []
     servizi_grezzi = (grezzo or documento).get("services", {})
+
+    # Due regole valgono per l'INTERO file e non per il singolo servizio: uno
+    # stack che dichiara un replica set pretende `--replSet` e `--keyFile` da
+    # ogni mongod, e uno stack che non lo dichiara non deve pretendere niente.
+    # È la guardia che tiene verde lo stack 01, che gira senza autenticazione
+    # per scelta didattica (ADR-0005): la regola si accende leggendo il file,
+    # non consultando un elenco di nomi che qualcuno dovrebbe tenere aggiornato.
+    stack_con_replica = any(
+        valore_opzione(servizio.get("command"), "--replSet")
+        for servizio in documento.get("services", {}).values()
+    )
 
     if "version" in documento:
         problemi.append(
@@ -261,6 +381,23 @@ def verifica(
                 "le due cifre (ADR-0004, V-009)"
             )
 
+        if stack_con_replica and avvia_mongod(servizio.get("command")):
+            if not valore_opzione(servizio.get("command"), "--replSet"):
+                problemi.append(
+                    f"{nome}: avvia un mongod senza «--replSet» in uno stack che "
+                    "dichiara un replica set. Resta un'istanza a sé, e nessuno lo "
+                    "dice (ADR-0021)"
+                )
+            if not valore_opzione(servizio.get("command"), "--keyFile"):
+                problemi.append(
+                    f"{nome}: avvia un membro di replica set senza «--keyFile». "
+                    "Parte lo stesso e resta fuori dalla replica: gli altri lo "
+                    "rifiutano all'handshake, e nei log sembra un problema di rete "
+                    "(ADR-0014)"
+                )
+
+        problemi.extend(problemi_keyfile(nome, servizio))
+
         for indirizzo in indirizzi_letterali(servizio):
             problemi.append(
                 f"{nome}: «{indirizzo}» è un indirizzo IP scritto a mano. La "
@@ -323,14 +460,42 @@ def problemi_ordine_avvio(nome: str, servizio: dict, documento: dict) -> list[st
                 f"{nome}: «depends_on: {atteso}» non dichiara «condition» (ADR-0023)"
             )
             continue
-        if condizione == "service_healthy" and "healthcheck" not in servizi.get(
-            atteso, {}
-        ):
+        bersaglio = servizi.get(atteso, {})
+
+        if condizione == "service_healthy" and "healthcheck" not in bersaglio:
             problemi.append(
                 f"{nome} attende «{atteso}» in stato service_healthy, ma «{atteso}» "
                 "non ha un «healthcheck»: la condizione non diventerà mai vera "
                 "(ADR-0023)"
             )
+
+        if condizione == "service_completed_successfully" and not e_restart_no(
+            bersaglio
+        ):
+            problemi.append(
+                f"{atteso}: «{nome}» lo attende come completato, ma «{atteso}» non "
+                'dichiara «restart: "no"». Compose lo rialza appena esce, la '
+                "condizione non diventa mai vera, e lo stack resta fermo a metà "
+                "senza dire perché (ADR-0023)"
+            )
+
+        if condizione == "service_started":
+            if avvia_mongod(bersaglio.get("command")):
+                problemi.append(
+                    f"{nome} attende «{atteso}» con «service_started», ma «{atteso}» "
+                    "avvia un mongod: la condizione scatta quando il container esiste, "
+                    "non quando il server risponde. Serve «service_healthy» — misurato "
+                    "al Task 1 di feature/02, ECONNREFUSED al primo colpo (ADR-0023)"
+                )
+            elif e_restart_no(bersaglio):
+                problemi.append(
+                    f"{nome} attende «{atteso}» con «service_started», ma «{atteso}» "
+                    'è un one-shot (dichiara «restart: "no"»): attenderne l\'avvio '
+                    "invece della fine rende la catena non deterministica — riesce "
+                    "sulla macchina veloce e fallisce in sala. Serve "
+                    "«service_completed_successfully» (ADR-0023)"
+                )
+
     return problemi
 
 
@@ -340,24 +505,54 @@ def main(argv: list[str] | None = None) -> int:
     import sys
 
     parser = argparse.ArgumentParser(description=__doc__)
+    # `--ambiente` è ripetibile perché lo è `--env-file` di Compose, e per lo
+    # stesso motivo: lo stack 02 si avvia con due file (ADR-0041). Uno strumento
+    # che ne accettasse uno solo controllerebbe un documento diverso da quello
+    # che verrà avviato. L'ordine è quello di Compose — «Later files can override
+    # variables from earlier files» (S-056).
     parser.add_argument(
         "--ambiente",
         type=pathlib.Path,
-        default=pathlib.Path("tools/images.env"),
-        help="il file che dichiara le immagini pinnate (default: tools/images.env)",
+        action="append",
+        metavar="FILE",
+        help="un file «NOME=valore», ripetibile; gli ultimi vincono sui primi "
+        "(default: tools/images.env)",
+    )
+    # `--variabile` serve ai file che dichiarano `${NOME:?…}` quando il `.env`
+    # vero non è nel repository — il caso della password dello stack 02, che è
+    # ignorata da git apposta. Il valore passato qui non avvia niente: esiste
+    # solo perché il documento si possa interpolare e quindi controllare.
+    parser.add_argument(
+        "--variabile",
+        action="append",
+        default=[],
+        metavar="NOME=valore",
+        help="una variabile singola, che vince su tutti i file",
     )
     parser.add_argument("compose", type=pathlib.Path, nargs="+")
     argomenti = parser.parse_args(argv)
 
-    try:
-        ambiente = leggi_ambiente(argomenti.ambiente)
-    except OSError as errore:
-        print(
-            f"Non riesco a leggere «{argomenti.ambiente}»: {errore.strerror}. "
-            "Il file si genera con `make images-pull`.",
-            file=sys.stderr,
-        )
-        return 2
+    ambiente: dict[str, str] = {}
+    for sorgente in argomenti.ambiente or [pathlib.Path("tools/images.env")]:
+        try:
+            ambiente.update(leggi_ambiente(sorgente))
+        except OSError as errore:
+            print(
+                f"Non riesco a leggere «{sorgente}»: {errore.strerror}. "
+                "Il file si genera con `make images-pull`.",
+                file=sys.stderr,
+            )
+            return 2
+
+    for dichiarazione in argomenti.variabile:
+        nome, uguale, valore = dichiarazione.partition("=")
+        if not uguale or not nome.strip():
+            print(
+                f"«{dichiarazione}» non è nella forma NOME=valore.",
+                file=sys.stderr,
+            )
+            return 2
+        ambiente[nome.strip()] = valore.strip()
 
     digest = digest_noti_da(ambiente)
     totale = 0

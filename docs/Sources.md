@@ -102,7 +102,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   più per la verifica empirica. Il tipo dell'opzione (intero o frazionario) e il suo default
   non sono pubblicati: la pagina `reference/configuration-options` viene servita troncata
   prima delle Storage Options.
-- **Usata da:** ADR-0004, ADR-0005
+- **Usata da:** ADR-0004, ADR-0005, ADR-0048
 
 <a id="s-003"></a>
 ### S-003 — Docker Docs: Define services in Docker Compose
@@ -179,7 +179,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   «Use keyfiles only for testing and development environments because of their limited
   manageability and cryptographic strength. For production environments, use X.509
   certificates».
-- **Usata da:** ADR-0005, ADR-0014, ADR-0037
+- **Usata da:** ADR-0005, ADR-0014, ADR-0037, ADR-0048
 
 <a id="s-006"></a>
 ### S-006 — MongoDB Manual: Localhost Exception in Self-Managed Deployments
@@ -206,7 +206,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   all'assunzione di progetto: l'eccezione decade anche con `createRole`, e non si attiva
   affatto se esiste già un ruolo — perimetro più stretto di quello che avevamo scritto. I
   config server non sono menzionati.
-- **Usata da:** ADR-0005
+- **Usata da:** ADR-0005, ADR-0040, ADR-0048
 
 <a id="s-007"></a>
 ### S-007 — MongoDB Manual: Connection String Options
@@ -335,7 +335,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   in time» e «does not guarantee» non compaiono: il paradosso dello standalone — senza oplog
   `--oplog` non è utilizzabile, quindi il dump non può essere coerente a un istante — è vero
   ma **non è scritto**.
-- **Usata da:** ADR-0022
+- **Usata da:** ADR-0022, ADR-0047
 
 <a id="s-012"></a>
 ### S-012 — Docker Docs: `depends_on`
@@ -573,7 +573,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 - **Riserve:** le unità sono **MiB**, non MB: scrivere «100 MB» in slide è impreciso ed è
   esattamente il dettaglio che viene fatto notare. I valori valgono per GitHub.com; su
   GitHub Enterprise Server «a site administrator can configure a different limit».
-- **Usata da:** ADR-0016, ADR-0031
+- **Usata da:** ADR-0016, ADR-0031, ADR-0050
 
 <a id="s-022"></a>
 ### S-022 — `docker-library/mongo`: `8.0/docker-entrypoint.sh`
@@ -601,7 +601,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   `--keyFile`. **`rs.initiate()` non viene mai eseguito dall'immagine: resta a nostro
   carico.** Trattandosi di sorgente, l'API non ha garanzie di stabilità fra versioni: la
   citazione deve indicare commit e riga.
-- **Usata da:** ADR-0005, ADR-0026
+- **Usata da:** ADR-0005, ADR-0026, ADR-0040, ADR-0042, ADR-0043
 
 <a id="s-023"></a>
 ### S-023 — `docker-library/mongo`: `8.0/Dockerfile`
@@ -883,7 +883,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   esterni, non il disco che si riempie.
 - **Riserve:** «il predefinito è illimitato, quindi non ruota» è una deduzione, e qui una
   deduzione non sostituisce una misura che costa un comando. Misurata in [V-011](#v-011).
-- **Usata da:** ADR-0030
+- **Usata da:** ADR-0030, ADR-0045
 
 ---
 
@@ -956,7 +956,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 - **Riserve:** la tabella dello standalone descrive il momento dell'*acknowledgement*, non la
   durabilità. Quanto dura la finestra fra l'ack in memoria e il disco non sta qui: sta in
   [S-036](#s-036), ed è il numero che rende la finestra misurabile.
-- **Usata da:** ADR-0032
+- **Usata da:** ADR-0032, ADR-0043, ADR-0045, ADR-0046
 
 ---
 
@@ -1013,7 +1013,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   dedotta dalla pagina e **verificata eseguendo**, come impone la gerarchia di
   [ADR-0024](Decision.md#adr-0024). Chi ripete l'affermazione senza la verifica sta citando un
   titolo.
-- **Usata da:** ADR-0032
+- **Usata da:** ADR-0032, ADR-0046
 
 ---
 
@@ -1244,7 +1244,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   `docs/03-amministrazione/log.md`, che per questa ragione è **dichiarata non verificata** su
   questo branch: qui non esiste un replica set. La verifica è dovuta a `feature/02`
   ([ADR-0035](Decision.md#adr-0035)).
-- **Usata da:** ADR-0035, ADR-0036
+- **Usata da:** ADR-0035, ADR-0036, ADR-0044, ADR-0045, ADR-0046
 
 ---
 
@@ -1282,7 +1282,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
 - **Riserve:** la pagina è scritta pensando ad Atlas e a installazioni sull'host. Il caso di
   questo lab — `mongosh` che vive **dentro** il container a cui si connette — non è contemplato,
   e cambia il significato di «localhost» ([V-018](#v-018)).
-- **Usata da:** ADR-0036
+- **Usata da:** ADR-0036, ADR-0045, ADR-0049
 
 ---
 
@@ -1640,7 +1640,458 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   sostituto della documentazione di GitHub.
 - **Usata da:** ADR-0038
 
+<a id="s-055"></a>
+### S-055 — MongoDB Manual v7.0: Localhost Exception (la variante della versione pinnata)
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/localhost-exception/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0 — la stessa serie dell'immagine che il lab pinna (`mongo:7.0.40`)
+- **Consultata:** 2026-08-31
+- **Verdetto:** conferma parziale
+- **Perché una voce separata da [S-006](#s-006):** S-006 è stata letta il 2026-08-25 sulla pagina
+  `manual/`, che serve la versione **8.3 (Current)**. Gli stack del lab girano su 7.0.40
+  ([ADR-0028](Decision.md#adr-0028)), e una regola di autenticazione è esattamente il genere di
+  cosa che può cambiare fra due major. La pagina è stata quindi riletta sulla variante `v7.0/`
+  prima di fondarci sopra la catena di inizializzazione del replica set.
+- **Cosa afferma:** la definizione è identica a quella di 8.3 — «On a `mongod` instance, the
+  localhost exception only applies when there are **no users or roles** created in the MongoDB
+  instance» — e così l'elenco delle operazioni ammesse, che comprende `createUser` e `createRole`
+  («This ends the localhost exception» per entrambi), `grantRole` verso sistemi esterni,
+  **`replSetInitiate` «to initiate a new replica set»**, `replSetGetStatus`, `replSetReconfig` sul
+  primario, e su `mongos` `addShard` «if the cluster is hosted on `localhost`». La frase di
+  apertura dichiara i due usi insieme: «The localhost exception allows you to create the first user
+  or role in the system after enabling access control. **You can also use it to initiate a replica
+  set.**»
+- **Cosa afferma in più rispetto a [S-006](#s-006), ed è operativamente decisivo:** «You can use
+  the localhost exception to initiate a replica set, following the steps in Deploy a Self-Managed
+  Replica Set. **You must wait until the replica set elects a primary before you can add the first
+  user.**» È l'ordine dei passi, enunciato dalla fonte: prima `rs.initiate()`, poi l'attesa
+  dell'elezione, poi `createUser` — e non un ordine qualsiasi. Il riquadro di avvertimento stringe
+  ancora: «Connections using the localhost exception have access to create *only* the **first user
+  OR role**. Only create a role first if you are authorizing users with LDAP.»
+- **Come si spegne:** «Disable the localhost exception at startup. To disable the localhost
+  exception, set the `enableLocalhostAuthBypass` parameter to `0`.» Il che dice, per complemento,
+  che a `1` — cioè acceso — ci sta di suo.
+- **Riserve:** la riserva che [S-006](#s-006) aveva dichiarato il 2026-08-25 **vale identica sulla
+  v7.0**. Le stringhe `127.0.0.1`, `::1`, «loopback» e «same host» non compaiono da nessuna parte
+  nella pagina; la formulazione più vicina al vincolo che tutti danno per ovvio è «connect to the
+  localhost interface», che nomina un'interfaccia senza dire quale sia né da dove debba arrivare la
+  connessione. La fonte, insomma, chiama l'eccezione «localhost» e non definisce «localhost». Non è
+  una lacuna accademica: è la differenza fra un sidecar che riesce a inizializzare il replica set e
+  uno che non ci riesce, e la misura sta in [V-023](#v-023).
+- **Usata da:** ADR-0040
+
+<a id="s-056"></a>
+### S-056 — Docker Docs: Environment variables — Interpolation (`--env-file`)
+
+- **URL:** https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** riferimento Compose v2
+- **Consultata:** 2026-08-31
+- **Verdetto:** conferma
+- **Cosa afferma:** che il `.env` accanto al progetto si legge da solo, ma solo finché non si
+  passa la flag: «If the `--env-file` is not used in the command line, the `.env` file is loaded
+  by default», e «Passing the `--env-file` argument **overrides** the default file path». La
+  stessa cosa detta dal lato opposto: «Your `.env` file can be overridden by another `.env` if it
+  is substituted with `--env-file`». Il rimedio è nella riga successiva: «You can use multiple
+  `--env-file` options to specify multiple environment files, and Docker Compose reads them in
+  order», con la regola di fusione esplicita — «Later files can override variables from earlier
+  files». Un percorso sbagliato non viene ignorato: «When an invalid file path is being passed as
+  an `--env-file` argument, Compose returns an error». I percorsi si risolvono «relative to the
+  current working directory where the Docker Compose command is executed». Sulla directory di
+  progetto — quella dove il `.env` implicito viene cercato — la pagina dà tre passi in ordine:
+  «`--project-directory` if set», altrimenti la «directory of the first Compose file specified
+  with `-f`/`--file`», altrimenti `PWD`. L'ordine di precedenza complessivo mette prima le
+  variabili di shell, poi i file passati con `--env-file`, poi il `.env` della directory di
+  progetto.
+- **Riserve:** la frase che conta **non sta sulla pagina che si andrebbe a leggere**. La pagina
+  intitolata «Environment variables precedence», che è quella dove uno cerca, non contiene mai
+  l'affermazione che `--env-file` sostituisce il `.env`: dice solo «When `--env-file` is not set,
+  Compose may load up to two `.env` files», e lascia dedurre il resto. L'affermazione esplicita è
+  su questa pagina, sotto un titolo — «Interpolation» — che non lascia sospettare di contenerla.
+  Seconda riserva: «overrides the default file path» va combinato con la regola dei tre passi per
+  arrivare alla conseguenza che serve qui, cioè che passando `--env-file` sparisce anche il `.env`
+  che sta **accanto al file indicato con `-f`**. Sono due frasi distanti sulla stessa pagina, e la
+  conclusione è una deduzione: la misura diretta è in [V-025](#v-025).
+- **Usata da:** ADR-0041, ADR-0042, ADR-0052
+
+<a id="s-057"></a>
+### S-057 — `docker compose wait` e `docker compose up --wait`: che cosa dichiarano di attendere
+
+- **URL:** https://docs.docker.com/reference/cli/docker/compose/wait/
+- **Editore:** Docker Inc. — Docker Docs, e la guida del comando installato
+- **Versione documentata:** Docker Compose v5.4.0
+- **Consultata:** 2026-08-31
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** `docker compose wait --help` dà la definizione in una riga — «Block until
+  containers of all (or specified) services stop.» — con la forma d'uso `docker compose wait
+  SERVICE [SERVICE...] [OPTIONS]` e una sola opzione propria, `--down-project` («Drops project
+  when the first container stops»). Il riferimento in rete di `docker compose up` descrive
+  l'opzione omonima ma diversa: `--wait` è «Wait services be running|healthy. Implies detached
+  mode», e `--wait-timeout` è la «Maximum duration in seconds wait project to be running|healthy».
+  Le due formulazioni non dicono la stessa cosa: `up --wait` attende che i servizi **siano** in
+  esecuzione o sani, `compose wait` attende che i container **si fermino**.
+- **Riserve:** la pagina in rete di `docker compose wait` non è stata leggibile in forma
+  utilizzabile — la lettura ha restituito soltanto la tabella delle opzioni, senza il testo di
+  descrizione. La definizione citata qui viene quindi dalla guida del comando installato sulla
+  versione pinnata, che è una fonte primaria ma **locale**: su un'altra versione di Compose la
+  formulazione può cambiare, e chi rilegge queste righe dovrebbe rieseguire `docker compose wait
+  --help` prima di darle per attuali. La riserva che pesa davvero è però un'altra, ed è un
+  silenzio: **nessuno dei due testi dice che cosa faccia `--wait` con un servizio che finisce il
+  suo lavoro ed esce.** La distinzione fra un container che resta su e uno che muore per
+  progetto non compare da nessuna parte sulla pagina di `up`. Non è un dettaglio di lettura: è
+  esattamente il buco in cui cade lo stack di questo repository, misurato in [V-025](#v-025).
+- **Usata da:** ADR-0041, ADR-0052
+
 ---
+
+<a id="s-058"></a>
+### S-058 — MongoDB Manual 7.0: Read Preference
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/read-preference/
+- **Editore:** MongoDB, Inc. — MongoDB Manual, versione v7.0 (la stessa dell'immagine pinnata)
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma:** definisce il read preference come il modo in cui «MongoDB clients route read
+  operations to the members of a replica set», ed elenca i cinque modi. Il predefinito è
+  esplicito: «By default, an application directs its read operations to the primary member in a
+  replica set (that is, read preference mode `primary`)», e per quel modo «All read operations use
+  only the current replica set primary. This is the default read mode. **If the primary is
+  unavailable, read operations produce an error or throw an exception.**» Gli altri quattro:
+  `primaryPreferred` — «In most situations, operations read from the primary but if it is
+  unavailable, operations read from secondary members»; `secondary` — «All operations read from the
+  secondary members of the replica set»; `secondaryPreferred` — «Operations typically read data from
+  secondary members of the replica set. If the replica set has only one single primary member and no
+  other members, operations read data from the primary member»; `nearest` — «Operations read from a
+  random eligible replica set member, irrespective of whether that member is a primary or secondary,
+  based on a specified latency threshold».
+
+  La frase che conta più di tutte sta nella sezione *Behavior*: «**All read preference modes except
+  `primary` may return stale data** because secondaries replicate operations from the primary in an
+  asynchronous process. Ensure that your application can tolerate stale data if you choose to use a
+  non-`primary` mode.» E subito dopo, un avvertimento che si legge di rado: «Read preference does
+  not affect the visibility of data. Clients can see the results of writes before they are
+  acknowledged or have propagated to a majority of replica set members.» Il rimedio nominato dalla
+  pagina, per ciascuno dei modi non predefiniti, è sempre lo stesso: «Use the `maxStalenessSeconds`
+  option to avoid reading from secondaries that the client estimates are overly stale.»
+- **Riserve:** la pagina descrive il **contratto**, non il costo: non dà nessun numero sul ritardo
+  di replica, che dipende dalla distribuzione e va misurato dove gira ([V-027](#v-027)). Le
+  descrizioni dei modi nominano più volte gli *hedged read*, che valgono sugli sharded cluster e
+  non su un replica set: non riguardano lo stack 02 e non sono stati provati. `maxStalenessSeconds`
+  è citato dalla pagina come rimedio ma **non è stato usato né misurato** in questo repository.
+- **Usata da:** ADR-0046
+
+---
+
+<a id="s-059"></a>
+### S-059 — MongoDB Database Tools: `mongorestore`
+
+- **URL:** https://www.mongodb.com/docs/database-tools/mongorestore/
+- **Editore:** MongoDB, Inc. — MongoDB Database Tools (prodotto distinto dal server)
+- **Versione documentata:** Database Tools 100.18.0 — la stessa versione dei binari dentro
+  l'immagine pinnata di questo repository ([V-035](#v-035))
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma:** `--oplogReplay` «After restoring the database dump, replays the oplog entries
+  from an `oplog.bson` file», e la coppia è dichiarata esplicitamente: «You can use `mongodump
+  --oplog` together with `mongorestore --oplogReplay` to ensure the data is current and has all the
+  writes that occurred during the dump operation.» Il vincolo è netto e sta in una nota: «When using
+  `mongorestore` with `--oplogReplay` to restore a replica set, you must restore a **full dump** of
+  a replica set member created using `mongodump --oplog`. `mongorestore` with `--oplogReplay` fails
+  if you use any of the following options to limit the data to be restored» — e l'elenco è `--db`,
+  `--collection`, `--nsInclude`, `--nsExclude`, `--nsFrom`, `--nsTo`.
+
+  Su `--drop`: «Before restoring the collections from the dumped backup, drops the collections from
+  the target database. `--drop` does not drop collections that are not in the backup.» E
+  l'avvertimento che riguarda chiunque ripristini un dump completo su uno stack autenticato: «When
+  the restore includes the `admin` database, `mongorestore` with `--drop` removes all user
+  credentials and replaces them with the users defined in the dump file. […] If `mongorestore` can't
+  authenticate to a user defined in the dump file, the restoration process will fail, leaving an
+  empty database.»
+
+  Su `--oplogLimit`: «Prevents `mongorestore` from applying oplog entries with timestamp newer than
+  or equal to `<timestamp>`», con l'obbligo «You must use `--oplogLimit` in conjunction with the
+  `--oplogReplay` option» e un avviso in riquadro: «Use `oplogLimit` with caution: manually
+  specifying the oplog entries to apply might cause corruption and inconsistencies in the restored
+  data.»
+
+  Sulla compatibilità di versione: «You can restore the BSON files generated from `mongodump` into
+  MongoDB deployments running the **same major version or feature compatibility version** as the
+  source deployment.»
+- **Riserve:** la frase «to ensure the data is current» è la più ottimista della pagina e non regge
+  alla misura. Il punto di ripristino non è «adesso»: è l'istante dell'**ultima voce di oplog
+  catturata**, che cade dentro l'esecuzione del comando e non alla sua ultima riga di log — sullo
+  stack di questo repository il restore si ferma a 740 documenti mentre alla fine del dump ce
+  n'erano 741 ([V-035](#v-035)). La pagina non dice che cosa succede se si passa `--oplogReplay` a
+  un dump privo di `oplog.bson`, e **non è stato provato**. `--oplogLimit` **non è stato provato**.
+  Il vincolo di versione **non è stato provato**: qui sorgente e destinazione sono lo stesso
+  processo.
+- **Usata da:** ADR-0047
+
+---
+
+<a id="s-060"></a>
+### S-060 — MongoDB Manual 7.0: Backup Methods for a Self-Managed Deployment
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/backups/
+- **Editore:** MongoDB, Inc. — MongoDB Manual, versione v7.0 (la stessa dell'immagine pinnata)
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma, ed è la fonte che dichiara i limiti che `mongodump` non dichiara
+- **Cosa afferma:** l'ambito è nella prima riga della sezione, e non è un dettaglio: «`mongodump`
+  and `mongorestore` are tools for backing up and restoring **small** MongoDB deployments.» La
+  tabella di confronto fra i metodi assegna alla coppia `mongodump`/`mongorestore` valori che vale
+  la pena riportare per intero: RTO **High**, RPO **High**, costo di archiviazione **High**, tempo
+  del personale **High**, ripristino continuo a un punto nel tempo **No**, complessità del ripristino
+  **Low**, backup di uno sharded cluster «**High, requires extra steps**», impatto sulla sorgente
+  «**High, requires write lock**», coerenza «**Not guaranteed**», incrementale **No**, possibilità
+  di scegliere l'ambito **Yes**.
+
+  Sulla copia dei file di dati, che è l'alternativa che viene sempre proposta: «Backups produced by
+  copying the underlying data do not support point in time recovery for replica sets and are
+  difficult to manage for larger sharded clusters. Additionally, these backups are larger because
+  they include the indexes and duplicate underlying storage padding and fragmentation. `mongodump`,
+  by contrast, creates smaller backups.»
+- **Riserve:** la tabella è qualitativa. «High» e «Low» non hanno soglie, e «small deployments» non
+  è quantificato da nessuna parte nella pagina: chi deve decidere se il proprio database è «small»
+  non trova qui il numero per farlo. La riga «impact on source: High, requires write lock» **non
+  corrisponde a ciò che si osserva** su questo stack: durante i 50 ms del dump le scritture sono
+  proseguite senza interruzione, e i documenti scritti in quella finestra sono nel database
+  ([V-035](#v-035)) — la voce della tabella resta citabile come dichiarazione dell'editore, non come
+  descrizione del comportamento misurato qui. Il resto della pagina descrive Atlas, Ops Manager e
+  gli snapshot di filesystem, che sono **fuori dall'ambito** di questo repository e non sono stati
+  provati.
+- **Usata da:** ADR-0047
+
+---
+
+<a id="s-061"></a>
+### S-061 — MongoDB Manual 7.0: Verify Cluster Membership with X.509 on Self-Managed MongoDB
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/configure-x509-member-authentication/
+  (citazioni dalla variante `configure-x509-member-authentication.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** 7.0 — la versione pinnata del lab ([ADR-0028](Decision.md#adr-0028))
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma:** l'alternativa al keyfile è dichiarata in apertura: «Sharded cluster members and
+  replica set members can use X.509 certificates to verify their membership to the cluster or the
+  replica set instead of using keyfiles. The membership authentication is an internal process.» La
+  conseguenza sul controllo degli accessi è **la stessa** del keyfile: «Enabling internal
+  authentication also enables Role-Based Access Control in Self-Managed Deployments. Clients must
+  authenticate as a user in order to connect and perform operations in the deployment.»
+
+  I requisiti dei certificati di membro, che sono la vera differenza di costo rispetto al keyfile:
+  «A single Certificate Authority (CA) must issue all X.509 certificates for the members of a
+  sharded cluster or a replica set»; il soggetto deve avere un valore non vuoto per almeno uno fra
+  Organization (`O`), Organizational Unit (`OU`) e Domain Component (`DC`), e «MongoDB verifies that
+  entries match exactly across all member certificates. If you list multiple `OU` values, all
+  certificates must use an identical list»; «At least one of the Subject Alternative Name (`SAN`)
+  entries must match the server hostname used by other cluster members. When comparing `SAN`s,
+  MongoDB can compare either DNS names or IP addresses», con la nota che in mancanza di
+  `subjectAltName` «MongoDB compares the Common Name (CN) instead. However, this usage of CN is
+  deprecated per RFC2818». Sugli usi estesi della chiave: il certificato di
+  `tlsCertificateKeyFile` deve includere `serverAuth`, quello di `tlsClusterFile` deve includere
+  `clientAuth`, e se `tlsClusterFile` è omesso il primo deve includerli entrambi — ma «If
+  `tlsCertificateKeyFile` or `tlsClusterFile` point to certificates that omit these extensions, no
+  restrictions apply».
+
+  L'avvio: `mongod --replSet <name> --tlsMode requireTLS --clusterAuthMode x509 --tlsClusterFile
+  <path to membership certificate and key PEM file> --tlsCertificateKeyFile <path to TLS/SSL
+  certificate and key file> --tlsCAFile <path to root CA file> --bind_ip localhost,<hostname(s)|ip
+  address(es)>`, con l'obbligo che «To use X.509 authentication, `--tlsCAFile` or `net.tls.CAFile`
+  must be specified unless you are using `--tlsCertificateSelector`». Sull'uniformità del
+  parametro: «Outside of rolling upgrade procedures, every component of a replica set or sharded
+  cluster should use the same `--clusterAuthMode` setting». Infine due avvertenze che valgono anche
+  per chi non usa X.509: «MongoDB disables support for TLS 1.0 encryption on systems where TLS 1.1+
+  is available» e «If you specify `--tlsAllowInvalidCertificates` or
+  `net.tls.allowInvalidCertificates: true`, an invalid certificate is sufficient only to establish
+  a TLS connection but it is *insufficient* for authentication».
+- **Riserve:** la pagina dichiara i propri limiti in modo esplicito, e vanno riportati: «A full
+  description of TLS/SSL, PKI (Public Key Infrastructure) certificates, in particular X.509
+  certificates, and Certificate Authority is beyond the scope of this document. This tutorial
+  assumes prior knowledge of TLS/SSL as well as access to valid X.509 certificates.» Cioè: la fonte
+  che questo repository cita per «come si passa a X.509» **non insegna a produrre i certificati**, e
+  questo repository nemmeno. La pagina inoltre **non contiene** né la sequenza di migrazione a
+  caldo né la rotazione dei certificati: rimanda a due pagine separate, registrate come
+  [S-062](#s-062) e [S-063](#s-063). Nota terminologica utile: gli alias `ssl` sono deprecati ma
+  non diversi — «The `tls` settings/options provide **identical** functionality as the `ssl`
+  options since MongoDB has always supported TLS 1.0 and later».
+- **Usata da:** ADR-0048
+
+<a id="s-062"></a>
+### S-062 — MongoDB Manual 7.0: Upgrade from Keyfile Authentication to X.509 Authentication
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/upgrade-keyfile-to-x509/
+  (citazioni dalla variante `upgrade-keyfile-to-x509.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** 7.0
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma:** la migrazione è una **procedura a caldo**, in due varianti a seconda che il
+  cluster usi già TLS. Per un cluster con keyfile e **senza** TLS — il caso dello stack di questo
+  repository — i passi sono quattro.
+
+  Primo, riavvio di ogni membro con `net.tls.mode: allowTLS` («This value allows the node to accept
+  both TLS/SSL and non-TLS/non-SSL incoming connections. Its outgoing connections do not use
+  TLS/SSL»), `net.tls.certificateKeyFile`, `net.tls.clusterFile` («Set to the appropriate path of
+  the node's certificate key file for membership authentication»), `net.tls.CAFile`, e
+  `security.clusterAuthMode: sendKeyFile` — «each node continues to send its keyfile to
+  authenticate itself as a member. However, each node can receive either a keyfile or an X.509
+  certificate from other members to authenticate those members». Il keyfile **resta al suo posto**
+  in questa fase.
+
+  Secondo, su ogni nodo, due `setParameter`:
+  `db.adminCommand( { setParameter: 1, tlsMode: "preferTLS" } )` e
+  `db.adminCommand( { setParameter: 1, clusterAuthMode: "sendX509" } )`. Con `preferTLS` «the node
+  accepts both TLS/SSL and non-TLS/non-SSL incoming connections, and its outgoing connections use
+  TLS/SSL»; con `sendX509` «each node sends its `net.tls.clusterFile` to authenticate itself as a
+  member. However, each node continues to accept either a keyfile or an X.509 certificate».
+  «Upgrade all nodes of the cluster to these settings before continuing.»
+
+  Terzo, riscrittura del file di configurazione perché il nuovo stato sopravviva ai riavvii. Quarto,
+  *«Optional but recommended»*: `net.tls.mode: requireTLS` e `security.clusterAuthMode: x509`, con
+  un avviso in grassetto sul fatto che il requisito TLS riguarda **anche i client** — «This TLS/SSL
+  connection requirement applies to all connections; that is, with the clients as well as with the
+  members of the cluster.»
+
+  Per il cluster che usa già TLS la procedura si accorcia a `sendKeyFile` → `sendX509` → `x509`,
+  senza toccare `tlsMode`. In coda, un'alternativa dichiarata: «As an alternative to using the
+  `setParameter` command, you can also restart the nodes with the appropriate TLS/SSL and x509
+  options and values.»
+- **Riserve:** la pagina **non dice** che le transizioni siano a senso unico, e non dice che
+  l'ordine dei due `setParameter` del secondo passo sia obbligatorio — li presenta insieme, nello
+  stesso blocco, senza spiegare perché quello su `tlsMode` viene prima. Entrambe le cose sono state
+  misurate: [V-039](#v-039). La parola «downtime» non compare nella pagina; l'assenza di fermo
+  macchina è implicita nella formula «rolling upgrade process», non dichiarata. Un refuso della
+  fonte, riportato per fedeltà: nel testo del secondo passo si legge «Update the `tlsMode` to
+  `preferSSL`» mentre il comando immediatamente sotto usa `preferTLS` — il valore giusto è quello
+  del comando.
+- **Usata da:** ADR-0048
+
+<a id="s-063"></a>
+### S-063 — MongoDB Manual 7.0: Rotate Certificates on Clusters without clusterAuthX509
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/rotate-x509-membership-certificates/
+  (citazioni dalla variante `rotate-x509-membership-certificates.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** 7.0
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma:** come un membro riconosce un altro membro, prima di tutto: «When a server node
+  receives a connection request, it compares the Distinguished Name (DN) attributes in the
+  `subject` field of the presented certificates to the subject DN attributes of its own
+  certificates. The certificates match if their subjects contain the same values for the
+  Organization (`O`), Organizational Unit (`OU`), and Domain Component (`DC`) attributes.» Da qui
+  discende il problema: cambiare il DN dei certificati significa che i nodi smettono di
+  riconoscersi. La via d'uscita è un parametro-ponte: «Clusters adopting new certificates can use
+  the `tlsX509ClusterAuthDNOverride` parameter to accept x.509 certificates with different subject
+  DN attributes during the certificate rotation procedure. Once all members use certificates with
+  the new value, remove the override to begin rejecting the now out of date certificates.»
+
+  La procedura è di **sei passi** e comporta **tre giri di riavvii** dell'intero cluster: si imposta
+  l'override al DN nuovo su tutti i nodi e si riavvia; si sostituiscono i certificati mettendo
+  l'override sul DN **vecchio** e si riavvia; si toglie l'override e si riavvia una terza volta. Il
+  giro di riavvii è descritto con precisione: «To perform a rolling restart of all members, restart
+  each secondary and then the primary», con `db.shutdownServer()` su ogni secondario, l'attesa che
+  torni in stato `SECONDARY` verificata con `rs.status()`, e `rs.stepDown()` sul primario prima di
+  fermarlo. Sull'assenza di fermo macchina la pagina è esplicita: «In a rolling update, member
+  certificates are updated one at a time, and your deployment does not incur any downtime.» Ogni
+  passo ripete lo stesso avviso: «This configuration will not be taken into consideration until you
+  restart each member.»
+- **Riserve:** la pagina copre **solo** i cluster che non usano `net.tls.clusterAuthX509`; per gli
+  altri rimanda a una procedura diversa, non consultata qui. Non dice niente sulla **scadenza** dei
+  certificati — né come accorgersene, né che cosa succede a un cluster i cui certificati scadono
+  mentre è in esercizio: la rotazione è descritta come una scelta organizzativa («such as if an
+  organization changes its name»), non come una manutenzione periodica obbligata. La procedura è
+  registrata qui per il suo **costo**, che è il termine di paragone onesto con il keyfile: non è
+  stata eseguita.
+- **Usata da:** ADR-0048
+
+<a id="s-064"></a>
+### S-064 — Compose file reference: Interpolation — il dollaro che Compose non deve mangiare
+
+- **URL:** https://docs.docker.com/reference/compose-file/interpolation/
+- **Editore:** Docker Inc. — Docker Docs, Compose file reference
+- **Versione documentata:** Compose Specification, riferimento corrente alla consultazione
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — come si scrive un dollaro che deve sopravvivere.** «You can use a
+  `$$` (double-dollar sign) when your configuration needs a literal dollar sign.» La pagina precisa
+  che il doppio dollaro serve anche a **impedire** l'interpolazione, e ne dà l'esempio:
+
+```yml
+web:
+  build: .
+  command: "$$VAR_NOT_INTERPOLATED_BY_COMPOSE"
+```
+
+- **Cosa afferma, secondo punto — le due forme e che cosa accettano.** «Compose files use a
+  Bash-like syntax `${VARIABLE}`. Both `$VARIABLE` and `${VARIABLE}` syntax is supported», ma solo
+  la forma con le graffe accetta i modificatori. Dopo il dollaro Compose interpola qualunque cosa
+  formi «a valid variable definition - either an alphanumeric name (`[_a-zA-Z][_a-zA-Z0-9]*`)»;
+  il resto lo lascia stare. Le sostituzioni di shell tipo `${VARIABLE/foo/bar}` «are not supported
+  by Compose», mentre l'annidamento `${VARIABLE:-${FOO:-default}}` funziona.
+- **Cosa afferma, terzo punto — i due punti cambiano la domanda.** `${VAR:-default}` dà «value of
+  `VAR` if set and non-empty, otherwise `default`»; `${VAR-default}` dà «value of `VAR` if set,
+  otherwise `default`». Lo stesso per il rifiuto: `${VAR:?error}` esce con errore se la variabile è
+  assente **o vuota**, `${VAR?error}` solo se è assente. È la differenza su cui poggia il
+  segnaposto vuoto di `.env.example`: senza i due punti, una password lasciata in bianco passerebbe.
+- **Cosa afferma, quarto punto — quando non c'è niente da sostituire.** «If Compose can't resolve a
+  substituted variable and no default value is defined, it displays a warning and substitutes» la
+  variabile con la stringa vuota. Un avviso, non un errore: il file resta valido e sbagliato.
+- **Cosa afferma, quinto punto — l'interpolazione tocca i valori, non le chiavi.** «Interpolation
+  applies only to YAML values, not to keys.» Per le mappe definite dall'utente — `labels`,
+  `environment` — serve la forma a lista con l'uguale perché la sostituzione avvenga.
+- **Cosa non afferma:** che l'interpolazione avvenga **prima** che il file arrivi al container. La
+  pagina colloca il momento rispetto alla fusione dei file — «interpolation is applied before a
+  merge on a per-file basis» — e non parla mai del container. Che il `$` di un comando `sh -c`
+  venga consumato da Compose e non arrivi alla shell è una **conseguenza** di questo, non una frase
+  della pagina.
+- **Riserve:** la frase sul `$$` non sta dove uno la cerca. La pagina «Environment variables —
+  Interpolation» ([S-056](#s-056)), che è quella raggiungibile dalla guida alle variabili
+  d'ambiente, non nomina mai il doppio dollaro: rimanda qui con un collegamento. Chi cerca l'escape
+  partendo da lì trova la regola delle virgolette singole nei file `.env`, che è un'altra cosa e
+  funziona in un altro modo.
+- **Usata da:** ADR-0052
+
+<a id="s-065"></a>
+### S-065 — MongoDB Manual 7.0: Adjust Priority for Replica Set Member
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/adjust-replica-set-member-priority/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — la priorità decide sia il quando sia il chi.** «The `priority`
+  settings of replica set members affect both the timing and the outcome of elections for primary.
+  Higher-priority members are more likely to call elections, and are more likely to win. Use this
+  setting to ensure that some members are more likely to become primary and that others can never
+  become primary.» E, sul numero: «The value of the member's `priority` setting determines the
+  member's `priority` in elections. The higher the number, the higher the priority.»
+- **Cosa afferma, secondo punto — l'intervallo e il valore predefinito.** «The value of `priority`
+  can be any floating point (i.e. decimal) number between `0` and `1000`. The default value for the
+  `priority` field is `1`.» Lo zero è un caso a sé: «To block a member from seeking election as
+  primary, assign it a priority of `0`.»
+- **Cosa afferma, terzo punto — cambiarla non è gratis.** «Adjust priority settings during a
+  scheduled maintenance window. Reconfiguring priority can force the current primary to step down,
+  leading to an election. Before an election, the primary closes all open client connections.» E
+  nell'avviso della procedura: «The `rs.reconfig()` shell method can force the current primary to
+  step down, which causes an election. When the primary steps down, the `mongod` closes all client
+  connections. While this typically takes 10-20 seconds, try to make these changes during scheduled
+  maintenance periods.»
+- **Cosa afferma, quarto punto — priorità e voti sono legati.** «Non-voting (i.e. `votes` is `0`)
+  members must have `priority` of 0», e «Members with `priority` greater than 0 cannot have 0
+  `votes`». Alzare la priorità di un membro non votante «*requires* setting `votes` to `1`».
+- **Cosa non afferma:** **quanto** un membro a priorità più alta sia più probabile, né dopo quanto
+  tempo si riprenda il posto quando rientra. La pagina descrive il meccanismo in termini di
+  probabilità e non dà nessun tempo. I dieci secondi con cui `mongo-rs-1` si riprende il ruolo nel
+  lab sono misurati ([V-042](#v-042)), non letti qui.
+- **Riserve:** la pagina è un tutorial di modifica a caldo, e il lab la priorità la scrive
+  **all'inizializzazione**, dove nessuna delle cautele sulla finestra di manutenzione si applica —
+  non c'è ancora un primario da far dimettere. Vale però al contrario, e vale per il talk: chi
+  volesse cambiare le priorità sullo stack acceso durante la demo provocherebbe un'elezione e la
+  chiusura di tutte le connessioni.
+- **Usata da:** ADR-0051
 
 ## Verifiche empiriche
 
@@ -2128,7 +2579,7 @@ presenterebbe come un nodo che tarda a diventare sano.
   32 bit, che è specificata: non dipende dalla macchina, ma dipende dal fatto che il motore sia
   conforme, e qui è stato provato solo su `mongosh` 2.10.0.
 - **Data:** 2026-08-28
-- **Usata da:** ADR-0031
+- **Usata da:** ADR-0031, ADR-0043
 
 ---
 
@@ -2179,7 +2630,7 @@ succedendo è «la mia modifica non è stata nemmeno letta».
   perché il volume non è di Docker: bisogna cancellare la cartella sull'host. Non provato qui,
   perché il lab non usa bind mount per i dati.
 - **Data:** 2026-08-28
-- **Usata da:** ADR-0031, ADR-0033
+- **Usata da:** ADR-0031, ADR-0033, ADR-0043
 
 ---
 
@@ -2312,7 +2763,7 @@ sorprendente, misurato nella stessa sessione e registrato dove gli compete, in
   della velocità: è la misura naturale da aggiungere quando l'applicazione Python
   (`feature/04`) potrà farla sotto carico controllato.
 - **Data:** 2026-08-28
-- **Usata da:** ADR-0032
+- **Usata da:** ADR-0032, ADR-0046
 
 ---
 
@@ -2381,7 +2832,7 @@ dodici controlli verdi, impronta invariata.
   stop`, che [S-039](#s-039) copre esplicitamente ed è il caso non interessante. Il numero
   `RestartCount` è cumulativo sulla vita del container: azzerarlo richiede ricrearlo.
 - **Data:** 2026-08-28
-- **Usata da:** ADR-0034
+- **Usata da:** ADR-0034, ADR-0044
 
 ---
 
@@ -2902,3 +3353,2128 @@ iniziato, e conferma su questo file quello che [V-006](#v-006) aveva misurato su
 - **Usata da:** ADR-0039
 
 ---
+
+<a id="v-023"></a>
+### V-023 — Chi inizializza il replica set: tre strade provate, e una terza che non era scritta da nessuna parte
+
+> **Nota di precisione, 2026-08-31 (Task 3).** Nella «misura di contorno» qui sotto il blocco di
+> console riporta `isWritablePrimary=false secondary=true` attribuendolo a un membro «non ancora
+> inizializzato». La *conclusione* tratta lì è giusta e oggi è confermata sullo stack vero — un
+> controllo «sei primario o secondario?» resterebbe rosso fino a `rs.initiate()` — ma quei due
+> valori vengono da un membro che l'inizializzazione l'aveva già ricevuta. Su un membro davvero
+> vergine i tre `mongod` dello stack rispondono `isWritablePrimary=false secondary=false
+> **isreplicaset=true**`, e `isreplicaset` è il marcatore che il Task 5 può usare. Il corpo non
+> viene toccato: si legge com'era, con questa nota davanti.
+
+- **Domanda:** il design (§5.4) e [ADR-0026](Decision.md#adr-0026) dicono due cose diverse su chi
+  crea l'utente amministratore di uno stack a replica set sotto keyfile. Il design mette
+  `MONGO_INITDB_ROOT_USERNAME`/`_PASSWORD` sul primo membro e fa inizializzare il set a un sidecar
+  già autenticato; ADR-0026 vuole i `mongod` **senza** variabili di root e l'utente creato sotto
+  eccezione localhost. Non è una sfumatura: cambia se nel repository finisce una password. Il
+  Task 1 del piano di `feature/02` ha rifiutato di scegliere a tavolino e ha montato entrambe le
+  strade. Tre domande: la strada di ADR-0026 funziona su un replica set (e non solo su uno sharded
+  cluster)? La strada del design funziona, cioè l'entrypoint crea davvero l'utente anche con
+  `--replSet` e `--keyFile` addosso? E l'affermazione del design secondo cui «l'eccezione localhost
+  non copre un container sidecar» è vera?
+- **Ambiente:** macchina di sviluppo macOS 26.6.2 (Darwin 25.6.0), Docker Desktop, server Docker
+  29.7.2, `docker compose version` v5.4.0. Immagine `mongo:7.0.40` pinnata per digest
+  `sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b`. Tre stack usa-e-getta
+  (`spike-rs-a`, `spike-rs-b`, `spike-rs-c`) montati **fuori dal repository**, nella cartella
+  temporanea della sessione, e smontati con `down -v` a misura presa. Nessuna porta pubblicata.
+  Data: 2026-08-31.
+
+**Prima strada — ADR-0026: nessuna variabile di root, `rs.initiate()` dentro il container.**
+
+Tre `mongod` con `--replSet rs0 --keyFile /keyfile/mongo-keyfile --bind_ip_all`, il keyfile
+generato da un servizio one-shot, e l'inizializzazione eseguita con `docker exec` **dentro** il
+membro 1, senza passare credenziali:
+
+```console
+$ docker exec spike-a-rs-1 mongosh --quiet --eval 'rs.initiate({_id:"rs0", members:[...]})'
+{"ok":1}
+$ docker exec spike-a-rs-1 mongosh --quiet --eval 'db.getSiblingDB("admin").createUser({user:"lab-admin", pwd:"...", roles:["root"]})'
+{ ok: 1 }
+$ docker exec spike-a-rs-1 mongosh --quiet --eval 'db.getSiblingDB("prova").c.insertOne({x:1})'
+MongoServerError[Unauthorized]: command insert requires authentication
+```
+
+Funziona, e funziona nell'ordine che [S-055](#s-055) prescrive: `replSetInitiate` passa,
+`createUser` passa, e il primo comando successivo **non** passa più. L'ultima riga non è un
+fallimento: è la ricevuta che l'eccezione si è chiusa da sé, esattamente dove la fonte dice che si
+chiude. Il costo è tutto architetturale: `docker exec` non è un servizio Compose, quindi
+`docker compose up -d` da solo **non** produce un replica set funzionante. Serve un passo fuori dal
+file — uno script, un `make`, o le dita di chi presenta.
+
+**Seconda strada — il design §5.4: variabili di root sul membro 1, sidecar autenticato.**
+
+Prima domanda da sciogliere: l'entrypoint dell'immagine ufficiale, che per creare l'utente avvia un
+`mongod` temporaneo togliendo `--replSet` ([S-022](#s-022)), sopravvive alla presenza di
+`--keyFile`? Sì — nei log del membro compare `Successfully added user: { "user" : "lab-admin",
+"roles" : [ "root" ] }`. Il caso che ADR-0026 aveva incontrato era `--configsvr`, che l'entrypoint
+**non** toglie e che da solo non esiste: è quello a rompersi, non `--replSet`. La differenza fra i
+due casi non era scritta da nessuna parte, e per sei giorni ADR-0026 è stato letto come se valesse
+per entrambi.
+
+Poi il sidecar, al primo colpo, è fallito:
+
+```console
+$ docker logs spike-b-rs-init
+MongoNetworkError: connect ECONNREFUSED 172.20.0.3:27017
+```
+
+`depends_on` con `condition: service_started` è arrivato mentre il membro era ancora nella fase del
+`mongod` temporaneo, che ascolta solo su loopback. È esattamente la corsa che il Task 5 del piano
+aveva previsto, misurata prima di scrivere il file definitivo. Ripetuta l'inizializzazione a membri
+avviati, la strada regge:
+
+```console
+$ mongosh --host mongo-rs-1 -u lab-admin -p ... --eval 'rs.initiate({...})'
+{"ok":1}
+$ mongosh ... --eval 'rs.status().members.map(m => m.stateStr).join(",")'
+PRIMARY,SECONDARY,SECONDARY
+```
+
+E i membri 2 e 3, partiti **vuoti** e senza alcuna variabile di root, accettano le credenziali di
+`lab-admin`: la sincronizzazione iniziale porta con sé anche la collezione `admin.system.users`.
+Un utente creato su un membro solo diventa, senza altri passi, l'utente di tutto il set.
+
+**Terza prova — l'affermazione del design sul sidecar è vera.**
+
+Uno stack con un membro non inizializzato e un sidecar sulla rete Compose, che prova
+`rs.initiate()` dall'esterno del container:
+
+```console
+$ docker logs spike-c-rs-init
+ERRORE codeName=Unauthorized code=13
+Command replSetInitiate requires authentication
+```
+
+L'affermazione del design regge. Il sidecar raggiunge il `mongod` — non è un problema di rete — ma
+arriva da un altro indirizzo, e l'eccezione non lo riconosce. Ed è qui che si chiude una riserva
+aperta da sei giorni: [S-006](#s-006) aveva dichiarato il 2026-08-25 che il vincolo «solo da
+loopback» **non è enunciato da nessuna fonte primaria**, e [S-055](#s-055) ha confermato che
+neppure la pagina della v7.0 lo enuncia. Adesso c'è la misura. Il vincolo esiste, il prodotto lo
+applica, la documentazione non lo scrive: la riserva passa da «vero per convenzione» a «vero,
+misurato qui, e ancora non scritto dalla fonte».
+
+**Quarta prova — la terza via: un sidecar che condivide il namespace di rete del membro.**
+
+Se il problema è l'indirizzo di provenienza, si può cambiare l'indirizzo di provenienza invece di
+rinunciare all'eccezione. Un container avviato con `--network container:<membro>` — in Compose
+`network_mode: "service:mongo-rs-1"` — non ha una propria interfaccia di rete: **usa quella del
+membro**, e `localhost` dentro il sidecar è lo stesso `localhost` del `mongod`.
+
+```console
+$ docker run --rm --network container:spike-c-rs-1 mongo@sha256:b642... \
+    mongosh --quiet --host localhost --eval '...'
+NAMESPACE_CONDIVISO_OK {"ok":1}
+UTENTE_CREATO da sidecar in namespace condiviso
+CHIUSA_DOPO_IL_PRIMO_UTENTE codeName=Unauthorized code=13
+```
+
+Le tre righe sono la strada intera in tre battute: l'eccezione si apre a un container che non è il
+membro, concede `replSetInitiate` e poi `createUser`, e si chiude subito dopo. Questa via non sta
+né nel design né in ADR-0026: è saltata fuori chiedendosi *perché* la prova C fallisse, invece di
+prendere atto che falliva.
+
+**Misura di contorno, raccolta di passaggio e utile al Task 5.** Su un `mongod` avviato con
+`--keyFile` e non ancora inizializzato, `hello()` risponde **senza credenziali**:
+
+```console
+$ docker exec spike-c-rs-1 mongosh --quiet --eval 'const h = hello(); print("isWritablePrimary=" + h.isWritablePrimary + " secondary=" + h.secondary)'
+isWritablePrimary=false secondary=true
+```
+
+Serve a disinnescare l'uovo e la gallina dell'healthcheck: un controllo che chiede «`hello()`
+risponde?» diventa verde **prima** dell'inizializzazione, e quindi un servizio di inizializzazione
+può dipendere da `service_healthy` senza aspettare qualcosa che solo lui può produrre. Un controllo
+che chiedesse «sei primario o secondario?» resterebbe rosso fino a `rs.initiate()`, e
+l'inizializzazione non partirebbe mai.
+
+- **Conseguenza:** le tre strade funzionano tutte, quindi la scelta non è tecnica ma di prezzo.
+  ADR-0026 costa un passo fuori da Compose; il design costa una password nel repository; la terza
+  via non costa nessuno dei due e paga con un costrutto Docker che va spiegato. La decisione è
+  registrata in [ADR-0040](Decision.md#adr-0040).
+- **Riserve:** tutto su una macchina sola, su Docker Desktop, con una sola ripetizione per strada;
+  le prove dicono *che* una strada funziona, non quanto sia stabile sotto ripetizione o su Linux
+  nativo. La corsa del sidecar della strada B è stata osservata una volta e aggirata a mano: non è
+  stato misurato dopo quanto tempo il membro smette di rifiutare la connessione, perché la
+  soluzione scelta non passa da un'attesa a tempo. Il comportamento di `network_mode:` con
+  `service:` è stato provato nella forma equivalente da riga di comando (`docker run --network
+  container:…`), e non ancora dentro un file Compose del repository: la conferma nella forma
+  definitiva spetta al Task 2.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0040
+
+---
+
+<a id="v-024"></a>
+### V-024 — La terza via nella forma definitiva: un container che non ha una rete propria, e per questo può creare il primo utente
+
+- **Comandi:** `docker compose --env-file tools/images.env --env-file docker/02-replicaset/.env -f
+  docker/02-replicaset/compose.yaml up -d --wait` · `docker inspect` · `docker logs rs-init` ·
+  `mongosh`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, immagine
+  `mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b` (MongoDB 7.0.40),
+  stack `docker/02-replicaset/compose.yaml` del repository, volumi vuoti
+- **Che cosa restava da dimostrare:** [V-023](#v-023) chiudeva con una riserva scritta a chiare
+  lettere — il comportamento di `network_mode: "service:"` era stato provato «nella forma
+  equivalente da riga di comando (`docker run --network container:…`), e non ancora dentro un file
+  Compose del repository». Su quella prova incompleta è stato deciso [ADR-0040](Decision.md#adr-0040).
+  Questa voce salda il debito: stessa terza via, ma nello stack vero, scritta come la leggerà chi
+  clona.
+- **Esito, il namespace è davvero condiviso:** Compose non copia la configurazione di rete del
+  membro, aggancia `rs-init` al suo container. L'identificatore che compare in `NetworkMode` è, cifra
+  per cifra, l'identificatore di `mongo-rs-1`:
+
+```
+NetworkMode di rs-init: container:fdf722b35d3d782d47a5e97caef7ce21ab0ebd3581795d6566cd1fff735fa8d7
+id di mongo-rs-1:       fdf722b35d3d782d47a5e97caef7ce21ab0ebd3581795d6566cd1fff735fa8d7
+indirizzo di mongo-rs-1: 172.18.0.3
+```
+
+C'è un solo indirizzo, e appartiene al membro. `rs-init` non ne ha uno suo: quando parla a
+`localhost` parla all'interfaccia del `mongod`, che è la ragione per cui l'eccezione localhost lo
+riconosce.
+
+- **Esito, la catena arriva in fondo da sola:** quattro righe, nell'ordine previsto, con codice di
+  uscita 0.
+
+```
+inizializzo il replica set «rs0»
+primario eletto: mongo-rs-1:27017
+utente amministratore «admin» creato
+catena completata
+```
+
+- **Esito, il set esiste ed è chiuso:** con le credenziali si vede il set formato; senza, la stessa
+  interrogazione viene rifiutata. L'eccezione localhost si è richiusa da sé alla creazione del primo
+  utente, come [S-055](#s-055) prescrive.
+
+```
+set=rs0
+  mongo-rs-1:27017  PRIMARY  health=1
+  mongo-rs-2:27017  SECONDARY  health=1
+  mongo-rs-3:27017  SECONDARY  health=1
+--- senza credenziali ---
+rifiutato: Unauthorized (13)
+```
+
+Una scrittura con `w: "majority"` sul primario torna `inserito=true` e il documento si legge sul
+membro 3: la replica non è solo dichiarata, trasporta dati.
+
+- **Esito, l'healthcheck è verde in tutte e due le fasi, per due motivi diversi:** è il punto che
+  vale la pena guardare due volte. La condizione scritta nel file è
+  `h.isWritablePrimary || h.secondary || h.isreplicaset === true`, ed è un `or` di tre termini
+  perché nessuno dei tre da solo copre entrambe le fasi. Prima di `rs.initiate()` i tre membri
+  rispondono `isWritablePrimary=false secondary=false isreplicaset=true` ([V-023](#v-023), con la
+  nota di precisione in testa a quella voce): passa il terzo termine. Dopo, `isreplicaset` sparisce
+  e passano i primi due:
+
+```
+mongo-rs-1  isWritablePrimary=true secondary=false isreplicaset=undefined
+mongo-rs-2  isWritablePrimary=false secondary=true isreplicaset=undefined
+mongo-rs-3  isWritablePrimary=false secondary=true isreplicaset=undefined
+```
+
+Un healthcheck che avesse chiesto solo «sei primario o secondario?» sarebbe rimasto rosso nella
+prima fase, e `rs-init` — che dipende da `service_healthy` — non sarebbe mai partito per produrre
+proprio ciò che gli si chiedeva di avere già. Un healthcheck che avesse chiesto solo
+`isreplicaset === true` sarebbe diventato rosso appena il set si forma, cioè avrebbe segnato come
+malato uno stack perfettamente sano.
+
+- **Conseguenza:** la riserva di [V-023](#v-023) è scaricata, e [ADR-0040](Decision.md#adr-0040)
+  regge nella forma definitiva senza modifiche. Il resto delle conseguenze — quando la catena si
+  possa dire finita — sta in [V-025](#v-025) e in [ADR-0041](Decision.md#adr-0041).
+- **Riserve:** una macchina sola, Docker Desktop, nessuna prova su Linux nativo. `NetworkMode` dice
+  `container:<identificatore>`, non `service:mongo-rs-1`: Compose risolve il nome del servizio in un
+  identificatore **al momento della creazione**, il che implica che `mongo-rs-1` debba esistere
+  prima di `rs-init`. Qui quell'ordine è garantito dal `depends_on`, e **non è stato misurato** che
+  cosa succeda togliendolo — la prova non è stata fatta perché il `depends_on` serve comunque per la
+  condizione `service_healthy`, ma resta un'affermazione che questo repository non ha verificato.
+  Infine, che `rs-init` non possa pubblicare porte né essere raggiunto per nome sulla rete Compose è
+  dedotto dal non avere un'interfaccia propria, non provato tentandolo.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0041
+
+---
+
+<a id="v-025"></a>
+### V-025 — «Fatto» detto due volte: `up --wait` esce con successo quattordici secondi prima che la replica esista
+
+> **Nota di allineamento, 2026-08-31.** Il fenomeno descritto qui regge intatto, il numero no.
+> Al Task 7 il caricamento dei dati di demo è entrato dentro `rs-init` ([ADR-0043](Decision.md#adr-0043)),
+> quindi quel servizio dura di più e lo scarto misurato è salito a **ventidue** secondi
+> ([V-028](#v-028)). Il titolo resta com'era perché così è stato misurato quel giorno, su quella
+> configurazione: chi cita lo scarto citi la voce che corrisponde allo stack che ha davanti, e
+> soprattutto lo rimisuri invece di impararlo a memoria — è la conclusione, non il quattordici.
+
+- **Comandi:** `docker compose … up -d --wait` · `docker compose … wait rs-init` ·
+  `docker compose … config` · `docker inspect`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, stack
+  `docker/02-replicaset/compose.yaml`, immagine `mongo@sha256:b6421fd6…` (MongoDB 7.0.40)
+- **Esito, lo scarto:** `up -d --wait` termina con codice 0 dopo otto secondi. In quell'istante
+  `rs-init` è in stato `running` — ha appena cominciato — e chi si collega al membro 1 riceve un
+  errore:
+
+```
+«up -d --wait» uscita=0 dopo 8 secondi
+stato di rs-init in quell'istante: running
+--- che cosa vede un client in quell'istante ---
+NotYetInitialized (94)
+
+rs-init uscito dopo 22 secondi dall'avvio, codice=0
+scarto fra «up dice fatto» e «la replica c'e'»: 14 secondi
+```
+
+Quattordici secondi in cui il comando ha già detto di sì e il replica set non esiste. Il perché sta
+nella definizione: [S-057](#s-057) documenta `--wait` come «Wait services be running|healthy», e
+`rs-init` non ha un healthcheck — quindi la soglia applicabile è `running`. Un container che deve
+morire è `running` **nel momento esatto in cui comincia**, e `--wait` si dichiara soddisfatto lì.
+Non è un difetto di Compose: è l'opzione che fa quello che dichiara, applicata a un servizio per cui
+la parola «pronto» significa il contrario di «in esecuzione».
+
+- **Esito, come si chiude lo scarto:** `docker compose wait rs-init` — «Block until containers of
+  all (or specified) services stop», [S-057](#s-057) — blocca fino all'uscita e ne riporta il
+  codice.
+
+```
+«up -d --wait» + «wait rs-init»: 20 secondi, uscita=0
+stampato da «compose wait»: container "6727c2a2386e…" exited with status code 0
+subito dopo wait: set=rs0
+```
+
+Le due opzioni non sono alternative e non si somigliano: `up --wait` serve ai tre membri, che devono
+essere **sani**; `compose wait` serve a `rs-init`, che deve essere **finito**. Lo stack ne ha bisogno
+di entrambe perché contiene i due generi di servizio.
+
+- **Esito, un solo `--env-file` non basta, e si vede:** lo stack ha bisogno di due file d'ambiente —
+  il pin dell'immagine in `tools/images.env`, la password in `docker/02-replicaset/.env`. Passando
+  solo il primo, il secondo **non viene letto**, benché stia accanto al file indicato con `-f`:
+
+```
+uscita di «config» con un solo --env-file: 1
+error while interpolating services.rs-init.environment.PASSWORD_AMMINISTRATORE: required variable
+PASSWORD_AMMINISTRATORE is missing a value: assente — copiare docker/02-replicaset/.env.example in
+.env e riempire la password
+```
+
+È la conferma diretta di [S-056](#s-056): «Passing the `--env-file` argument overrides the default
+file path». La flag non aggiunge un file, ne prende il posto. Con entrambe le occorrenze lo stesso
+comando esce 0. Vale la pena notare **come** si è manifestato l'errore: non con un utente creato con
+password vuota, ma con un rifiuto che nomina il file da copiare. Quel messaggio esiste perché la
+variabile è scritta nella forma `${PASSWORD_AMMINISTRATORE:?…}`; nella forma senza `:?` la stessa
+dimenticanza sarebbe passata in silenzio.
+
+- **Esito, l'idempotenza:** rieseguendo l'avvio su uno stack già inizializzato, `rs-init` riconosce
+  il set e non tocca niente, uscendo di nuovo 0. `docker logs rs-init` mostra **entrambe** le
+  esecuzioni una dopo l'altra, perché Compose riavvia il container one-shot esistente invece di
+  crearne uno nuovo: le prime quattro righe sono del primo avvio, le seconde quattro del secondo.
+
+```
+inizializzo il replica set «rs0»
+primario eletto: mongo-rs-1:27017
+utente amministratore «admin» creato
+catena completata
+replica set «rs0» già formato: non lo reinizializzo
+primario eletto: mongo-rs-1:27017
+utente amministratore già presente: non lo ricreo
+catena completata
+```
+
+- **Esito, i tempi, con una sorpresa:** misurati dal lancio alla fine di `compose wait rs-init`,
+  cioè fino alla replica realmente formata.
+
+```
+freddo, giro 1: 21 secondi
+freddo, giro 2: 21 secondi
+freddo, giro 3: 19 secondi
+caldo (volumi conservati): 24 secondi
+```
+
+Il riavvio **a caldo è più lento** dell'avvio da volumi vuoti. Controintuitivo, e utile a chi deve
+riavviare lo stack in sala: non conviene fare `down` e `up` sperando che «tanto i dati ci sono già».
+Dopo uno smontaggio completo si spengono tre membri, e alla ripartenza il set deve rieleggere un
+primario prima che qualunque cosa funzioni; da volumi vuoti l'elezione è la prima e avviene su un
+set appena costruito. Questa è però una **spiegazione**, non una misura: vedi le riserve.
+
+- **Conseguenza:** l'avvio dello stack 02 è di due comandi, non di uno, e gli ambienti si passano
+  con due `--env-file`. Registrato in [ADR-0041](Decision.md#adr-0041), che ne fa la forma
+  obbligatoria per il Makefile del Task 7.
+- **Riserve:** i secondi valgono per questa macchina e per questa immagine, e non vanno riportati
+  come previsione altrove: quello che non cambia è **che lo scarto esista**, perché discende dalla
+  definizione di `--wait` e non dalla velocità dell'host. Il numero 14 è di una sola esecuzione. La
+  lentezza dell'avvio a caldo è stata osservata **una volta sola**, contro tre giri a freddo: la
+  differenza è larga (24 contro 19÷21) ma un solo campione non stabilisce una regola, e la causa
+  proposta — la rielezione del primario dopo lo spegnimento — non è stata isolata da nessuna misura,
+  è un'ipotesi coerente con il funzionamento noto del protocollo. Va rifatta con più ripetizioni
+  prima di dirla in sala. Infine `compose wait` è stato osservato solo su un'uscita 0: che riporti
+  fedelmente anche un codice diverso da zero è documentato ma non provato qui, e conviene provarlo
+  al Task 7, dove quel codice diventa il verdetto di un bersaglio del Makefile.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0041, ADR-0052
+
+---
+
+<a id="v-026"></a>
+### V-026 — Sei mutazioni sul file vero: un controllo che non si è visto fallire lì dove serve non è un controllo
+
+- **Comandi:** `uv run --project tools python tools/check_stack.py --variabile
+  PASSWORD_AMMINISTRATORE=… <copia mutata di docker/02-replicaset/compose.yaml>`, ripetuto su sei
+  copie, ognuna con un solo difetto introdotto
+- **Ambiente:** macOS 26.6.2 arm64, Python 3.13 via `uv`, `tools/check_stack.py` dopo il Task 6 di
+  `feature/02`, `tools/images.env` come file d'ambiente predefinito
+- **Che cosa restava da dimostrare:** le quattro regole nuove del Task 6 erano rosse sui campioni
+  costruiti nei test, e verdi sui due file veri. Verde su un campione costruito prova che la regola
+  esiste; verde sul file vero **non prova niente**, perché non distingue «la regola ha guardato e ha
+  approvato» da «la regola non è mai entrata in funzione». Le regole 2 e 4 si autolimitano leggendo
+  il file — la 2 si accende solo se qualcuno dichiara `--replSet`, la 4 solo se qualcuno dichiara
+  `depends_on` — e una guardia scritta male le spegne in silenzio proprio sul file che contava.
+- **Metodo:** si prende il file vero, se ne fa una copia, si introduce **un solo** difetto, si passa
+  la copia allo strumento. Se il messaggio giusto compare, la regola era accesa su quel file. Il
+  difetto viene introdotto con `sed` o con una sostituzione che verifica prima quante occorrenze
+  esistono, così una modifica che non ha attecchito si presenta come un errore invece che come un
+  verde.
+- **Esito, sei difetti e sei messaggi distinti:**
+
+```
+regola 1 — keyfile da bind mount
+  ✗ mongo-rs-1: il keyfile «/keyfile/mongo-keyfile» arriva da «./keyfile», che è un
+    percorso dell'host. […] serve un volume nominato (ADR-0014)
+
+regola 2 — membro senza --keyFile
+  ✗ mongo-rs-1: avvia un membro di replica set senza «--keyFile». Parte lo stesso e resta
+    fuori dalla replica: gli altri lo rifiutano all'handshake […] (ADR-0014)
+
+regola 3 — one-shot con restart che lo rialza
+  ✗ keyfile-init: «mongo-rs-1» lo attende come completato, ma «keyfile-init» non dichiara
+    «restart: "no"». Compose lo rialza appena esce […] (ADR-0023)
+
+regola 4 — service_started verso un mongod
+  ✗ rs-init attende «mongo-rs-1» con «service_started», ma «mongo-rs-1» avvia un mongod:
+    la condizione scatta quando il container esiste, non quando il server risponde […]
+
+regola 4 — service_started verso un one-shot
+  ✗ mongo-rs-1 attende «keyfile-init» con «service_started», ma «keyfile-init» è un
+    one-shot […]: riesce sulla macchina veloce e fallisce in sala […]
+
+difetto vecchio — forma abbreviata senza cache
+  ✗ mongo-rs-1: avvia mongod senza «--wiredTigerCacheSizeGB» […] (ADR-0004)
+```
+
+- **Esito, il file intatto:**
+
+```
+Stack conformi: 1.
+uscita: 0
+```
+
+L'ultima delle sei merita una riga a parte, perché non è una regola nuova: è una regola vecchia che
+non poteva fallire. `avvia_mongod()` riconosceva solo i comandi che cominciano con la parola
+`mongod`; l'entrypoint ufficiale dell'immagine antepone `mongod` da sé quando il primo argomento
+comincia per trattino ([S-022](#s-022)), e nella forma abbreviata — quella che gira in metà degli
+esempi in rete — lo strumento non vedeva un mongod, quindi non pretendeva né la cache né il keyfile.
+Una regola che dorme è peggio di una regola assente: dà la ricevuta senza aver guardato.
+
+- **Conseguenza:** `make stack-check` passa ora entrambi i file Compose e non solo il primo; le
+  quattro regole nuove e la correzione della forma abbreviata sono registrate in
+  [ADR-0042](Decision.md#adr-0042).
+- **Riserve:** sei difetti non sono tutti i difetti. Questa prova stabilisce che ogni regola nuova
+  è **accesa** sul file vero, non che l'insieme delle regole sia completo: un file Compose può
+  restare conforme a tutte e sei e non funzionare comunque, e infatti la conformità statica non ha
+  mai sostituito l'avvio dello stack, che resta il verdetto di [V-024](#v-024) e [V-025](#v-025).
+  Le mutazioni sono state introdotte a mano, una volta sola, e non da un generatore sistematico:
+  non c'è un numero di copertura da citare, c'è un elenco di sei casi che si possono rileggere.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0042
+
+---
+
+<a id="v-027"></a>
+### V-027 — Il ritardo di replica a riposo, e quanto costa davvero chiedere la maggioranza
+
+- **Comandi:** `mongosh --file` di uno script che scrive sul primario e interroga un secondario in
+  un ciclo stretto finché il documento non compare; 10 giri per esecuzione, 3 esecuzioni
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, stack
+  `docker/02-replicaset/compose.yaml`, tre membri con 768 MiB e 0,75 CPU ciascuno, replica formata
+  e `lab.ordini` già caricata, nessun altro carico
+- **Che cosa si voleva sapere:** la pagina del Task 9 parla di «ritardo di replica» e senza un
+  numero non lo mostra. Serviva anche il prezzo di `w: "majority"`, perché il dataset dello stack 02
+  si scrive così e dire «costa di più» senza dire quanto è un'affermazione che non impegna nessuno.
+- **La misura ovvia non funziona, ed è il primo risultato.** `rs.status()` porta `optimeDate` per
+  ogni membro, e la differenza fra primario e secondari è il modo in cui il ritardo si misura in
+  tutti gli esempi che si trovano. Su questo set, a riposo, tre letture a cinque secondi di
+  distanza:
+
+```
+mongo-rs-2:27017  ritardo 0 ms
+mongo-rs-3:27017  ritardo 0 ms
+```
+
+`optimeDate` deriva dal timestamp dell'oplog, che ha **granularità di un secondo**: quello zero non
+significa «nessun ritardo», significa «meno di un secondo, e più in là non vedo». Per un set che
+replica in millisecondi è uno strumento che risponde sempre la stessa cosa.
+
+- **La misura vera:** si scrive sul primario con `w: 1` — che torna appena il primario ha preso la
+  scrittura, quindi il cronometro parte prima che i secondari sappiano qualcosa — e si interroga un
+  secondario in un ciclo finché il documento non compare.
+
+```
+esecuzione 1
+ritardo primario -> secondario     min 1  mediana 1  max 3   media 1.6 ms
+costo di una scrittura w: 1        min 0  mediana 1  max 58  media 7.0 ms
+costo di una w: majority           min 2  mediana 2  max 68  media 8.9 ms
+valori grezzi del ritardo: 3 1 1 1 1 3 2 2 1 1
+
+esecuzione 2
+ritardo primario -> secondario     min 1  mediana 1  max 9   media 1.9 ms
+costo di una scrittura w: 1        min 0  mediana 1  max 9   media 1.6 ms
+costo di una w: majority           min 1  mediana 2  max 3   media 2.0 ms
+valori grezzi del ritardo: 9 1 1 2 1 1 1 1 1 1
+
+esecuzione 3
+ritardo primario -> secondario     min 1  mediana 1  max 46  media 6.2 ms
+costo di una scrittura w: 1        min 0  mediana 1  max 8   media 1.8 ms
+costo di una w: majority           min 2  mediana 2  max 82  media 10.4 ms
+valori grezzi del ritardo: 46 1 3 6 1 1 1 1 1 1
+```
+
+**I due numeri da tenere sono le mediane, e le medie vanno ignorate.** Ritardo mediano **1 ms**;
+`w: 1` mediana **1 ms**, `w: "majority"` mediana **2 ms**. Le medie sono più alte perché ogni
+esecuzione ha esattamente un valore fuori scala — 3, 9, 46 — ed è sempre **il primo giro**: i valori
+grezzi lo mostrano a occhio. Non è ritardo di replica, è la prima connessione al secondario che si
+apre e si autentica. Una media su dieci giri di cui uno è il riscaldamento non descrive niente.
+
+- **Conseguenza:** chiedere la maggioranza costa **un millisecondo in più** che non chiederla, su
+  questa configurazione. Registrato in [ADR-0043](Decision.md#adr-0043) come il motivo per cui il
+  dataset dello stack 02 si scrive con `w: "majority"` senza rimpianti: la garanzia si prende perché
+  è quasi gratis, non perché il prezzo non conti.
+- **Riserve:** e sono la parte importante di questa voce. **I tre membri girano sulla stessa
+  macchina**, dentro la stessa rete Docker: fra loro non c'è una rete vera, c'è un bridge locale.
+  Il costo di `w: "majority"` è, per definizione, un giro fino al secondo membro più veloce — qui
+  vale un millisecondo, su due datacenter varrebbe la latenza fra i due datacenter, e sarebbe il
+  termine dominante. Il numero **non va portato sul palco come se descrivesse la produzione**: va
+  detto insieme alla frase che lo qualifica. Seconda riserva: il ciclo di attesa costa un giro di
+  rete per ogni tentativo, quindi il ritardo misurato ha un pavimento di circa un giro — il ritardo
+  vero potrebbe essere sotto il millisecondo e questo metodo non saprebbe distinguerlo. Terza: il
+  set è a riposo e la collezione di prova è vuota; sotto il carico della demo dell'applicazione i
+  numeri saranno altri, e vanno rimisurati là invece che estrapolati da qui.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0043, ADR-0046
+
+---
+
+<a id="v-028"></a>
+### V-028 — Lo stack 02 dall'avvio alla prova: 42 controlli, e lo stesso dataset dello stack 01
+
+- **Comandi:** `make up-02` · `make seed-02` · `make reset-02` · `make down-02` · `make smoke-02` ·
+  `docker stop mongo-rs-3`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, immagine
+  `mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b` (MongoDB 7.0.40)
+- **Che cosa si voleva sapere:** se i sei bersagli del `Makefile`, il seed dentro `rs-init` e
+  `tools/smoke-replicaset.sh` fanno quello che dicono — e, soprattutto, se lo smoke sa diventare
+  rosso. Un `Superati: 42 · Errori: 0` che non si è mai visto fallire vale quanto il verde del
+  Task 6 prima di [V-026](#v-026).
+- **Esito, l'avvio a freddo:**
+
+```
+up --wait uscita=0
+container "4955bdf1…" exited with status code 0
+compose wait rs-init uscita=0
+
+up --wait ha impiegato   8 secondi
+compose wait ha aggiunto 22 secondi
+totale                   30 secondi
+
+=== log di rs-init ===
+inizializzo il replica set «rs0»
+primario eletto: mongo-rs-1:27017
+utente amministratore «admin» creato
+catena completata
+Carico 50000 ordini in lab.ordini con w: "majority"...
+Caricati 50000 ordini in 6439 ms.
+```
+
+Il divario fra i due comandi è ora di **22 secondi**, non dei 14 misurati in [V-025](#v-025): il
+seed vive dentro `rs-init`, quindi `rs-init` dura di più, quindi il tratto che `up --wait` non copre
+si allunga. Il fenomeno è lo stesso e la conclusione di [ADR-0041](Decision.md#adr-0041) non cambia
+— cambia il numero, ed è il motivo per cui il numero non va imparato a memoria.
+
+- **Esito, l'impronta del dataset:**
+
+```
+✓ impronta di lab.ordini: 50000 124861860.70 150281
+```
+
+Sono **gli stessi tre numeri** dello stack 01 ([V-013](#v-013)), ottenuti da un file diverso, su una
+topologia diversa, con un write concern diverso. È il controllo che tiene insieme i due stack: una
+parte della demo confronta la stessa interrogazione sull'uno e sull'altro, e con dataset diversi il
+confronto sarebbe una recita. I due script di prova sorvegliano la stessa terna, quindi modificarne
+uno solo fa fallire l'altro.
+
+- **Esito, lo smoke sa diventare rosso.** Con `docker stop mongo-rs-3`:
+
+```
+uscita=1
+  ✗ salute di mongo-rs-3: atteso healthy, ottenuto «unhealthy»
+  ✗ PID 1 non è mongod su mongo-rs-3: «»
+  ✗ i tre keyfile differiscono o mancano: 33257423… 33257423…
+  ✗ secondari: atteso 2, ottenuto «1»
+  ✗ membri non in salute: atteso nessuno, ottenuto «mongo-rs-3:27017»
+  ✗ memoria vista da mongo-rs-3 (MiB): atteso 768, ottenuto «»
+  ✗ cache WiredTiger di mongo-rs-3 (byte): atteso 268435456, ottenuto «»
+  ✗ nessuna porta pubblicata per mongo-rs-3:27017
+Superati: 34 · Errori: 8
+```
+
+E, nella stessa esecuzione, le risposte che contano:
+
+```
+  ✓ primari: 1
+  ✓ scrittura con w: majority accettata: true
+  ✓ rilettura da mongo-rs-2 (secondario): 1
+  ✓ impronta di lab.ordini: 50000 124861860.70 150281
+```
+
+Questo è un risultato di progetto, non solo una prova: la prima versione dello script si fermava
+dopo tre righe, perché aveva ereditato da `smoke-standalone.sh` un cancello che esce appena un nodo
+non è sano. Su un'istanza singola quel cancello è giusto — senza il nodo non c'è niente da chiedere.
+Su tre membri butta via esattamente le risposte che uno cerca in quel momento. Il cancello è stato
+ristretto al caso «il container non esiste»:
+
+```
+  ✗ il container mongo-rs-3 non esiste — esegui prima «make up-02»
+Superati: 0 · Errori: 3
+Mancano 3 container su 3: lo stack non è avviato.
+```
+
+- **Esito, `reset-02` conserva il segreto:**
+
+```
+prima:  volumi dati-1 dati-2 dati-3 keyfile   keyfile sha 33257423c039b2a2
+dopo:   volumi keyfile                        keyfile sha 33257423c039b2a2
+```
+
+- **Esito, i tempi degli altri bersagli:** `make up-02` a caldo (dati conservati) 16 s; dopo
+  `reset-02`, cioè con i dati da rifare e il keyfile già buono, 29 s; `make seed-02` su uno stack in
+  piedi ricarica 50 000 documenti in 7 658 ms e stampa da sé le due righe dell'idempotenza
+  («replica set già formato: non lo reinizializzo», «utente amministratore già presente»).
+  `make smoke-02` è stato eseguito quattro volte di fila su stack sano: `Superati: 42 · Errori: 0`
+  tutte e quattro.
+- **Conseguenza:** i sei bersagli, il seed dentro `rs-init` e lo script di prova sono registrati in
+  [ADR-0043](Decision.md#adr-0043).
+- **Riserve:** una macchina sola, Docker Desktop, nessun Linux nativo — vale per i tempi, non per
+  gli esiti. Lo smoke è stato visto fallire su **un** guasto, un membro fermato: gli altri 34
+  controlli restano verdi perché il resto funzionava, non perché siano stati messi alla prova uno
+  per uno come in [V-026](#v-026). Il caso «due membri fermi su tre», che è quello interessante —
+  il set perde la maggioranza e diventa di sola lettura — non è stato provato qui: è la scena del
+  Task 8, e va misurato là. Infine `make down-02` e `make reset-02` sono stati eseguiti su uno stack
+  che non aveva mai perso un volume per errore: che si comportino bene su uno stato sporco non è
+  stato verificato.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0043
+
+---
+
+<a id="v-029"></a>
+### V-029 — Dieci secondi contro mezzo: le due morti di un primario non costano lo stesso
+
+- **Comandi:** `docker kill <primario>` · `db.adminCommand({shutdown: 1})` · un `mongosh` che
+  gira dentro un membro superstite e interroga `hello()` in un ciclo da 20 ms · `docker inspect`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, stack
+  `docker/02-replicaset/compose.yaml`, tre membri sani, `mongo-rs-1` primario per priorità 2,
+  nessun carico applicativo. Tre esecuzioni per scena.
+- **Che cosa si voleva sapere:** quanto dura, cronometrato, l'intervallo fra la caduta del
+  primario e il momento in cui un client può di nuovo scrivere. Il numero serve alla pagina del
+  Task 9 e serve a decidere se la scena regge dal vivo — dieci secondi di schermo fermo davanti a
+  cento persone sono una cosa diversa da due.
+- **Come si è misurato, e perché non nel modo ovvio.** Il cronometro non poteva partire *dopo* il
+  colpo: `mongosh` impiega quasi un secondo ad avviarsi e ad autenticarsi, e quel secondo sarebbe
+  finito dentro la misura. L'osservatore viene quindi avviato **prima**, dentro un membro
+  superstite; quando è connesso e caldo stampa `PRONTO`, e solo allora chi lo ha lanciato uccide il
+  primario e segna `t0`. Il ciclo interroga `hello()` ogni 20 ms fino a vedere un `primary` diverso
+  da quello di partenza.
+
+- **Esito, scena 1 — `docker kill` sul primario:**
+
+```
+giro 1   nuovo primario mongo-rs-3:27017   elezione in  9812 ms
+giro 2   nuovo primario mongo-rs-2:27017   elezione in 10619 ms
+giro 3   nuovo primario mongo-rs-3:27017   elezione in 10943 ms
+stato del container ucciso, tutte e tre le volte:
+  Status=exited  RestartCount=0  ExitCode=137
+```
+
+- **Esito, scena 2 — il processo esce da sé (`shutdownServer()`):**
+
+```
+giro 1   nuovo primario mongo-rs-2:27017   elezione in 574 ms
+giro 2   nuovo primario mongo-rs-2:27017   elezione in 480 ms
+giro 3   nuovo primario mongo-rs-2:27017   elezione in 486 ms
+stato del container terminato:
+  Status=running  RestartCount=1, poi 2, poi 3  ExitCode=0
+```
+
+**Venti volte più veloce, e nel verso che nessuno si aspetta.** Il gesto brutale è quello lento; il
+gesto educato è quello rapido. Il motivo sta nel log ([V-030](#v-030)) e non è misterioso: con
+`docker kill` nessuno avvisa nessuno, quindi i superstiti devono aspettare che scada
+`electionTimeoutMillis` — che vale 10 000 ms, e infatti i tre numeri della scena 1 stanno tutti
+poco sopra i dieci secondi. Con `shutdown` il primario cede il ruolo *e lo dice*: non c'è nessun
+timeout da far scadere, e restano solo i millisecondi del voto.
+
+- **`RestartCount=0` è la seconda metà del risultato.** Su un replica set vale quello che
+  [V-017](#v-017) aveva misurato su un'istanza singola: dopo un `docker kill` la politica
+  `restart: unless-stopped` **non interviene**, perché per il demone quella fermata l'ha voluta un
+  umano. Il container resta `exited` con `ExitCode=137`, e ci resta finché qualcuno non lo riavvia.
+  Dopo lo `shutdown`, invece, `RestartCount` avanza a ogni giro e il membro torna su da sé: è la
+  prova che la politica funziona e che il problema non era mai la politica.
+- **Conseguenza:** le due scene sono due bersagli distinti — `make failover-02` e
+  `make failover-02-termina` — registrati in [ADR-0044](Decision.md#adr-0044). La misura conferma
+  su tre membri quanto [ADR-0034](Decision.md#adr-0034) aveva deciso su uno solo, e le dà il numero
+  che le mancava.
+- **Riserve:** tre membri sulla stessa macchina, senza carico e senza rete vera: i dieci secondi
+  sono dominati da un timeout di configurazione e quindi reggeranno altrove, ma il mezzo secondo
+  della scena 2 no — è tempo di rete e di voto, e su datacenter separati vale di più.
+  `electionTimeoutMillis` non è stato modificato: abbassarlo accorcerebbe la scena 1, e non lo si è
+  fatto apposta, perché il valore predefinito è quello che il pubblico troverà. Le tre esecuzioni
+  per scena sono poche per parlare di distribuzione; bastano per dire che i due ordini di grandezza
+  non si sovrappongono. Infine il primario è sempre stato `mongo-rs-1`: il caso in cui cade un
+  **secondario** — che non provoca nessuna elezione — non è cronometrato qui perché non ha niente
+  da cronometrare.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0044, ADR-0046, ADR-0049, ADR-0050, ADR-0051
+
+---
+
+<a id="v-030"></a>
+### V-030 — Le righe di un'elezione, finalmente viste: il voto dura sei millisecondi, il resto è attesa
+
+- **Comandi:** `docker kill <primario>` · `docker logs mongo-rs-2` · filtro per `id` sul JSON
+- **Ambiente:** come [V-029](#v-029). Log del membro **eletto** (`mongo-rs-2`), non di chi ha votato.
+- **Che cosa si voleva sapere:** [ADR-0035](Decision.md#adr-0035) aveva lasciato aperto un debito
+  dichiarato: la sezione sull'elezione di `docs/03-amministrazione/log.md` poggiava solo su
+  [S-044](#s-044), che descrive il meccanismo ma **non nomina una sola riga di log**. Gli `id`
+  andavano inseriti «in `feature/02`, dopo averne vista una». Questa è quella.
+
+- **Esito, la sequenza completa** (orari veri, un'elezione sola):
+
+```
+19:01:47.369  id=21216    REPL      Member is now in state DOWN
+              attr: hostAndPort=mongo-rs-1:27017, heartbeatMessage="Connection refused"
+
+   ... nove secondi, e diciannove ripetizioni di id=23974 «Heartbeat failed after max retries» ...
+
+19:01:56.558  id=4615652  ELECTION  Starting an election, since we've seen no PRIMARY in
+                                    election timeout period
+              attr: electionTimeoutPeriodMillis=10000
+19:01:56.558  id=21438    ELECTION  Conducting a dry run election to see if we could be elected
+              attr: currentTerm=13
+19:01:56.560  id=51799    ELECTION  VoteRequester processResponse
+              attr: dryRun=true, vote="yes", from=mongo-rs-3:27017
+19:01:56.560  id=21444    ELECTION  Dry election run succeeded, running for election
+              attr: newTerm=14
+19:01:56.560  id=6015300  ELECTION  Storing last vote document in local storage for my election
+19:01:56.564  id=51799    ELECTION  VoteRequester processResponse
+              attr: dryRun=false, vote="yes", from=mongo-rs-3:27017
+19:01:56.564  id=21450    ELECTION  Election succeeded, assuming primary role
+              attr: term=14
+19:01:56.564  id=21358    REPL      Replica set state transition
+              attr: newState="PRIMARY", oldState="SECONDARY"
+```
+
+Sul membro che ha **votato** e non è stato eletto compaiono invece solo `id=23980` «Responding to
+vote request», due volte — una per il giro a vuoto e una per quello vero — e `id=21215` «Member is
+in new state».
+
+**Il numero che cambia il racconto: 56.558 → 56.564 sono sei millisecondi.** L'elezione vera —
+giro a vuoto, voto scritto su disco, richiesta di voto, ruolo assunto — dura quanto un battito di
+ciglia. I dieci secondi di [V-029](#v-029) non sono l'elezione: sono l'**attesa prima di
+cominciarla**, e il log lo dice per esteso in un attributo, `electionTimeoutPeriodMillis: 10000`.
+Ancora più preciso: la caduta è **notata subito**, a `19:01:47.369`, tre decimi di secondo dopo il
+colpo, con «Connection refused» scritto nell'attributo. Il set sa che il primario è morto quasi
+istantaneamente e aspetta comunque dieci secondi prima di reagire — perché un membro irraggiungibile
+per un istante non è un membro morto, e indire un'elezione a ogni singhiozzo di rete costerebbe più
+di quello che salva.
+
+- **Conseguenza:** gli `id` entrano in `docs/03-amministrazione/log.md` al Task 12, e la riserva
+  dichiarata da [ADR-0035](Decision.md#adr-0035) può essere tolta. Lo script
+  `tools/failover-replicaset.sh` filtra il log **per questi `id`** e non per il testo dei
+  messaggi, secondo la regola 1 di quell'ADR. Registrato in [ADR-0044](Decision.md#adr-0044).
+- **Riserve:** una sola elezione osservata riga per riga, su un set a tre membri con priorità
+  2/1/1 e senza carico. Il numero di termine (`term`) qui è 13→14 perché il set aveva già subìto
+  altre prove: su un set appena creato sarebbe 1→2, e chi confronta i propri log non deve
+  aspettarsi lo stesso valore. La sequenza è stata letta sul nodo **eletto**: guardare il log del
+  votante fa concludere che l'elezione non lasci quasi traccia, ed è l'errore più facile da
+  commettere. Infine non è stata osservata un'elezione *contesa* — due candidati nello stesso
+  termine, con un `dry run` che fallisce — che è il caso in cui `21438` e `21444` divergono.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0044, ADR-0046, ADR-0049
+
+---
+
+<a id="v-031"></a>
+### V-031 — La maggioranza persa: il superstite è vivo, è sano, e non scrive più
+
+- **Comandi:** `./tools/failover-replicaset.sh maggioranza` (cioè `make failover-02-maggioranza`)
+  · `docker kill` su due membri, il primario lasciato in piedi · `hello()` interrogato in ciclo
+  stretto dentro il primario stesso · `rs.conf()`, `rs.status()`, e una scrittura provata a mano
+- **Ambiente:** stack `docker/02-replicaset`, `mongo@sha256:b6421f…` (MongoDB 7.0.40), tre membri
+  con priorità 2/1/1, macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0. Nessun carico.
+  Impostazioni lette da `rs.conf()`, non supposte: `heartbeatIntervalMillis: 2000`,
+  `electionTimeoutMillis: 10000`, `heartbeatTimeoutSecs: 10`.
+- **Che cosa si voleva sapere:** [V-029](#v-029) e [V-030](#v-030) misurano due scene che
+  **finiscono bene** — il set perde il primario e se ne dà un altro. Chi guarda ne ricava che un
+  replica set «regge ai guasti», senza mai sentir dire *a quanti*. Il caso che risponde è l'altro:
+  due membri su tre fermi. È dichiarato scoperto in [ADR-0043](Decision.md#adr-0043) e in
+  [ADR-0044](Decision.md#adr-0044), ed è l'unica scena che spieghi perché i membri sono tre.
+
+- **Esito, primo numero — il primario si retrocede da solo, e ci mette nove secondi.** Sei
+  esecuzioni, stesso protocollo: si ferma un secondario (il set non se ne accorge), poi si ferma
+  il secondo e si cronometra da lì.
+
+```
+9 364 · 9 136 · 9 331 · 9 334 · 9 327 · 9 316  ms      mediana 9 329 ms
+```
+
+  Il cronometro gira **dentro il primario**, in una `mongosh` collegata e autenticata prima del
+  colpo, che interroga `hello()` ogni 20 ms e si ferma al primo `isWritablePrimary` diverso da
+  `true`. È la sua stessa retrocessione: nessun altro nodo può datarla, perché non ne resta
+  nessuno.
+
+- **Perché nove e non dieci.** `electionTimeoutMillis` vale 10 000 ms, ma il conto non parte dal
+  colpo: parte dall'**ultimo battito ricevuto da una maggioranza**. I battiti vanno ogni
+  `heartbeatIntervalMillis` = 2 000 ms ([S-044](#s-044) lo dice a parole: «Replica set members
+  send heartbeats (pings) to each other every two seconds»), quindi il colpo cade in un punto
+  qualunque di quella finestra e la misura vale fra 8 e 10 secondi. Le sei esecuzioni stanno in
+  9,1–9,4 s: coerente, e appunto per questo **il numero non va imparato a memoria**.
+
+- **Esito, la sequenza nel log** (esecuzione del 2026-09-01, `id` sul superstite `mongo-rs-1`):
+
+```
+08:28:45.164  id=21216    REPL   Member is now in state DOWN      ← il primo membro fermato
+08:28:47.193  id=21216    REPL   Member is now in state DOWN      ← il secondo, 0,4 s dopo il colpo
+
+   ... nove secondi, e id=23974 «Heartbeat failed after max retries» ripetuto ogni 2 s ...
+
+08:28:56.092  id=21809    REPL   Can't see a majority of the set, relinquishing primary
+08:28:56.092  id=21475    REPL   Stepping down from primary in response to heartbeat
+08:28:56.092  id=21343    REPL   Starting to kill user operations
+08:28:56.093  id=21358    REPL   Replica set state transition
+08:28:56.094  id=5123007  REPL   Interrupting PrimaryOnlyService due to stepDown
+```
+
+  **`id=21809` è la riga che vale la scena**, e dice in inglese esatto quello che si fatica a far
+  passare a parole: non «ho perso la connessione», ma «non vedo una maggioranza, quindi **cedo**».
+  La forma è la stessa di [V-030](#v-030): la caduta è notata in quattro decimi di secondo, e la
+  reazione arriva nove secondi dopo perché è **decisa**, non subita. `id=21343` spiega di
+  passaggio perché le connessioni aperte cadono: le operazioni degli utenti vengono interrotte.
+
+- **Esito, che cosa risponde da lì in poi.**
+
+| richiesta | come | risposta |
+|---|---|---|
+| scrittura | qualunque | `NotWritablePrimary` (code **10107**) — «not primary» |
+| lettura | `mongosh --host localhost`, connessione **diretta** | `lab.ordini` → 50 000 documenti |
+| lettura | URI con `replicaSet=rs0`, `readPreference` predefinita | `MongoServerSelectionError` |
+| lettura | URI con `replicaSet=rs0`, `readPreference=secondaryPreferred` | 50 000 documenti |
+
+  Il superstite si presenta come `isWritablePrimary=false, secondary=true, primary=nessuno`, e
+  `rs.status()` lo dà `SECONDARY health=1` con gli altri due «(not reachable/healthy)». La
+  differenza fra le due letture non è un capriccio: [S-045](#s-045) documenta che `mongosh`
+  aggiunge `directConnection=true` da sé *a meno che* la stringa non contenga `replicaSet`. Con
+  la connessione diretta si parla a **quel** nodo e si legge; con l'URI del replica set si chiede
+  al driver di trovare un primario, e un primario non c'è. **Chi prova la demo con `mongosh
+  --host` conclude che il set funziona ancora.** L'applicazione, no.
+
+- **Esito, il rientro.** Riavviando i due membri fermati, il primario torna dopo 9 207 · 12 348 ·
+  12 425 ms: il tempo di far ripartire due `mongod` e di rieleggere. Nessuno lo fa da sé — i
+  container sono `exited` dopo un `docker kill` ([V-017](#v-017)) — e il gesto è
+  `./tools/reset-demo.sh 02`, che li rialza, aspetta le priorità e ripulisce la collezione di
+  scarto lasciata dalla scena.
+
+- **Conseguenza:** la scena entra in `tools/failover-replicaset.sh` come terzo bersaglio e nel
+  `Makefile` come `failover-02-maggioranza`; i numeri vanno in `docs/02-architetture/replica-set.md`
+  al Task 9. Registrata in [ADR-0045](Decision.md#adr-0045). Il debito dichiarato in
+  [ADR-0043](Decision.md#adr-0043) e in [ADR-0044](Decision.md#adr-0044) è saldato.
+- **Riserve:** il messaggio d'errore dell'URI di replica set è, alla lettera,
+  `MongoServerSelectionError: getaddrinfo ENOTFOUND mongo-rs-2` — un errore di **risoluzione del
+  nome**, non di selezione del server. È un artefatto dei container: un container fermo sparisce
+  dal DNS della rete Compose, mentre su macchine vere il nome risolverebbe e la connessione
+  verrebbe rifiutata, con un testo diverso. Chi riconosce la situazione dal testo dell'errore
+  sbaglierà: è la stessa lezione di [ADR-0035](Decision.md#adr-0035), un piano più in là. Poi:
+  la finestra 8–10 s è dedotta dai due parametri e corroborata da sei valori che stanno tutti in
+  9,1–9,4 s, ma gli estremi non sono stati osservati — un colpo che cadesse subito dopo un battito
+  dovrebbe dare ~8 s, e non è capitato. La scena ferma sempre **due secondari**, lasciando in
+  piedi il primario; il caso simmetrico — primario più un secondario, con un secondario solo
+  superstite — non è cronometrato, perché lì non c'è nessuna retrocessione da datare. Infine
+  «ecco perché i membri sono tre e non due» resta un **ragionamento** sulla stessa regola, non una
+  misura: un set a due membri non è stato costruito, e la sua maggioranza sarebbe 2, cioè zero
+  guasti tollerati in scrittura.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0045, ADR-0046, ADR-0051, ADR-0052
+
+---
+
+<a id="v-032"></a>
+### V-032 — Il container lavora, `docker logs` tace: la cattura si congela quando il demone riparte
+
+- **Comandi:** `docker logs <membro>` · `docker inspect --format '{{.State.StartedAt}}'` ·
+  `db.adminCommand({ getLog: "global" })` · un container creato apposta come controllo
+- **Ambiente:** Docker Desktop 29.7.2 su macOS 26.6.2 arm64. Il demone era stato **fermo tutta la
+  notte** — la sessione si è aperta con `Cannot connect to the Docker daemon` — ed è stato
+  riavviato la mattina del 2026-09-01. I tre membri dello stack 02 sono tornati su da soli, come
+  prescrive `restart: unless-stopped`, e risultavano `healthy`.
+- **Che cosa si voleva sapere:** niente. È stata trovata cercando dell'altro, ed è il motivo per
+  cui è finita qui: `tools/failover-replicaset.sh` legge il log con `docker logs`, e in queste
+  condizioni non avrebbe stampato **niente**, senza dire perché.
+
+- **Esito, il fatto nudo.** Su `mongo-rs-1`, alle 08:12 del 2026-09-01:
+
+```
+docker inspect  → StartedAt = 2026-09-01T08:05:55.098Z   RestartCount = 0
+docker logs     → 13 944 righe, l'ultima delle quali del 2026-08-31T19:19:50.378
+getLog global   → totalLinesWritten = 2 548, righe da 08:08:31.096 a 08:12:03.430
+```
+
+  Il container è partito **stamattina**, mongod ha scritto **2 548 righe** da allora, e
+  `docker logs` non ne mostra una. Non dà errore: dà silenzio, che è la forma peggiore, perché
+  chi legge conclude che l'evento non ha lasciato traccia.
+
+- **Esito, il controllo.** Un container creato in quel momento (`docker run -d alpine …`) è stato
+  catturato normalmente. Quindi non è il demone a non catturare: è la cattura dei container
+  **preesistenti** al suo riavvio a non ripartire.
+
+- **Esito, e non è nemmeno stabile.** Ricontrollando un'ora dopo, la cattura era ripresa **da
+  sola** su due membri su tre, lasciando un buco:
+
+| membro | ultima riga di ieri | prima riga di oggi | buco |
+|---|---|---|---|
+| `mongo-rs-1` | 2026-08-31T19:19:50.378 | 2026-09-01T08:15:23.610 | 9 min 28 s dall'avvio |
+| `mongo-rs-2` | 2026-08-31T19:19:50.378 | 2026-09-01T08:20:01.936 | ripresa dopo un riavvio |
+| `mongo-rs-3` | 2026-08-31T19:20:05.557 | *nessuna* | tutta la mattina |
+
+  Le righe del buco non sono ricomparse più: per chi legge `docker logs`, sono perse. Su
+  `mongo-rs-3` la cattura è tornata solo dopo che `reset-demo.sh` ne ha ricreato l'esecuzione.
+  Nessun campanello: `docker ps` dice `healthy`, `docker inspect` dice `running`, l'healthcheck
+  passa. Lo stato del container non racconta niente dello stato del suo log.
+
+- **Conseguenza:** `tools/failover-replicaset.sh` non si fida più. Prima di leggere confronta
+  l'ultima riga catturata con l'istante di avvio del container: se il log è più vecchio
+  dell'avvio non può essere di quella esecuzione, e le righe si chiedono a **mongod**, che le
+  tiene in memoria e non dipende da Docker. Il confronto è coperto da
+  `tools/tests/test_failover_log.py`, costruito sugli istanti veri di questa verifica —
+  perché un rilevatore la cui condizione di scatto si presenta di rado può rompersi senza che
+  nessuno se ne accorga, fino alla sera in cui serve. Registrata in
+  [ADR-0045](Decision.md#adr-0045).
+- **Riserve:** **la causa non è stata identificata**, e nemmeno il motivo per cui la cattura
+  riprende. Un solo riavvio del demone osservato, non provocato apposta e non riprodotto: questa
+  voce dice *che succede*, non *quando*. Osservata su Docker Desktop, dove fra il container e il
+  file di log c'è una macchina virtuale in più; su un `dockerd` nativo di Linux il meccanismo è
+  diverso e non è stato provato. [S-033](#s-033) documenta il driver `json-file` e non nomina
+  questo caso — la pagina parla di rotazione e di dimensioni, mai di una cattura che si ferma.
+  Infine il ripiego ha un orizzonte suo: `getLog: "global"` è un anello di **1 024 righe**
+  (misurato: `totalLinesWritten` 2 548, `log.length` 1 023), quindi su un nodo chiacchierone le
+  righe che interessano possono esserne già uscite. Lo stesso vale, dall'altro lato, per il
+  `tail -600` con cui si legge `docker logs`: un ciclo d'attesa che riapre una `mongosh` ogni
+  mezzo secondo ha prodotto circa 800 righe di `NETWORK` e `ACCESS` in pochi minuti, e ha spinto
+  fuori dalla finestra proprio le righe di `REPL` che si cercavano.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0045, ADR-0052
+
+---
+
+<a id="v-033"></a>
+### V-033 — La controprova di V-016: dodicimila scritture confermate, il primario ucciso, zero perse
+
+- **Comandi:** uno scrittore `mongosh` collegato con l'URI del replica set che inserisce documenti
+  uno alla volta con `w: "majority"` e stampa l'`_id` **dopo** la conferma del server; a metà corsa
+  `docker kill` sul primario; a membro rialzato, si verifica quali dei confermati esistano ancora,
+  leggendo con `readConcern: "majority"`
+- **Ambiente:** stack `docker/02-replicaset`, MongoDB 7.0.40, tre membri con priorità 2/1/1, macOS
+  26.6.2 arm64, Docker 29.7.2. Lo scrittore gira **dentro un membro che non verrà ucciso**, così il
+  colpo non porta via anche il cliente. Due esecuzioni da 45 secondi.
+- **Che cosa si voleva sapere:** [ADR-0032](Decision.md#adr-0032) rimanda esplicitamente a
+  `feature/02` il confronto sulla perdita di dati, e la pagina dell'istanza singola ha un numero che
+  fa male: **100 scritture confermate al client e sparite** dopo un `SIGKILL`, con la write concern
+  predefinita ([V-016](#v-016)). Il confronto senza il numero gemello è una discussione; con il
+  numero gemello è una misura.
+
+- **Esito, il numero gemello.**
+
+| | istanza singola ([V-016](#v-016)) | replica set, `w: "majority"` |
+|---|---:|---:|
+| scritture confermate al client | 41 558 | 12 901 |
+| **confermate e perdute** | **100** | **0** |
+
+  E non è che siano sopravvissute «quasi tutte»: nella collezione ci sono **12 902** documenti e il
+  massimo `n` scritto è **12 902**, quindi l'insieme è completo, senza buchi. Prima esecuzione,
+  senza istanti nei documenti: 11 937 confermate, 11 937 sopravvissute, zero errori.
+
+- **Esito, che cosa ha visto l'applicazione.** Quasi niente, ed è il secondo risultato. Su 12 902
+  tentativi, **un solo errore**:
+
+```
+ERR 2698 connection 1 to 172.18.0.3:27017 closed
+```
+
+  Poi lo scrittore è ripartito da sé, senza che nessuno lo toccasse. Il prezzo è stato una **pausa**,
+  e si vede negli istanti che il client scrive dentro i documenti:
+
+```
+n=2697  t=08:49:50.524
+n=2698  t=08:49:50.527   ← l'errore, e il colpo: docker kill alle 08:49:50
+n=2699  t=08:49:50.669
+n=2700  t=08:50:00.824   ← 10 155 ms dopo
+```
+
+  **Varco massimo 10 155 ms**; i quattro salti successivi per grandezza sono 142, 132, 99 e 92 ms.
+  Un'unica `insertOne` è rimasta appesa dieci secondi dentro il driver e poi è riuscita: è
+  l'elezione di [V-029](#v-029) vista dal lato dell'applicazione, che non sa niente di elezioni e si
+  limita ad aspettare. Su 45 secondi di corsa, 12 902 scritture: circa **287 al secondo**, con dieci
+  secondi buttati in mezzo.
+
+- **Esito, il caso incerto — e vale il resto della voce.** Il documento `n=2698`, quello per cui il
+  client ha ricevuto un **errore**, nel database **c'è**. Scritto e mai confermato. È l'immagine
+  speculare esatta di [V-016](#v-016): là il client aveva in mano un `acknowledged: true` per dati
+  che non esistevano, qui ha in mano un errore per dati che esistono. In tutti e due i casi ciò che
+  il client crede non coincide con ciò che il database ha, e la differenza fra i due è che **questo
+  si sopravvive** — a patto che la scrittura si possa rifare senza danno. Un'applicazione che
+  reagisce a un errore riscrivendo, e la cui riscrittura non è idempotente, qui si fa un duplicato.
+- **Conseguenza:** chiude il rimando di [ADR-0032](Decision.md#adr-0032). Il numero va in
+  `docs/02-architetture/replica-set.md` accanto al suo gemello, registrato in
+  [ADR-0046](Decision.md#adr-0046).
+- **Riserve:** **la quasi invisibilità del guasto non è merito della replica, è merito dei
+  retryable write**, che nel driver sono attivi per impostazione predefinita: senza di essi
+  l'applicazione avrebbe visto una raffica di errori e avrebbe dovuto decidere lei che fare. La
+  prova con `retryWrites=false` **non è stata fatta**, e sarebbe la naturale da aggiungere. Poi:
+  gli istanti nei documenti li scrive il **client** quando costruisce il documento, cioè all'inizio
+  della chiamata — il varco fra due istanti consecutivi è quindi la durata della chiamata in mezzo,
+  che è proprio quello che si voleva, ma è un orologio di client e non del server. Due esecuzioni
+  sole. In tutte e due è stato ucciso il **primario mentre gli altri due erano sani**, cioè con la
+  maggioranza superstite: non dice niente sul caso di [V-031](#v-031), dove le scritture si fermano
+  del tutto. E `w: "majority"` qui vuol dire «due container su tre sullo stesso portatile»: la
+  garanzia è la stessa che si avrebbe altrove, il costo no ([V-027](#v-027)).
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0046
+
+---
+
+<a id="v-034"></a>
+### V-034 — La finestra dell'oplog dello stack 02: quindici ore dentro due gigabyte
+
+- **Comandi:** `rs.printReplicationInfo()` e `db.getSiblingDB("local").oplog.rs.stats()` sul
+  primario, dopo una giornata di prove sullo stack.
+- **Ambiente:** stack `docker/02-replicaset`, MongoDB 7.0.40, tre membri con priorità 2/1/1,
+  macOS 26.6.2 arm64, Docker 29.7.2.
+- **Che cosa si voleva sapere:** l'oplog è il pezzo che rende possibile il backup a caldo coerente,
+  ed è **finito**. Prima di scrivere una pagina che dice «attenzione alla finestra» serviva sapere
+  quanto è larga la finestra qui.
+- **Esito:**
+
+```text
+configuredLogSizeMB : 2032.35
+usedMB              :  120.39
+timeDiff            : 54339 s   →  15,09 ore
+tFirst              : Mon Aug 31 2026 18:43:29 GMT+0000
+tLast               : Tue Sep 01 2026 09:49:08 GMT+0000
+```
+
+  Due gigabyte di oplog, riempiti per il 6 %, che coprono **quindici ore** di storia. I 2 032 MB non
+  sono stati scelti da nessuno: sono il 5 % dello spazio libero al primo avvio, che è il valore
+  predefinito dell'immagine.
+- **Conseguenza:** la finestra dell'oplog di questo stack è troppo larga perché un dump la superi.
+  Per mostrare il fallimento è servita un'istanza usa-e-getta ([V-036](#v-036)).
+- **Riserve:** **le quindici ore non sono una proprietà dello stack, sono una proprietà del
+  traffico.** La stessa configurazione sotto la scrittura di [V-036](#v-036) — documenti da 100 KB —
+  scenderebbe a minuti. Il numero da guardare non è mai la dimensione dell'oplog: è
+  `timeDiff`, e va guardato **sotto il carico vero**. Misura singola, su una macchina che quel
+  giorno faceva quasi solo prove di failover.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0047
+
+---
+
+<a id="v-035"></a>
+### V-035 — Un dump a caldo mentre si scrive, e due restore dello stesso file: sette documenti di differenza
+
+- **Comandi:** uno scrittore `mongosh` che inserisce in `lab.movimenti` per 30 secondi, un documento
+  alla volta, con un istante `t` messo dal client; a metà corsa, sul primario,
+  `mongodump --oplog --out /tmp/dump-02` con l'URI del replica set e l'autenticazione di
+  amministratore; poi, due volte, `lab.dropDatabase()` seguito da `mongorestore` sullo stesso dump —
+  la prima senza `--oplogReplay`, la seconda con.
+- **Ambiente:** stack `docker/02-replicaset`, MongoDB 7.0.40, `mongodump`/`mongorestore` 100.18.0
+  presi da `/usr/bin` dentro l'immagine pinnata (non installati a parte), macOS 26.6.2 arm64,
+  Docker 29.7.2. Il dataset di partenza è quello di `reset-demo.sh 02`: `lab.ordini`, 50 000
+  documenti, impronta `50000 124861860.70 150281`.
+- **Che cosa si voleva sapere:** `--oplog` promette coerenza a un punto nel tempo. Serviva sapere
+  **quale** punto, e quanto valga davvero la riproduzione dell'oplog: se la differenza fra i due
+  restore fosse zero, l'opzione sarebbe cerimonia.
+- **Esito, il dump.** È durato **50 ms**, dalle 09:51:48.369 alle 09:51:48.419, e in quel mezzo
+  decimo di secondo le scritture non si sono fermate:
+
+```text
+lab.movimenti     733 documenti
+lab.ordini      50 000 documenti
+oplog catturato     12 voci
+```
+
+  Lo scrittore ha messo giù **6 107** documenti in tutto, dalle 09:51:44.079 alle 09:52:14.054.
+  Contati sull'istante scritto dal client: **732** esistevano all'inizio del dump, **741** alla fine,
+  **5 366** sono arrivati dopo che il dump era finito.
+- **Esito, i due restore.** Stesso file, stessa destinazione svuotata prima con `dropDatabase()`:
+
+| | senza `--oplogReplay` | con `--oplogReplay` |
+|---|---:|---:|
+| documenti ripristinati | 50 733 | 50 733 |
+| falliti | 0 | 0 |
+| impronta di `lab.ordini` | `50000 124861860.70 150281` ✓ | `50000 124861860.70 150281` ✓ |
+| `lab.movimenti` | **733** | **740** |
+| ultimo movimento | `n=733  t=09:51:48.370` | `n=740  t=09:51:48.388` |
+
+  La seconda esecuzione dice a voce alta che cosa ha fatto in più: `replaying oplog`, poi
+  `applied 12 oplog entries`. **Sette documenti**: è quanto vale la riproduzione dell'oplog su un
+  dump durato cinquanta millisecondi. Su un dump che dura mezz'ora vale mezz'ora di scritture.
+- **Esito, il punto nel tempo — ed è la ragione della voce.** Il restore completo si ferma a **740**;
+  alla fine del dump i documenti erano **741**. Il punto di ripristino **non è l'ultima riga di log
+  del comando**: è l'istante dell'ultima voce di oplog catturata, e cade **dentro** l'esecuzione. Un
+  documento scritto fra la cattura dell'ultima voce e il ritorno del comando è nel database e non è
+  nel backup. Nessuna delle due esecuzioni ha ricostruito gli indici — `no indexes to restore for
+  collection lab.ordini` — perché il dataset di demo non ne ha oltre a `_id_`.
+- **Conseguenza:** la pagina `docs/03-amministrazione/backup-restore.md` può dire «coerente a un
+  punto nel tempo» indicando **quale** punto, e può quantificare `--oplogReplay` invece di
+  raccomandarlo. Registrato in [ADR-0047](Decision.md#adr-0047).
+- **Riserve:** gli istanti `t` li scrive il **client** quando costruisce il documento, non il server
+  quando lo applica: il confine 740/741 è approssimato al millisecondo di due orologi diversi, non
+  dimostrato confrontando i timestamp dell'oplog. Una sola esecuzione. Il dump è girato **sul
+  primario**: `--readPreference=secondary` toglierebbe carico alla sorgente e **non è stato
+  provato**. Il dump è completo — `--oplog` lo impone ([S-011](#s-011)) — e quindi contiene
+  `admin/system.users.bson`: il restore ha stampato `restoring users from …`, il che significa che
+  **il file di backup vale quanto le credenziali del database** e va trattato come tale
+  ([ADR-0014](Decision.md#adr-0014)). Nessun restore è stato fatto su uno stack **diverso** da
+  quello di origine, che è il caso vero di un ripristino.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0047
+
+---
+
+<a id="v-036"></a>
+### V-036 — L'oplog che rotola sotto il dump: «oplog overflow», uscita 1, e 1,8 GB di BSON senza `oplog.bson`
+
+- **Comandi:** un'istanza usa-e-getta con l'immagine pinnata, senza keyfile e senza autenticazione,
+  avviata con `--replSet mini --oplogSize 1 --bind_ip_all`; carico di dati; uno scrittore che
+  inserisce documenti da 100 KB senza sosta; `mongodump --oplog --out /tmp/dump-mini` durante la
+  scrittura. Il container è stato rimosso con `docker rm -f -v` a prova finita.
+- **Ambiente:** `mongo@sha256:b6421fd6…`, MongoDB 7.0.40, macOS 26.6.2 arm64, Docker 29.7.2.
+  Istanza separata: lo stack del lab ha una finestra di **15 ore** ([V-034](#v-034)) e non può
+  mostrare questo guasto.
+- **Che cosa si voleva sapere:** `--oplog` funziona finché l'oplog conserva le voci prodotte durante
+  il dump. Se il dump dura più della finestra, la garanzia salta. Il piano di questa feature chiede
+  di mostrarlo **mentre fallisce**, non di raccontarlo.
+- **Esito, il primo tentativo — fallito, e istruttivo.** Con `--oplogSize 1` l'oplog **non** si è
+  fermato a 1 MB: è arrivato a **429,86 MB** con una finestra di **131 secondi**, e il dump da
+  2,2 GB, durato 4,8 secondi, è riuscito con 857 voci catturate. Il motivo sta nel log del server:
+
+```text
+id 22402  OplogCapMaintainerThread-local.oplog.rs
+"WiredTiger record store oplog truncation finished"
+pinnedOplogTimestamp: 09:59:44   numRecords: 1835   dataSize: 188 494 870   durationMillis: 3751
+```
+
+  Il taglio dell'oplog è limitato da un **timestamp bloccato**: WiredTiger non può buttare via voci
+  che servirebbero a ripartire dopo un crash, e quel confine è l'ultimo checkpoint. I checkpoint,
+  per impostazione predefinita, sono ogni **60 secondi**. Ne segue una conseguenza che vale la pena
+  scrivere: **la finestra dell'oplog non può scendere sotto l'intervallo di checkpoint, per quanto
+  si rimpicciolisca l'oplog.** Un oplog da 1 MB con checkpoint ogni minuto tiene comunque un minuto
+  di storia, e centinaia di megabyte.
+- **Esito, il secondo tentativo — il fallimento vero.** Stessa istanza, avviata in più con
+  `--syncdelay 1`, cioè un checkpoint al secondo. La finestra è crollata dove serviva:
+
+```text
+oplog configurato MB = 1.00
+oplog usato MB       = 27.63
+finestra secondi     = 1
+voci nell'oplog      = 287
+```
+
+  Con 1,5 GB da scaricare e la scrittura in corso, il dump ha impiegato **3,4 secondi** — tre volte
+  la finestra — ed è finito così:
+
+```text
+10:03:43.261  writing `lab.grandi` to /tmp/dump-mini/lab/grandi.bson
+10:03:46.673  done dumping `lab.grandi` (15000 documents)
+10:03:46.678  Failed: oplog overflow: mongodump was unable to capture all new oplog entries during execution
+USCITA=1
+```
+
+- **Esito, il pezzo che si dimentica.** Il comando è fallito **dopo** aver scritto tutto:
+
+```text
+/tmp/dump-mini/lab/grandi.bson     1 536 555 000 byte
+/tmp/dump-mini/lab/disturbo.bson     320 525 373 byte
+/tmp/dump-mini/oplog.bson                  assente
+/tmp/dump-mini/prelude.json                assente
+```
+
+  Un dump riuscito ha `oplog.bson` e `prelude.json` in cima alla cartella; questo ha 1,8 GB di BSON
+  e nessuno dei due. Sul disco resta qualcosa che **assomiglia** a un backup, pesa come un backup, e
+  non è coerente a nessun punto nel tempo. L'unico segnale è il codice di uscita **1**: uno script
+  di backup che non lo controlla conserva l'oggetto sbagliato.
+- **Conseguenza:** il fallimento entra nella pagina con il suo testo esatto, insieme alla regola che
+  ne discende — si controlla il codice di uscita, e si controlla che `oplog.bson` esista. Registrato
+  in [ADR-0047](Decision.md#adr-0047).
+- **Riserve:** **la prova è forzata, e va detto come.** Nessuno mette in produzione un oplog da 1 MB
+  con un checkpoint al secondo: il caso vero è l'opposto — un oplog normale e un dump che dura ore.
+  Qui i due termini sono stati compressi per farli stare in tre secondi; il meccanismo e il messaggio
+  d'errore sono quelli veri, la scala no. `--syncdelay` è un parametro che il manuale sconsiglia di
+  toccare, ed è stato toccato **solo** su un'istanza usa-e-getta, mai sullo stack del lab. Infine:
+  **la pagina di `mongodump` non nomina questo guasto.** Elenca le combinazioni vietate e le
+  operazioni che lo fanno fallire ([S-011](#s-011)), ma non dice da nessuna parte che l'oplog possa
+  rotolare via sotto il dump. Il limite è reale, il messaggio d'errore esiste nel programma, e la
+  fonte primaria tace.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0047
+
+---
+
+<a id="v-037"></a>
+### V-037 — `--oplogReplay` con `--nsInclude`: il rifiuto arriva prima di toccare i dati
+
+- **Comando:** `mongorestore --oplogReplay --nsInclude 'lab.*' /tmp/dump-02` sullo stack del lab,
+  sullo stesso dump completo di [V-035](#v-035).
+- **Ambiente:** stack `docker/02-replicaset`, `mongorestore` 100.18.0.
+- **Che cosa si voleva sapere:** [S-059](#s-059) dichiara che `--oplogReplay` non convive con le
+  opzioni che restringono l'ambito del restore. Restava da sapere **quando** se ne accorge: prima o
+  dopo aver scritto.
+- **Esito:**
+
+```text
+Failed: cannot use --oplogReplay with includes specified
+0 document(s) restored successfully. 0 document(s) failed to restore.
+USCITA=1
+```
+
+  Prima. **Zero documenti** toccati: il controllo è a monte, non a metà strada.
+- **Conseguenza:** il limite dichiarato dalla fonte si può mostrare in due righe, e la coppia
+  «dump completo obbligatorio / restore completo obbligatorio» diventa una regola verificata invece
+  che una nota a piè di pagina. Registrato in [ADR-0047](Decision.md#adr-0047).
+- **Riserve:** provata **solo** la combinazione con `--nsInclude`. Le altre cinque dell'elenco —
+  `--db`, `--collection`, `--nsExclude`, `--nsFrom`, `--nsTo` — non sono state provate, e il
+  messaggio d'errore potrebbe essere diverso. Non è stato provato il caso simmetrico e più insidioso:
+  un restore **parziale senza** `--oplogReplay`, che non dà nessun errore e produce un ripristino
+  incoerente in silenzio.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0047
+
+---
+
+<a id="v-038"></a>
+### V-038 — `--keyFile` senza `--auth`, e dove vivono gli utenti di un replica set
+
+- **Comandi:** `docker inspect` sul comando di `mongo-rs-1`; `stat` sul keyfile dentro il
+  container; una sessione `mongosh` **senza credenziali** su `localhost:27017` da dentro il membro;
+  poi, autenticati, lettura di `admin.system.users` sui tre membri, creazione di un utente sul
+  primario, rilettura sui secondari, tentativo di creazione **su un secondario** e su `local`.
+- **Ambiente:** stack `docker/02-replicaset` in esercizio, mongod 7.0.40, replica `rs0`.
+- **Che cosa si voleva sapere:** quattro cose che la pagina della sicurezza deve poter affermare.
+  Che `--keyFile` attivi il controllo degli accessi **da solo** ([S-002](#s-002)); che l'eccezione
+  localhost sia davvero chiusa dopo il primo utente ([S-006](#s-006)); se l'utente interno dei
+  membri sia un documento da qualche parte; e se in un replica set esistano utenti «locali a un
+  nodo», che è la distinzione che [ADR-0026](Decision.md#adr-0026) intesta a quella pagina.
+- **Esito:**
+
+```text
+comando:  ["mongod","--replSet","rs0","--keyFile","/keyfile/mongo-keyfile",
+           "--bind_ip_all","--wiredTigerCacheSizeGB","0.25"]
+keyfile:  /keyfile/mongo-keyfile  400  mongodb:mongodb  1024 byte
+          16 righe, 1008 caratteri base64 senza gli a capo
+utente del processo: uid=999(mongodb) gid=999(mongodb)
+```
+
+  Nel comando **`--auth` non c'è**. Da una connessione senza credenziali, sullo stesso loopback a
+  cui l'eccezione localhost si applicherebbe:
+
+```text
+hello()                            -> OK: setName=rs0 primary=mongo-rs-1:27017
+admin.system.users.countDocuments  -> Unauthorized: Command aggregate requires authentication
+replSetGetStatus                   -> Unauthorized: Command replSetGetStatus requires authentication
+lab.ordini.countDocuments          -> Unauthorized: Command aggregate requires authentication
+createUser                         -> Unauthorized: Command createUser requires authentication
+```
+
+  Autenticati, i tre membri dicono la stessa cosa — un utente, e l'utente interno **non è un
+  documento**:
+
+```text
+mongo-rs-1 (primario)  utenti=1  __system=0   admin.admin  ruoli=[{"role":"root","db":"admin"}]
+mongo-rs-2 (secondario) utenti=1 __system=0   admin.admin  ruoli=[{"role":"root","db":"admin"}]
+mongo-rs-3 (secondario) utenti=1 __system=0   admin.admin  ruoli=[{"role":"root","db":"admin"}]
+```
+
+  Creando `lettore-demo` sul primario, i due secondari lo vedono subito (`utenti=2`, stessi ruoli).
+  I due tentativi che dovevano fallire falliscono:
+
+```text
+createUser su un secondario   -> NotWritablePrimary: not primary
+createUser sul database local -> BadValue: Cannot create users in the local database
+```
+
+  L'utente di prova è stato rimosso; i tre membri sono tornati a `utenti=1`.
+- **Conseguenza:** quattro affermazioni della pagina della sicurezza sono misurate invece che
+  dedotte. La quarta è quella che chiude il debito di [ADR-0026](Decision.md#adr-0026): in un
+  replica set **un utente locale a un nodo non esiste**, e non per convenzione — MongoDB rifiuta di
+  crearne uno nell'unico database che non viene replicato. Registrato in
+  [ADR-0048](Decision.md#adr-0048).
+- **Riserve:** il keyfile misura **1024 byte** sul disco, che è esattamente il massimo dichiarato da
+  [S-005](#s-005) per la lunghezza di una chiave («between 6 and 1024 characters»); tolti i sedici
+  a capo che `openssl` inserisce, i caratteri base64 sono **1008**. Quale dei due numeri MongoDB
+  confronti con il limite **non è scritto** nella fonte: la ricetta ufficiale
+  `openssl rand -base64 756` produce un file che sta al confine con entrambe le letture, e questa
+  verifica non le distingue. Non è stato provato che cosa succeda con un keyfile più lungo. Non è
+  stato provato il caso dello sharded cluster, dove l'eccezione localhost «applies to each shard
+  individually as well as to the cluster as a whole» ([S-006](#s-006)) e dove gli utenti locali a
+  uno shard esistono davvero: è materia di `feature/03`.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0048
+
+---
+
+<a id="v-039"></a>
+### V-039 — `clusterAuthMode` è a senso unico, e la strada passa da `tlsMode`
+
+- **Comandi:** quattro avvii di `mongod` con `--clusterAuthMode` e senza il resto, per vedere dove
+  si ferma; poi un'istanza avviata come prescrive la procedura di migrazione
+  ([S-062](#s-062)) — keyfile, certificato autofirmato, `--tlsMode allowTLS`,
+  `--clusterAuthMode sendKeyFile` — su cui la sequenza è stata eseguita con `setParameter`, prima
+  nell'ordine sbagliato e poi in quello documentato.
+- **Ambiente:** istanze usa-e-getta con l'immagine pinnata (mongod 7.0.40), rimosse con
+  `docker rm -f -v`. Lo stack del lab non è stato toccato: su di esso è stato solo **letto**
+  `getParameter` → `clusterAuthMode: 'keyFile'`, `tlsMode: 'disabled'`.
+- **Che cosa si voleva sapere:** [S-062](#s-062) elenca i passi ma non dice se siano reversibili, e
+  presenta i due `setParameter` del secondo passo nello stesso blocco senza dire che l'ordine conti.
+  Prima di scrivere «si può fare a caldo» in una pagina, conviene averlo fatto.
+- **Esito.** Gli avvii, tutti con **uscita 1**:
+
+```text
+--clusterAuthMode x509         BadValue: need to enable TLS via the tlsMode flag
+--clusterAuthMode sendX509     BadValue: need to enable TLS via the tlsMode flag
+--clusterAuthMode sendKeyFile  BadValue: need to enable TLS via the tlsMode flag
+--clusterAuthMode keyFile      Location5579201: Unable to acquire security key[s]
+  (preceduto da  id 20254  «Read security file failed»  InvalidPath)
+```
+
+  Il terzo è quello che sorprende: **anche il modo di transizione, quello che continua a mandare il
+  keyfile, si rifiuta di partire senza TLS.** La migrazione non comincia da X.509, comincia da TLS.
+
+  Sull'istanza configurata a dovere, partendo da `[sendKeyFile / allowTLS]`, l'ordine sbagliato:
+
+```text
+clusterAuthMode=x509         -> BadValue: Illegal state transition for clusterAuthMode,
+                                need to enable SSL for outgoing connections
+clusterAuthMode=sendX509     -> BadValue: (idem)
+clusterAuthMode=keyFile      -> Location5579202: Illegal state transition for clusterAuthMode
+                                from 'sendKeyFile' to 'keyFile'
+```
+
+  E l'ordine documentato, sulla stessa istanza ripartita da capo:
+
+```text
+partenza: [sendKeyFile / allowTLS]
+  tlsMode=preferTLS            [sendKeyFile / allowTLS]   ->  accettato
+  clusterAuthMode=sendX509     [sendKeyFile / preferTLS]  ->  accettato
+  tlsMode=requireTLS           [sendX509 / preferTLS]     ->  accettato
+  clusterAuthMode=x509         [sendX509 / requireTLS]    ->  accettato
+arrivo:   [x509 / requireTLS]     il nodo scrive: true     stato: PRIMARY
+```
+
+  Nessun riavvio, nessuna interruzione: il nodo è rimasto primario e scrivibile per tutta la
+  sequenza. Indietro non si torna:
+
+```text
+clusterAuthMode=sendX509  [x509]        -> Location5579202: Illegal state transition
+                                           for clusterAuthMode from 'x509' to 'sendX509'
+clusterAuthMode=keyFile   [x509]        -> Location5579202: (idem, verso 'keyFile')
+tlsMode=preferTLS         [requireTLS]  -> BadValue: Illegal state transition for tlsMode,
+                                           attempt to change from requireTLS to preferTLS
+```
+
+- **Conseguenza:** la pagina può affermare tre cose che la fonte non scrive. Che l'ordine dei due
+  `setParameter` **non è indifferente**: `clusterAuthMode` non sale finché `tlsMode` non è almeno
+  `preferTLS`, perché il vincolo è sulle connessioni **uscenti**. Che la scala è **a senso unico**,
+  su entrambi i parametri: sbagliare tappa costa un riavvio, non un comando. E che il ritorno al
+  keyfile, dopo, non è un ripensamento ma una rimessa in piedi. Registrato in
+  [ADR-0048](Decision.md#adr-0048).
+- **Riserve:** **un solo nodo.** La sequenza è stata eseguita su un replica set di un membro, dove
+  l'autenticazione interna non ha nessuno con cui parlare: quello che non è stato provato è
+  esattamente ciò che rende la procedura un *rolling upgrade*, cioè un cluster misto in cui un nodo
+  a `sendX509` e uno a `sendKeyFile` continuano a riconoscersi. Il certificato è **autofirmato** e
+  privo di estensioni di uso della chiave, quindi per [S-061](#s-061) «no restrictions apply»: i
+  requisiti `serverAuth`/`clientAuth` non sono stati messi alla prova, e nemmeno la regola che
+  vuole un'unica CA per tutti i membri. Un dettaglio osservato e **non spiegato**: reimpostare
+  `clusterAuthMode` al valore che ha già viene rifiutato, con il messaggio sul TLS invece che con
+  quello sulla transizione — chi scrive uno script di migrazione idempotente lo scoprirà, e questa
+  verifica non dice perché.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0048
+
+---
+
+<a id="v-040"></a>
+### V-040 — Con `requireTLS` il client cambia mestiere, e il certificato deve nominare l'host
+
+- **Comandi:** un'istanza usa-e-getta con `--tlsMode requireTLS`, `--tlsCertificateKeyFile` e
+  `--tlsCAFile` puntati a un certificato autofirmato con
+  `subjectAltName = DNS:x509-san, DNS:localhost`, e cinque tentativi di connessione con `mongosh`
+  da dentro il container.
+- **Ambiente:** istanza usa-e-getta con l'immagine pinnata, rimossa con `docker rm -f -v`.
+- **Che cosa si voleva sapere:** il quarto passo di [S-062](#s-062) avverte che il requisito TLS
+  «applies to all connections; that is, with the clients as well as with the members of the
+  cluster». Quell'avviso è la ragione per cui una migrazione a X.509 non è un lavoro da
+  amministratore soltanto, e vale la pena vederlo succedere.
+- **Esito:**
+
+```text
+127.0.0.1  tls=true   -> Hostname/IP does not match certificate's altnames:
+                         IP: 127.0.0.1 is not in the cert's list:      (rifiuto del CLIENT)
+localhost  senza tls  -> connessione chiusa
+                         lato server: SSLHandshakeFailed
+                         «The server is configured to only allow SSL connections»
+x509-san   tls=true   -> connessione chiusa
+                         lato server: id 23255, «No SSL certificate provided by peer;
+                         connection rejected»  →  SSLHandshakeFailed
+```
+
+  Tre rifiuti diversi, e nessuno dei tre è il server che va male. Il primo è il **client** che
+  verifica il nome: il certificato elenca `DNS:localhost` e nessun indirizzo, quindi connettersi a
+  `127.0.0.1` non passa. Il secondo è il client in chiaro contro un server che non parla più in
+  chiaro. Il terzo è il server che, avendo un `--tlsCAFile`, **pretende un certificato anche dal
+  client** e non lo riceve.
+- **Conseguenza:** la pagina può dire, con i messaggi accanto, che passare a `requireTLS` sposta il
+  lavoro sui client e sui nomi: ogni host va nominato nel `SAN`, e ogni client va provvisto. È il
+  costo che il keyfile non ha, ed è il motivo per cui questo repository non lo paga.
+  Registrato in [ADR-0048](Decision.md#adr-0048).
+- **Riserve:** **nessun certificato client è stato generato**, quindi non è stato mostrato il caso
+  che funziona — solo i tre modi di sbagliare. Non è stata provata l'opzione che allenta la
+  pretesa del server (`--tlsAllowConnectionsWithoutCertificates`), né l'autenticazione **dei client**
+  via X.509, che è cosa diversa dall'autenticazione interna fra membri ed è fuori dal Task. Il
+  certificato è autofirmato e usato al tempo stesso come certificato del server e come CA: in una
+  configurazione vera i due file sono distinti.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0048
+
+---
+
+<a id="v-041"></a>
+### V-041 — «Too open» non vuol dire leggibile da tutti: basta un bit fuori dal proprietario
+
+- **Comandi:** `openssl rand -base64 756 > /kf` · `chmod <permessi> /kf` ·
+  `gosu mongodb mongod --replSet rs0 --keyFile /kf --dbpath /data/db2 --bind_ip 127.0.0.1`
+- **Ambiente:** sei container usa-e-getta dall'immagine pinnata
+  `mongo@sha256:b6421fd6…`, `mongod` 7.0.40, keyfile di 1024 byte con proprietario `mongodb:mongodb`
+  in tutti i casi. L'unica variabile è il permesso.
+- **Che cosa si voleva sapere:** il messaggio esatto che `mongod` produce quando il keyfile ha
+  permessi larghi era stato preso al Task 2 di `feature/02` e trascritto nel
+  [registro](registro-operativo-sviluppo.md), ma **non era mai entrato in questo file**: era
+  l'unico debito documentale dichiarato aperto dai primi due task. Qui viene ripreso, e insieme si
+  chiede la cosa che il registro non diceva — **dove passa la soglia**.
+
+- **Esito, la soglia:**
+
+```
+-r--------  400   parte, arriva a «Listening on»
+-rw-------  600   parte, arriva a «Listening on»
+-rw-r-----  640   RIFIUTATO   uscita 1
+-rw-r--r--  644   RIFIUTATO   uscita 1
+-r--r--r--  444   RIFIUTATO   uscita 1
+-r-------x  401   RIFIUTATO   uscita 1
+```
+
+**La soglia non è «leggibile da tutti»: è «un bit qualsiasi acceso fuori dal proprietario».** `640`
+concede la lettura al solo gruppo e viene rifiutato come `644`. `401` non concede nessuna lettura a
+nessuno — concede il bit di *esecuzione* al mondo, che su un file di chiavi non significa niente — e
+viene rifiutato lo stesso. Le due combinazioni che passano sono `400` e `600`.
+
+- **Esito, le due righe di log** (identiche in tutti e quattro i casi rifiutati):
+
+```json
+{"s":"I",  "c":"ACCESS",  "id":20254, "ctx":"main", "msg":"Read security file failed",
+ "attr":{"error":{"code":30,"codeName":"InvalidPath",
+                  "errmsg":"permissions on /kf are too open"}}}
+{"s":"F",  "c":"CONTROL", "id":20575, "ctx":"main", "msg":"Error creating service context",
+ "attr":{"error":"Location5579201: Unable to acquire security key[s]"}}
+```
+
+**La riga che spiega è informativa; la riga fatale non spiega.** `"s":"I"` porta il nome del file e
+la parola `permissions`; `"s":"F"`, che è quella che il container stampa per ultima prima di
+morire, dice soltanto «Unable to acquire security key[s]» e non nomina né i permessi né il
+percorso. Chi filtra per severità — la prima cosa che si fa davanti a un container che esce subito
+— trova la riga muta e perde quella utile. I due identificatori sono `id: 20254` per la causa e
+`id: 20575` per l'effetto, e valgono più del testo perché il testo cambia fra versioni
+([ADR-0035](Decision.md#adr-0035), regola 1).
+
+- **Conseguenza:** entra come voce **12** in
+  [`02-architetture/trappole-mongodb-in-docker.md`](02-architetture/trappole-mongodb-in-docker.md#t-12),
+  con il sintomo per titolo. È anche la ragione per cui `docker/02-replicaset/init/01-keyfile.sh`
+  genera il keyfile **dentro un volume nominato** e non lo monta dall'host: su un bind mount da
+  macOS i permessi del file non sono quelli che si sono scritti.
+- **Riserve:** provato su `mongod` 7.0.40 su Linux dentro container. Il controllo dei permessi non
+  esiste su Windows, dove la documentazione del keyfile non lo nomina; qui non è stato verificato.
+  Non è stato provato il caso del **proprietario sbagliato** con permessi stretti (`400` ma
+  `root:root` mentre `mongod` gira come `mongodb`), che produce un errore diverso — di lettura, non
+  di permessi larghi — e che nel lab non può capitare perché lo script genera e assegna il file
+  nello stesso gesto.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0049
+
+---
+
+<a id="v-042"></a>
+### V-042 — I comandi di amministrazione del replica set, eseguiti: due righe della guida erano sbagliate
+
+- **Comandi:** `rs.status()` · `rs.conf()` · `rs.reconfig()` · `replSetReconfig` ·
+  `rs.printSecondaryReplicationInfo()` · `rs.stepDown()` · `rs.add()` · `rs.remove()` ·
+  `rs.initiate()` · `db.getMongo().setReadPref()`, dati sia al primario sia a un secondario
+- **Ambiente:** stack `docker/02-replicaset`, tre membri sani, `mongosh` 2.10.0 dentro
+  l'immagine pinnata, `lab.ordini` con 50 000 documenti.
+- **Che cosa si voleva sapere:** [ADR-0036](Decision.md#adr-0036), regola 6, aveva marcato
+  «**non eseguito su questo branch**» tutta la §3.2 della guida a `mongosh`. Questo è il branch che
+  la deve eseguire. La domanda non è «funzionano?» ma «la guida dice il vero?».
+
+- **Esito 1 — la lettura da un secondario funziona, e la guida diceva il contrario.** La §3.2
+  avvertiva: «un secondario non risponde alle letture finché non glielo si dice». Misurato su
+  `mongo-rs-2`, collegandosi al nodo e basta:
+
+```
+nodo=mongo-rs-2:27017  scrivo=false  secondario=true
+readPrefMode = primary
+countDocuments        -> 50000
+find().limit(1)       -> 1 documento
+runCommand({find:…})  -> 1 documento
+insertOne             -> NotWritablePrimary: not primary
+```
+
+Nessun `setReadPref`, nessun `secondaryOk`, e la lettura passa. La stessa pagina lo diceva già
+correttamente in §1.5 — «`mongodb://nodo1:27017/` parla con **quel nodo**, anche se è un
+secondario» — quindi la guida **contraddiceva se stessa**, e la misura sta con §1.5. Quello che
+resta vero è la seconda metà: la **scrittura** su un secondario è rifiutata, con
+`NotWritablePrimary: not primary`.
+
+- **Esito 2 — dire il nome di un secondario non basta a parlarci.** La stessa interrogazione, con
+  tre modi di scrivere «collegati a `mongo-rs-2`»:
+
+```
+--host mongo-rs-2:27017         uri …?directConnection=true      servito da mongo-rs-2  (secondario)
+--host rs0/mongo-rs-2:27017     uri …?replicaSet=rs0             servito da mongo-rs-1  (primario)
+…?directConnection=false        uri …&directConnection=false     servito da mongo-rs-1  (primario)
+```
+
+Nei due casi in cui il driver conosce il replica set, il nodo che si è nominato viene usato come
+*seme* e poi scartato: si finisce sul primario. È la conferma misurata delle quattro eccezioni di
+[S-045](#s-045), ed è la ragione per cui `readPreference` da sola non manda le letture a un
+secondario.
+
+- **Esito 3 — le funzioni `rs.print*` non stampano niente dentro `--file`.**
+
+```
+rs.printSecondaryReplicationInfo();          nessun output
+print(rs.printSecondaryReplicationInfo());   source: mongo-rs-2:27017
+                                             { syncedTo: '…', replLag: '0 secs (0 hrs) behind the primary ' }
+                                             ---
+                                             source: mongo-rs-3:27017
+                                             { syncedTo: '…', replLag: '0 secs (0 hrs) behind the primary ' }
+```
+
+Non stampano: **restituiscono un oggetto**, che nella shell interattiva viene stampato dal ciclo di
+valutazione e in uno script no. Vale per `rs.printSecondaryReplicationInfo()` e per
+`rs.printReplicationInfo()`. È la stessa famiglia di sorprese della «regola dell'ultimo» di
+[V-020](#v-020), su un'altra strada.
+
+- **Esito 4 — `rs.reconfig()` disarma il controllo che il server fa.** Il comando grezzo protegge:
+
+```
+replSetReconfig(version=1)  su una configurazione a version=3
+  -> NewReplicaSetConfigurationIncompatible: New replica set configuration version and term
+     must be greater than old, but {version: 1, term: 38} is not greater than
+     {version: 3, term: 38} for replica set rs0
+replSetReconfig(version+1)  -> ok=1
+```
+
+L'aiuto di `mongosh`, no:
+
+```
+rs.reconfig(<configurazione con version: 1>)  -> ok=1,  version finale 3
+```
+
+`rs.reconfig()` **riscrive il numero di versione** con quello corrente più uno prima di spedire, e
+quindi il rifiuto non arriva mai. Chi si fida del ciclo leggi-modifica-riscrivi come di una
+protezione contro le modifiche concorrenti si fida di una protezione che l'aiuto ha tolto.
+
+- **Esito 5 — gli stessi comandi dati a un secondario:**
+
+```
+rs.conf()                    -> version=4          (si legge: la configurazione è replicata)
+rs.reconfig(rs.conf())       -> NotWritablePrimary: New config is rejected :: caused by ::
+                                replSetReconfig should only be run on a writable PRIMARY.
+                                Current state SECONDARY;
+rs.add("mongo-rs-9:27017")   -> identico al precedente  (rs.add è un rs.reconfig)
+rs.remove("mongo-rs-3:27017")-> identico al precedente
+rs.initiate()                -> AlreadyInitialized: already initialized
+rs.stepDown(20)              -> NotWritablePrimary: not primary so can't step down
+rs.stepDown(1)               -> BadValue: stepdown period must be longer than
+                                secondaryCatchUpPeriodSecs
+```
+
+Due dettagli che si vedono solo eseguendo. `rs.add` e `rs.remove` non hanno un errore proprio:
+dicono `replSetReconfig`, perché sono `replSetReconfig`. E `rs.stepDown(1)` viene rifiutato **per
+l'argomento prima che per il ruolo** — il periodo predefinito di attesa dei secondari è 10 secondi,
+e un `rs.stepDown(<meno di 10>)` fallisce su qualunque nodo, primario compreso.
+
+- **Esito 6 — `rs.stepDown()` cronometrato, tre giri**, con la disciplina di [V-029](#v-029):
+  osservatore già caldo su `mongo-rs-3`, comando spedito al primario, `hello()` interrogato in un
+  ciclo stretto.
+
+```
+giro 1   nuovo primario mongo-rs-2:27017   dopo   8 ms     ritorno di mongo-rs-1 dopo 11308 ms
+giro 2   nuovo primario mongo-rs-2:27017   dopo 101 ms     ritorno di mongo-rs-1 dopo 11293 ms
+giro 3   nuovo primario mongo-rs-2:27017   dopo  87 ms     ritorno di mongo-rs-1 dopo 11021 ms
+```
+
+**Il terzo termine di paragone del Task 8, ed è il più veloce di tutti.** `docker kill` costa
+~10 000 ms, `shutdownServer()` ~500 ms ([V-029](#v-029)), `rs.stepDown()` fra 8 e 101. Il motivo è
+lo stesso in tutti e tre i casi e sta in [V-030](#v-030): quello che si paga non è l'elezione, sono
+i dieci secondi di `electionTimeoutMillis` che nessuno spende quando il primario **dice** che se ne
+va.
+
+**E poi torna indietro da solo.** Con `mongo-rs-1` a priorità 2, dopo il periodo di
+`rs.stepDown(10)` il nodo si ricandida e riprende il posto: undici secondi dopo il comando il set è
+com'era. Su un palco è una demo che si rimette a posto da sé, e insieme una demo che **si annulla
+mentre la si sta spiegando** se chi parla si dilunga.
+
+- **Esito 7 — la configurazione del lab, letta invece che dichiarata:**
+
+```
+rs.conf()  _id=rs0  members: mongo-rs-1/priority 2  mongo-rs-2/priority 1  mongo-rs-3/priority 1
+           settings.electionTimeoutMillis   = 10000
+           settings.heartbeatIntervalMillis = 2000
+           settings.catchUpTimeoutMillis    = -1
+rs.status() majorityVoteCount=2  writeMajorityCount=2
+            mongo-rs-2 syncSourceHost = mongo-rs-1:27017
+            mongo-rs-3 syncSourceHost = mongo-rs-2:27017
+```
+
+I due numeri di [S-044](#s-044) — due secondi di battito, dieci di attesa — non sono
+un'impostazione del lab: sono i valori predefiniti, e il lab non li ha toccati.
+`mongo-rs-3` **non si sincronizza dal primario** ma da `mongo-rs-2`: il concatenamento della
+replica è attivo per impostazione predefinita, e chi guarda `rs.status()` aspettandosi tre frecce
+verso il primario ne trova due in fila.
+
+- **Conseguenza:** la §3.2 della guida perde la marcatura «non eseguito» per tutto ciò che è
+  elencato qui, e la corregge dove la misura la smentisce. La §3.3, sullo sharded cluster, **resta
+  marcata**: è dovuta a `feature/03`. Registrato in [ADR-0049](Decision.md#adr-0049).
+- **Riserve:** `rs.add()` e `rs.remove()` sono stati eseguiti **solo nella forma che fallisce**, su
+  un secondario: aggiungere un quarto membro richiede un quarto container che questo stack non ha,
+  e togliere un membro vivo romperebbe le prove che vengono dopo. La riga della tabella resta, con
+  la marcatura. Il ritorno del primario a priorità 2 è una seconda elezione e non è stato
+  cronometrato a parte. Le tre esecuzioni di `rs.stepDown()` sono su una macchina sola e senza
+  carico: la distanza fra 8 e 101 ms è rumore di scheduling, non un fenomeno.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0049, ADR-0051
+
+---
+
+<a id="v-043"></a>
+### V-043 — Il driver riceve i nomi di dentro: `ENOTFOUND` su un host che nessuno ha scritto
+
+- **Comandi:** `docker run --rm <immagine> mongosh "<stringa>"` da un container **fuori** dalla
+  rete Compose e da uno **dentro**, contro le porte pubblicate `27021`/`27022`/`27023`
+- **Ambiente:** stack `docker/02-replicaset` in esecuzione e sano, rete
+  `sqlstart-02-replicaset_default`, `mongosh` 2.10.0.
+- **Che cosa si voleva sapere:** [ADR-0033](Decision.md#adr-0033) aveva nominato, fra le trappole
+  che `feature/02` avrebbe aggiunto, la «scoperta della topologia». Questa è la misura che la
+  rende una voce.
+
+- **Esito:**
+
+```
+1. da FUORI, mongodb://…@host.docker.internal:27021/?replicaSet=rs0
+   -> MongoNetworkError: getaddrinfo ENOTFOUND mongo-rs-2
+
+2. da FUORI, mongodb://…@host.docker.internal:27021/?directConnection=true
+   -> servito da mongo-rs-1:27017
+      hosts   = ["mongo-rs-1:27017","mongo-rs-2:27017","mongo-rs-3:27017"]
+      primary = mongo-rs-1:27017
+      ordini  = 50000
+
+3. da FUORI, i tre indirizzi pubblicati e nessuna opzione
+   mongodb://…@host.docker.internal:27021,host.docker.internal:27022,host.docker.internal:27023/
+   -> MongoNetworkError: getaddrinfo ENOTFOUND mongo-rs-2
+
+4. da DENTRO la rete, mongodb://…@mongo-rs-1:27017/?replicaSet=rs0
+   -> servito da mongo-rs-1:27017, ordini = 50000
+```
+
+**Il caso 2 contiene la spiegazione dei casi 1 e 3.** La connessione diretta riesce, e la prima
+cosa che stampa è l'elenco `hosts`: tre nomi di servizio Compose, che dentro la rete risolvono e
+fuori no. Il replica set non conosce le porte pubblicate sull'host — conosce i nomi con cui i
+membri sono stati configurati — e li consegna a chiunque chieda. Il client li prende per buoni,
+butta via l'indirizzo che gli era stato dato e prova quelli.
+
+**Il caso 3 è quello che sorprende, e va provato prima di scriverlo.** Elencare tutti e tre gli
+indirizzi *pubblicati* sembra la mossa risolutiva e non lo è: una seed list con più host è la terza
+delle quattro eccezioni di [S-045](#s-045) che spengono `directConnection`, quindi il driver
+scopre il replica set e sostituisce i tre indirizzi buoni con i tre nomi che non risolvono. Più
+indirizzi si scrivono, più il fallimento è certo.
+
+**Il nome nel messaggio non è quello che si è scritto, e cambia a ogni tentativo.** Tre esecuzioni
+identiche del caso 1 hanno prodotto `ENOTFOUND mongo-rs-1`, `ENOTFOUND mongo-rs-2`,
+`ENOTFOUND mongo-rs-1`: il driver nomina uno dei tre membri, non necessariamente il primo e mai
+quello digitato. Cercare in rete il nome che compare nell'errore porta quindi fuori strada, perché
+quel nome è un dettaglio locale del `compose.yaml`.
+
+- **Conseguenza:** entra come voce **13** in
+  [`02-architetture/trappole-mongodb-in-docker.md`](02-architetture/trappole-mongodb-in-docker.md#t-13),
+  accanto alla voce [5](02-architetture/trappole-mongodb-in-docker.md#t-05) che ha lo stesso
+  messaggio e una causa diversa: là il nome non risolveva perché il client era fuori rete, qui il
+  nome non lo ha nemmeno scritto il client. Registrato in [ADR-0049](Decision.md#adr-0049).
+- **Riserve:** `host.docker.internal` è un nome di Docker Desktop; su un Docker Engine per Linux
+  l'equivalente si ottiene con `--add-host host.docker.internal:host-gateway`, e non è stato
+  provato. La terza via d'uscita — riconfigurare il replica set con nomi e porte risolvibili da
+  fuori, cioè `rs.reconfig()` sugli `host` dei membri — **non è stata eseguita**: cambierebbe in
+  modo permanente lo stack del lab, che deve restare quello del talk. Non è stato provato il caso
+  intermedio in cui i nomi risolvono ma le porte no, che dà un errore di connessione invece che di
+  risoluzione.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0049
+
+---
+
+<a id="v-044"></a>
+### V-044 — Tre modi di diventare primario, tre prime righe diverse: il log dice se è stato un guasto
+
+- **Comandi:** `rs.stepDown()` sul primario · `docker logs mongo-rs-2` e `docker logs mongo-rs-1`,
+  filtrati per componente `ELECTION` e per `id`
+- **Ambiente:** stack `docker/02-replicaset`, tre membri sani, `mongo-rs-1` a priorità 2 e quindi
+  destinato a riprendersi il posto da solo. Nessun carico.
+- **Che cosa si voleva sapere:** `docs/03-amministrazione/log.md`, §3.1, afferma — ragionando su
+  [S-044](#s-044) e senza aver visto un log — che «la manutenzione ordinaria produce lo stesso
+  tracciato nel log di un incidente, e che leggere una riga di elezione non basta a sapere se c'è
+  stato un problema». Il Task 12 doveva riempire quella sezione di `id`, e prima di riempirla ha
+  controllato la frase.
+
+- **Esito: la frase è falsa, e lo si vede alla prima riga.** Un solo `rs.stepDown(10)` produce
+  **due** elezioni — la dimissione e il rientro del nodo a priorità 2 — e nessuna delle due
+  assomiglia a quella del guasto di [V-030](#v-030).
+
+*Sul nodo che viene eletto al posto di chi si dimette* (`mongo-rs-2`):
+
+```
+11:52:29.687  id=4615661  ELECTION  Starting an election due to step up request
+11:52:29.687  id=21437    ELECTION  Skipping dry run and running for election
+                                    attr: newTerm=39
+11:52:29.688  id=6015300  ELECTION  Storing last vote document in local storage for my election
+11:52:29.690  id=51799    ELECTION  VoteRequester processResponse
+                                    attr: dryRun=false, vote="yes", from=mongo-rs-1:27017
+11:52:29.690  id=21450    ELECTION  Election succeeded, assuming primary role
+11:52:29.690  id=21358    REPL      Replica set state transition
+                                    attr: newState="PRIMARY", oldState="SECONDARY"
+11:52:29.692  id=21107    REPL      Stopping replication producer
+```
+
+*Sul nodo che si è dimesso e poi si riprende il posto* (`mongo-rs-1`, priorità 2):
+
+```
+11:52:29.685  id=21358    REPL      Replica set state transition  PRIMARY -> SECONDARY
+11:52:29.692  id=4615601  ELECTION  Scheduling priority takeover
+                                    attr: when=2026-09-01T11:52:39.958Z
+11:52:39.685  id=4764800  ELECTION  Not starting an election, since we are not an electable
+                                    single node
+11:52:40.111  id=4615660  ELECTION  Starting an election for a priority takeover
+11:52:40.111  id=21438    ELECTION  Conducting a dry run election to see if we could be elected
+11:52:40.112  id=21444    ELECTION  Dry election run succeeded, running for election
+11:52:40.116  id=21450    ELECTION  Election succeeded, assuming primary role
+```
+
+- **Le tre prime righe, che sono la risposta:**
+
+| `id` | messaggio | che cosa è successo |
+| ---: | --- | --- |
+| `4615652` | «Starting an election, since we've seen no PRIMARY in election timeout period» | **nessuno ha avvisato**: il timeout è scaduto. È un guasto ([V-030](#v-030)) |
+| `4615661` | «Starting an election due to step up request» | qualcuno ha chiesto a un altro nodo di dimettersi. È manutenzione |
+| `4615660` | «Starting an election for a priority takeover» | un nodo a priorità più alta si riprende il posto. È la configurazione che lavora |
+
+- **Due differenze che seguono dalla prima.** Nel caso del guasto compaiono `id: 21216` «Member is
+  now in state DOWN» e diciannove `id: 23974` «Heartbeat failed after max retries»; nel caso della
+  dimissione **non compare nessuna delle due**, perché nessun membro è mai mancato. E il giro a
+  vuoto viene saltato: `id: 21437` «Skipping dry run and running for election» invece della coppia
+  `21438`/`21444`, con un solo `VoteRequester processResponse` invece di due. È la spiegazione dei
+  millisecondi di [V-042](#v-042): chi riceve una richiesta di promozione non ha bisogno di
+  chiedere agli altri se sarebbe eletto, perché glielo hanno appena chiesto.
+- **`4615601` annuncia il futuro.** «Scheduling priority takeover» compare **tre millisecondi dopo
+  la dimissione** e porta nell'attributo l'ora esatta in cui il rientro avverrà. Chi legge il log
+  dal vivo sa già, dieci secondi prima, che il primario sta per tornare. E nel mezzo `4764800`
+  spiega perché non è ancora successo: «Not starting an election, since we are not an electable
+  single node», che è il periodo di `rs.stepDown()` che scorre.
+- **Conseguenza:** la frase di §3.1 viene corretta invece che confermata, e la §3.3 di
+  `docs/03-amministrazione/log.md` riporta tutte e tre le prime righe. Registrato in
+  [ADR-0049](Decision.md#adr-0049). Per chi prepara la demo: la riga da proiettare non è
+  `21450` «Election succeeded» — che è identica in tutti e tre i casi — ma la prima, che è l'unica
+  che distingue.
+- **Riserve:** letto su un set a tre membri con priorità 2/1/1; su un set a priorità tutte uguali
+  il rientro non avviene e `4615660` non compare mai. Non è stato osservato il caso di
+  `rs.stepDown()` con `force: true`, né quello di un `replSetStepUp` chiesto direttamente a un
+  secondario, che è il comando che `4615661` nomina e che qui è arrivato per conseguenza e non per
+  richiesta esplicita. Gli `id` sono di `mongod` 7.0.40: sono stabili, i testi molto meno
+  ([ADR-0035](Decision.md#adr-0035), regola 1).
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0049
+
+---
+
+<a id="v-045"></a>
+### V-045 — Le quattro scene registrate: tredici kilobyte di testo, e una misura fuori dall'intervallo
+
+- **Comandi:** `python3 tools/registra-terminale.py <file>.cast -- make smoke-02` ·
+  `… -- make failover-02` · `… -- make failover-02-termina` ·
+  `… -- make failover-02-maggioranza`, con `./tools/reset-demo.sh 02` fra una scena e l'altra
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, stack `docker/02-replicaset` con i tre membri
+  sani prima di ogni scena, nessun carico applicativo. Terminale registrato a 100×30.
+- **Che cosa si voleva sapere:** se una registrazione di terminale in formato asciinema v2 basti
+  come materiale di riserva del talk, e quanto pesi.
+
+- **Esito, le quattro scene:**
+
+```
+file                                   durata   eventi   byte   il numero che porta
+01-smoke-replica-set.cast              16,9 s      49    4630   Superati: 42 · Errori: 0
+02-failover-docker-kill.cast           17,2 s      17    2556   elezione in 8617 ms
+                                                                 exited, RestartCount=0, ExitCode=137
+03-failover-terminazione-pulita.cast   25,1 s      23    2589   elezione in 1039 ms
+                                                                 running, RestartCount=1, ExitCode=0
+04-maggioranza-persa.cast              15,6 s      29    3714   SECONDARY dopo 8634 ms
+```
+
+- **Tredici kilobyte per quattro scene.** Il formato è JSON su righe: un'intestazione e poi un
+  evento per blocco di output, `[secondi, "o", testo]`. Si legge con `cat`, si cerca con `grep`, si
+  confronta con `diff`, e sta in un repository senza le cautele che
+  [S-021](#s-021) impone ai file grandi. Un `.mp4` delle stesse quattro scene starebbe fra le
+  decine e le centinaia di megabyte.
+- **Una misura cade fuori dall'intervallo noto, e conferma la riserva che c'era.** La scena della
+  terminazione pulita ha dato **1039 ms**, contro i 574, 480 e 486 ms dei tre giri di
+  [V-029](#v-029) — circa il doppio del massimo osservato. Il metodo è lo stesso, non un altro:
+  `tools/failover-replicaset.sh` usa l'osservatore preriscaldato dentro un membro superstite che
+  interroga `hello()` ogni 20 ms, cioè esattamente lo strumento di V-029. La differenza è il
+  contesto — la macchina aveva appena eseguito tre scene e tre ripristini — ed è precisamente ciò
+  che V-029 aveva messo nelle riserve: «tre esecuzioni per scena sono poche per parlare di
+  distribuzione; bastano per dire che i due ordini di grandezza non si sovrappongono». Il singolo
+  numero è instabile, il rapporto no: 1039 contro 8617 ms nella stessa sessione restano un ordine
+  di grandezza.
+- **Il `docker kill` è invece stabile e sotto i dieci secondi.** 8617 ms qui, contro 9812, 10 619 e
+  10 943 di V-029. Anche questo è coerente con la spiegazione: il conto dei 10 000 ms parte
+  dall'ultimo battito riuscito e non dal colpo, i battiti vanno ogni 2000 ms, quindi la misura cade
+  fra 8 e 10 secondi a seconda di dove il colpo capita nell'intervallo — ed è quello che la scena
+  stessa stampa a schermo.
+- **Conseguenza:** le quattro registrazioni stanno in
+  `docs/05-talk/registrazioni/`, il formato e lo strumento sono decisi in
+  [ADR-0050](Decision.md#adr-0050). Non sostituiscono i filmati `.mp4` di
+  [ADR-0016](Decision.md#adr-0016), che restano dovuti: una registrazione di terminale non mostra
+  la faccia di chi parla né si proietta senza un terminale.
+- **Riserve:** le scene sono registrate senza voce e senza pause di scena — sono il tracciato di
+  ciò che il terminale ha fatto, non una prova generale. La riproduzione richiede un terminale che
+  interpreti le sequenze ANSI: dentro una pipe i colori diventano caratteri. Una sola esecuzione per
+  scena: i numeri sopra sono singoli, non mediane, e vanno letti accanto a [V-029](#v-029) e
+  [V-031](#v-031) che le mediane le hanno.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0050
+
+---
+
+<a id="v-046"></a>
+### V-046 — Il dollaro che non arriva: Compose lo mangia, avvisa, e consegna una stringa vuota
+
+- **Comandi:** `docker compose config` · `docker compose up --abort-on-container-exit` su un file
+  Compose usa-e-getta di nove righe
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, immagine `alpine:3` dalla cache
+  locale
+- **Che cosa si voleva sapere:** `docker/02-replicaset/compose.yaml` scrive `$$NOME_REPLICA` e non
+  `$NOME_REPLICA` nel comando di `rs-init`, con un commento che spiega perché. La regola è
+  documentata ([S-064](#s-064)) ma qui non era mai stata **vista fallire**, e una trappola scritta
+  senza averne visto il sintomo è una previsione ([ADR-0052](Decision.md#adr-0052)). Il file di
+  prova mette le due forme una accanto all'altra:
+
+```yaml
+services:
+  prova:
+    image: alpine:3
+    environment:
+      DENTRO: valore-del-container
+    command:
+      - sh
+      - -c
+      - 'echo "singolo=[$DENTRO]  doppio=[$$DENTRO]"'
+```
+
+- **Esito, quello che il container stampa:**
+
+```
+prova-1  | singolo=[]  doppio=[valore-del-container]
+```
+
+  La variabile è dichiarata in `environment` **due righe sopra**, e nella forma con un dollaro solo
+  arriva vuota. Non è che la shell non la trovi: la shell non la vede nemmeno nominare, perché
+  Compose ha sostituito `$DENTRO` prima di consegnare il comando.
+
+- **Esito, dove lo si può vedere prima di avviare:** `docker compose config` mostra il file dopo
+  l'interpolazione, e la sostituzione è già avvenuta:
+
+```
+level=warning msg="The \"DENTRO\" variable is not set. Defaulting to a blank string."
+    command:
+      - sh
+      - -c
+      - echo "singolo=[]  doppio=[$$DENTRO]"
+```
+
+  **Uscita `0`.** L'avviso è un avviso: il file è valido, lo stack parte, il comando gira. È la
+  forma esatta descritta da [S-064](#s-064) — «it displays a warning and substitutes» con la stringa
+  vuota — e la ragione per cui il fenomeno sopravvive alle riletture.
+
+- **Esito, il caso peggiore — la variabile esiste sull'host:**
+
+```
+$ DENTRO=valore-dell-host docker compose … up
+prova-1  | singolo=[valore-dell-host]  doppio=[valore-del-container]
+```
+
+  Qui l'avviso **sparisce**, perché Compose la variabile l'ha trovata: nella shell di chi ha
+  digitato il comando. Il container riceve il valore dell'host al posto del proprio, senza che nulla
+  segnali niente. Due macchine con ambienti diversi eseguono lo stesso file Compose e ottengono
+  comportamenti diversi, ed è il modo in cui questo errore arriva fino in produzione.
+
+- **Conseguenza:** la voce **16** di `docs/02-architetture/trappole-mongodb-in-docker.md`. Conferma
+  per misura la scelta già scritta in `docker/02-replicaset/compose.yaml`, dove le tre variabili del
+  comando di `rs-init` sono `$$NOME_REPLICA`, `$$UTENTE_AMMINISTRATORE`, `$$PASSWORD_AMMINISTRATORE`.
+- **Riserve:** provato su `alpine:3` e non sullo stack del lab, di proposito: sullo stack la forma
+  giusta è già scritta, e per vedere il sintomo bisognerebbe romperla. Una sola esecuzione per
+  ciascuno dei tre casi — non ci sono tempi da mediare, i risultati sono testo e sono deterministici.
+  Il fenomeno riguarda `command` perché è lì che il lab lo incontra; vale identico per `entrypoint`,
+  `healthcheck` e per i valori di `environment`, che non sono stati provati. Infine `config` non
+  «disfa» il doppio dollaro: lo ristampa come `$$DENTRO`, perché quello che mostra è ancora un file
+  Compose, non ciò che vedrà la shell.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0052
+
+
+<a id="v-047"></a>
+### V-047 — La password nella tabella dei processi: `mongosh` si oscura da solo, il client `docker` no
+
+- **Comandi:** `mongosh --help` dentro `mongo-rs-1` · `ps -eo args` dentro il container e
+  sull'host, con un `mongosh` vivo · lo stesso con `docker exec -e SEGRETO=…` in più
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, client `/usr/local/bin/docker`, immagine
+  `mongo:7.0.40`, `mongosh` **2.10.0** dentro il container
+- **Che cosa si voleva sapere:** `tools/smoke-replicaset.sh` portava un commento che prometteva una
+  protezione — «la password passa per `-e` e non sulla riga di comando di mongosh» — e sotto una
+  riga che passava `--password "${PASSWORD}"` a `mongosh` **e** un `-e SEGRETO="${PASSWORD}"` che
+  nessun comando leggeva. Un revisore esterno ha segnalato la contraddizione fra il testo e il
+  codice. Prima di riscrivere il commento serviva sapere che cosa sia vero davvero, perché la
+  risposta che sembra ovvia — «la password è comunque leggibile in `ps` nel container» — è quella
+  che si scrive senza guardare.
+
+- **Esito, primo punto — `mongosh` non ha una via che non sia la riga di comando.** Nella 2.10.0
+  l'aiuto elenca **due** sole opzioni che nominano una password, entrambe con un argomento:
+
+```
+-p, --password [arg]                       Password for authentication
+    --tlsCertificateKeyFilePassword [arg]  Password for key in PEM file for TLS
+```
+
+  Nessuna variabile d'ambiente compare nell'aiuto. Le alternative sono il prompt interattivo, che
+  non esiste in uno script, e lo standard input, che con `--eval` è già occupato dallo script.
+  Quindi la password **deve** stare fra gli argomenti: non è una scorciatoia, è l'unica strada.
+
+- **Esito, secondo punto — dentro il container non si vede.** Con un `mongosh` autenticato in
+  esecuzione, `ps -eo args` dentro `mongo-rs-1` conta **zero** occorrenze della password in chiaro
+  e **una** del segnaposto `<credentials>`. La riga è questa, e non è quella che era stata digitata:
+
+```
+mongosh mongodb://<credentials>@127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&authSour…
+```
+
+  `mongosh` riscrive il proprio `argv`: unisce utente, password e host in una stringa di
+  connessione e ne oscura le credenziali. La convinzione di partenza era sbagliata.
+
+- **Esito, terzo punto — sull'host si vede, e nessuno la oscura.** La stessa esecuzione, vista da
+  `ps -eo args` sull'host, produce **quattro** righe che contengono la password in chiaro. Fra
+  queste il client Docker (qui con la password sostituita a mano per poterla riportare):
+
+```
+/usr/local/bin/docker exec mongo-rs-1 mongosh --quiet --username admin --password <password> …
+```
+
+  L'esposizione non è dove la si cercava. `mongosh` protegge il proprio processo; il processo che
+  lo lancia — `docker`, e quindi `docker compose exec` — non protegge il proprio, e vive
+  sull'host, dove girano anche i programmi di chiunque altro usi quella macchina.
+
+- **Esito, quarto punto — la variabile «protettiva» raddoppiava l'esposizione.** Aggiungendo
+  `-e SEGRETO=<password>` allo stesso comando, la **singola** riga di comando del client `docker`
+  contiene **due** copie della password invece di una. Il conteggio, sull'host:
+
+```
+copie della password nella singola riga di comando di docker sull'host: 2
+```
+
+  Il `-e` non toglie la password dalla riga di comando: ce la mette una seconda volta, sulla riga
+  che espone davvero. Il codice che il commento presentava come una cautela peggiorava di misura la
+  cosa che diceva di curare, e per giunta nessuno leggeva la variabile — `grep -rn SEGRETO tools/
+  docker/ Makefile` ne trovava una sola occorrenza, la definizione.
+
+- **Conseguenza:** [ADR-0054](Decision.md#adr-0054). In `tools/smoke-replicaset.sh` il
+  `-e SEGRETO=` è stato tolto e il commento riscritto su questi quattro punti. Gli altri strumenti
+  — `failover-replicaset.sh`, `reset-demo.sh` — passavano già `--password` senza decorazioni e non
+  cambiano.
+- **Riserve:** misurato solo su `mongosh` 2.10.0; l'oscuramento dell'`argv` è comportamento della
+  shell, non un contratto documentato in una pagina di manuale, e una versione futura potrebbe
+  cambiarlo — il che rafforza la conclusione invece di indebolirla, perché la protezione su cui non
+  si deve contare è proprio quella. La finestra fra l'`exec` e la riscrittura dell'`argv` non è
+  stata cercata: se esiste è di millisecondi, ma esiste. Non è stato provato il caso TLS, dove la
+  password della chiave PEM segue la stessa strada. E resta vero il contorno che conta più di tutto
+  il resto: è una password di laboratorio, e il file che la porta è fuori dal repository
+  ([ADR-0014](Decision.md#adr-0014)).
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0054
+
+
+<a id="v-048"></a>
+### V-048 — 126 e 127: la shell distingue «non c'è» da «non si esegue», e il registratore no
+
+- **Comandi:** `sh -c` e `bash -c` su tre bersagli · `tools/registra-terminale.py … -- <bersaglio>`
+  prima e dopo la correzione
+- **Ambiente:** macOS 26.6.2 arm64, Python 3.14.7, `/bin/sh` e `/bin/bash` di sistema
+- **Che cosa si voleva sapere:** un revisore esterno ha segnalato che in
+  `tools/registra-terminale.py` la chiamata a `os.execvpe` nel processo figlio non è protetta. Il
+  programma un controllo preventivo ce l'aveva — `shutil.which(comando[0]) is None and not
+  os.path.exists(comando[0])` → uscita 127 — e la domanda era se quel controllo bastasse. Un file
+  che **esiste** e non si può eseguire lo attraversa.
+
+- **Esito, primo punto — che cosa fa la shell.** Tre bersagli, due shell, sempre gli stessi codici:
+
+```
+sh, comando assente         -> 127   (command not found)
+sh, file non eseguibile     -> 126   (Permission denied)
+sh, directory               -> 126   (is a directory)
+bash, comando assente       -> 127
+bash, file non eseguibile   -> 126
+```
+
+  La distinzione non è un dettaglio di stile: 127 dice «hai sbagliato a scrivere il nome», 126 dice
+  «il nome è giusto, manca il permesso». Sono due errori che si riparano in due modi diversi.
+
+- **Esito, secondo punto — che cosa faceva il registratore, prima.** Un file `.sh` con modo `644`,
+  passato dopo `--`, attraversava il controllo preventivo perché esiste. Poi `execvpe` falliva nel
+  figlio, che a quel punto era già dentro lo pseudo-terminale: il traceback di Python è stato
+  **scritto nella registrazione**. Il `.cast` prodotto contiene quattro eventi, e il terzo è questo
+  (accorciato):
+
+```
+[0.009369, "o", "Traceback (most recent call last):\r\n  File \"…/tools/registra-terminale.py\", line 220 …"]
+[0.009452, "o", "…PermissionError: [Errno 13] Permission denied: './nonesegui.sh'\r\n"]
+```
+
+  Tre cose sbagliate insieme: il file `.cast` **resta su disco** e sembra una registrazione valida;
+  dentro ci sono i **percorsi assoluti** della macchina di chi registra; e il programma esce con
+  **1**, il codice generico di un'eccezione Python, che non distingue questo caso da nessun altro.
+  La riserva del talk ([ADR-0050](Decision.md#adr-0050)) è materiale che si guarda il giorno in cui
+  la demo dal vivo è già fallita: una che mostra un traceback di Python è peggio di non averla.
+
+- **Esito, terzo punto — dopo la correzione.** Con il controllo preventivo esteso a
+  `os.access(…, os.X_OK)` e la `execvpe` racchiusa in un `try`, i due casi si comportano come la
+  shell:
+
+```
+file non eseguibile   -> uscita 126, «comando non eseguibile: …», nessun .cast scritto
+directory             -> uscita 126, nessun traceback né su stderr né dentro la registrazione
+comando assente       -> uscita 127, «comando non trovato: …», nessun .cast   (invariato)
+```
+
+  La directory è il caso che il controllo preventivo **non** può prendere: per il sistema una
+  directory è attraversabile, quindi `os.access(…, os.X_OK)` risponde di sì, ed è `exec` a
+  rifiutarla. Serve la protezione nel figlio — e la shell arriva alla stessa conclusione per la
+  stessa strada: `sh -c './'` esce 126.
+
+- **Conseguenza:** [ADR-0053](Decision.md#adr-0053), e cinque casi nuovi in
+  `tools/tests/test_registra_terminale.py`, che passa da 8 a 13.
+- **Riserve:** i codici della shell sono misurati su macOS, con `/bin/sh` e `/bin/bash` di sistema;
+  sono convenzione POSIX diffusa ma qui valgono come **misura su questa macchina**, non come
+  citazione di uno standard. Non sono stati provati gli altri modi in cui `exec` può fallire —
+  binario per un'altra architettura, `ENOEXEC` su un file senza `#!`, `ETXTBSY` — che ora finiscono
+  tutti nello stesso ramo protetto senza essere distinti fra loro. La finestra fra `fork` e `exec`
+  resta la parte più delicata del programma e non è coperta da altro che da questi test.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0053
+
+
+<a id="v-049"></a>
+### V-049 — Il difetto che macOS nasconde: Linux non chiude il pty, e il codice di uscita diventava 0
+
+- **Comandi:** `tools/registra-terminale.py … -- <comando che lascia un discendente>` su macOS e
+  dentro un container `alpine:3`, prima e dopo la correzione
+- **Ambiente:** macOS 26.6.2 arm64, Python 3.14.7 · container `alpine:3` con `python3` 3.14.7,
+  Docker 29.7.2
+- **Che cosa si voleva sapere:** una seconda review esterna sulla PR #3 ha segnalato che il ciclo di
+  cattura di `registra-terminale.py` ha **due** uscite, e che la seconda perde lo stato. Quando il
+  comando registrato finisce senza chiudere lo pseudo-terminale — succede se lascia dietro di sé un
+  discendente — il ramo non bloccante `os.waitpid(pid, os.WNOHANG)` lo **raccoglie** e ne butta via
+  lo stato; la `waitpid` finale non trova più nessuno, solleva `ChildProcessError`, e il ripiego
+  `stato = 0` fa riportare **successo**. Il rilievo proponeva anche un caso di prova. Chi lo ha
+  scritto non ha potuto eseguirlo — la propria sandbox glielo ha impedito.
+
+- **Esito, primo punto — su macOS non si riproduce, e non per caso.** Tre costruzioni diverse,
+  tutte con il comando che esce `7` lasciando un discendente attaccato al pty:
+
+```
+sh -c 'sleep 5 & exit 7'                        -> uscita 7, in 0,068 s
+sh -c '(trap "" HUP; sleep 5) & exit 7'         -> uscita 7, in 0,075 s
+python3 …  (figlio con os.setsid(), sleep 3)    -> uscita 7, in 0,087 s
+```
+
+  Nessuna arriva al ramo non bloccante: se ci arrivasse, il ciclo aspetterebbe almeno il timeout di
+  `select`, cioè 0,2 s. Il pty si chiude subito lo stesso, e la registrazione risulta vuota anche
+  quando il discendente stampa (`echo TARDI` dopo un secondo non compare nel `.cast`). È il
+  comportamento BSD: quando muore il processo di controllo, il kernel **revoca** il terminale di
+  controllo, e i descrittori del lato schiavo che i discendenti si portano dietro non lo tengono
+  più aperto.
+
+- **Esito, secondo punto — su Linux si riproduce alla prima.** Stesso strumento, stesso comando,
+  dentro `alpine:3`:
+
+```
+$ python3 /strumenti/registra-terminale.py /prova/linux.cast -- python3 /prova/tiene_il_pty.py
+registrato: /prova/linux.cast · 0.0 s · uscita 0
+real  0m 0.25s
+codice riportato su Linux: 0  (atteso 7)
+```
+
+  Il tempo lo conferma: **0,25 s**, cioè il timeout di `select` più il giro non bloccante. Linux non
+  revoca niente, il discendente tiene aperto il lato schiavo, il pty non dà EOF, e si finisce
+  esattamente nel ramo che perde lo stato.
+
+- **Esito, terzo punto — dopo la correzione.** Lo stato raccolto dal ramo non bloccante viene
+  conservato e riusato al posto della `waitpid` finale:
+
+```
+codice riportato su Linux dopo la correzione: 7  (atteso 7)
+```
+
+  La suite del file passa **14 su 14** su tutte e due le piattaforme.
+
+- **Conseguenza:** [ADR-0055](Decision.md#adr-0055), e un test in più in
+  `tools/tests/test_registra_terminale.py`. Il test è scritto in modo che su macOS passi per
+  l'altra strada — il pty si chiude comunque, il codice arriva dalla `waitpid` finale — e su Linux
+  provi davvero il ramo corretto: prima della correzione, là, riportava 0.
+- **Riserve:** il container è `alpine:3` con `musl`, non `glibc`, e non è una delle immagini pinnate
+  del laboratorio: serviva un Linux qualsiasi, non quello del lab. La revoca del terminale su macOS
+  è dedotta dal comportamento osservato — tre costruzioni, tutte con EOF immediato, compresa quella
+  con `setsid()` che al SIGHUP è immune — e non da una pagina di manuale citata qui. Non è stato
+  provato WSL2, che è Linux e dovrebbe comportarsi come il container. Resta fuori dalla misura la
+  domanda vicina: in quel ramo l'output prodotto **dopo** l'uscita del comando non viene registrato,
+  ed è per costruzione, non un difetto.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0055

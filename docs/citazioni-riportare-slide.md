@@ -237,7 +237,310 @@ parte standalone e senza autenticazione, e `rs.initiate()` non lo esegue nessuno
 nostro. Comportamento controintuitivo, condizionale e non documentato: sapere dove sta scritto
 vale più che saperlo e basta.
 
+### L'eccezione si chiama «localhost» e la fonte non definisce «localhost»
+
+> «The localhost exception allows you to create the first user or role in the system after
+> enabling access control. You can also use it to initiate a replica set.»
+
+> «You must wait until the replica set elects a primary before you can add the first user.»
+
+Fonte: [S-055](Sources.md#s-055) — MongoDB Manual v7.0, Localhost Exception. Misura in
+[V-023](Sources.md#v-023).
+
+**Perché una slide:** perché quello che la pagina **non** dice pesa quanto quello che dice. Le
+stringhe `127.0.0.1`, `::1`, «loopback» e «same host» non compaiono da nessuna parte, né sulla v7.0
+né sulla 8.3; la formulazione più vicina è «connect to the localhost interface», che nomina
+un'interfaccia senza dire quale sia. Eppure il vincolo esiste: un sidecar sulla rete Compose si
+prende `Command replSetInitiate requires authentication`. È il caso più pulito del talk di una
+regola che il prodotto applica e la documentazione non scrive — e la diapositiva può mostrare
+insieme la pagina e il messaggio d'errore.
+
+### Se il problema è l'indirizzo di provenienza, si cambia l'indirizzo di provenienza
+
+> ```
+> NAMESPACE_CONDIVISO_OK {"ok":1}
+> UTENTE_CREATO da sidecar in namespace condiviso
+> CHIUSA_DOPO_IL_PRIMO_UTENTE codeName=Unauthorized code=13
+> ```
+
+Fonte: [V-023](Sources.md#v-023) — misura del 2026-08-31, decisione in
+[ADR-0040](Decision.md#adr-0040).
+
+**Perché una slide:** tre righe raccontano l'eccezione localhost per intero — si apre, concede
+`replSetInitiate` e `createUser`, si richiude — e insieme mostrano il trucco che le fa da cornice:
+un container avviato con `network_mode: "service:mongo-rs-1"` non ha un'interfaccia di rete propria,
+usa quella del membro, e il suo `localhost` è il `localhost` del `mongod`. È il momento in cui la
+platea capisce che «localhost» in Docker è una proprietà del namespace, non della macchina.
+
+### Tre membri, maggioranza due: un guasto tollerato, e al secondo il set cede da solo
+
+> ```text
+> 08:28:47.193  id=21216    Member is now in state DOWN    ← il secondo, 0,4 s dopo il colpo
+>
+>      ... nove secondi, e «Heartbeat failed after max retries» ogni due ...
+>
+> 08:28:56.092  id=21809    Can't see a majority of the set, relinquishing primary
+> 08:28:56.092  id=21475    Stepping down from primary in response to heartbeat
+> ```
+
+Fonte: [V-031](Sources.md#v-031) — sei esecuzioni sullo stack `02-replicaset`, log del superstite,
+mediana 9 329 ms. Decisione in [ADR-0045](Decision.md#adr-0045).
+
+**Perché una slide:** perché è l'unica che risponde alla domanda che le scene di failover lasciano
+aperta. Quelle finiscono bene — cade un membro, il set se ne dà un altro — e chi guarda ne ricava
+che un replica set «regge ai guasti», senza sentirsi mai dire *a quanti*. La risposta è una
+sottrazione: la maggioranza di tre è due, quindi si tollera **uno**. Con due membri la maggioranza
+sarebbe ancora due, cioè **zero** guasti tollerati in scrittura: ecco perché i membri sono tre, e
+non è una questione di prestazioni né di copie dei dati.
+
+Al secondo guasto non succede niente di drammatico da vedere, ed è questo che va detto: il
+superstite è **vivo, sano, raggiungibile e con tutti i dati**, e smette di scrivere lo stesso.
+Il verbo del log è `relinquishing`, cedere — non «ho perso la connessione», ma «non vedo una
+maggioranza, quindi mi tolgo». È una decisione, non un guasto, e ha la stessa forma dei dieci
+secondi dell'elezione (vedi «L'elezione dura sei millisecondi», più sotto): il set si accorge in
+quattro decimi di secondo e **aspetta apposta** i nove che seguono.
+
+La coda cattiva sta nella prova: da `mongosh --host` quel nodo restituisce ancora tutti e 50 000 i
+documenti, perché una connessione diretta parla a lui e non cerca un primario
+([S-045](Sources.md#s-045)). Chi verifica la demo così conclude che il set funziona. Le scritture
+rispondono `NotWritablePrimary`, e l'applicazione, che usa l'URI del replica set, non trova nessun
+server a cui parlare.
+
 ---
+
+### Cento contro zero, misurato sulla stessa prova
+
+> | | istanza singola, `w: 1` | replica set, `w: "majority"` |
+> |---|---:|---:|
+> | scritture confermate all'applicazione | 41 558 | 12 901 |
+> | **confermate e perdute** | **100** | **0** |
+
+Fonte: [V-016](Sources.md#v-016) e [V-033](Sources.md#v-033) — stesso gesto, `docker kill` sul
+processo che scrive, sulle due architetture. Decisione in [ADR-0046](Decision.md#adr-0046).
+
+**Perché una slide:** perché è il numero che l'alta disponibilità di solito non porta. Si parla di
+failover in secondi, che è la parte visibile, e quasi mai di quante scritture già confermate
+all'applicazione svaniscono nel frattempo — che è la parte che finisce in un ticket sei mesi dopo.
+Cento è un numero piccolo e concreto: sta in una riga, e chi lo sente pensa subito ai propri cento.
+
+Ma la slide va detta intera, perché la metà scomoda è la lezione vera. Nel caso a destra
+l'applicazione **un errore l'ha visto**: uno, per il documento `n=2698` — che nel database **c'è**.
+Scritto, e mai confermato. La bugia non sparisce, **cambia verso**: sull'istanza singola il client
+crede di avere dati che non ha, sul replica set crede di non avere dati che ha. Il secondo caso si
+sopravvive, a una condizione da dire ad alta voce: che la scrittura si possa rifare senza danno.
+
+E una precisazione di onestà, perché la scena sembra più bella di com'è: quasi tutta l'invisibilità
+del guasto la fanno i **retryable write**, attivi per impostazione predefinita nel driver, che hanno
+tenuto appesa una `insertOne` per dieci secondi invece di farla fallire. La replica ha salvato i
+dati; il driver ha salvato la faccia all'applicazione. Sono due cose diverse, e vale la pena non
+attribuirle alla stessa.
+
+### Nel comando non c'è `--auth`, e senza credenziali non passa niente
+
+> ```text
+> ["mongod","--replSet","rs0","--keyFile","/keyfile/mongo-keyfile",
+>  "--bind_ip_all","--wiredTigerCacheSizeGB","0.25"]
+> ```
+>
+> ```text
+> hello()                            -> OK: setName=rs0 primary=mongo-rs-1:27017
+> admin.system.users.countDocuments  -> Unauthorized: requires authentication
+> replSetGetStatus                   -> Unauthorized: requires authentication
+> lab.ordini.countDocuments          -> Unauthorized: requires authentication
+> createUser                         -> Unauthorized: requires authentication
+> ```
+
+Fonte: [V-038](Sources.md#v-038); dichiarato da [S-002](Sources.md#s-002) — «`--keyFile` implies
+`--auth`» — e da [S-005](Sources.md#s-005). Decisione in [ADR-0048](Decision.md#adr-0048).
+
+**Perché una slide:** perché la platea legge il comando e cerca `--auth`, e non lo trova. Il
+keyfile non è solo autenticazione **fra** i membri: attiva anche quella dei client, e nessuno lo ha
+chiesto. La riga da dire mentre la seconda schermata è a video è che passa **una cosa sola**,
+`hello()`, perché altrimenti un driver non saprebbe nemmeno a chi presentare le credenziali. Ed è
+anche la spiegazione del paradosso che rende complicata l'inizializzazione: prima di un utente
+nessuno può inizializzare la replica, e senza replica non si crea un utente.
+
+### La migrazione a X.509 non comincia da X.509
+
+> ```text
+> mongod --clusterAuthMode x509         BadValue: need to enable TLS via the tlsMode flag
+> mongod --clusterAuthMode sendX509     BadValue: need to enable TLS via the tlsMode flag
+> mongod --clusterAuthMode sendKeyFile  BadValue: need to enable TLS via the tlsMode flag
+> uscita = 1
+> ```
+
+Fonte: [V-039](Sources.md#v-039), sull'immagine pinnata. La procedura è
+[S-062](Sources.md#s-062). Decisione in [ADR-0048](Decision.md#adr-0048).
+
+**Perché una slide:** perché ribalta la stima dei tempi. `sendKeyFile` è il modo *di transizione*,
+quello che continua a mandare il keyfile e serve solo a non fermare il cluster — e non parte se il
+TLS non c'è. Quindi il primo passo della migrazione non riguarda i certificati di membro: riguarda
+TLS, cioè **tutti i client**, cioè persone che non lavorano nel gruppo che amministra il database.
+Da dire subito dopo: la scala è a senso unico, `Illegal state transition` in tutte e due le
+direzioni, e chi sbaglia tappa riavvia il nodo invece di annullare il comando.
+
+### Un utente locale a un nodo non esiste, e MongoDB lo dice a chiare lettere
+
+> ```text
+> createUser su un secondario   -> NotWritablePrimary: not primary
+> createUser sul database local -> BadValue: Cannot create users in the local database
+> ```
+>
+> ```text
+> mongo-rs-1  utenti=2  admin.admin  admin.lettore-demo
+> mongo-rs-2  utenti=2  admin.admin  admin.lettore-demo
+> mongo-rs-3  utenti=2  admin.admin  admin.lettore-demo
+> ```
+
+Fonte: [V-038](Sources.md#v-038). Decisione in [ADR-0048](Decision.md#adr-0048).
+
+**Perché una slide:** perché la domanda «devo creare l'utente su tutti e tre?» arriva sempre, e la
+risposta migliore non è «no, si replica»: è il secondo messaggio d'errore. L'unico database che non
+viene replicato è `local`, ed è precisamente l'unico in cui non si possono mettere utenti. Il posto
+dove un utente «solo di questo nodo» potrebbe vivere è l'unico posto che gli è vietato.
+
+Terza riga, se c'è tempo: `__system`, l'identità con cui i membri parlano fra loro, **non è un
+documento** — non sta in nessuna collezione, sta nel keyfile. È il motivo per cui perdere il
+keyfile non è come perdere una password: non c'è niente da riscrivere, c'è un file da
+ridistribuire ovunque.
+
+---
+
+### Il primario si dimette in otto millisecondi, e undici secondi dopo si riprende il posto
+
+> | come lo si toglie | quanto ci mette il set a darsi un primario |
+> |---|---:|
+> | `rs.stepDown()` | **8 ms** · 101 ms · 87 ms |
+> | `db.shutdownServer()` | ~500 ms |
+> | `docker kill` | ~10 000 ms |
+>
+> ```text
+> … e poi, da solo, senza che nessuno tocchi niente:
+> mongo-rs-1 (priorità 2) torna primario dopo  11 308 · 11 293 · 11 021 ms
+> ```
+
+Fonte: [V-042](Sources.md#v-042) — tre `rs.stepDown()` cronometrati sullo stack `02-replicaset`,
+con l'osservatore su un terzo nodo. Gli altri due tempi sono [V-029](Sources.md#v-029). Decisione
+in [ADR-0049](Decision.md#adr-0049).
+
+**Perché una slide:** perché completa la scala che le altre due misure lasciano a metà, e lo fa nel
+verso che sorprende. Il gesto brutale è il **più lento** — dieci secondi — e il gesto educato è
+mille volte più veloce, perché chi si dimette **avvisa**, e non c'è nessun timeout da far scadere.
+Detto in una riga: la velocità di un failover non dipende da quanto è potente il cluster, dipende
+da quanto è stato educato chi se n'è andato.
+
+La seconda riga della slide è quella che serve a chi la demo la deve *fare*. Nel lab `mongo-rs-1`
+ha priorità 2, quindi dopo undici secondi si riprende il posto **da solo**. È comodo — la scena si
+ripulisce, lo stack non resta storto per le prove successive — ed è una trappola da palco: chi
+proietta `rs.status()` e comincia a spiegare che «adesso il primario è mongo-rs-2» ha una decina di
+secondi prima che lo schermo lo smentisca. Se la spiegazione è lunga, il gesto giusto è
+`docker stop`, che non si annulla da sé.
+
+---
+
+### Tre modi di diventare primario, e solo la prima riga del log li distingue
+
+> ```text
+> id=4615652  «since we've seen no PRIMARY in election timeout period»  → è un GUASTO
+> id=4615661  «due to step up request»                                  → è MANUTENZIONE
+> id=4615660  «for a priority takeover»                                 → è la CONFIGURAZIONE
+>
+> id=21450    «Election succeeded, assuming primary role»               → identica in tutti e tre
+> ```
+
+Fonte: [V-044](Sources.md#v-044) — log di tre elezioni vere sullo stack `02-replicaset`. Decisione
+in [ADR-0049](Decision.md#adr-0049).
+
+**Perché una slide:** perché è la risposta alla domanda che si fa il lunedì mattina guardando un
+log, e perché questo repository ci aveva sbagliato. In `docs/03-amministrazione/log.md` stava
+scritto — ragionando sulla documentazione, senza aver visto un'elezione — che «la manutenzione
+ordinaria produce lo stesso tracciato nel log di un incidente». È falso, e si vede alla **prima
+riga**: le tre cause hanno tre `id` diversi, e il testo dice in chiaro che cosa è successo.
+
+Il punto da portare in sala è quale riga **non** proiettare. `21450` «Election succeeded» è la riga
+che tutti mostrano, ed è l'unica delle quattro che non insegna niente: è identica se il primario è
+morto, se si è dimesso o se un collega più titolato è tornato al suo posto. La riga che risponde è
+la prima, ed è quella che nei tutorial non c'è mai.
+
+Se c'è tempo, la coda: `id=4615601` «Scheduling priority takeover» compare **tre millisecondi dopo
+la dimissione** e porta nell'attributo l'ora esatta in cui il rientro avverrà. Chi legge il log sa
+dieci secondi prima che il primario sta per tornare — il log non racconta solo il passato.
+
+---
+
+### Il driver prova a raggiungere un host che nessuno ha scritto
+
+> ```text
+> $ mongosh "mongodb://…@host.docker.internal:27021/?replicaSet=rs0"
+> MongoNetworkError: getaddrinfo ENOTFOUND mongo-rs-2
+>                                          ^^^^^^^^^^
+>                        nella stringa non c'è. E al tentativo dopo il nome cambia.
+> ```
+
+Fonte: [V-043](Sources.md#v-043) — dallo host verso lo stack `02-replicaset`. Decisione in
+[ADR-0049](Decision.md#adr-0049), voce [13](02-architetture/trappole-mongodb-in-docker.md#t-13)
+della pagina delle trappole.
+
+**Perché una slide:** perché è il momento in cui si capisce che cos'è davvero un client di replica
+set. L'indirizzo che si scrive nella stringa **serve solo a bussare**: subito dopo il driver chiede
+al nodo com'è fatto il set, riceve `["mongo-rs-1:27017", "mongo-rs-2:27017", "mongo-rs-3:27017"]`,
+adotta quei nomi e butta via quello con cui era entrato. Da lì in poi parla a nomi che fuori dalla
+rete Docker non esistono. Non è un errore di configurazione: è il protocollo che funziona come
+deve, dentro una rete in cui chi si connette non sta.
+
+La seconda metà della slide è la mossa che peggiora le cose, e viene in mente a tutti: elencare
+**tutti e tre** gli indirizzi pubblicati. Stesso errore, perché una seed list con più di un host è
+una delle quattro eccezioni che spengono `directConnection` ([S-045](Sources.md#s-045)). Più
+indirizzi buoni si scrivono, più si convince il driver a scoprire la topologia e a buttarli via
+tutti e tre. È il caso raro in cui la soluzione è **scriverne uno solo**, e dire al driver di non
+guardarsi intorno.
+
+---
+
+### La priorità non decide solo chi vince: decide anche quanto ci mette
+
+> «The `priority` settings of replica set members affect both the timing and the outcome of
+> elections for primary. Higher-priority members are more likely to call elections, and are more
+> likely to win. Use this setting to ensure that some members are more likely to become primary
+> and that others can never become primary.»
+
+Fonte: [S-065](Sources.md#s-065) — MongoDB Manual 7.0, Adjust Priority for Replica Set Member.
+
+E il campo ha un intervallo, con un valore predefinito che rende tutti i membri equivalenti:
+
+> «The value of `priority` can be any floating point (i.e. decimal) number between `0` and `1000`.
+> The default value for the `priority` field is `1`.»
+
+Fonte: [S-065](Sources.md#s-065).
+
+**Perché una slide:** spiega in una riga perché nel laboratorio il primario si può **nominare in
+anticipo** — `mongo-rs-1` ha `priority: 2`, gli altri due `1` ([ADR-0051](Decision.md#adr-0051)) — e
+prepara la sorpresa della demo di failover: il nodo che si è ucciso, quando torna, **si riprende il
+ruolo da solo**. Misurato: undici secondi dopo uno `rs.stepDown(10)`
+([V-042](Sources.md#v-042)). Va detto prima, altrimenti il pubblico vede una scena che si annulla
+mentre la si commenta e non capisce se ha appena assistito a un guasto o a una guarigione.
+
+### Chi maneggia il segreto lo nasconde, chi lo lancia lo lascia scritto
+
+> ```text
+> dentro il container:   mongosh mongodb://<credentials>@127.0.0.1:27017/?directConnection=true…
+> sull'host:             /usr/local/bin/docker exec … mongosh --username admin --password <password> …
+> ```
+
+Fonte: [V-047](Sources.md#v-047) — misura del 2026-09-01 su `mongosh` 2.10.0; decisione in
+[ADR-0054](Decision.md#adr-0054). Nella riga dell'host `<password>` è sostituita a mano: lì la
+password c'è per davvero, ed è il punto.
+
+**Perché una slide:** perché smonta l'abitudine di guardare nel posto sbagliato. La domanda «la
+password si vede in `ps`?» ha due risposte opposte a seconda di quale tabella dei processi si
+guarda, e quasi tutti guardano quella del container. Lì non si vede: `mongosh` riscrive il proprio
+`argv` e mette `<credentials>` al posto delle credenziali. Si vede **sull'host**, nella riga del
+client `docker`, che nessuno riscrive — e l'host è la macchina dove girano anche i programmi di
+tutti gli altri. La morale sta in una riga e vale ben oltre MongoDB: quando si mette un comando
+dentro un container, il confine di sicurezza non è dove sembra, ed è di là dal confine che il
+segreto resta scritto. Sotto, la coda della storia: nello script c'era un `-e SEGRETO=` messo per
+prudenza, che nessuno leggeva e che di quella password metteva una **seconda** copia proprio sulla
+riga che la espone.
 
 ## Blocco 3 — Sharded cluster
 
@@ -307,6 +610,76 @@ Fonte: [S-011](Sources.md#s-011).
 segnalare con onestà: le espressioni «point in time» e «does not guarantee» **non** compaiono
 nella documentazione, e il caso dello standalone — dove `--oplog` non è nemmeno utilizzabile —
 non è trattato esplicitamente.
+
+### Il dump fallito pesa 1,8 GB e non è un backup
+
+> ```text
+> 10:03:46.673  done dumping `lab.grandi` (15000 documents)
+> 10:03:46.678  Failed: oplog overflow: mongodump was unable to capture
+>                       all new oplog entries during execution
+> uscita = 1
+> ```
+>
+> ```text
+> /tmp/dump-mini/lab/grandi.bson     1 536 555 000 byte
+> /tmp/dump-mini/lab/disturbo.bson     320 525 373 byte
+> /tmp/dump-mini/oplog.bson                  assente
+> /tmp/dump-mini/prelude.json                assente
+> ```
+
+Fonte: [V-036](Sources.md#v-036), riprodotto su un'istanza usa-e-getta con oplog da 1 MB.
+Decisione in [ADR-0047](Decision.md#adr-0047).
+
+**Perché una slide:** perché il fallimento non ha l'aspetto di un fallimento. `mongodump` si ferma
+**dopo** aver scritto tutte le collezioni: sul disco resta un albero completo, pesante, che si apre
+senza errori e non è coerente rispetto a nessun istante. Mancano due file soli — `oplog.bson` e
+`prelude.json` — e nessuno li guarda. L'unico segnale è il codice di uscita **1**, cioè la cosa che
+gli script di backup scritti in fretta non controllano mai. In sala la domanda da fare prima di
+mostrare la seconda schermata è: «quanti di voi controllano il valore di ritorno di `mongodump`?».
+
+Da dire nello stesso respiro, perché altrimenti è un trucco: la prova è **forzata**. Un oplog da
+1 MB con un checkpoint al secondo non esiste in produzione. Il caso vero è l'opposto — un oplog
+normale e un dump che dura ore — e qui i due termini sono stati compressi per farli stare in tre
+secondi. Il meccanismo e il messaggio sono quelli veri; la scala no.
+
+### `mongodump` è dichiarato per installazioni piccole, dalla sua stessa documentazione
+
+> «`mongodump` and `mongorestore` are tools for backing up and restoring **small** MongoDB
+> deployments.»
+
+> Nella tabella di confronto, la stessa pagina assegna alla coppia: RTO **High**, RPO **High**,
+> ripristino continuo a un punto nel tempo **No**, coerenza **Not guaranteed**, backup di uno
+> sharded cluster «High, requires extra steps».
+
+Fonte: [S-060](Sources.md#s-060) — MongoDB Manual 7.0, *Backup Methods for a Self-Managed
+Deployment*.
+
+**Perché una slide:** perché la riserva più importante di una demo di backup non è un'opinione di
+chi parla, è una riga del manuale. Chiude in anticipo la domanda «e in produzione?» senza doverla
+argomentare. Va però detto anche il buco: «small» **non è quantificato da nessuna parte**, quindi la
+frase orienta e non decide. E una riga della tabella — «impact on source: High, requires write lock»
+— **non corrisponde** a quello che si vede sullo stack: durante i cinquanta millisecondi del dump le
+scritture sono proseguite ([V-035](Sources.md#v-035)).
+
+### Il punto nel tempo cade dentro il comando, non alla sua ultima riga
+
+> | | senza `--oplogReplay` | con `--oplogReplay` |
+> |---|---:|---:|
+> | `lab.movimenti` ripristinati | **733** | **740** |
+> | documenti presenti a fine dump | | **741** |
+
+Fonte: [V-035](Sources.md#v-035), stesso file di dump ripristinato due volte.
+Decisione in [ADR-0047](Decision.md#adr-0047).
+
+**Perché una slide:** perché sostituisce una formula con un numero. «Coerente a un punto nel tempo»
+non dice quale punto; questi tre numeri lo dicono. I **sette** documenti fra 733 e 740 sono quanto
+vale `--oplogReplay` su un dump di cinquanta millisecondi — su un dump di mezz'ora sono mezz'ora di
+scritture. E il documento che manca fra 740 e 741 è la definizione operativa del punto di
+ripristino: **l'ultima voce di oplog catturata**, che cade dentro l'esecuzione del comando. Chi
+scrive durante quel respiro finale ha il dato nel database e non nel backup.
+
+Riserva da tenere sulla slide, non a voce: gli istanti nei documenti li scrive il **client**, quindi
+il confine 740/741 è approssimato al millisecondo fra due orologi diversi.
 
 ---
 
@@ -430,7 +803,145 @@ raggiunge PID 1 — e il comando ritorna successo senza aver fatto niente. Il de
 invece nel namespace antenato, e passa. Chi entra nel container per «uccidere `mongod`» si
 convince di averlo fatto.
 
+### Lo stesso stack, scritto in due modi equivalenti: uno passa il controllo, l'altro no
+
+> ```console
+> $ check_stack.py senza-mongod.yaml     # command: [--replSet, rs0, --bind_ip_all]
+> Stack conformi: 1.
+>
+> $ check_stack.py con-mongod.yaml       # command: [mongod, --replSet, rs0, --bind_ip_all]
+> ✗ membro: avvia mongod senza «--wiredTigerCacheSizeGB».
+> ```
+
+Fonte: misura del Task 3 di `feature/02`, verbalizzata in
+[`registro-operativo-sviluppo.md`](registro-operativo-sviluppo.md). L'entrypoint ufficiale
+antepone `mongod` quando il primo argomento comincia per trattino: per Docker i due file
+avviano lo stesso identico processo.
+
+**Perché una slide:** è la lezione dei controlli automatici in sei righe. Lo strumento non
+sbaglia una regola, sbaglia a riconoscere il bersaglio — e chi legge il verde non ha modo di
+saperlo. Vale per ogni linter di configurazione: l'insieme delle scritture equivalenti nel
+formato è parte del formato, e un controllo che ne conosce una sola è una convenzione
+travestita da regola.
+
 ---
+
+### `up` ha detto di sì, e per quattordici secondi la replica non c'era
+
+> ```console
+> $ docker compose ... up -d --wait
+> $ echo $?
+> 0
+> $ docker inspect rs-init --format '{{.State.Status}}'
+> running
+> $ mongosh --quiet --eval 'rs.status()'
+> NotYetInitialized (94)
+> ```
+
+Fonte: [V-025](Sources.md#v-025), misurata sullo stack `02-replicaset`. `--wait` è documentato
+come «Wait services be running|healthy» ([S-057](Sources.md#s-057)); il servizio che inizializza
+il replica set non ha un healthcheck, quindi la soglia che gli si applica è `running` — e un
+container che deve morire è `running` nell'istante esatto in cui comincia. Il rimedio è un secondo
+comando, `docker compose wait rs-init`, che «blocca fino a che i container si fermano» e ne
+restituisce il codice di uscita.
+
+**Perché una slide:** perché l'opzione fa esattamente ciò che dichiara, e la dichiarazione è stata
+letta male da chi l'ha usata — cioè da me. In uno stesso file convivono due generi di servizio:
+quelli per cui «pronto» significa *essere su*, e quelli per cui significa *essere finiti*. Una sola
+opzione risponde alla prima domanda, e chi non si accorge di avere anche la seconda ottiene uno
+zero che non vale niente. In sala funziona come esempio della classe di bug peggiore: quella che
+riesce quasi sempre, perché su una macchina veloce lo scarto si accorcia e il test rosso arriva una
+volta ogni tanto, su un'altra macchina, davanti a qualcun altro.
+
+**Il numero è cambiato, e va detto così.** Da quando il caricamento dei dati di demo sta dentro
+`rs-init` ([ADR-0043](Decision.md#adr-0043)) lo scarto misurato è di **ventidue** secondi
+([V-028](Sources.md#v-028)). Sul palco si dica quello che si è misurato la mattina stessa, non un
+numero imparato a memoria: il punto della slide non è il quattordici, è che lo zero arrivava prima.
+
+---
+
+### Chiedere la maggioranza costa un millisecondo, e questo è il numero più pericoloso della demo
+
+> ```text
+> ritardo primario -> secondario   mediana 1 ms
+> scrittura con w: 1               mediana 1 ms
+> scrittura con w: "majority"      mediana 2 ms
+> ```
+
+Fonte: [V-027](Sources.md#v-027), tre esecuzioni da dieci giri sullo stack `02-replicaset` a riposo.
+`w: "majority"` restituisce l'ack quando la scrittura è arrivata a una maggioranza di membri, quindi
+sopravvive alla caduta del primario ([S-035](Sources.md#s-035)); è il write concern con cui lo stack
+02 carica i suoi 50 000 ordini.
+
+**Perché una slide:** perché la garanzia più citata dei replica set, qui, costa un millisecondo — e
+perché quel millisecondo non vale niente fuori da questa macchina. I tre membri girano sullo stesso
+portatile, su un bridge Docker: `w: "majority"` è per definizione un giro fino al secondo membro più
+veloce, e su due datacenter quel giro è la latenza fra i due datacenter — il termine dominante, non
+un millisecondo. La slide serve a dire due cose insieme: *la maggioranza è quasi gratis qui*, e *chi
+riporta questo numero altrove sta citando la propria rete, non MongoDB*. È anche l'occasione per
+mostrare la misura sbagliata: `optimeDate` in `rs.status()`, che tutti usano per il ritardo di
+replica, ha granularità di un secondo e su questo set risponde `0 ms` sempre — uno strumento che
+dà sempre ragione non sta misurando.
+
+---
+
+### L'elezione dura sei millisecondi. I dieci secondi sono l'attesa prima di cominciarla
+
+> ```text
+> 19:01:47.369  id=21216    Member is now in state DOWN        ← 0,3 s dopo il colpo
+>
+>      ... nove secondi, e diciannove «Heartbeat failed after max retries» ...
+>
+> 19:01:56.558  id=4615652  Starting an election, since we've seen no PRIMARY
+>                           in election timeout period
+>                           electionTimeoutPeriodMillis: 10000
+> 19:01:56.564  id=21450    Election succeeded, assuming primary role
+> ```
+
+Fonte: [V-030](Sources.md#v-030), un'elezione vera sullo stack `02-replicaset`, log del nodo
+eletto. I tempi complessivi sono in [V-029](Sources.md#v-029): `docker kill` sul primario costa
+**~10 s**, uno `shutdown` **~0,5 s**.
+
+**Perché una slide:** perché smonta due frasi che si dicono sempre. La prima è «l'elezione è
+lenta»: non lo è, dura sei millisecondi. Il tempo se ne va tutto ad **aspettare**, e il log lo dice
+in un attributo invece che in una nota a piè di pagina. La seconda è che il set «si accorge dopo
+dieci secondi»: se ne accorge dopo tre decimi, con `Connection refused` scritto nell'attributo, e
+poi *decide di non fare niente* — perché un membro irraggiungibile per un istante non è un membro
+morto, e indire un'elezione a ogni singhiozzo di rete costerebbe più di quello che salva. È la
+differenza fra un timeout e un ritardo, e in sala è il punto in cui si capisce che quei dieci
+secondi sono una scelta di progetto, non una lentezza.
+
+Il seguito naturale è il confronto delle due scene: il gesto brutale — `docker kill` — costa dieci
+secondi, quello educato mezzo. Chi si aspetta l'opposto ha ragione a sorprendersi, e la risposta è
+sempre la stessa riga di log: con lo `shutdown` il primario **avvisa**, quindi non c'è nessun
+timeout da far scadere.
+
+---
+
+### Il dollaro se lo mangia Compose, e nel container arriva una stringa vuota
+
+> «You can use a `$$` (double-dollar sign) when your configuration needs a literal dollar sign.»
+
+Fonte: [S-064](Sources.md#s-064) — Docker Docs, Compose file reference: Interpolation.
+
+E quando non trova niente da sostituire, Compose non si ferma:
+
+> «If Compose can't resolve a substituted variable and no default value is defined, it displays a
+> warning and substitutes»
+
+— e ciò che sostituisce è la stringa vuota. Un avviso, non un errore: il file resta valido, e
+sbagliato.
+
+Fonte: [S-064](Sources.md#s-064).
+
+**Perché una slide:** è la trappola che si prende chiunque scriva un `command: sh -c` dentro un
+`compose.yaml` — e nel laboratorio di MongoDB capita subito, perché i `mongosh --eval` di
+inizializzazione ne sono pieni. La variabile è dichiarata due righe sopra, in `environment:`, e
+dentro il container risulta vuota: Compose ha interpolato il `$` prima ancora che il file
+diventasse un container, non ha trovato quella variabile **nel proprio ambiente** e ha messo una
+stringa vuota. Misurato: `singolo=[]  doppio=[valore-del-container]`, e con la stessa variabile
+esportata nella shell che lancia, il dollaro singolo stampa il valore **dell'host**
+([V-046](Sources.md#v-046)). `docker compose config` esce `0` e si limita a un avviso.
 
 ## Installazione su una macchina vera
 
@@ -516,3 +1027,20 @@ Fonte: [S-021](Sources.md#s-021) — GitHub Docs, About large files on GitHub.
 
 **Perché una slide:** giustifica in tre numeri la scelta di tenere i filmati fuori dal
 repository. Le unità sono **MiB**, non MB: vedi i [limiti noti](00-progetto/limiti-noti.md).
+
+---
+
+### La riserva della demo pesa tredici kilobyte
+
+> Quattro scene registrate — lo smoke completo, `docker kill` sul primario, la terminazione
+> pulita, la maggioranza persa — occupano **13 KB** in tutto: 118 righe di JSON con accanto
+> il secondo in cui ogni cosa è comparsa sullo schermo.
+
+Fonte: [V-045](Sources.md#v-045) — le quattro registrazioni del branch `feature/02`.
+
+**Perché una slide:** sta subito dopo i numeri di [S-021](Sources.md#s-021) e li ribalta. I filmati
+restano fuori dal repository perché pesano; il tracciato del terminale ci sta dentro perché è testo,
+e per lo stesso motivo si può leggere con `cat`, confrontare con `diff` e riprodurre senza
+installare niente. Sono due riserve diverse, non due copie della stessa cosa: il filmato copre il
+caso «la demo non parte», la registrazione di terminale il caso «la demo parte ma il tempo è
+finito».

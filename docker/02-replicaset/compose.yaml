@@ -1,0 +1,422 @@
+# Stack 02 — replica set a tre membri.
+#
+# È il primo stack del lab che si autentica. Lo stack 01 gira deliberatamente senza
+# autenticazione come esempio negativo (ADR-0005); qui i membri si riconoscono fra
+# loro con un keyfile condiviso, e quel keyfile NON entra nel repository: lo genera
+# un servizio one-shot al primo avvio, dentro un volume nominato (ADR-0014).
+#
+# La catena di inizializzazione segue ADR-0040, scelta dopo aver montato e misurato
+# tre strade diverse (V-023). In sintesi: nessun mongod riceve MONGO_INITDB_ROOT_*,
+# e l'utente amministratore nasce sotto eccezione localhost da un servizio che
+# condivide il namespace di rete del primo membro. Il risultato è che
+# `docker compose up -d` da solo produce un replica set completo e autenticato,
+# senza passi manuali e senza una password scritta nel repository.
+#
+# La catena è di tre anelli e si legge dall'alto in basso:
+#
+#   keyfile-init  genera il segreto condiviso e muore
+#        ↓        (service_completed_successfully)
+#   mongo-rs-1/2/3  partono con --keyFile, rispondono, non sono ancora una replica
+#        ↓        (service_healthy)
+#   rs-init      esegue rs.initiate(), attende il primario, crea l'amministratore,
+#                e come ultimo passo carica i dati di demo con w: "majority"
+#
+# Gli anelli restano TRE anche se rs-init fa due cose, ed è una scelta: un quarto
+# servizio per il solo seed aggiungerebbe un terzo comando d'attesa e toglierebbe
+# ad ADR-0041 il suo verdetto unico, che è il codice di uscita di
+# `docker compose wait rs-init`. Il seed è il primo punto del lab in cui qualcuno
+# si autentica come client, e sta bene attaccato al `createUser` che ha appena
+# chiuso l'eccezione localhost.
+#
+# Serve un file `.env` accanto a questo, copiato da `.env.example`: la password
+# dell'amministratore non ha un valore predefinito e senza di essa l'avvio si
+# ferma dicendolo.
+#
+# COME SI AVVIA — due comandi, non uno, e due --env-file, non uno (ADR-0041):
+#
+#   docker compose --env-file tools/images.env \
+#                  --env-file docker/02-replicaset/.env \
+#                  -f docker/02-replicaset/compose.yaml up -d --wait
+#   docker compose ... wait rs-init
+#
+# Il primo comando esce 0 QUATTORDICI SECONDI PRIMA che il replica set esista:
+# `--wait` attende che i servizi siano «running|healthy», e rs-init — che non ha
+# un healthcheck perché deve morire, non vivere — è `running` nell'istante in cui
+# comincia. Il verdetto vero è il codice di uscita del secondo comando, che
+# blocca fino a che il container si ferma. Misurato in V-025.
+#
+# Il secondo `--env-file` non è ridondante: la flag non AGGIUNGE un file, prende
+# il posto del `.env` implicito. Passandone uno solo, il `.env` qui accanto non
+# viene letto benché sia qui accanto (S-056, V-025).
+
+name: sqlstart-02-replicaset
+
+services:
+  # Primo anello della catena. Gira una volta sola, prima di chiunque altro, e
+  # lascia dietro di sé un keyfile che i tre mongod monteranno in sola lettura.
+  keyfile-init:
+    # La STESSA immagine dei mongod, non un'immagine di utilità: una in meno da
+    # scaricare, e il vincolo offline ringrazia. Contiene già `openssl`.
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: rs-keyfile-init
+    # `never` fisso, non parametrico: ADR-0039. Se l'immagine manca dalla cache
+    # l'avvio fallisce subito, invece di aprire una connessione che in sala non c'è.
+    pull_policy: never
+    # Obbligatorio su un one-shot. Con `unless-stopped` Compose rialzerebbe il
+    # servizio ogni volta che esce — e un servizio che ha finito esce sempre —
+    # quindi la catena non completerebbe mai e `service_completed_successfully`
+    # non scatterebbe per nessuno.
+    restart: "no"
+
+    # ADR-0004 chiede limiti espliciti a OGNI servizio, non solo ai mongod, e la
+    # regola ha ragione anche qui: un `openssl rand` non consuma niente, ma un
+    # servizio senza tetto è un servizio di cui nessuno ha fatto il conto. Questi
+    # 128 MiB non entrano nel bilancio dei 2,25 GiB del design §5.1, perché
+    # keyfile-init è già uscito quando il primo mongod parte.
+    mem_limit: 128m
+    cpus: 0.25
+
+    command: ["bash", "/init/01-keyfile.sh"]
+    volumes:
+      # Volume NOMINATO, non bind mount, ed è la decisione di ADR-0014: su macOS
+      # un file montato dall'host non conserva i permessi che gli si danno, e
+      # mongod rifiuta di partire con un keyfile che considera «too open».
+      # Generarlo dentro il volume è l'unico modo di garantire il 400 ovunque.
+      - keyfile:/keyfile
+      # Lo script invece arriva dall'host, in sola lettura. Qui il bind mount va
+      # bene: il file viene passato a `bash` come argomento, quindi non gli serve
+      # il bit di esecuzione, che è appunto la cosa che macOS non garantisce.
+      - ./init/01-keyfile.sh:/init/01-keyfile.sh:ro
+
+  # ---------------------------------------------------------------------------
+  # I tre membri. Sono scritti per esteso tre volte, senza ancoraggi YAML e senza
+  # `extends`: la ripetizione è deliberata (ADR-0003). Questo file è materiale
+  # didattico e va letto dall'alto in basso da chi non conosce né il progetto né
+  # gli ancoraggi YAML; un `<<: *membro` risparmierebbe trenta righe a chi lo sa
+  # già leggere e ne costerebbe dieci minuti a chiunque altro.
+  # ---------------------------------------------------------------------------
+
+  mongo-rs-1:
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: mongo-rs-1
+    # Il nome host qui non è una buona abitudine come nello stack 01: è un
+    # requisito. `rs.initiate()` registra i membri con il nome con cui li si
+    # elenca, e quel nome finisce DENTRO la configurazione della replica — poi
+    # torna al driver quando scopre la topologia. Deve risolvere ovunque, quindi
+    # nomi e mai indirizzi (ADR-0021).
+    hostname: mongo-rs-1
+    pull_policy: never
+    restart: unless-stopped
+
+    # 768 MiB per membro, 2,25 GiB per i tre: il bilancio del design §5.1, pensato
+    # per girare su un portatile che intanto proietta. Parametrico perché chi
+    # clona può avere più memoria di chi presenta; il valore predefinito è quello
+    # con cui il talk è stato provato.
+    mem_limit: ${MEMORIA_MEMBRO:-768m}
+    cpus: ${CPU_MEMBRO:-0.75}
+
+    command:
+      # `mongod` scritto per esteso, e non è pedanteria. L'entrypoint ufficiale
+      # antepone `mongod` da sé quando il primo argomento comincia per trattino,
+      # quindi le due forme avviano lo stesso processo — ma `tools/check_stack.py`
+      # riconosce un mongod dal primo elemento del comando, e sulla forma
+      # abbreviata la regola ADR-0004 sulla cache NON scatta. Misurato: un file
+      # con `--replSet` in testa e nessuna cache dichiarata passa il controllo
+      # come conforme. Una regola che non può fallire non è una regola.
+      - mongod
+      - --replSet
+      - ${NOME_REPLICA:-rs0}
+      # L'autenticazione interna fra i membri. Con --keyFile MongoDB attiva anche
+      # l'autenticazione dei client: è la ragione per cui esiste tutta la catena
+      # di ADR-0040 — prima che un utente esista, nessuno può inizializzare la
+      # replica, e senza replica inizializzata non si può creare un utente.
+      - --keyFile
+      - /keyfile/mongo-keyfile
+      # Dentro un container l'interfaccia utile non è `localhost`: i compagni di
+      # replica arrivano dalla rete Compose. È anche la ragione per cui questo
+      # stack NON va esposto fuori dalla macchina di chi presenta.
+      - --bind_ip_all
+      # 0,25 GiB = 256 MiB di cache dentro 768 MiB di limite. Il valore è fisso
+      # mentre `mem_limit` è parametrico, e la coppia va mossa insieme: chi
+      # abbassa MEMORIA_MEMBRO sotto i 256 MiB configura una cache più grande
+      # della memoria che avrà, e mongod lo accetta senza un avviso. È
+      # esattamente il caso che `make stack-check` intercetta (ADR-0004, V-009).
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+
+    ports:
+      # 27021-27023 dalla mappa del design §5.2, già riservate in
+      # tools/preflight.sh da prima che questo stack esistesse. Gli intervalli dei
+      # tre stack non si sovrappongono apposta: il 01 deve poter restare acceso
+      # mentre questo gira (ADR-0003).
+      - "${PORTA_MEMBRO_1:-27021}:27017"
+
+    volumes:
+      # In SOLA LETTURA. Un membro non ha ragione di riscrivere il keyfile, e il
+      # montaggio glielo impedisce invece di fidarsi che non lo faccia.
+      - keyfile:/keyfile:ro
+      # Un volume dati PER MEMBRO. Condividerne uno significherebbe tre processi
+      # sullo stesso /data/db, che è il modo più rapido di corrompere un database.
+      - dati-1:/data/db
+      # Lo stesso file che esegue rs-init all'avvio, montato anche qui perché
+      # `make seed-02` lo rilancia con `compose exec` su uno stack già in piedi.
+      # Una sorgente sola, due modi di eseguirla — come per lo stack 01
+      # (ADR-0031). NON è in /docker-entrypoint-initdb.d: là lo eseguirebbe il
+      # mongod temporaneo dell'entrypoint, che gira SENZA --replSet, e una
+      # scrittura con w: "majority" su un processo che non è una replica non
+      # significa niente.
+      - ./init/20-dati-demo.js:/init/20-dati-demo.js:ro
+
+    # Vedi il commento sui log dello stack 01: mongod scrive su stdout e la
+    # rotazione diventa affare del runtime, che per impostazione predefinita non
+    # ruota niente (V-011). Qui il volume è triplo — tre membri — e la scena di
+    # failover produce log di elezione a raffica proprio nel momento in cui
+    # servono leggibili.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # L'healthcheck che rs-init aspetta, e che deve diventare verde PRIMA che la
+    # replica esista — altrimenti rs-init attende una condizione che solo lui può
+    # produrre, e la catena si blocca.
+    #
+    # La condizione è una disgiunzione di tre stati, e i tre stati sono misurati,
+    # non ipotizzati (Task 3). Su un membro appena avviato con --replSet e nessuna
+    # configurazione ricevuta, hello() risponde isWritablePrimary=false,
+    # secondary=false e **isreplicaset=true**: il terzo termine è l'unico vero, ed
+    # è quello che apre la strada a rs.initiate(). A replica formata isreplicaset
+    # sparisce e valgono i primi due. Un healthcheck con i soli primi due termini
+    # — quello che il design §5.4 suggerisce — resta rosso per sempre.
+    #
+    # `quit(0/1)` e non il valore stampato: mongosh esce 0 se lo script non
+    # solleva eccezioni, quindi un `--eval` che si limita a stampare `false`
+    # risulterebbe sano lo stesso. È il controllo a dover decidere, non la
+    # connessione riuscita.
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "const h = db.hello(); quit(h.isWritablePrimary || h.secondary || h.isreplicaset === true ? 0 : 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      # Senza start_period i primi tentativi falliti contano come guasti e il
+      # membro risulta «unhealthy» mentre sta semplicemente ancora aprendo i file.
+      start_period: 20s
+
+    depends_on:
+      # Non «dopo che è partito» ma «dopo che ha finito bene»: il keyfile deve
+      # esistere e avere i permessi giusti PRIMA che mongod apra il file, e un
+      # one-shot che è partito non ha ancora fatto niente (ADR-0023).
+      keyfile-init:
+        condition: service_completed_successfully
+
+  mongo-rs-2:
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: mongo-rs-2
+    hostname: mongo-rs-2
+    pull_policy: never
+    restart: unless-stopped
+
+    mem_limit: ${MEMORIA_MEMBRO:-768m}
+    cpus: ${CPU_MEMBRO:-0.75}
+
+    command:
+      - mongod
+      - --replSet
+      # Lo stesso nome di replica del membro 1: è ciò che li rende compagni. Un
+      # membro avviato con un --replSet diverso non dà errore all'avvio, si
+      # limita a non partecipare, ed è un guasto che si scopre tardi.
+      - ${NOME_REPLICA:-rs0}
+      # Lo stesso keyfile, dallo stesso volume. Se i tre file differissero anche
+      # di un byte i membri si rifiuterebbero a vicenda con un errore di
+      # autenticazione che sembra tutt'altro: è la ragione per cui lo script del
+      # keyfile è idempotente e non lo rigenera mai al secondo avvio.
+      - --keyFile
+      - /keyfile/mongo-keyfile
+      - --bind_ip_all
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+
+    ports:
+      - "${PORTA_MEMBRO_2:-27022}:27017"
+
+    volumes:
+      - keyfile:/keyfile:ro
+      - dati-2:/data/db
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Identico a quello del membro 1: vedi lì il perché dei tre termini.
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "const h = db.hello(); quit(h.isWritablePrimary || h.secondary || h.isreplicaset === true ? 0 : 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+    depends_on:
+      keyfile-init:
+        condition: service_completed_successfully
+
+  mongo-rs-3:
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: mongo-rs-3
+    hostname: mongo-rs-3
+    pull_policy: never
+    restart: unless-stopped
+
+    mem_limit: ${MEMORIA_MEMBRO:-768m}
+    cpus: ${CPU_MEMBRO:-0.75}
+
+    command:
+      - mongod
+      - --replSet
+      - ${NOME_REPLICA:-rs0}
+      - --keyFile
+      - /keyfile/mongo-keyfile
+      - --bind_ip_all
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+
+    ports:
+      # Il terzo membro è quello che rende il set tollerante a un guasto: con due
+      # soli membri, fermarne uno lascia il superstite in minoranza e il set
+      # diventa di sola lettura. È la scena del talk, e vive di questo terzo.
+      - "${PORTA_MEMBRO_3:-27023}:27017"
+
+    volumes:
+      - keyfile:/keyfile:ro
+      - dati-3:/data/db
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Identico a quello del membro 1: vedi lì il perché dei tre termini.
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "const h = db.hello(); quit(h.isWritablePrimary || h.secondary || h.isreplicaset === true ? 0 : 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+    depends_on:
+      keyfile-init:
+        condition: service_completed_successfully
+
+  # ---------------------------------------------------------------------------
+  # Secondo anello: forma la replica e crea l'amministratore. Gira una volta e
+  # muore. È il servizio che ADR-0040 ha scelto dopo aver montato e misurato tre
+  # strade diverse, e l'unica riga che conta è `network_mode`.
+  # ---------------------------------------------------------------------------
+
+  rs-init:
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: rs-init
+    pull_policy: never
+    restart: "no"
+
+    mem_limit: 128m
+    cpus: 0.25
+
+    # LA riga del file. Questo container non ha un'interfaccia di rete propria:
+    # usa quella di mongo-rs-1. Quindi `localhost` qui dentro è il `localhost`
+    # del mongod, e la connessione gode dell'eccezione localhost — che permette
+    # `replSetInitiate` e il primo `createUser` su un nodo che pretende
+    # autenticazione ma non ha ancora nessun utente (ADR-0040, V-023, S-055).
+    #
+    # Due conseguenze da conoscere prima di provare a violarle: rs-init NON è
+    # raggiungibile per nome sulla rete Compose, e NON può pubblicare porte.
+    # Non gli serve nessuna delle due, ma il vincolo non è ovvio e chi modifica
+    # questo file ci sbatte contro con un messaggio poco parlante.
+    network_mode: "service:mongo-rs-1"
+
+    environment:
+      NOME_REPLICA: ${NOME_REPLICA:-rs0}
+      UTENTE_AMMINISTRATORE: ${UTENTE_AMMINISTRATORE:-admin}
+      # La forma `:?` fa fallire l'avvio con un messaggio invece di creare un
+      # amministratore con password vuota. Per Compose una variabile vuota vale
+      # quanto una assente, quindi il segnaposto vuoto di .env.example scatta qui.
+      PASSWORD_AMMINISTRATORE: ${PASSWORD_AMMINISTRATORE:?assente — copiare docker/02-replicaset/.env.example in .env e riempire la password}
+
+    # Due mongosh in fila, legati da `&&`, ed è la catena in miniatura.
+    #
+    # Il primo gira SENZA credenziali e ci riesce solo grazie all'eccezione
+    # localhost. Il secondo gira CON le credenziali, e non per scrupolo: la
+    # `createUser` con cui finisce il primo script chiude l'eccezione, quindi
+    # dall'istante successivo su questo nodo non passa più niente in anonimo.
+    # Chi vuole vedere la differenza fra i due mondi la vede in queste due righe.
+    #
+    # `$$` e non `$`: il dollaro singolo lo mangerebbe Compose, che interpola il
+    # file PRIMA di consegnarlo al container. `$$` è come si scrive un dollaro
+    # che deve arrivare intero alla shell.
+    #
+    # `--host "rs0/localhost:27017"` è la forma «insieme di semi con nome della
+    # replica»: il driver si collega, scopre la topologia e scrive sul primario,
+    # chiunque esso sia. Con `--host localhost` scriverebbe sul nodo che ha
+    # accanto, e se quello non fosse primario la scrittura fallirebbe. Usare le
+    # credenziali con `--username/--password` e non dentro l'URI evita di dover
+    # codificare in percentuale una password che contenga `@` o `:`.
+    #
+    # `--file` con percorso ASSOLUTO, mai per pipe: dentro un container la
+    # directory di lavoro non è quella da cui si è digitato il comando, e sullo
+    # standard input mongosh crede di avere una sessione interattiva e ci stampa
+    # sopra i prompt (ADR-0036, S-047).
+    command:
+      - sh
+      - -c
+      - >-
+        mongosh --quiet --host localhost --file /init/10-rs-initiate.js
+        &&
+        mongosh --quiet --host "$$NOME_REPLICA/localhost:27017"
+        --username "$$UTENTE_AMMINISTRATORE"
+        --password "$$PASSWORD_AMMINISTRATORE"
+        --authenticationDatabase admin
+        --file /init/20-dati-demo.js
+
+    volumes:
+      - ./init/10-rs-initiate.js:/init/10-rs-initiate.js:ro
+      - ./init/20-dati-demo.js:/init/20-dati-demo.js:ro
+
+    depends_on:
+      # Tutti e tre sani, non solo il primo. rs.initiate() elenca tre membri: se
+      # due non rispondono ancora, il set si forma comunque ma l'elezione tarda,
+      # e l'attesa del primario dentro lo script consuma i suoi tentativi per un
+      # motivo evitabile.
+      #
+      # `service_started` qui non basta, ed è misurato: nella prova del Task 1
+      # rs-init è arrivato mentre il membro era ancora nella fase iniziale e ha
+      # preso ECONNREFUSED (V-023).
+      mongo-rs-1:
+        condition: service_healthy
+      mongo-rs-2:
+        condition: service_healthy
+      mongo-rs-3:
+        condition: service_healthy
+
+volumes:
+  keyfile:
+  dati-1:
+  dati-2:
+  dati-3:
