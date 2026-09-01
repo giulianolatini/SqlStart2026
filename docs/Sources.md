@@ -5960,3 +5960,96 @@ cluster pronto: 2 shard registrati
   residui. Tutto su arm64.
 - **Data:** 2026-09-01
 - **Usata da:** ADR-0061
+
+<a id="v-056"></a>
+### V-056 — La sentinella: `up --wait` diventa onesto, e un ramo d'errore che era codice morto
+
+- **Comandi:** `docker compose up -d --wait` con e senza il servizio sentinella;
+  `docker compose wait`; `docker inspect --format`; `docker logs`; un banco di prova in
+  `busybox` con un one-shot a durata e codice di uscita governati da fuori
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.4.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-01
+- **Che cosa si voleva sapere:** il Passo 4 del Task 4 chiede di verificare che
+  `docker compose --profile palco up --wait` esca 0 **soltanto** quando `sh.status()` è già utile.
+  Non è verificabile così com'è — [V-025](#v-025) e [ADR-0041](Decision.md#adr-0041) hanno già
+  stabilito che `up --wait` non aspetta i one-shot — quindi la domanda vera è se si possa
+  **costruire** quella proprietà, e a che prezzo.
+
+- **Esito, primo punto — il banco di prova isola il meccanismo.** Tre container `busybox`: un
+  one-shot che dorme sei secondi e poi esce con il codice che gli si passa, una sentinella che
+  dipende da lui con `service_completed_successfully` e resta viva, un servizio di controllo che
+  non dipende da niente. Senza la sentinella:
+
+```
+progetto intero, one-shot che uscirà 0  ->  up --wait esce 0 dopo 1 secondo, one-shot «running»
+progetto intero, one-shot che uscirà 7  ->  up --wait esce 0 dopo 0 secondi
+                                            e Compose stampa «Container lavoro Healthy»
+```
+
+  Con la sentinella, gli stessi due casi:
+
+```
+one-shot che esce 0  ->  up --wait esce 0 dopo 7 secondi
+one-shot che esce 7  ->  up --wait esce 1, «service "lavoro" didn't complete
+                         successfully: exit 7», sentinella ferma in «Created»
+```
+
+- **Esito, secondo punto — lo stesso, sullo stack vero.** Con `--profile palco` e `add-shard`
+  rallentata di 40 secondi per rendere deterministica una corsa che altrimenti si vince per caso:
+
+| | `up --wait` | dopo | shard registrati | add-shard |
+|---|---|---|---|---|
+| senza sentinella | **0** | 18 s | **0** | `running` |
+| senza sentinella, catena rotta | **0** | 18 s | 0 | `running` |
+| con sentinella | 0 | 60 s | **2** | `exited 0` |
+| con sentinella, catena rotta | **1** | 35 s | 0 | `exited 6` |
+
+  Nel quarto caso il messaggio è `service "add-shard" didn't complete successfully: exit 6` e la
+  sentinella resta in `Created`. Nel terzo, nell'istante in cui `up --wait` torna, `sh.status()`
+  mostra i due shard con `state: 1`, il balancer attivo e una scrittura che viene accettata: è
+  esattamente la proprietà che il Passo 4 chiedeva di verificare, ottenuta costruendola.
+
+- **Esito, terzo punto — quello che la sentinella non dà.** `up --wait` esce **1**, non 6. Il
+  verdetto è giusto e il colpevole è nominato, ma il codice specifico dello script — 6 per
+  `addShard` fallita, 7 per cluster incompleto — sopravvive solo nel testo del messaggio.
+
+- **Esito, quarto punto — e il secondo comando qui farebbe danno.** `docker compose wait
+  add-shard` dopo un `up --wait` riuscito risponde `no containers for project
+  "sqlstart-03-sharded"` ed esce **1**, con il flag di profilo acceso: il container ha già finito, e
+  `wait` vuole qualcosa di vivo a cui attaccarsi. Il controllo è sul banco `busybox`, dove lo
+  stesso comando su un one-shot **ancora in corsa** esce 0 e stampa `exited with status code 0`.
+  La forma prescritta da ADR-0041 per lo stack 02 è quindi la forma sbagliata per lo stack 03, e
+  non per una questione di stile: fallirebbe.
+
+- **Esito, quinto punto — un ramo d'errore che era codice morto.** Rompendo la stringa di uno
+  shard (`SHARD_1: nonesiste/shard1a:27017`) è venuto fuori che `sh.addShard()` **solleva** invece
+  di rispondere `ok: 0`: `MongoServerError: Could not find host matching read preference
+  { mode: "primary" } for set nonesiste`. mongosh usciva **1** per eccezione non gestita, quindi
+  il controllo `if (!esito.ok)` di `20-add-shard.js` non veniva valutato mai, l'uscita 6 era
+  irraggiungibile e il messaggio che nomina le due cause frequenti non si stampava. Con il
+  `try/catch` aggiunto, lo stesso caso dà uscita **6** e stampa:
+
+```
+ERRORE: sh.addShard(«nonesiste/shard1a:27017») ha risposto ok=0
+Messaggio: Could not find host matching read preference { mode: "primary" } for set nonesiste
+Le due cause frequenti: il mongod non è stato avviato con --shardsvr,
+oppure il replica set nominato non ha un primario eletto.
+```
+
+- **Esito, sesto punto — un file di override ACCODA le liste, non le sostituisce.** Il primo
+  tentativo di controllo metteva `profiles: ["mai"]` su `up-03` in un file passato con un secondo
+  `-f`, aspettandosi di spegnerlo. `config --services` continuava a elencarlo: la lista risultante
+  è `["palco","completo","mai"]`, e `--profile palco` lo seleziona lo stesso. Due misure fatte
+  così erano prive di valore e sono state rifatte su una copia del file senza il servizio. Vale
+  per ogni campo a sequenza, non solo per `profiles`.
+
+- **Conseguenza:** [ADR-0062](Decision.md#adr-0062).
+- **Riserve:** il quarto punto non è stato riverificato sullo stack 02, dove `up-02` esegue
+  proprio i due comandi: lì `up --wait` torna **prima** che `rs-init` finisca ([V-025](#v-025)),
+  quindi `wait` trova il container vivo e il bersaglio funziona — ma la distanza fra le due cose
+  è di secondi, e nessuna misura dice quanto sia stabile su una macchina diversa. È un controllo
+  da fare al Task 7. Le prove sono tutte sul profilo `palco`; il rallentamento di 40 secondi è un
+  artificio da banco di prova e non descrive un tempo reale. Password di scarto, ogni caso chiuso
+  con `down -v`, nessun residuo. Tutto su arm64.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0062

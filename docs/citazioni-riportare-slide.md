@@ -1208,3 +1208,59 @@ Fonte: [V-055](Sources.md#v-055), sesto punto.
 **Perché una slide:** è la mezza slide del Blocco 3 sui router, e si dimostra dal vivo con un
 `docker stop`. Le tre assenze — replica set, volume, cache — sono la definizione operativa di
 «senza stato» detta con tre righe di `compose.yaml` invece che con una definizione.
+
+---
+
+### C'è un container nello stack che non fa niente, e c'è per un motivo
+
+> `docker compose up --wait` esce 0 diciotto secondi dopo l'avvio, con zero shard registrati. Ed
+> esce 0 anche quando la catena è rotta e nessuno shard esisterà mai. La proprietà «esce 0 solo
+> quando il cluster serve» non si poteva verificare: si è dovuta costruire, e per costruirla serve
+> un servizio che stampa una riga e dorme.
+
+Fonte: [V-056](Sources.md#v-056), [ADR-0062](Decision.md#adr-0062).
+
+**Perché una slide:** è la slide onesta sul lab. Il pubblico vede in `docker ps` un container che
+non è MongoDB e ha diritto di chiedere perché; la risposta insegna più di quanto costi. Si mostra
+con due `docker compose up --wait` cronometrati, uno per verso.
+
+---
+
+### La ricetta giusta per uno stack è quella sbagliata per l'altro
+
+> Sullo stack a replica set l'avvio è di due comandi, perché `up --wait` torna troppo presto. Sullo
+> stack sharded il secondo comando fallisce **sempre**: `docker compose wait` vuole un container
+> vivo, e a quel punto il one-shot ha già finito. Stessa famiglia di problema, due risposte
+> opposte, e copiare la prima nella seconda dà un bersaglio che non funziona mai.
+
+Fonte: [ADR-0062](Decision.md#adr-0062), che non tocca [ADR-0041](Decision.md#adr-0041).
+
+**Perché una slide:** se resta tempo. È il rimedio contro la generalizzazione affrettata, che nel
+lab si vede in dieci righe di Makefile.
+
+---
+
+### Un ramo d'errore che non è mai stato eseguito non è codice: è un'intenzione
+
+> Sei righe scritte bene: nominavano le due cause frequenti, uscivano con il codice giusto. Erano
+> irraggiungibili, perché `sh.addShard()` solleva invece di rispondere `ok: 0`. Ho scoperto che
+> non funzionavano solo perché una verifica mi ha costretto a rompere la catena apposta.
+
+Fonte: nota di metodo 101 del [registro](registro-operativo-sviluppo.md),
+[V-056](Sources.md#v-056) quinto punto.
+
+**Perché una slide:** è la gemella della slide sui messaggi d'errore, e chiude il cerchio: scrivere
+un buon messaggio non basta, bisogna averlo letto almeno una volta con gli occhi.
+
+---
+
+### La sonda severa si mette solo dove non aspetta nessuno
+
+> Un healthcheck che pretende un cluster completo su `mongos` è uno stallo, perché è il servizio in
+> coda a doverlo completare. Lo stesso healthcheck su un servizio da cui non dipende nessuno è
+> gratis. Non cambia la sonda: cambia chi la sta aspettando.
+
+Fonte: [ADR-0061](Decision.md#adr-0061) e [ADR-0062](Decision.md#adr-0062), note di metodo 97 e 102.
+
+**Perché una slide:** chiusura del Blocco 3 se resta tempo. È una regola di progettazione delle
+catene di avvio che vale ovunque ci siano dipendenze e sonde, non solo in Compose.

@@ -3610,3 +3610,86 @@ prontezza su `mongos2` soltanto, dove il deadlock non ci sarebbe perché `add-sh
 (due sonde diverse per lo stesso ruolo, e `mongos2` non esiste nel profilo `palco`).
 
 **Fonti:** [V-055](Sources.md#v-055)
+
+---
+
+<a id="adr-0062"></a>
+## ADR-0062 — Lo stack 03 si avvia con un comando, e a farlo è un servizio che non fa niente
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto:** [ADR-0041](#adr-0041) ha deciso per lo stack 02 che l'avvio è di **due comandi**,
+perché `docker compose up -d --wait` esce con successo prima che il replica set esista. Il
+ragionamento è ancora valido e la misura pure: `--wait` è documentato come «Wait services be
+running|healthy» ([S-057](Sources.md#s-057)), un one-shot che deve morire non ha healthcheck,
+quindi la soglia che gli si applica è `running` ed è soddisfatta nell'istante in cui parte.
+
+Il Passo 4 del Task 4 di `feature/03` chiedeva di verificare che su questo stack `up --wait`
+esca 0 soltanto quando il cluster serve. Così com'è non è verificabile: è falso, e
+[V-056](Sources.md#v-056) lo ha rimisurato qui — senza sentinella `up --wait` esce **0 dopo 18
+secondi** con `add-shard` ancora in corsa e **zero shard registrati**, e esce **0** anche quando
+la catena è rotta e non ci sarà mai nessuno shard. La domanda utile non è se la proprietà valga,
+ma se si possa costruirla.
+
+Si può. Un servizio che dipende da `add-shard` con `service_completed_successfully` non diventa
+`running` finché `add-shard` non è uscito 0, e `--wait` aspetta che diventi `running`. Misurato
+nei due versi: con la sentinella `up --wait` esce 0 a cluster fatto — nell'istante in cui torna,
+`sh.status()` mostra due shard `state: 1` e una scrittura passa — oppure esce **1** con
+`service "add-shard" didn't complete successfully: exit 6`.
+
+Va detto che cosa questo **non** è. Non è dare un healthcheck a `add-shard`: ADR-0041 l'aveva
+scartato con l'argomento giusto — un healthcheck descrive un container che resta vivo, un one-shot
+deve morire — e quell'argomento regge. `add-shard` resta senza healthcheck e il suo verdetto resta
+un codice di uscita. La sentinella usa `service_completed_successfully` per quello per cui è
+documentato, cioè un vincolo di **ordine di avvio**, e sposta l'attesa su un servizio che vive
+davvero.
+
+**Decisione:**
+
+1. **Lo stack 03 ha un servizio `up-03`** che dipende da `add-shard` con
+   `service_completed_successfully`, non ha healthcheck, stampa una riga e dorme. Non ha healthcheck
+   apposta: senza, la soglia di `--wait` per lui è `running`, che è esattamente la domanda giusta.
+
+2. **L'avvio dello stack 03 è di UN comando**, `up -d --wait`, e il suo codice di uscita è il
+   verdetto. È l'opposto della regola che ADR-0041 detta per lo stack 02, e i due stack restano
+   diversi: quella regola non viene toccata.
+
+3. **Il secondo comando qui non va dato**, e non è una preferenza. `docker compose wait add-shard`
+   dopo un `up --wait` riuscito risponde `no containers for project` ed esce **1**, perché il
+   container ha già finito e `wait` vuole qualcosa di vivo a cui attaccarsi. Un bersaglio del
+   Makefile scritto per analogia con `up-02` fallirebbe sempre. Il Task 7 scrive **una** riga.
+
+4. **`docker compose wait add-shard` resta lo strumento per la diagnosi**, non per il verdetto:
+   `up --wait` esce 1 e non 6, quindi i codici distinti di `20-add-shard.js` sopravvivono solo nel
+   testo del messaggio. Chi automatizza e vuole distinguere «addShard fallita» da «cluster
+   incompleto» lancia `add-shard` da solo e ne legge l'uscita.
+
+5. **La sonda severa si mette solo su un servizio da cui non dipende nessuno.** È la regola
+   generale che tiene insieme questa decisione e [ADR-0061](#adr-0061): lì una sonda di prontezza
+   su `mongos` era un cappio perché `add-shard` aspetta la salute di `mongos`; qui la sentinella
+   può essere severa quanto si vuole perché nessuno la aspetta. Vale per gli stack che verranno.
+
+**Conseguenze.** Lo stack acquista un container che non è MongoDB e che comparirà in `docker ps`
+durante il talk. È un costo didattico reale, e si paga volentieri perché è anche una slide: il
+container esiste perché `up --wait` mente, e spiegarlo insegna più di quanto costi. `up-03` è
+scritto sull'immagine di `mongo` e non su `busybox` benché sia due ordini di grandezza più pesante:
+il lab deve funzionare senza rete, e tutto lo stack gira su una immagine sola — la sentinella non è
+un buon motivo per pinnarne una seconda. Il processo acceso è `sleep`.
+
+Un debito verso lo stack 02, aperto qui perché è qui che si è visto: `up-02` esegue proprio i due
+comandi, e funziona perché `up --wait` torna **prima** che `rs-init` finisca. La distanza fra le
+due cose è di secondi e nessuna misura dice quanto sia stabile altrove; se un giorno `rs-init`
+finisse per primo, `wait rs-init` risponderebbe `no containers` e il bersaglio fallirebbe senza che
+niente sia rotto. Va verificato al Task 7, che è il task che tocca il Makefile.
+
+**Alternative scartate:** lasciare due comandi anche qui (il secondo fallisce, misurato — non è
+un'alternativa, è un guasto); dare un healthcheck a `add-shard` (piega la salute a descrivere una
+cosa morta, e ADR-0041 l'ha già scartato); un healthcheck sulla sentinella che riverifichi il
+cluster (non aggiunge niente, perché `add-shard` ha già verificato il risultato uscendo 7 se
+incompleto, e ritarderebbe l'uscita di `up` del suo primo intervallo); `busybox` invece
+dell'immagine di mongo (una seconda immagine da pinnare e scaricare, contro il vincolo del lab
+offline); nessuna sentinella e la verifica affidata allo smoke del Task 7 (sposta il problema più
+in là e lascia `up --wait` a mentire a chi lo lancia a mano, che è il caso d'uso del materiale
+didattico).
+
+**Fonti:** [V-056](Sources.md#v-056)

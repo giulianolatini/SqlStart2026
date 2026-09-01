@@ -3003,3 +3003,74 @@ fallire: non ha uno storage engine) sono le tre assenze che spiegano che cos'è 
     l'esecuzione se ne scosta — è la fotografia di che cosa si era deciso, e riscriverlo
     cancellerebbe proprio lo scarto che vale la pena leggere. Lo scarto si registra qui, e il Task
     4 troverà il suo Passo 2 già evaso con l'esito opposto.
+
+## 2026-09-01 — `feature/03`, Task 4: un servizio che non fa niente, e due misure senza valore
+
+Il Task 4 arrivava già mezzo evaso. Il Passo 1 — gli healthcheck dei `mongod` — lo aveva scritto
+il Task 2, disgiunzione a tre termini e commento che spiega perché differisce dal `ping` dello
+spike. Il Passo 2 lo aveva evaso il Task 3, con la conclusione rovesciata rispetto a come il piano
+la immaginava ([ADR-0061](Decision.md#adr-0061)). Restavano il Passo 3 e il Passo 4, che sono la
+stessa domanda scritta due volte: si può fare in modo che `docker compose up --wait` esca 0
+soltanto quando il cluster serve?
+
+**Non si può verificare, si può costruire.** Così com'è la proprietà è falsa, e
+[V-025](Sources.md#v-025) lo diceva dal 31 agosto. L'ho rimisurata qui perché la misura vecchia
+era su un altro stack: senza sentinella `up --wait` esce **0 dopo diciotto secondi**, con
+`add-shard` ancora in corsa e **zero shard registrati**. E — questo è il caso che conta — esce
+**0 anche quando la catena è rotta**, cioè quando `add-shard` fallirà e nessuno shard esisterà
+mai. Diciotto secondi per dichiarare pronto un cluster che non lo sarà.
+
+La costruzione è un servizio che dipende da `add-shard` con `service_completed_successfully`, non
+ha healthcheck e dorme. Non diventa `running` finché `add-shard` non è uscito 0, e `--wait`
+aspetta che diventi `running`. Con la sentinella accesa: 0 a cluster fatto, con `sh.status()` già
+utile nell'istante in cui `up` torna, oppure **1** con `service "add-shard" didn't complete
+successfully: exit 6`. [ADR-0062](Decision.md#adr-0062).
+
+**E il secondo comando qui farebbe danno.** `docker compose wait add-shard` dopo un `up --wait`
+riuscito risponde `no containers for project` ed esce 1, con il profilo acceso: il container ha
+già finito e `wait` vuole qualcosa di vivo. La forma che [ADR-0041](Decision.md#adr-0041)
+prescrive allo stack 02 è la forma che sullo stack 03 fallisce sempre. Il Task 7 scriverà una riga
+sola. Resta un dubbio sullo stack 02, che i due comandi li esegue davvero: lì funziona perché
+`up --wait` torna prima che `rs-init` finisca, ma la distanza è di secondi e nessuno l'ha misurata
+altrove. Debito per il Task 7.
+
+**Il ramo d'errore che non era mai stato eseguito.** Rompendo apposta la stringa di uno shard è
+venuto fuori che `sh.addShard()` **solleva** invece di rispondere `ok: 0`. Il controllo
+`if (!esito.ok)` che avevo scritto ieri in `20-add-shard.js` non veniva quindi valutato mai:
+mongosh usciva 1 per eccezione non gestita, l'uscita 6 era irraggiungibile e le due righe che
+nominano le cause frequenti — quelle che secondo la nota 96 sono il valore del controllo — non si
+stampavano. Con il `try/catch` il caso rotto esce 6 e le stampa.
+
+**Note di metodo.**
+
+100. **Un controllo che non controlla vale meno di nessun controllo, perché occupa il posto.**
+     Per misurare lo stack «com'era prima della sentinella» ho scritto un file di override che
+     metteva `profiles: ["mai"]` su `up-03`, convinto di spegnerlo. La Compose **accoda** le liste
+     invece di sostituirle: la lista risultante era `["palco","completo","mai"]` e `--profile
+     palco` continuava a selezionarlo. Due misure sono uscite con numeri plausibili — 61 secondi,
+     due shard registrati — e le ho quasi scritte in `Sources.md` come prova che la sentinella non
+     serviva. Erano lo stack con la sentinella accesa, misurato due volte. Le ha smontate una
+     domanda sola, `config --services | grep -c up-03`, che risponde 1 dove doveva rispondere 0.
+     La regola: quando un esperimento ha un braccio di controllo, la prima cosa da verificare non
+     è il risultato, è **che il controllo sia diverso dal trattamento**. Costa un comando e
+     protegge dalla peggiore specie di errore, quella che produce numeri credibili.
+101. **Un ramo d'errore che non è mai stato eseguito non è codice: è un'intenzione.** Le sei righe
+     dentro `if (!esito.ok)` erano scritte bene, nominavano le due cause frequenti, uscivano con
+     il codice che ADR-0036 assegna. Erano irraggiungibili, perché `sh.addShard()` solleva invece
+     di restituire. Non me ne sarei accorto scrivendo un altro test del percorso felice: me ne
+     sono accorto perché il Passo 4 mi obbligava a rompere la catena per vedere che cosa fa
+     `up --wait` quando fallisce, e rompendola ho letto l'uscita sbagliata. Vale come regola:
+     ogni ramo d'errore va **eseguito almeno una volta**, e il modo di eseguirlo va scritto
+     accanto. La nota 96 diceva che il valore di un controllo è il testo che produce quando
+     fallisce; questa è la nota gemella, e dice che quel testo va letto davvero, una volta, con
+     gli occhi.
+102. **Il piano aveva ragione a chiedere una verifica impossibile.** Il Passo 4 chiedeva di
+     verificare che `up --wait` esca 0 soltanto a cluster utile, e quella proprietà era falsa e
+     già documentata come falsa. Un piano più prudente avrebbe scritto «prendere atto che
+     `up --wait` non aspetta i one-shot e usare due comandi», e avrei scritto due comandi — che su
+     questo stack falliscono. La richiesta impossibile ha costretto a chiedersi se la proprietà si
+     potesse **costruire** invece che verificare, ed è saltato fuori sia il servizio sentinella sia
+     il fatto che la ricetta dello stack 02 qui non funziona. Non è un invito a scrivere piani
+     sbagliati: è che un passo di piano formulato come proprietà desiderata («deve valere X»)
+     interroga meglio di uno formulato come procedura («fai Y»), perché quando X non vale
+     costringe a cercare, mentre Y si esegue e basta.

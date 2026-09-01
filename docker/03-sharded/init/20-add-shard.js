@@ -83,7 +83,21 @@ for (const stringa of DA_REGISTRARE) {
   }
 
   print("registro lo shard «" + nome + "» -> " + stringa);
-  const esito = sh.addShard(stringa);
+
+  // Il try/catch non è prudenza generica: senza, il ramo qui sotto è CODICE
+  // MORTO. `sh.addShard()` non risponde `ok: 0` quando fallisce, SOLLEVA — con
+  // un nome di replica set irraggiungibile alza
+  // `Could not find host matching read preference { mode: "primary" } for set X`.
+  // mongosh allora esce 1 per eccezione non gestita, e tutto quello che c'è
+  // scritto sotto — le due cause frequenti, il codice di uscita 6 che ADR-0036
+  // gli assegna — non arriva mai a chi guarda. Misurato in V-056, rompendo la
+  // stringa di uno shard apposta.
+  let esito;
+  try {
+    esito = sh.addShard(stringa);
+  } catch (errore) {
+    esito = { ok: 0, errmsg: errore.message };
+  }
 
   if (!esito.ok) {
     print("ERRORE: sh.addShard(«" + stringa + "») ha risposto ok=" + esito.ok);

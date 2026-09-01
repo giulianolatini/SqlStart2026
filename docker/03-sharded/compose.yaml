@@ -14,15 +14,23 @@
 #
 # Resta fuori solo ciò che non è topologia e ha una sede propria nei task
 # successivi del piano (docs/00-progetto/2026-09-01-piano-feature-03-stack-sharded.md):
-# la chiusura della catena di avvio (Task 4), i dati di demo con la loro shard key
-# (Task 6) e i bersagli del Makefile che rendono l'avvio un comando solo (Task 7).
-# I primi due passi del Task 4 — gli healthcheck dei `mongod` e quello di `mongos`
-# — sono già qui, perché scrivere un servizio senza decidere come si dichiara sano
-# non si può; il ragionamento sulla sonda di `mongos` è in ADR-0061.
+# i dati di demo con la loro shard key (Task 6) e i bersagli del Makefile che
+# risparmiano di scrivere due `--env-file` a mano (Task 7).
 #
-# Finché il Makefile non ha i suoi bersagli, l'avvio va dato a mano come descritto
-# in `.env.example`, e va dato in DUE comandi: `up --wait` non aspetta i one-shot,
-# ed è una trappola misurata due volte (ADR-0041).
+# L'AVVIO È DI UN COMANDO SOLO, e questa è la differenza con lo stack 02. Lì
+# `up --wait` esce prima che la replica esista e il verdetto va chiesto con un
+# secondo comando (ADR-0041). Qui c'è `up-03`, un servizio sentinella che parte
+# solo quando `add-shard` è uscito 0: finché non parte, `up --wait` non torna.
+# Misurato nei due versi (V-056): senza sentinella `up --wait` esce 0 dopo 18
+# secondi con zero shard registrati, e esce 0 anche quando la catena è rotta.
+# Con la sentinella esce 0 a cluster fatto, oppure 1 dicendo quale servizio è
+# morto e con che codice. Il ragionamento è in ADR-0062, quello sulla sonda di
+# `mongos` in ADR-0061.
+#
+# E QUI IL SECONDO COMANDO NON VA DATO: `docker compose wait add-shard` dopo un
+# `up --wait` andato a buon fine risponde `no containers for project` ed esce 1,
+# perché il container ha già finito e `wait` vuole qualcosa di vivo a cui
+# attaccarsi. La forma giusta per lo stack 02 è quella sbagliata per il 03.
 #
 # PERCHÉ DUE PROFILI (ADR-0010). Uno sharded cluster non è negoziabile nella
 # forma: ogni shard è un replica set, i config server sono un replica set, e
@@ -950,6 +958,12 @@ services:
     # solo quando ha finito. È la stessa forma di ADR-0041 sullo stack 02 —
     # `up --wait` non è la prova, la prova è il one-shot che si ferma.
     #
+    # Con una differenza rispetto allo stack 02, aggiunta dal Task 4: qui quel
+    # verdetto arriva comunque dentro `up --wait`, perché il servizio `up-03` in
+    # fondo al file aspetta che `add-shard` sia uscito bene (ADR-0062). Non è
+    # questa sonda a essere diventata più severa: è che a valle c'è qualcuno che
+    # la severità la esercita al posto suo.
+    #
     # `hello()` passa senza credenziali anche su un `mongos` con `--keyFile` e
     # utenti già creati: è misurato, non dato per scontato. Vale la stessa
     # ragione dello stack 02 per cui la password non si mette nella riga di un
@@ -1099,6 +1113,93 @@ services:
       shard1-init:
         condition: service_completed_successfully
       shard2-init:
+        condition: service_completed_successfully
+
+  # ---------------------------------------------------------------------------
+  # up-03 — la sentinella, cioè il servizio che esiste perché `up --wait` mente.
+  #
+  # Non fa niente. Stampa una riga e dorme. È l'unico servizio dello stack che
+  # non è MongoDB, e chi lo vede in `docker ps` ha diritto di chiedersi perché
+  # c'è: la risposta è che senza di lui `docker compose up -d --wait` esce 0
+  # mentre il cluster non c'è ancora.
+  #
+  # LA MISURA (V-056). `--wait` è documentato come «Wait services be
+  # running|healthy» (S-057). Un one-shot che deve morire non ha healthcheck,
+  # quindi la soglia che gli si applica è `running`, ed è soddisfatta
+  # nell'istante in cui parte. L'ho misurato con un sosia di `add-shard`: senza
+  # sentinella `up --wait` esce 0 dopo UN secondo mentre il one-shot ne ha
+  # ancora sei da fare.
+  #
+  # Con la sentinella cambia, e cambia in tutti e due i versi:
+  #
+  #   one-shot che esce 0  ->  `up --wait` esce 0 dopo sette secondi, cioè
+  #                            quando il lavoro è davvero finito
+  #   one-shot che esce 7  ->  `up --wait` esce 1 e dice «service "add-shard"
+  #                            didn't complete successfully: exit 7», lasciando
+  #                            la sentinella nello stato `Created`
+  #
+  # PERCHÉ NON UN HEALTHCHECK SU add-shard. La tentazione è dargliene uno
+  # perché `--wait` lo aspetti, e ADR-0041 l'aveva già scartata per lo stack
+  # 02 con una ragione che vale anche qui: un healthcheck descrive un container
+  # che resta vivo e continua a rispondere, mentre un one-shot deve morire. La
+  # sentinella non piega quel concetto — `add-shard` resta senza healthcheck e
+  # il suo verdetto resta un codice di uscita. Sposta la domanda su un servizio
+  # che vive davvero, e usa `service_completed_successfully` per quello per cui
+  # è documentato: un vincolo di ORDINE, non di salute (ADR-0062).
+  #
+  # QUELLO CHE LA SENTINELLA NON DÀ. `up --wait` esce **1**, non 7: il verdetto
+  # è giusto, la diagnosi si perde. I codici di 20-add-shard.js — 6 per
+  # addShard fallita, 7 per cluster incompleto — restano leggibili solo con
+  # `docker compose wait add-shard`, che resta quindi lo strumento giusto per
+  # chi automatizza e vuole distinguere le cause. Per chi sta al podio, un
+  # comando che esce 1 e nomina il colpevole basta.
+  #
+  # PERCHÉ L'IMMAGINE DI MONGO E NON busybox. Sarebbe più leggera di due
+  # ordini di grandezza, e costerebbe una seconda immagine da pinnare per digest
+  # e da scaricare prima di partire. Il lab deve funzionare senza rete, e tutto
+  # questo stack gira su UNA immagine sola: la sentinella non è un buon motivo
+  # per romperlo. Il processo che resta acceso è `sleep`, non un mongod.
+  # ---------------------------------------------------------------------------
+
+  up-03:
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-up-03
+    pull_policy: never
+    # Non `unless-stopped`: se qualcuno lo ferma a mano ha voluto fermarlo, e
+    # rialzarlo non aggiungerebbe niente — il lavoro che sorvegliava è già
+    # fatto.
+    restart: "no"
+    profiles: ["palco", "completo"]
+
+    # ADR-0004 chiede limiti espliciti a ogni servizio. Questi 64 MiB sono per un
+    # `sleep`, e non entrano nel bilancio del design §5.1 perché qui dentro non
+    # c'è nessun database.
+    mem_limit: 64m
+    cpus: 0.1
+
+    # NIENTE healthcheck, ed è la scelta che fa funzionare tutto: senza, la
+    # soglia di `--wait` per questo servizio è `running`, e diventa `running`
+    # solo dopo che add-shard è uscito 0. Un healthcheck qui non aggiungerebbe
+    # niente e ritarderebbe l'uscita di `up` del suo primo intervallo.
+    #
+    # Nota per chi confronta con ADR-0061: lì si diceva che una sonda di
+    # PRONTEZZA su `mongos` sarebbe un cappio, perché add-shard aspetta la
+    # salute di mongos. Qui il cappio non c'è, perché nessuno aspetta la
+    # sentinella. È la stessa regola letta al contrario: la sonda severa si può
+    # mettere solo su un servizio da cui non dipende nessuno.
+    command:
+      - bash
+      - -c
+      - |
+        echo "cluster pronto — i due shard sono registrati e mongos serve."
+        echo "punto d'ingresso: mongodb://localhost:${PORTA_MONGOS:-27117}"
+        exec sleep infinity
+
+    depends_on:
+      # L'unica dipendenza che serve, e copre tutta la catena in transitiva:
+      # add-shard aspetta mongos sano e i due shard-init finiti, mongos aspetta
+      # cfg-init, e tutti e tre gli init aspettano keyfile-init.
+      add-shard:
         condition: service_completed_successfully
 
 volumes:
