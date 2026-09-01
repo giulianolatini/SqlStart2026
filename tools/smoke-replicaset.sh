@@ -91,12 +91,16 @@ compose() {
 # Dopo una demo di failover non lo è, e una prova che lo dà per scontato fallisce
 # raccontando la cosa sbagliata.
 #
-# La password passa per `-e` e non sulla riga di comando di mongosh: dentro il container
-# resta comunque leggibile in `ps`, ma è una password di lab e il file che la porta sta
-# fuori dal repository. La riga esiste per non prendere l'abitudine, non per illusione
-# di segretezza.
+# Sulla password: `mongosh` la riceve con `--password`, e dentro il container **non**
+# resta leggibile — la 2.10.0 riscrive il proprio argv e la tabella dei processi mostra
+# `mongodb://<credentials>@…`. Dove resta leggibile è **sull'host**, nella riga di
+# comando del client `docker`, che nessuno riscrive. Qui c'era un `-e SEGRETO=` che
+# nessuno leggeva e un commento che lo dava per una protezione: non solo era codice
+# morto, ne metteva una **seconda** copia proprio sulla riga che espone (misurato in
+# V-047). Quello che protegge davvero è che sia una password di laboratorio e che il
+# file che la porta stia fuori dal repository.
 interroga() {
-  compose exec -T -e SEGRETO="${PASSWORD}" mongo-rs-1 \
+  compose exec -T mongo-rs-1 \
     mongosh --quiet --host "${REPLICA}/localhost:27017" \
       --username "${UTENTE}" --password "${PASSWORD}" --authenticationDatabase admin \
       lab --eval "$1" 2>/dev/null | tail -1 | tr -d '\r'

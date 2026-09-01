@@ -63,9 +63,18 @@ def registra(destinazione: str, comando: list[str], titolo: str, righe: int, col
     Restituisce il codice di uscita del comando: una registrazione di una demo
     fallita è ancora una registrazione, ma chi la produce deve saperlo subito.
     """
-    if shutil.which(comando[0]) is None and not os.path.exists(comando[0]):
-        print("comando non trovato: %s" % comando[0], file=sys.stderr)
-        return 127
+    # Due controlli e due codici, gli stessi che usa la shell: 127 se il comando non
+    # c'è, 126 se c'è e non si può eseguire. La distinzione non è pedanteria — chi
+    # registra deve capire in un secondo se ha sbagliato a scrivere il nome o a dare
+    # il permesso, e senza il secondo controllo `execvpe` falliva più avanti, quando
+    # lo pseudo-terminale era già aperto e la registrazione già cominciata.
+    if shutil.which(comando[0]) is None:
+        if not os.path.exists(comando[0]):
+            print("comando non trovato: %s" % comando[0], file=sys.stderr)
+            return 127
+        if not os.access(comando[0], os.X_OK):
+            print("comando non eseguibile: %s" % comando[0], file=sys.stderr)
+            return 126
 
     figlio, discendente = pty.openpty()
     imposta_dimensioni(discendente, righe, colonne)
@@ -91,8 +100,16 @@ def registra(destinazione: str, comando: list[str], titolo: str, righe: int, col
         os.dup2(discendente, 2)
         if discendente > 2:
             os.close(discendente)
-        os.execvpe(comando[0], comando, ambiente)
-        os._exit(127)  # non si arriva qui se execvpe riesce
+        try:
+            os.execvpe(comando[0], comando, ambiente)
+        except OSError as errore:
+            # Qui siamo già dentro lo pseudo-terminale che si sta registrando: un
+            # traceback di Python finirebbe **nel .cast**, con i percorsi assoluti
+            # della macchina di chi registra, e la riserva del talk mostrerebbe
+            # quello. Si scrive una riga sola, con `os.write` perché dopo `fork` il
+            # buffering di `print` non è cosa su cui contare.
+            os.write(2, ("non eseguibile: %s: %s\n" % (comando[0], errore.strerror)).encode())
+        os._exit(126)  # non si arriva qui se execvpe riesce
 
     os.close(discendente)
 
@@ -183,18 +200,26 @@ def main(argomenti: list[str] | None = None) -> int:
 
     # La divisione su `--` si fa a mano invece che con `argparse.REMAINDER`, che
     # dopo il primo argomento posizionale inghiotte anche le opzioni di questo
-    # programma: `--titolo` finirebbe nel comando da registrare.
+    # programma: `--titolo` finirebbe nel comando da registrare. E la divisione vale
+    # nei due versi: anche `--riproduci` si cerca **solo prima** di `--`, se no un
+    # comando che ha per conto suo un'opzione con quel nome non si riesce a registrare.
     tutti = list(sys.argv[1:] if argomenti is None else argomenti)
-    if "--riproduci" in tutti:
-        letti = analizzatore.parse_args(tutti)
+    taglio = tutti.index("--") if "--" in tutti else len(tutti)
+    miei, comando = tutti[:taglio], tutti[taglio + 1 :]
+
+    if "--riproduci" in miei:
+        letti = analizzatore.parse_args(miei)
+        if comando:
+            analizzatore.error("--riproduci non registra niente: togliere il comando dopo `--`")
+        if letti.velocita <= 0:
+            # Dividere per zero qui vuol dire un traceback al posto della riserva, il
+            # giorno in cui la demo dal vivo è già fallita una volta.
+            analizzatore.error("--velocita vuole un numero maggiore di zero")
         return riproduci(letti.destinazione, letti.velocita)
-    if "--" not in tutti:
+
+    if "--" not in tutti or not comando:
         analizzatore.error("manca il comando da registrare (dopo `--`)")
-    taglio = tutti.index("--")
-    letti = analizzatore.parse_args(tutti[:taglio])
-    comando = tutti[taglio + 1 :]
-    if not comando:
-        analizzatore.error("manca il comando da registrare (dopo `--`)")
+    letti = analizzatore.parse_args(miei)
 
     # Ctrl-C durante una registrazione deve fermare il comando, non lasciare un
     # .cast troncato senza che nessuno lo sappia.

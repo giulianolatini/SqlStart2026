@@ -3038,3 +3038,125 @@ riscrive quando l'esecuzione devia — la deviazione si spiega nel registro, ed 
 fatto).
 
 **Fonti:** [S-056](Sources.md#s-056), [S-057](Sources.md#s-057), [S-064](Sources.md#s-064), [V-025](Sources.md#v-025), [V-031](Sources.md#v-031), [V-032](Sources.md#v-032), [V-046](Sources.md#v-046)
+
+
+---
+
+<a id="adr-0053"></a>
+## ADR-0053 — Uno strumento che sbaglia lo dice con il codice della shell, e non scrive Python dentro una registrazione
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto:** `tools/registra-terminale.py` produce la riserva del talk
+([ADR-0050](#adr-0050)): quattro registrazioni di terminale che si guardano il giorno in cui la
+demo dal vivo non parte. Il programma fa `fork`, apre uno pseudo-terminale e chiama `os.execvpe`
+nel figlio. Aveva un solo controllo preventivo — se il comando non esiste, esci 127 senza scrivere
+niente — nato dalla prima regressione, quella in cui `argparse.REMAINDER` mangiava `--titolo`.
+
+Una review esterna sulla PR #3 ha segnalato che `os.execvpe` non è protetta. Eseguendo il caso
+([V-048](Sources.md#v-048)) il difetto si è rivelato più largo del rilievo: un file che **esiste**
+ma non è eseguibile attraversa il controllo preventivo, `execvpe` fallisce quando lo pseudo-terminale
+è già aperto, e il traceback di Python finisce **dentro il `.cast`**, percorsi assoluti della
+macchina di chi registra compresi. Il file resta su disco e sembra una registrazione buona; il
+programma esce con `1`.
+
+La stessa misura ha mostrato che la shell questi due casi li distingue da sempre: `127` quando il
+comando non c'è, `126` quando c'è e non si esegue — identico in `sh` e in `bash`, e `126` anche per
+una directory.
+
+**Decisione:** gli strumenti di questo repository riportano i due casi con i **codici della shell**,
+127 per «non trovato» e 126 per «trovato e non eseguibile», e **nessun traceback di Python può
+entrare in una registrazione**.
+
+In concreto, in `registra-terminale.py`: il controllo preventivo verifica anche `os.access(…,
+os.X_OK)` e restituisce 126 con un messaggio proprio; la `os.execvpe` nel figlio è racchiusa in un
+`try`, e in caso di `OSError` il figlio scrive **una riga** con `os.write(2, …)` — non `print`, che
+dopo `fork` ha un buffering su cui non si deve contare — ed esce con `os._exit(126)`.
+
+Nella stessa correzione entrano altri due difetti trovati dalla stessa review e verificati
+eseguendoli: `--velocita 0` sollevava `ZeroDivisionError` dentro `riproduci()`, cioè un traceback
+al posto della riserva nel momento peggiore possibile, e ora è un errore di `argparse` (uscita 2);
+e `--riproduci` veniva cercato in **tutta** la riga di comando, quindi un comando da registrare che
+avesse per conto suo un'opzione con quel nome non si riusciva a registrare — `argparse` rispondeva
+«unrecognized arguments», incolpando l'utente. La ricerca ora guarda solo la parte **prima** di
+`--`. È l'immagine speculare della regressione originale: là erano le opzioni del programma a
+colare nel comando, qui era un'opzione del comando a essere letta come propria, e la divisione su
+`--` deve valere nei due versi.
+
+**Conseguenze:** cinque casi nuovi in `tools/tests/test_registra_terminale.py`, che passa da 8 a
+13. Uno dei cinque — `--riproduci` insieme a un comando dopo `--` si rifiuta invece di ignorarlo —
+passava già prima della correzione: è lì per **conservare** un comportamento che la riscrittura
+poteva far degradare in un silenzioso «ignoro quello che hai scritto», ed è il tipo di test che si
+scrive solo mentre si tocca quel codice.
+
+Il criterio dei due codici vale per tutti gli strumenti, non solo per questo: è una convenzione che
+costa una riga e che chi legge un'uscita non nulla in un `make` conosce già. Non è stata estesa a
+`smoke-replicaset.sh` e agli altri script di palco perché nessuno di loro esegue programmi
+arbitrari scelti da chi digita — se lo faranno, la regola c'è.
+
+**Alternative scartate:** lasciare la `execvpe` nuda e affidarsi al controllo preventivo (è la
+situazione di partenza; un controllo preventivo non può coprire tutti i modi di fallire di `exec`,
+e la directory lo dimostra — per il sistema è attraversabile, quindi `os.access` risponde di sì);
+usare un solo codice, 127, per tutti gli errori di avvio (semplice, e cancella la distinzione che
+serve a chi deve riparare: nome sbagliato e permesso mancante si aggiustano in due modi diversi);
+cancellare il `.cast` quando il comando fallisce (sbagliato in generale — [ADR-0050](#adr-0050) e
+il test già esistente vogliono che una demo *fallita* resti registrata: il problema non era il file,
+era il traceback dentro); validare `--velocita` con un `type=` di `argparse` invece che con un
+controllo esplicito (equivalente nell'effetto, meno leggibile nel messaggio d'errore).
+
+**Fonti:** [V-048](Sources.md#v-048)
+
+
+---
+
+<a id="adr-0054"></a>
+## ADR-0054 — La password del lab sta sulla riga di comando dell'host, e il commento lo dice
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto:** `tools/smoke-replicaset.sh` conteneva un commento che prometteva una cautela — «la
+password passa per `-e` e non sulla riga di comando di mongosh: dentro il container resta comunque
+leggibile in `ps`, ma è una password di lab… La riga esiste per non prendere l'abitudine, non per
+illusione di segretezza» — e sotto, una chiamata che passava `--password "${PASSWORD}"` a `mongosh`
+**e** un `-e SEGRETO="${PASSWORD}"` in più. Una review esterna sulla PR #3 ha notato che il testo e
+il codice non dicono la stessa cosa.
+
+La misura ([V-047](Sources.md#v-047)) ha ribaltato tutte e tre le affermazioni del commento.
+`mongosh` 2.10.0 **riscrive il proprio `argv`**: nella tabella dei processi del container la
+password in chiaro compare **zero** volte, e si legge `mongodb://<credentials>@127.0.0.1:27017/…`.
+Dove resta in chiaro è **sull'host**, nella riga di comando del client `docker`, che nessuno
+riscrive. E il `-e SEGRETO=` non solo non veniva letto da nessun comando — `grep` ne trovava la
+sola definizione — ma metteva una **seconda** copia della password proprio su quella riga: il
+gesto presentato come cautela peggiorava, di una misura contabile, la cosa che diceva di curare.
+
+**Decisione:** la password del laboratorio passa a `mongosh` con `--password`, senza intermediari,
+e il commento che l'accompagna descrive **l'esposizione vera**: sull'host, nell'`argv` del client
+Docker. Il `-e SEGRETO=` è rimosso. Nessun codice di questo repository esiste per «dare l'esempio»
+o «non prendere l'abitudine» senza fare nulla: o protegge qualcosa di misurabile, o non c'è.
+
+Ciò che protegge davvero resta scritto, perché è quello che il pubblico deve portarsi via: è una
+password di laboratorio, e il file che la porta sta fuori dal repository
+([ADR-0014](#adr-0014)) — non un accorgimento sulla riga di comando.
+
+**Conseguenze:** `smoke-replicaset.sh` si allinea a `failover-replicaset.sh` e `reset-demo.sh`, che
+`--password` lo passavano già senza decorazioni; i 42 controlli dello smoke restano verdi contro lo
+stack avviato. Sul palco la faccenda diventa dicibile in una frase, ed è più interessante di quella
+che si sarebbe detta prima: lo strumento che maneggia il segreto si protegge, quello che lo lancia
+no — e il secondo è quello che gira sulla macchina condivisa.
+
+Il criterio generale che questa decisione fissa è più largo del caso: **un commento che promette
+una protezione inesistente è un difetto di sicurezza, non di stile**. Chi legge smette di cercare,
+ed è esattamente l'effetto che ha avuto qui per sette commit. Si corregge misurando, non
+riscrivendo la frase a intuito — l'intuito, in questo caso, avrebbe scritto «tanto in `ps` si vede
+lo stesso», che è falso nel container e vero sull'host, cioè sbagliato due volte.
+
+**Alternative scartate:** far leggere davvero la variabile, con `sh -c 'mongosh --password
+"$SEGRETO"'` (non nasconde niente: la shell la espande costruendo l'`argv` di `mongosh`, e la
+password torna dove era — in più resta sulla riga di `docker`, che è quella che espone); togliere
+la password dagli argomenti passando per un file dentro il container (`mongosh` 2.10.0 non offre
+questa strada, e montare un file di segreti per un lab di sessanta minuti costa più di quanto
+renda); lasciare il commento e togliere solo il codice morto (il commento era la parte dannosa:
+quella che faceva smettere di guardare); toglierli entrambi senza scrivere niente al loro posto (la
+riga senza spiegazione invita il prossimo lettore a «sistemarla» rimettendo un `-e`).
+
+**Fonti:** [V-047](Sources.md#v-047)

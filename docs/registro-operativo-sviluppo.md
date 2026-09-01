@@ -2321,13 +2321,15 @@ tempi dell'elezione, nel Blocco 2, e il dollaro mangiato da Compose, fra le trap
     perché la si sta scrivendo nello stesso commit, oppure si nomina il debito nel registro — che è
     l'unico posto dove qualcuno lo va a ricontrollare.
 
-**Consuntivo del branch, alla vigilia dell'unione.** Venti commit e trentaquattro file rispetto a
-`develop`: il piano, tredici di task, quattro punti di ripresa, una nota di metodo isolata, e il
-Task 14 che chiude il lavoro. Il numero è calcolato **includendo il commit che lo introduce**, come
-prescrive la nota 37 dopo che era stato sbagliato due volte — e questa riga è stata riscritta due
-volte proprio per rispettarla: diceva «diciotto» quando fu scritta, «diciannove» dopo il punto di
-ripresa di `feature/03`, e adesso conta anche quello di `feature/04`. Il trentaquattresimo file è
-il `README.md` alla radice, che dichiarava ancora `docker/02-replicaset` «in lavorazione». I quattro controlli sono verdi in locale, con gli stack
+**Consuntivo del branch, alla vigilia dell'unione.** Ventun commit e trentaquattro file rispetto a
+`develop`: il piano, tredici di task, quattro punti di ripresa, una nota di metodo isolata, il
+Task 14 che chiude il lavoro e il giro di review della PR #3. Il numero è calcolato **includendo il
+commit che lo introduce**, come prescrive la nota 37 dopo che era stato sbagliato due volte — e
+questa riga è stata riscritta tre volte proprio per rispettarla: diceva «diciotto» quando fu
+scritta, «diciannove» dopo il punto di ripresa di `feature/03`, «venti» dopo quello di
+`feature/04`, e adesso conta anche la review. Il conto dei file non si muove: la review ha toccato
+sei pagine e tre strumenti, tutti già dentro. Il trentaquattresimo file resta il `README.md` alla
+radice, che dichiarava ancora `docker/02-replicaset` «in lavorazione». I quattro controlli sono verdi in locale, con gli stack
 fermi e con lo stack 02 acceso; su GitHub non ne gira nessuno, per scelta
 ([ADR-0038](Decision.md#adr-0038)).
 
@@ -2526,3 +2528,90 @@ cui dipende tutto il resto e l'unica che non si può aggiustare dopo.
     ragione per cui non si riscrivono gli ADR: è un documento datato e va letto per quello che era.
     Ma allora qualcuno deve tenere il conto di che cosa lo ha superato, e il punto di ripresa è il
     posto naturale perché è l'ultima cosa che si legge prima di ricominciare.
+
+## 2026-09-01 — Review della PR #3: cinque rilievi, quattro veri, e uno che si smonta in dieci secondi
+
+La PR #3 è aperta e il Product Owner l'ha revisionata. Ha poi chiesto una *review lite* a GitHub
+Copilot, che ha lasciato **cinque commenti in linea**, e ha dato l'istruzione che vale per tutte le
+review esterne: verificarli **eseguendo**, correggere quelli veri chiudendoli con una spiegazione,
+chiudere gli altri dicendo perché non reggono. Nessuno è stato accettato o respinto leggendolo.
+
+| # | Dove | Che cosa sosteneva | Verdetto |
+|---|---|---|---|
+| 1 | `tools/failover-replicaset.sh:190`, `:354` | `mktemp` senza argomenti fallisce su macOS/BSD con «too few X's in template» | **falso** |
+| 2 | `tools/registra-terminale.py:95` | `os.execvpe` non protetta nel figlio: in caso di errore un traceback e un codice di uscita non controllato | **vero, e più largo** |
+| 3 | `tools/registra-terminale.py:152` | `riproduci()` divide per `velocita` senza validarla: `--velocita 0` solleva `ZeroDivisionError` | **vero** |
+| 4 | `tools/registra-terminale.py:190` | `--riproduci` viene cercato in tutta la riga, anche dopo `--` | **vero** |
+| 5 | `tools/smoke-replicaset.sh:97`, `:99` | il commento promette che la password passa per `-e`, ma `mongosh` la riceve con `--password` | **vero, e nella direzione opposta** |
+
+**Il primo si smonta eseguendolo.** `mktemp` su questa macchina restituisce
+`/var/folders/gx/…/tmp.Mgs1q6sDpe` e esce `0`. Il manuale di macOS lo scrive: «If no arguments are
+passed or if only the `-d` flag is passed mktemp behaves as if `-t tmp` was supplied». Il rilievo
+descrive il comportamento di `mktemp` con un *template* privo di `X`, che è un'altra invocazione.
+C'è anche una prova indiretta che non richiede il manuale: `failover-replicaset.sh` è lo strumento
+che ha prodotto [V-042](Sources.md#v-042) e le altre misure di failover del branch — se `mktemp`
+non avesse funzionato, quelle misure non esisterebbero.
+
+**Il secondo era più grande di come è stato descritto.** Il rilievo parlava del codice di uscita;
+la misura ([V-048](Sources.md#v-048)) ha mostrato che il traceback finisce **dentro il `.cast`**,
+con i percorsi assoluti della macchina di chi registra, e che il file resta su disco sembrando una
+registrazione buona. Il controllo preventivo che c'era guardava se il file *esiste*, non se si
+*esegue*. Correzione in [ADR-0053](Decision.md#adr-0053): 127 e 126 come li usa la shell, e
+`execvpe` racchiusa in un `try` che scrive una riga con `os.write` — non `print`, che dopo `fork`
+ha un buffering su cui non si conta.
+
+**Il terzo e il quarto sono piccoli e reali.** `--velocita 0` produceva un `ZeroDivisionError`
+nella riproduzione, cioè un traceback al posto della riserva nel momento in cui la riserva serve.
+Il quarto è l'immagine speculare della regressione che ha dato origine a questo strumento: là erano
+le opzioni del programma a colare nel comando da registrare, qui era un'opzione del comando a
+essere letta come propria — e `argparse` rispondeva «unrecognized arguments», incolpando chi
+digitava. La divisione su `--` adesso vale nei due versi.
+
+**Il quinto aveva ragione sul fatto e torto sul perché — e per un momento gli ho dato torto
+anch'io nel modo sbagliato.** Il commento prometteva che la password non finisse sulla riga di
+comando di `mongosh`; il codice ce la metteva. Fin qui il rilievo è esatto. La prima riscrittura
+del commento diceva «dentro il container resta comunque leggibile in `ps`»: sembrava l'unica cosa
+che potesse essere vera, e non è stata misurata. Poi è stata misurata ([V-047](Sources.md#v-047)),
+ed è **falsa**: `mongosh` 2.10.0 riscrive il proprio `argv` e nella tabella dei processi del
+container si legge `mongodb://<credentials>@…`, zero occorrenze della password. Dove si legge in
+chiaro è **sull'host**, nella riga del client `docker`. E il `-e SEGRETO=` che il commento
+presentava come cautela non era solo codice morto: ne metteva una **seconda** copia proprio su
+quella riga. Correzione e criterio in [ADR-0054](Decision.md#adr-0054).
+
+**Che cosa è cambiato in pagina e in codice.** Due misure nuove — [V-047](Sources.md#v-047) e
+[V-048](Sources.md#v-048) — due ADR che le citano, una citazione da slide in coda al Blocco 2, e
+cinque casi nuovi in `tools/tests/test_registra_terminale.py`, che passa da 8 a 13. Uno dei cinque
+passava già prima della correzione: sta lì per impedire che la riscrittura degradasse in un
+silenzioso «ignoro quello che hai scritto».
+
+**Controlli.** `make tools-test` verde, 13 su 13 sul file toccato; `make docs-check` verde dopo che
+i due ADR hanno ricevuto l'ancora esplicita e il separatore che gli altri hanno — `check_links.py`
+li ha segnalati subito, che è il motivo per cui esiste; `bash -n` sullo smoke; e lo smoke eseguito
+davvero contro lo stack avviato, **42 controlli superati, 0 errori**, perché togliere un argomento
+a `compose exec` è una modifica al codice e non al commento.
+
+**Note di metodo.**
+
+83. **Un revisore automatico sbaglia in un modo che conviene conoscere: inventa dettagli
+    verificabili in dieci secondi e vede difetti veri dove nessuno rilegge.** I cinque rilievi
+    stanno tutti e due gli estremi. Quello su `mktemp` è una regola vera applicata a
+    un'invocazione che nel codice non c'è: costa una riga di terminale smentirlo. Quello su
+    `os.execvpe` sta dentro un blocco `fork`/`exec` che si scrive una volta e non si rilegge mai
+    più, ed era vero e più grave del rilievo. L'asimmetria suggerisce la regola operativa: siccome
+    il costo di verificare è quasi nullo e il costo di ignorare è un difetto che vive nella riserva
+    del talk, **si verificano tutti**, compresi quelli che sembrano sbagliati a prima vista — e
+    soprattutto quelli, perché è lì che si è tentati di rispondere a memoria.
+84. **Quando un rilievo dice che un commento è falso, la correzione va misurata quanto il codice.**
+    Qui il commento sbagliato è stato sostituito per un istante da un secondo commento sbagliato,
+    scritto con la stessa fiducia: «in `ps` si vede lo stesso» è la frase che l'intuito produce, ed
+    è falsa nel container e vera sull'host, cioè sbagliata due volte. Un commento non ha test che
+    lo tengano onesto: l'unica cosa che lo tiene onesto è misurare la frase prima di scriverla.
+    Vale il criterio inverso di [ADR-0024](Decision.md#adr-0024) — la pagina promette il sintomo
+    come si è visto, non come dovrebbe presentarsi.
+85. **Una review su cinque righe può costare due ADR, e non è sproporzione.** Il diff delle
+    correzioni è di poche decine di righe; la documentazione che ne è uscita è più lunga del
+    codice. Non è zelo: le due misure rispondono a domande che sarebbero tornate — «dove si vede
+    davvero una password passata a un container» e «che cosa fa un `exec` che fallisce dentro un
+    registratore» — e senza scriverle si sarebbe rifatta la stessa indagine al primo dubbio. La
+    proporzione giusta di un repository didattico non è fra righe di codice e righe di prosa: è fra
+    quello che si è imparato e quello che resta scritto.

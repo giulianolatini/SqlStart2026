@@ -5261,3 +5261,151 @@ prova-1  | singolo=[valore-dell-host]  doppio=[valore-del-container]
   Compose, non ciò che vedrà la shell.
 - **Data:** 2026-09-01
 - **Usata da:** ADR-0052
+
+
+<a id="v-047"></a>
+### V-047 — La password nella tabella dei processi: `mongosh` si oscura da solo, il client `docker` no
+
+- **Comandi:** `mongosh --help` dentro `mongo-rs-1` · `ps -eo args` dentro il container e
+  sull'host, con un `mongosh` vivo · lo stesso con `docker exec -e SEGRETO=…` in più
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, client `/usr/local/bin/docker`, immagine
+  `mongo:7.0.40`, `mongosh` **2.10.0** dentro il container
+- **Che cosa si voleva sapere:** `tools/smoke-replicaset.sh` portava un commento che prometteva una
+  protezione — «la password passa per `-e` e non sulla riga di comando di mongosh» — e sotto una
+  riga che passava `--password "${PASSWORD}"` a `mongosh` **e** un `-e SEGRETO="${PASSWORD}"` che
+  nessun comando leggeva. Un revisore esterno ha segnalato la contraddizione fra il testo e il
+  codice. Prima di riscrivere il commento serviva sapere che cosa sia vero davvero, perché la
+  risposta che sembra ovvia — «la password è comunque leggibile in `ps` nel container» — è quella
+  che si scrive senza guardare.
+
+- **Esito, primo punto — `mongosh` non ha una via che non sia la riga di comando.** Nella 2.10.0
+  l'aiuto elenca **due** sole opzioni che nominano una password, entrambe con un argomento:
+
+```
+-p, --password [arg]                       Password for authentication
+    --tlsCertificateKeyFilePassword [arg]  Password for key in PEM file for TLS
+```
+
+  Nessuna variabile d'ambiente compare nell'aiuto. Le alternative sono il prompt interattivo, che
+  non esiste in uno script, e lo standard input, che con `--eval` è già occupato dallo script.
+  Quindi la password **deve** stare fra gli argomenti: non è una scorciatoia, è l'unica strada.
+
+- **Esito, secondo punto — dentro il container non si vede.** Con un `mongosh` autenticato in
+  esecuzione, `ps -eo args` dentro `mongo-rs-1` conta **zero** occorrenze della password in chiaro
+  e **una** del segnaposto `<credentials>`. La riga è questa, e non è quella che era stata digitata:
+
+```
+mongosh mongodb://<credentials>@127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&authSour…
+```
+
+  `mongosh` riscrive il proprio `argv`: unisce utente, password e host in una stringa di
+  connessione e ne oscura le credenziali. La convinzione di partenza era sbagliata.
+
+- **Esito, terzo punto — sull'host si vede, e nessuno la oscura.** La stessa esecuzione, vista da
+  `ps -eo args` sull'host, produce **quattro** righe che contengono la password in chiaro. Fra
+  queste il client Docker (qui con la password sostituita a mano per poterla riportare):
+
+```
+/usr/local/bin/docker exec mongo-rs-1 mongosh --quiet --username admin --password <password> …
+```
+
+  L'esposizione non è dove la si cercava. `mongosh` protegge il proprio processo; il processo che
+  lo lancia — `docker`, e quindi `docker compose exec` — non protegge il proprio, e vive
+  sull'host, dove girano anche i programmi di chiunque altro usi quella macchina.
+
+- **Esito, quarto punto — la variabile «protettiva» raddoppiava l'esposizione.** Aggiungendo
+  `-e SEGRETO=<password>` allo stesso comando, la **singola** riga di comando del client `docker`
+  contiene **due** copie della password invece di una. Il conteggio, sull'host:
+
+```
+copie della password nella singola riga di comando di docker sull'host: 2
+```
+
+  Il `-e` non toglie la password dalla riga di comando: ce la mette una seconda volta, sulla riga
+  che espone davvero. Il codice che il commento presentava come una cautela peggiorava di misura la
+  cosa che diceva di curare, e per giunta nessuno leggeva la variabile — `grep -rn SEGRETO tools/
+  docker/ Makefile` ne trovava una sola occorrenza, la definizione.
+
+- **Conseguenza:** [ADR-0054](Decision.md#adr-0054). In `tools/smoke-replicaset.sh` il
+  `-e SEGRETO=` è stato tolto e il commento riscritto su questi quattro punti. Gli altri strumenti
+  — `failover-replicaset.sh`, `reset-demo.sh` — passavano già `--password` senza decorazioni e non
+  cambiano.
+- **Riserve:** misurato solo su `mongosh` 2.10.0; l'oscuramento dell'`argv` è comportamento della
+  shell, non un contratto documentato in una pagina di manuale, e una versione futura potrebbe
+  cambiarlo — il che rafforza la conclusione invece di indebolirla, perché la protezione su cui non
+  si deve contare è proprio quella. La finestra fra l'`exec` e la riscrittura dell'`argv` non è
+  stata cercata: se esiste è di millisecondi, ma esiste. Non è stato provato il caso TLS, dove la
+  password della chiave PEM segue la stessa strada. E resta vero il contorno che conta più di tutto
+  il resto: è una password di laboratorio, e il file che la porta è fuori dal repository
+  ([ADR-0014](Decision.md#adr-0014)).
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0054
+
+
+<a id="v-048"></a>
+### V-048 — 126 e 127: la shell distingue «non c'è» da «non si esegue», e il registratore no
+
+- **Comandi:** `sh -c` e `bash -c` su tre bersagli · `tools/registra-terminale.py … -- <bersaglio>`
+  prima e dopo la correzione
+- **Ambiente:** macOS 26.6.2 arm64, Python 3.14.7, `/bin/sh` e `/bin/bash` di sistema
+- **Che cosa si voleva sapere:** un revisore esterno ha segnalato che in
+  `tools/registra-terminale.py` la chiamata a `os.execvpe` nel processo figlio non è protetta. Il
+  programma un controllo preventivo ce l'aveva — `shutil.which(comando[0]) is None and not
+  os.path.exists(comando[0])` → uscita 127 — e la domanda era se quel controllo bastasse. Un file
+  che **esiste** e non si può eseguire lo attraversa.
+
+- **Esito, primo punto — che cosa fa la shell.** Tre bersagli, due shell, sempre gli stessi codici:
+
+```
+sh, comando assente         -> 127   (command not found)
+sh, file non eseguibile     -> 126   (Permission denied)
+sh, directory               -> 126   (is a directory)
+bash, comando assente       -> 127
+bash, file non eseguibile   -> 126
+```
+
+  La distinzione non è un dettaglio di stile: 127 dice «hai sbagliato a scrivere il nome», 126 dice
+  «il nome è giusto, manca il permesso». Sono due errori che si riparano in due modi diversi.
+
+- **Esito, secondo punto — che cosa faceva il registratore, prima.** Un file `.sh` con modo `644`,
+  passato dopo `--`, attraversava il controllo preventivo perché esiste. Poi `execvpe` falliva nel
+  figlio, che a quel punto era già dentro lo pseudo-terminale: il traceback di Python è stato
+  **scritto nella registrazione**. Il `.cast` prodotto contiene quattro eventi, e il terzo è questo
+  (accorciato):
+
+```
+[0.009369, "o", "Traceback (most recent call last):\r\n  File \"…/tools/registra-terminale.py\", line 220 …"]
+[0.009452, "o", "…PermissionError: [Errno 13] Permission denied: './nonesegui.sh'\r\n"]
+```
+
+  Tre cose sbagliate insieme: il file `.cast` **resta su disco** e sembra una registrazione valida;
+  dentro ci sono i **percorsi assoluti** della macchina di chi registra; e il programma esce con
+  **1**, il codice generico di un'eccezione Python, che non distingue questo caso da nessun altro.
+  La riserva del talk ([ADR-0050](Decision.md#adr-0050)) è materiale che si guarda il giorno in cui
+  la demo dal vivo è già fallita: una che mostra un traceback di Python è peggio di non averla.
+
+- **Esito, terzo punto — dopo la correzione.** Con il controllo preventivo esteso a
+  `os.access(…, os.X_OK)` e la `execvpe` racchiusa in un `try`, i due casi si comportano come la
+  shell:
+
+```
+file non eseguibile   -> uscita 126, «comando non eseguibile: …», nessun .cast scritto
+directory             -> uscita 126, nessun traceback né su stderr né dentro la registrazione
+comando assente       -> uscita 127, «comando non trovato: …», nessun .cast   (invariato)
+```
+
+  La directory è il caso che il controllo preventivo **non** può prendere: per il sistema una
+  directory è attraversabile, quindi `os.access(…, os.X_OK)` risponde di sì, ed è `exec` a
+  rifiutarla. Serve la protezione nel figlio — e la shell arriva alla stessa conclusione per la
+  stessa strada: `sh -c './'` esce 126.
+
+- **Conseguenza:** [ADR-0053](Decision.md#adr-0053), e cinque casi nuovi in
+  `tools/tests/test_registra_terminale.py`, che passa da 8 a 13.
+- **Riserve:** i codici della shell sono misurati su macOS, con `/bin/sh` e `/bin/bash` di sistema;
+  sono convenzione POSIX diffusa ma qui valgono come **misura su questa macchina**, non come
+  citazione di uno standard. Non sono stati provati gli altri modi in cui `exec` può fallire —
+  binario per un'altra architettura, `ENOEXEC` su un file senza `#!`, `ETXTBSY` — che ora finiscono
+  tutti nello stesso ramo protetto senza essere distinti fra loro. La finestra fra `fork` e `exec`
+  resta la parte più delicata del programma e non è coperta da altro che da questi test.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0053

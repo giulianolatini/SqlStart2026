@@ -520,6 +520,28 @@ ruolo da solo**. Misurato: undici secondi dopo uno `rs.stepDown(10)`
 ([V-042](Sources.md#v-042)). Va detto prima, altrimenti il pubblico vede una scena che si annulla
 mentre la si commenta e non capisce se ha appena assistito a un guasto o a una guarigione.
 
+### Chi maneggia il segreto lo nasconde, chi lo lancia lo lascia scritto
+
+> ```text
+> dentro il container:   mongosh mongodb://<credentials>@127.0.0.1:27017/?directConnection=true…
+> sull'host:             /usr/local/bin/docker exec … mongosh --username admin --password <password> …
+> ```
+
+Fonte: [V-047](Sources.md#v-047) — misura del 2026-09-01 su `mongosh` 2.10.0; decisione in
+[ADR-0054](Decision.md#adr-0054). Nella riga dell'host `<password>` è sostituita a mano: lì la
+password c'è per davvero, ed è il punto.
+
+**Perché una slide:** perché smonta l'abitudine di guardare nel posto sbagliato. La domanda «la
+password si vede in `ps`?» ha due risposte opposte a seconda di quale tabella dei processi si
+guarda, e quasi tutti guardano quella del container. Lì non si vede: `mongosh` riscrive il proprio
+`argv` e mette `<credentials>` al posto delle credenziali. Si vede **sull'host**, nella riga del
+client `docker`, che nessuno riscrive — e l'host è la macchina dove girano anche i programmi di
+tutti gli altri. La morale sta in una riga e vale ben oltre MongoDB: quando si mette un comando
+dentro un container, il confine di sicurezza non è dove sembra, ed è di là dal confine che il
+segreto resta scritto. Sotto, la coda della storia: nello script c'era un `-e SEGRETO=` messo per
+prudenza, che nessuno leggeva e che di quella password metteva una **seconda** copia proprio sulla
+riga che la espone.
+
 ## Blocco 3 — Sharded cluster
 
 ### Shard e config server devono essere replica set

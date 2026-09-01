@@ -123,3 +123,72 @@ def test_senza_il_doppio_trattino_si_ferma_invece_di_indovinare(tmp_path):
     assert esito.returncode == 2
     assert "manca il comando da registrare" in esito.stderr
     assert not destinazione.exists()
+
+
+def test_un_file_che_esiste_ma_non_si_esegue_non_finisce_in_un_traceback(tmp_path):
+    """Il pre-controllo guardava se il file *esiste*, non se si può eseguire: il
+    traceback di `execvpe` veniva scritto **dentro** la registrazione, con i percorsi
+    assoluti della macchina di chi registra, e l'uscita era 1 invece che 126."""
+    finto = tmp_path / "non-eseguibile.sh"
+    finto.write_text("#!/bin/sh\necho ciao\n", encoding="utf-8")
+    finto.chmod(0o644)
+    destinazione = tmp_path / "prova.cast"
+
+    esito = esegui(str(destinazione), "--", str(finto))
+
+    assert esito.returncode == 126
+    assert "non eseguibile" in esito.stderr
+    assert "Traceback" not in esito.stderr
+    assert not destinazione.exists()
+
+
+def test_se_l_esecuzione_fallisce_lo_stesso_la_registrazione_non_contiene_un_traceback(tmp_path):
+    """Un controllo preventivo non copre tutti i modi di fallire di `execvpe`: una
+    directory è eseguibile per il sistema e non lo è per `exec`. Il figlio deve dirlo
+    in una riga, non riversare Python nello pseudo-terminale che si sta registrando."""
+    destinazione = tmp_path / "prova.cast"
+
+    esito = esegui(str(destinazione), "--", str(tmp_path))
+
+    assert esito.returncode == 126
+    assert "Traceback" not in esito.stderr
+    if destinazione.exists():
+        assert "Traceback" not in intestazione_e_testo(destinazione)[1]
+
+
+def test_una_velocita_nulla_si_rifiuta_invece_di_dividere_per_zero(tmp_path):
+    """La riproduzione è la riserva del talk: un `ZeroDivisionError` lì è l'errore
+    peggiore nel momento peggiore. Si rifiuta l'argomento, non si divide."""
+    destinazione = tmp_path / "prova.cast"
+    esegui(str(destinazione), "--", "echo", "ciao")
+
+    esito = esegui(str(destinazione), "--riproduci", "--velocita", "0")
+
+    assert esito.returncode == 2
+    assert "ZeroDivisionError" not in esito.stderr
+    assert "velocita" in esito.stderr
+
+
+def test_riproduci_dopo_il_doppio_trattino_appartiene_al_comando_registrato(tmp_path):
+    """L'immagine speculare della regressione del primo test: là erano le opzioni di
+    questo programma a finire nel comando, qui è un'opzione del comando a essere letta
+    come propria. `--` divide in due, e la divisione vale in tutte e due i versi."""
+    destinazione = tmp_path / "prova.cast"
+
+    esito = esegui(str(destinazione), "--", "echo", "--riproduci")
+
+    assert esito.returncode == 0
+    assert destinazione.exists()
+    assert "--riproduci" in intestazione_e_testo(destinazione)[1]
+
+
+def test_riproduci_con_un_comando_da_registrare_si_ferma_invece_di_ignorarlo(tmp_path):
+    """Chiedere insieme le due cose è un errore di chi digita, e va detto: prima
+    `argparse` lo segnalava per caso, come «unrecognized arguments»."""
+    destinazione = tmp_path / "prova.cast"
+    esegui(str(destinazione), "--", "echo", "ciao")
+
+    esito = esegui(str(destinazione), "--riproduci", "--", "echo", "ciao")
+
+    assert esito.returncode == 2
+    assert "riproduci" in esito.stderr
