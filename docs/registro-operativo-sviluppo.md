@@ -2321,11 +2321,13 @@ tempi dell'elezione, nel Blocco 2, e il dollaro mangiato da Compose, fra le trap
     perché la si sta scrivendo nello stesso commit, oppure si nomina il debito nel registro — che è
     l'unico posto dove qualcuno lo va a ricontrollare.
 
-**Consuntivo del branch, alla vigilia dell'unione.** Diciotto commit e trentatré file rispetto a
-`develop`: il piano, tredici di task, due punti di ripresa, una nota di metodo isolata — e questo,
-che chiude. Nessun file nuovo è stato toccato dal Task 14: le tre pagine che modifica erano già nel
-conto, e il numero è calcolato **includendo il commit che lo introduce**, come prescrive la nota 37
-dopo che era stato sbagliato due volte. I quattro controlli sono verdi in locale, con gli stack
+**Consuntivo del branch, alla vigilia dell'unione.** Diciannove commit e trentatré file rispetto a
+`develop`: il piano, tredici di task, tre punti di ripresa, una nota di metodo isolata, e il Task 14
+che chiude il lavoro. Nessun file nuovo è stato toccato dal Task 14: le tre pagine che modifica
+erano già nel conto, e il numero è calcolato **includendo il commit che lo introduce**, come
+prescrive la nota 37 dopo che era stato sbagliato due volte. La riga diceva «diciotto» quando è
+stata scritta ed era esatta allora; il punto di ripresa qui sotto è il diciannovesimo commit, e la
+regola vale anche per lui. I quattro controlli sono verdi in locale, con gli stack
 fermi e con lo stack 02 acceso; su GitHub non ne gira nessuno, per scelta
 ([ADR-0038](Decision.md#adr-0038)).
 
@@ -2334,3 +2336,101 @@ quattro filmati `.mp4`, che solo il relatore può girare, e l'avviso di `preflig
 acceso oggi, bloccante dal 2026-09-18. Le registrazioni di terminale che fanno da riserva ci sono
 già ([ADR-0050](Decision.md#adr-0050)), e non sostituiscono i filmati: sostituiscono la demo dal
 vivo se lo stack non parte.
+
+## 2026-09-01 — Punto di ripresa: `feature/03-stack-sharded`, che non è la prossima
+
+Questa voce non nasce da una sessione interrotta. Nasce dal fatto che `feature/02` è chiusa e in
+attesa di revisione, e che il branch che eredita lo sharded cluster **non comincia adesso**. Il
+calendario del [design](00-progetto/2026-08-24-design.md) mette dopo la PR #3 la
+`feature/04-app-python` — dal 4 all'11 settembre, PR #4 — e solo il 14 e 15 settembre la
+`feature/03-stack-sharded`, con la PR #5: l'applicazione viene prima perché è il pezzo più grande e
+meno comprimibile, e conviene averla in mano finché c'è margine. Fra oggi e il primo commit dello
+sharded ci sono quindi due settimane e un branch intero. È esattamente quella distanza a rendere il
+punto di ripresa utile: quello che oggi è ovvio, fra due settimane va ricostruito.
+
+**Quello che è deciso e non va più discusso.**
+
+- **La versione.** [ADR-0028](Decision.md#adr-0028): il lab gira su **MongoDB 7.0.40**, con la
+  8.0.30 come traguardo. Non c'è niente da ridiscutere, ma c'è una cosa da **verificare** prima di
+  montare il terzo stack: se i binari della 8.0.30 sono stati pubblicati. La decisione ha la
+  scadenza scritta dentro — si ripinna appena escono e si rigirano i filmati — e costa poco perché
+  la versione è una variabile sola, `${MONGO_IMAGE}` negli stack e `tools/images.env` rigenerato da
+  `make images-pull`.
+- **La topologia è validata.** Lo spike del 25 agosto ha montato lo sharded cluster completo e lo ha
+  misurato: [`2026-08-25-spike-sharded.md`](00-progetto/2026-08-25-spike-sharded.md). Il file
+  Compose che ha funzionato è **dentro il verbale** e non nel repository, e non è una dimenticanza:
+  codice non eseguito che resta in giro invecchia senza che nessuno se ne accorga.
+- **I due profili.** Il profilo di palco e quello completo si comportano come servono, e
+  `keyfile-init` resta **senza profilo** perché la dipendenza vada da un servizio con profilo verso
+  uno senza — l'unica direzione su cui la documentazione di Compose si sbilancia
+  ([S-015](Sources.md#s-015)). La riserva di [ADR-0010](Decision.md#adr-0010) resta aggirata per
+  costruzione, non per fortuna, e va riletta prima di toccare i profili.
+- **La catena di inizializzazione.** [ADR-0026](Decision.md#adr-0026) fissa che
+  `MONGO_INITDB_ROOT_*` non funziona su un config server; [ADR-0040](Decision.md#adr-0040) ha scelto
+  per il replica set la strada del namespace di rete condiviso dopo aver montato e misurato tutte e
+  tre le alternative ([V-023](Sources.md#v-023)). `feature/03` non deve rifare quel confronto: deve
+  decidere se la stessa forma regge con `mongos` davanti, che è una domanda più piccola.
+- **La pagina delle trappole cresce per aggiunta** ([ADR-0033](Decision.md#adr-0033)) e **una
+  trappola già misurata si scrive nel branch che l'ha misurata**
+  ([ADR-0052](Decision.md#adr-0052)). La conseguenza pratica è che `feature/03` non eredita una lista
+  di candidati aperti — `feature/02` ha chiuso la propria — e non deve accumularne una.
+- **Lo stack è un argomento, non un ramo dentro il codice.** `reset-demo.sh 03` deve funzionare
+  aggiungendo un caso, non riscrivendo lo strumento; lo stesso vale per i bersagli del Makefile.
+- **Ciò che non si esegue si marca** ([ADR-0035](Decision.md#adr-0035),
+  [ADR-0036](Decision.md#adr-0036)). Vale anche quando la marcatura è scomoda, ed è la regola che ha
+  prodotto i debiti elencati più sotto.
+
+**Quello che è costruito e si eredita.** Due stack che partono — `docker/01-standalone` e
+`docker/02-replicaset` — con i loro bersagli nel Makefile; gli strumenti di palco
+(`smoke-replicaset.sh`, `failover-replicaset.sh`, `reset-demo.sh`, `registra-terminale.py`) e i tre
+controllori (`check_stack.py`, `check_citations.py`, `check_links.py`) più `preflight`; 108 test in
+`tools/tests/`. Alla chiusura di `feature/02` i quattro controlli sono verdi, eseguiti con gli stack
+fermi e con lo stack 02 avviato.
+
+**Quello che è già misurato e non va rimisurato.** Dallo spike, sette risposte che un piano scritto
+da zero rimetterebbe in dubbio: `MONGO_INITDB_ROOT_*` su un config server (§2); `rs.initiate()`
+scritto con i nomi dei servizi Compose e non con gli IP (§3); l'eccezione localhost che concede meno
+di quanto sembri (§4, e [S-055](Sources.md#s-055)); la topologia che funziona, failover compreso
+(§5); i due profili contati in servizi (§6); la cache WiredTiger nei container e il comportamento di
+`compose up` sulla rete (§7). Da `feature/02`, cinque trappole che colpiscono chiunque monti uno
+stack Compose e che nello sharded si incontrano prima, non dopo: `--env-file` che sostituisce
+invece di aggiungersi, `up --wait` che esce mentre la topologia non c'è ancora, il dollaro che
+Compose consuma, `docker logs` che si congela dopo un riavvio del demone, e il terzo `ENOTFOUND` —
+voci [14](02-architetture/trappole-mongodb-in-docker.md#t-14)–[18](02-architetture/trappole-mongodb-in-docker.md#t-18)
+della pagina delle trappole.
+
+**Quello che è dovuto, e sta già scritto in pagina come debito.** Non è una lista da ricostruire: è
+già marcata nei documenti, e ogni riga ha un indirizzo.
+
+- `docs/02-architetture/sharded-cluster.md` — la pagina non esiste, e
+  l'[indice della documentazione](README.md) la promette per nome a `feature/03-stack-sharded`.
+- `README.md` alla radice dichiara `docker/03-sharded` «in lavorazione»: è la riga che va chiusa.
+- [`guida-mongosh.md`](04-mongosh/guida-mongosh.md) — la §3.3, *Sharded cluster*, è marcata per
+  intero come non eseguita.
+- [`sicurezza-keyfile-x509.md`](03-amministrazione/sicurezza-keyfile-x509.md) — gli **utenti locali
+  a uno shard**, che là esistono davvero perché ogni shard è un replica set con il proprio `admin`,
+  e l'eccezione localhost che «applies to each shard individually as well as to the cluster as a
+  whole» ([S-006](Sources.md#s-006)). Marcato, mai provato.
+- [`backup-restore.md`](03-amministrazione/backup-restore.md) — `--oplog` che la documentazione
+  vieta sullo sharded cluster ([S-011](Sources.md#s-011)); il seguito è dovuto lì.
+- [`trappole-mongodb-in-docker.md`](02-architetture/trappole-mongodb-in-docker.md) — le trappole dei
+  **config server** e del **bilanciamento**, che ADR-0033 intesta per nome a `feature/03`.
+
+**Il prossimo passo.** La PR #3 va revisionata e unita su GitHub, e **non** chiusa con
+`git flow feature finish`. Poi, per calendario, si apre `feature/04-app-python`. Quando toccherà
+allo sharded: si verifica se la 8.0.30 esiste, si scrive il piano in `docs/00-progetto/` sul
+modello del [piano di `feature/02`](00-progetto/2026-08-31-piano-feature-02-stack-replicaset.md), e
+si parte dal verbale dello spike invece che dalla pagina bianca — c'è dentro un Compose che ha già
+funzionato.
+
+**Note di metodo.**
+
+81. **Un punto di ripresa si scrive quando la distanza è prevedibile, non solo quando la sessione si
+    rompe.** La nota 44 lo aveva legato all'interruzione: si sospende, e l'ultimo commit non è il
+    codice ma il contesto. Ma il contesto si perde anche senza interruzioni, e in modo più insidioso:
+    qui fra la chiusura di `feature/02` e l'apertura di `feature/03` ci sono due settimane e un
+    branch intero, dedicato a tutt'altro. Al ritorno non si ricorderà che lo spike aveva già montato
+    la topologia, né che il Compose che funzionava è dentro un verbale invece che nel repository — e
+    la reazione naturale a un dubbio è **rifare la misura**, che costa un giorno. La regola: quando
+    fra due pezzi di lavoro correlati si sa già che passerà altro lavoro in mezzo, il punto di
+    ripresa si scrive alla fine del primo, finché è gratis.
