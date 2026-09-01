@@ -5478,3 +5478,76 @@ codice riportato su Linux dopo la correzione: 7  (atteso 7)
   ed è per costruzione, non un difetto.
 - **Data:** 2026-09-01
 - **Usata da:** ADR-0055
+
+
+<a id="v-050"></a>
+### V-050 — `git worktree remove` difende i file non tracciati e cancella gli ignorati senza dire niente
+
+- **Comandi:** `git worktree add --detach`, `git status --porcelain [-uall] [--ignored]`,
+  `git worktree remove`
+- **Ambiente:** macOS 26.6.2 arm64, git 2.50.1 (Apple Git-155)
+- **Che cosa si voleva sapere:** chiusa e unita la PR #3, il worktree che aveva ospitato
+  `feature/02` andava rimosso. La domanda non era se il lavoro fosse al sicuro — quello lo dice
+  `git merge-base --is-ancestor` — ma **che cosa si perde** che git non conta: i file ignorati, che
+  in questo repository non sono solo cache, perché `docker/02-replicaset/.env` è ignorato per
+  decisione ([ADR-0014](Decision.md#adr-0014)) e contiene la password dell'amministratore del lab.
+
+- **Esito, primo punto — con un file ignorato dentro, la rimozione riesce in silenzio.** Un
+  worktree di prova, un `.env` scritto al suo interno, e la domanda posta a git:
+
+```
+$ git -C w1 status --porcelain
+[uscita 0]
+
+$ git worktree remove w1
+[uscita 0]
+```
+
+  Nessuna riga in uscita né dal primo comando né dal secondo. `status` dice «pulito» perché il file
+  è ignorato, e `remove` non obietta: la directory non esiste più, e il `.env` con lei.
+
+- **Esito, secondo punto — con un file non tracciato dentro, la rimozione si rifiuta.** Stesso
+  worktree di prova, un `appunto.txt` qualunque al posto del `.env`:
+
+```
+$ git -C w2 status --porcelain
+?? appunto.txt
+[uscita 0]
+
+$ git worktree remove w2
+fatal: 'w2' contains modified or untracked files, use --force to delete it
+[uscita 128]
+```
+
+  La directory sopravvive. La rete di sicurezza esiste, ed è buona: copre i file **non tracciati**.
+  Non copre gli **ignorati**, che sono una categoria diversa e nel primo caso è passata liscia.
+
+- **Esito, terzo punto — dall'esterno il controllo non è possibile, e non per la regola di
+  ignore.** Elencare i file ignorati dal checkout che contiene il worktree restituisce una riga
+  sola, `!! .claude/worktrees/…/`, con la barra finale: la directory, non il suo contenuto. Il
+  motivo non è il `.gitignore`, è il **confine di repository**. Messi fianco a fianco un worktree
+  annidato e una directory normale, e chiesto a git di scendere con `-uall`, che è l'opzione
+  apposita:
+
+```
+$ git status --porcelain -uall
+?? dirnormale/dentro.txt
+?? w3/
+```
+
+  Nella directory normale git entra e nomina il file; nel worktree si ferma sulla soglia e nomina
+  la directory. Nessuno dei due è ignorato: la differenza è solo che il secondo contiene un `.git`.
+
+- **Conseguenza:** [ADR-0056](Decision.md#adr-0056). Nel caso concreto il controllo, eseguito
+  dall'interno, ha trovato quattro voci non rigenerabili a colpo d'occhio — tre di configurazione
+  di uno strumento di indicizzazione e `docker/02-replicaset/.env` — e ha stabilito che quella era
+  l'**unica** copia del file: nel checkout principale non compariva. È stato messo in salvo prima
+  della rimozione.
+- **Riserve:** misura su una sola piattaforma e una sola versione di git; il comportamento è
+  documentato come intenzionale, ma qui non è citata la pagina di manuale che lo dichiara — è
+  osservato. Non è stato provato `--force`, che per definizione cancella tutto, né il caso di un
+  file insieme modificato e ignorato. Il confine di repository è stato provato con un worktree; un
+  submodule dovrebbe comportarsi allo stesso modo per la stessa ragione, e non è stato provato.
+  Resta fuori dalla misura `git clean`, che è l'altro modo di arrivare alla stessa lista.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0056

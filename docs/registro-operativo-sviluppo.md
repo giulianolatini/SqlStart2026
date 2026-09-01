@@ -2668,3 +2668,64 @@ macOS e 14 su 14 dentro il container Linux. `make docs-check` verde.
     contrario, per non trarne la lezione sbagliata: il secondo revisore non ha ritrovato nessuno
     dei tre difetti del primo giro, che a quel punto erano già corretti, e non ha prodotto rumore.
     Un rilievo, vero.
+
+## 2026-09-01 — `feature/03`, apertura: un worktree si rimuove guardandoci dentro
+
+`feature/02` è unita, la PR #3 è chiusa, il ramo è cancellato di qua e di là. Restava una cosa
+sola, ed è quella che ha prodotto questa voce: il worktree che aveva ospitato il branch andava
+rimosso, e la domanda «posso rimuoverlo?» si è rivelata più larga di come era stata posta.
+
+**La domanda facile.** Nessuna modifica in sospeso, e la punta del ramo già dentro `develop`:
+`git status --porcelain` vuoto, `git merge-base --is-ancestor HEAD origin/develop` vero. Due
+comandi, risposta chiara, e a quel punto sembrava finita.
+
+**La domanda vera.** Non è che cosa git conta, è che cosa git ha ricevuto istruzione di **non**
+guardare. In questo repository quella categoria non è fatta solo di cache: `docker/02-replicaset/.env`
+è ignorato per decisione ([ADR-0014](Decision.md#adr-0014)) perché contiene la password
+dell'amministratore del lab. Il prezzo di quella scelta — mai scritto fino a oggi — è che il file
+esiste in una copia sola, dove è stato creato.
+
+**Due misure, e nessuna delle due è quella che si dava per scontata** ([V-050](Sources.md#v-050)).
+`git worktree remove` si rifiuta di cancellare un worktree con dentro un file non tracciato, e lo
+dice: `fatal: … contains modified or untracked files, use --force`. Con dentro un file **ignorato**
+non dice niente: uscita `0`, directory sparita. La rete di sicurezza esiste e copre la categoria
+sbagliata. Poi: il controllo non si può fare da fuori. Messi fianco a fianco un worktree annidato e
+una directory normale, e chiesto a git di scendere con `-uall` — l'opzione che serve proprio a
+quello — la risposta è `?? dirnormale/dentro.txt` per la seconda e `?? w3/` per il primo. Non è la
+regola di ignore a fermarlo: è il **confine di repository**. Una directory che contiene un `.git`
+git non la attraversa.
+
+Il primo tentativo di controllo era stato fatto dal checkout principale e aveva restituito una riga
+sola, `!! .claude/worktrees/feature+00-fondamenta/`, presa per un elenco completo. Era la soglia,
+non il contenuto. Rifatto dall'interno, l'elenco aveva quattro voci, e una era il `.env`. Il
+confronto con l'elenco del checkout principale ha aggiunto il pezzo che mancava: là il `.env` non
+c'era. Non era una copia, era **la** copia.
+
+Da qui [ADR-0056](Decision.md#adr-0056): l'elenco degli ignorati si fa dall'interno prima di ogni
+rimozione, e la sede dei `.env` del laboratorio è il checkout principale, non un worktree.
+
+**Perché sta in `feature/03` e non in `feature/02`.** Perché `feature/02` era già unita quando la
+misura è stata presa. La regola del repository è che una trappola misurata si scrive nel branch che
+l'ha misurata ([ADR-0052](Decision.md#adr-0052)); qui il branch che l'ha misurata non esisteva più,
+e il primo aperto dopo è questo. Il consuntivo di `feature/02` resta quello che era: ventidue
+commit, e non si riscrive per ospitare un fatto successivo.
+
+**Note di metodo.**
+
+88. **La rete di sicurezza di uno strumento definisce un confine, e va conosciuto invece che
+    sperato.** `git worktree remove` protegge i file non tracciati. È un comportamento buono, ed è
+    proprio la sua bontà a rendere il resto pericoloso: chi lo ha visto rifiutarsi una volta ne
+    ricava che lo strumento «controlla prima di cancellare», e smette di controllare lui. Ma la
+    protezione ha un bordo preciso — finisce dove comincia `.gitignore` — e il bordo non è
+    annunciato: dall'altra parte non c'è un avviso più debole, c'è il silenzio. La regola generale:
+    quando uno strumento ti ha protetto una volta, chiediti **da che cosa**, perché la risposta è
+    quasi sempre più stretta di «dagli errori». Qui la distanza fra le due letture era la password
+    dell'amministratore del lab.
+89. **Il controllo va eseguito dal punto di vista di chi subisce l'operazione, non di chi la
+    ordina.** Un worktree lo si rimuove standogli fuori, quindi è da fuori che viene naturale
+    ispezionarlo — ed è l'unico posto da cui l'ispezione non funziona, perché git non attraversa il
+    confine di un altro repository. Il guaio non è che dia una risposta parziale: è che ne dà una
+    **ben formata**, una riga con la sintassi giusta, che sembra un elenco completo di un elemento.
+    Un errore che si presenta come un risultato valido non lo si scopre rileggendo l'output; lo si
+    scopre solo cambiando posto e rifacendo la domanda. Vale oltre git: ogni volta che si verifica
+    qualcosa «da sopra», conviene chiedersi se da lì si veda davvero.

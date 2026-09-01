@@ -3226,3 +3226,68 @@ invece di toglierla); respingere il rilievo perché il caso di prova proposto no
 per non ripetere).
 
 **Fonti:** [V-049](Sources.md#v-049)
+
+
+---
+
+<a id="adr-0056"></a>
+## ADR-0056 — Prima di rimuovere un worktree si guarda dentro, e il file che conta vive nel checkout principale
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto:** il lavoro su questo repository si svolge in worktree separati, uno per branch, che
+alla chiusura della PR vengono rimossi. La domanda «posso rimuoverlo?» ha una risposta ovvia e una
+nascosta. Quella ovvia riguarda il lavoro versionato, e si verifica in due comandi: nessuna
+modifica in sospeso, e la punta del ramo già dentro `develop`. Quella nascosta riguarda i file che
+git ha ricevuto istruzione di non guardare.
+
+In questo repository quella categoria non contiene solo cache. `docker/02-replicaset/.env` è
+ignorato **per decisione** ([ADR-0014](#adr-0014) e la riga di `.gitignore` che ne discende):
+contiene la password dell'amministratore del laboratorio, e non deve entrare nella cronologia. Il
+prezzo di quella scelta, che fino a oggi non era stato scritto, è che quel file esiste in una copia
+sola, dove è stato creato.
+
+La misura ([V-050](Sources.md#v-050)) dice due cose. La prima: `git worktree remove` si rifiuta di
+cancellare un worktree che contiene file non tracciati — `fatal: … contains modified or untracked
+files` — ma cancella senza obiettare uno che contiene solo file ignorati, uscita `0` e nessun
+messaggio. La rete di sicurezza c'è, e non copre questa categoria. La seconda: il controllo non si
+può fare da fuori. Git non attraversa il confine di un altro repository, nemmeno con l'opzione che
+esiste apposta per scendere nelle directory; da fuori il worktree è una riga sola.
+
+**Decisione:** prima di ogni `git worktree remove`, si elencano i file ignorati **dall'interno del
+worktree**, e si mette in salvo ciò che non si rigenera:
+
+```
+git -C <worktree> status --porcelain --ignored -uall \
+  | grep -v -e '/\.venv/' -e '__pycache__' -e '\.pytest_cache'
+```
+
+Il filtro toglie ciò che si ricostruisce da solo e lascia in vista il resto. Quello che resta si
+guarda a una a una: se una riga non si rigenera con un comando, si copia prima di rimuovere.
+
+E, come conseguenza diretta: **la sede dei file `.env` del laboratorio è il checkout principale**,
+non un worktree. Un worktree è per costruzione temporaneo; un file che vive solo lì è un file che
+si perde a fine branch, e il momento in cui te ne accorgi è quello in cui uno stack non parte più.
+
+**Conseguenze:** un comando in più nella chiusura di ogni branch, e l'abitudine di leggerne
+l'uscita invece di scorrerla. In cambio, i worktree tornano a essere quello che devono essere —
+usa e getta — perché la condizione che li rende tali è ora esplicita invece che sperata.
+
+Alla chiusura di `feature/02` questa regola ha avuto la sua prima applicazione e ha trovato subito
+il caso per cui esiste: il `.env` del replica set era nel worktree e **non** nel checkout
+principale. Copiato prima della rimozione, lo stack 02 riparte senza reinizializzare
+l'amministratore nei volumi; perso, si sarebbe fermato sull'errore esplicito di
+`${PASSWORD_AMMINISTRATORE:?…}` — che è il comportamento voluto, ma a quel punto la password
+andava scelta di nuovo e i volumi ricreati.
+
+**Alternative scartate:** fidarsi di `git worktree remove`, che per i file non tracciati basta e
+avanza (misurato: sugli ignorati non dice niente, ed è esattamente la categoria in cui cade il
+`.env`); eseguire il controllo dal checkout principale, che è il posto naturale da cui si rimuove
+un worktree (misurato: git si ferma al confine di repository e riporta la sola directory, quindi il
+controllo non è impreciso, è cieco); togliere `.env` dal `.gitignore` così che git lo protegga come
+file tracciato (metterebbe la password nella cronologia, che è precisamente ciò che
+[ADR-0014](#adr-0014) vieta); usare `git clean -ndX` per l'elenco (funziona ed è più corto, ma
+elenca solo gli ignorati e non i non tracciati, e vive a un solo carattere di distanza da
+`-fdX`, che cancella — un comando di verifica non dovrebbe avere quella forma).
+
+**Fonti:** [V-050](Sources.md#v-050)
