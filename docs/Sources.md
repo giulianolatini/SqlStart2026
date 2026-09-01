@@ -5689,3 +5689,186 @@ MongoServerError: not authorized on admin to execute command { getCmdLineOpts: 1
   riverificati qui.
 - **Data:** 2026-09-01
 - **Usata da:** ADR-0059
+
+<a id="v-053"></a>
+### V-053 — Profili e `depends_on`: la riserva di ADR-0010, misurata su quattro casi
+
+- **Comandi:** `docker compose config --services` su due file di prova con `busybox`,
+  con `--profile palco`, con `--profile completo` e senza profili; `docker compose create`
+  nominando il servizio sulla riga di comando
+- **Ambiente:** macOS 26.6.2 arm64, Docker Compose v5.4.0, Docker Engine 29.7.2, 2026-09-01
+- **Che cosa si voleva sapere:** che cosa succede quando un servizio **selezionato** dichiara
+  `depends_on` verso un servizio **non selezionato** perché il suo profilo non è attivo.
+  [S-015](#s-015) documenta una sola direzione — servizio con profilo verso le sue dipendenze —
+  e la sua riserva dice che l'altra va misurata invece che dedotta. [ADR-0010](Decision.md#adr-0010)
+  aveva ereditato quella riserva e la teneva aperta dal 24 agosto. Lo stack 03 non poteva più
+  aggirarla: i suoi servizi di inizializzazione devono dipendere da membri che nel profilo
+  `palco` non esistono, oppure rinunciare a dipenderne.
+
+- **Esito, primo caso — servizio CON profilo verso una dipendenza non selezionata.** Un file con
+  `a` in entrambi i profili, `b` solo in `completo`, e `init-con-profilo` (entrambi i profili)
+  che dipende da tutti e due:
+
+```
+--profile palco     service "init-con-profilo" depends on undefined service "b":
+                    invalid compose project                              (uscita 1)
+--profile completo  a, b, init-con-profilo                               (uscita 0)
+```
+
+- **Esito, secondo caso — servizio SENZA profilo verso una dipendenza non selezionata.** È il caso
+  che la documentazione non tratta, ed è quello che ADR-0010 aveva lasciato aperto. Con
+  `init-senza-profilo` (nessun `profiles`) che dipende da `b`:
+
+```
+nessun profilo      service "init-senza-profilo" depends on undefined service "b":
+                    invalid compose project                              (uscita 1)
+--profile palco     stesso errore                                        (uscita 1)
+```
+
+  **La regola è simmetrica.** Non conta chi ha il profilo e chi no: conta che entrambi i servizi
+  siano selezionati. Un servizio selezionato non può dipendere da uno non selezionato, in nessuna
+  delle due direzioni.
+
+- **Esito, terzo caso — la validazione riguarda solo i servizi selezionati.** Sul file del primo
+  caso, senza nessun profilo attivo, `config --services` esce **0** e non stampa niente:
+  `init-con-profilo` non è selezionato, quindi il suo `depends_on` non viene nemmeno guardato. Un
+  `depends_on` rotto può quindi restare invisibile finché non si attiva il profilo che lo
+  seleziona.
+
+- **Esito, quarto caso — nominare il servizio è diverso dall'attivare il profilo.** `docker compose
+  create init-con-profilo`, senza nessun profilo attivo, esce **0** e crea **tre** container:
+
+```
+prova-profili-caso1-init-con-profilo-1  Created
+prova-profili-caso1-b-1                 Created
+prova-profili-caso1-a-1                 Created
+```
+
+  `b` viene tirato dentro nonostante il suo profilo non sia attivo. È la frase di [S-015](#s-015)
+  — «Only the targeted service (and any of its declared dependencies via `depends_on`) is
+  started» — e vale **solo** per il servizio nominato sulla riga di comando. Attivare un profilo e
+  nominare un servizio sono due modi di selezionare che si comportano in modo opposto davanti alla
+  stessa dipendenza: il primo è un errore, il secondo un'inclusione automatica.
+
+- **Il fallimento è rumoroso**, ed è la parte buona: Compose rifiuta l'intero progetto prima di
+  avviare qualsiasi cosa, con il nome del servizio e il nome della dipendenza nel messaggio.
+  Nessuno stack parte a metà.
+
+- **Conseguenza:** [ADR-0060](Decision.md#adr-0060). La riserva di [ADR-0010](Decision.md#adr-0010)
+  e quella di [S-015](#s-015) sono chiuse: la risposta è che il caso non trattato **fallisce**, e
+  fallisce dicendolo.
+- **Riserve:** misurato su Compose v5.4.0. Non è documentato, quindi è comportamento osservato e
+  non garantito: una versione futura potrebbe scegliere di tirare dentro la dipendenza come fa con
+  i servizi nominati. Chi aggiorna Compose rifaccia i quattro casi — il file di prova sta in
+  quattordici righe. Non è stato provato `--profile "*"`, né `COMPOSE_PROFILES`.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0060
+
+<a id="v-054"></a>
+### V-054 — I tre replica set dello stack 03, e una guardia provata rompendola due volte
+
+- **Comandi:** `docker compose --profile … up -d --wait`; `docker inspect --format`;
+  `docker wait`; `docker compose wait`; `mongosh --eval` dentro i container
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, immagine `mongo` pinnata per digest da
+  `tools/images.env`, 2026-09-01
+- **Che cosa si voleva sapere:** se i tre componenti dello stack 03 che tengono dati — il replica
+  set dei config server e i due shard — si formano da soli in tutti e due i profili, e se la
+  guardia bilaterale dei due script di inizializzazione ([ADR-0060](Decision.md#adr-0060)) becca
+  davvero i disallineamenti fra l'elenco dei membri e il profilo attivo.
+
+- **Esito, primo punto — i profili selezionano 7 e 13 servizi.** Con il Task 2 completo:
+  `palco` sette (`keyfile-init`, `cfg1`, `cfg-init`, `shard1a`, `shard1-init`, `shard2a`,
+  `shard2-init`), `completo` tredici. I sei servizi in più sono i due terzi di membri che il
+  profilo del talk non avvia.
+
+- **Esito, secondo punto — i tre set si formano, in tutti e due i profili.** Con `palco`, i tre
+  one-shot escono **0** e dicono:
+
+```
+membri da configurare: cfg1:27017
+inizializzo il replica set dei config server «cfgrs»
+primario del config server eletto: cfg1:27017
+utente amministratore «admin» creato
+config server pronto
+shard «shard1rs» pronto, primario: shard1a:27017
+shard «shard2rs» pronto, primario: shard2a:27017
+```
+
+  Con `completo`, `rs.status()` su ciascuno dei tre set:
+
+```
+cfgrs    ok=1 membri=3 -> cfg1:PRIMARY   cfg2:SECONDARY   cfg3:SECONDARY
+shard1rs ok=1 membri=3 -> shard1a:PRIMARY shard1b:SECONDARY shard1c:SECONDARY
+shard2rs ok=1 membri=3 -> shard2a:PRIMARY shard2b:SECONDARY shard2c:SECONDARY
+```
+
+  Il primario è il membro «a» in tutti e tre: `priority: 2` sul primo membro
+  ([ADR-0051](Decision.md#adr-0051)) funziona anche qui, e per una demo cronometrata vuol dire
+  sapere in anticipo quale container fermare.
+
+- **Esito, terzo punto — la guardia becca il caso pericoloso.** `--profile completo` con gli
+  elenchi lasciati al valore del `palco`: nove `mongod` in piedi, tre set da inizializzare a un
+  membro solo. Tutti e tre gli one-shot escono **5** (`USCITA_MEMBRO_DI_TROPPO`) senza toccare
+  niente. Senza guardia lo stack sarebbe partito, sarebbe sembrato sano, e la scena del failover
+  non avrebbe avuto niente da mostrare: è il guasto che di suo non fallisce.
+
+- **Esito, quarto punto — e becca anche l'altro.** `--profile palco` con gli elenchi del
+  `completo`: tutti e tre escono **4** (`USCITA_MEMBRO_ASSENTE`) dopo i trenta secondi di attesa,
+  dicendo quale membro manca e perché:
+
+```
+ERRORE: il membro «cfg2:27017» non risponde dopo 30 secondi.
+Di solito significa che MEMBRI_CFG elenca più membri di quanti il
+profilo attivo ne avvii. Con «--profile palco» il config server è uno solo.
+```
+
+- **Esito, quinto punto — `up --wait` esce 0 in tutti e quattro i casi, anche quando gli init
+  falliscono.** È la riconferma di [V-025](#v-025) su uno stack diverso, e la ragione per cui
+  [ADR-0041](Decision.md#adr-0041) vuole due comandi e non uno. Peggio: nel caso del disallineamento
+  Compose stampa
+
+```
+Container sh-cfg-init  Healthy
+```
+
+  per un container che `docker inspect` descrive come `stato=exited uscita=5 salute=nessun
+  healthcheck definito`. La parola «Healthy» sulla riga di un container morto non è un capriccio:
+  per `--wait` un servizio senza healthcheck è a posto appena parte. Nella prima misura del profilo
+  `completo` `up --wait` è uscito 0 mentre i tre one-shot erano ancora **in corsa**.
+
+  Una precisazione che lo stack 02 non poteva mostrare: `docker compose wait cfg-init` **senza**
+  `--profile` risponde `no containers for project "sqlstart-03-sharded"` e esce **1**. Il verdetto
+  di ADR-0041 va quindi dato con il profilo addosso, ed è un vincolo per il Task 4 del piano.
+
+- **Esito, sesto punto — l'eccezione localhost, misurata al confine su un nodo senza utenti.**
+  Uno shard resta senza utenti finché il Task 9 non decide diversamente, quindi la sua eccezione
+  localhost è aperta. Da dentro `sh-shard1a`, senza credenziali:
+
+```
+hello              AMMESSO
+replSetGetStatus   AMMESSO   (risposta piena: set, membri, stateStr)
+listDatabases      AMMESSO   (ok=1, ma l'elenco è VUOTO)
+getCmdLineOpts     NEGATO    Unauthorized
+serverStatus       NEGATO    Unauthorized
+find su una raccolta   NEGATO    Unauthorized
+insert su una raccolta NEGATO    Unauthorized
+```
+
+  Il confronto di controllo è su `sh-cfg1`, dove l'utente amministratore esiste e l'eccezione è
+  quindi chiusa: lì `replSetGetStatus` e `listDatabases` rispondono **Unauthorized**, e passa solo
+  `hello()`. La differenza fra le due colonne è l'eccezione localhost e nient'altro.
+
+  Ne segue che l'eccezione **non** è «solo la creazione del primo utente», come [V-052](#v-052)
+  aveva concluso da una misura sola: concede anche di leggere lo stato del replica set per intero.
+  Non concede di leggere dati, di scriverne, né di sapere come è stato avviato il server. È un
+  confine con una forma, non una porta aperta o chiusa, e la pagina della sicurezza del Task 9 lo
+  deve disegnare così.
+
+- **Conseguenza:** [ADR-0060](Decision.md#adr-0060).
+- **Riserve:** non c'è ancora nessun `mongos`, quindi i tre set esistono e **non si conoscono**:
+  niente di ciò che riguarda il routing, `sh.addShard()` o la distribuzione dei documenti è coperto
+  qui. La password usata nella prova è di scarto e i volumi sono stati cancellati con `down -v`
+  alla fine di ogni caso. Tutto su arm64. Il sesto punto è misurato su un `mongod --shardsvr`: non
+  è stato riverificato su un `--configsvr` senza utenti.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0060

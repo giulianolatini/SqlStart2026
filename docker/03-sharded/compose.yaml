@@ -8,13 +8,18 @@
 # regole del repository addosso: profili, pinning per digest, healthcheck che
 # aspettano un servizio operativo e non un processo vivo.
 #
-# ATTENZIONE — QUESTO FILE È INCOMPLETO. Contiene il primo anello della catena e
-# il replica set dei config server. Gli shard, `mongos` e la registrazione degli
-# shard nel cluster arrivano nei task successivi del piano
-# (docs/00-progetto/2026-09-01-piano-feature-03-stack-sharded.md). Così com'è
-# avvia un CSRS autenticato e nient'altro: non è ancora uno sharded cluster, e
-# non c'è nessun `mongos` a cui collegarsi. La riga è qui perché ADR-0037 vuole
-# che ciò che non c'è sia dichiarato, non lasciato scoprire.
+# ATTENZIONE — QUESTO FILE È ANCORA INCOMPLETO. Ci sono i tre componenti che
+# tengono dati — il replica set dei config server e i due shard — e i tre servizi
+# che li inizializzano. Manca l'ultimo pezzo, ed è quello che li unisce: `mongos`
+# e `sh.addShard()` arrivano nel Task 3 del piano
+# (docs/00-progetto/2026-09-01-piano-feature-03-stack-sharded.md).
+#
+# Così com'è, questo file avvia TRE REPLICA SET SEPARATI. Ognuno funziona, nessuno
+# sa degli altri, e non esiste nessun indirizzo a cui un'applicazione possa
+# collegarsi per vederli come una cosa sola: uno sharded cluster senza mongos non
+# è uno sharded cluster a cui manca un pezzo, è un insieme di replica set che non
+# si conoscono. La riga è qui perché ADR-0037 vuole che ciò che non c'è sia
+# dichiarato, non lasciato scoprire avviandolo.
 #
 # PERCHÉ DUE PROFILI (ADR-0010). Uno sharded cluster non è negoziabile nella
 # forma: ogni shard è un replica set, i config server sono un replica set, e
@@ -355,8 +360,515 @@ services:
       keyfile-init:
         condition: service_completed_successfully
 
+  # ---------------------------------------------------------------------------
+  # I due shard. Ognuno è un replica set a sé — «Each shard must be deployed as a
+  # replica set» — e contiene una PARTE dei dati, non una copia dell'insieme. È la
+  # differenza che il Blocco 3 deve far vedere: nel replica set dello stack 02 i
+  # tre membri hanno gli stessi documenti, qui shard1 e shard2 ne hanno di diversi
+  # e nessuno dei due ha tutto.
+  #
+  # I nomi dei due set differiscono fra loro e dal nome del config server
+  # (ADR-0010): `shard1rs`, `shard2rs`, `cfgrs`.
+  # ---------------------------------------------------------------------------
+
+  shard1a:
+    # PRIMO SERVIZIO DEL RUOLO «shard»: qui stanno i commenti, gli altri cinque
+    # rimandano a questo (ADR-0059).
+    #
+    # `--shardsvr` è la riga che lo distingue da un config server. Un mongod
+    # avviato senza viene RIFIUTATO da `sh.addShard()`, e il messaggio parla
+    # d'altro: è una delle trappole che la pagina del Task 9 deve raccogliere.
+    #
+    # 640 MiB contro i 512 di un config server, dal bilancio del design §5.1: qui
+    # ci stanno i documenti, non solo i nomi delle collezioni.
+    #
+    # È il membro che il Blocco 3 ferma con `docker kill` per mostrare il
+    # failover, ed è anche quello che `11-shard-initiate.js` mette a `priority: 2`
+    # — così quando torna si riprende il ruolo, e la scena si chiude come si è
+    # aperta.
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-shard1a
+    hostname: shard1a
+    pull_policy: never
+    restart: unless-stopped
+    profiles: ["palco", "completo"]
+
+    mem_limit: ${MEMORIA_SHARD:-640m}
+    cpus: ${CPU_SHARD:-0.5}
+
+    command:
+      - mongod
+      - --shardsvr
+      - --replSet
+      - ${NOME_REPLICA_SHARD1:-shard1rs}
+      - --keyFile
+      - /keyfile/mongo-keyfile
+      - --bind_ip_all
+      - --port
+      - "27017"
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+
+    ports:
+      - "${PORTA_SHARD1_A:-27141}:27017"
+
+    volumes:
+      - keyfile:/keyfile:ro
+      - dati-shard1a:/data/db
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "const h = db.hello(); quit(h.isWritablePrimary || h.secondary || h.isreplicaset === true ? 0 : 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+    depends_on:
+      keyfile-init:
+        condition: service_completed_successfully
+
+  shard1b:
+    # Identico a shard1a salvo nome, set, porta, volume e profilo: vedi lì.
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-shard1b
+    hostname: shard1b
+    pull_policy: never
+    restart: unless-stopped
+    profiles: ["completo"]
+
+    mem_limit: ${MEMORIA_SHARD:-640m}
+    cpus: ${CPU_SHARD:-0.5}
+
+    command:
+      - mongod
+      - --shardsvr
+      - --replSet
+      - ${NOME_REPLICA_SHARD1:-shard1rs}
+      - --keyFile
+      - /keyfile/mongo-keyfile
+      - --bind_ip_all
+      - --port
+      - "27017"
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+
+    ports:
+      - "${PORTA_SHARD1_B:-27142}:27017"
+
+    volumes:
+      - keyfile:/keyfile:ro
+      - dati-shard1b:/data/db
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "const h = db.hello(); quit(h.isWritablePrimary || h.secondary || h.isreplicaset === true ? 0 : 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+    depends_on:
+      keyfile-init:
+        condition: service_completed_successfully
+
+  shard1c:
+    # Identico a shard1a salvo nome, set, porta, volume e profilo: vedi lì.
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-shard1c
+    hostname: shard1c
+    pull_policy: never
+    restart: unless-stopped
+    profiles: ["completo"]
+
+    mem_limit: ${MEMORIA_SHARD:-640m}
+    cpus: ${CPU_SHARD:-0.5}
+
+    command:
+      - mongod
+      - --shardsvr
+      - --replSet
+      - ${NOME_REPLICA_SHARD1:-shard1rs}
+      - --keyFile
+      - /keyfile/mongo-keyfile
+      - --bind_ip_all
+      - --port
+      - "27017"
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+
+    ports:
+      - "${PORTA_SHARD1_C:-27143}:27017"
+
+    volumes:
+      - keyfile:/keyfile:ro
+      - dati-shard1c:/data/db
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "const h = db.hello(); quit(h.isWritablePrimary || h.secondary || h.isreplicaset === true ? 0 : 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+    depends_on:
+      keyfile-init:
+        condition: service_completed_successfully
+
+  shard2a:
+    # Identico a shard1a salvo nome, set, porta e volume: vedi lì i commenti.
+    # È il primo membro del SECONDO shard, e il secondo shard non è un lusso:
+    # «Sharding requires at least two shards to distribute sharded data»
+    # (ADR-0010). Con uno solo si ottiene un cluster che funziona e non partiziona
+    # niente, che è il modo più efficace di non spiegare lo sharding.
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-shard2a
+    hostname: shard2a
+    pull_policy: never
+    restart: unless-stopped
+    profiles: ["palco", "completo"]
+
+    mem_limit: ${MEMORIA_SHARD:-640m}
+    cpus: ${CPU_SHARD:-0.5}
+
+    command:
+      - mongod
+      - --shardsvr
+      - --replSet
+      - ${NOME_REPLICA_SHARD2:-shard2rs}
+      - --keyFile
+      - /keyfile/mongo-keyfile
+      - --bind_ip_all
+      - --port
+      - "27017"
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+
+    ports:
+      - "${PORTA_SHARD2_A:-27151}:27017"
+
+    volumes:
+      - keyfile:/keyfile:ro
+      - dati-shard2a:/data/db
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "const h = db.hello(); quit(h.isWritablePrimary || h.secondary || h.isreplicaset === true ? 0 : 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+    depends_on:
+      keyfile-init:
+        condition: service_completed_successfully
+
+  shard2b:
+    # Identico a shard1a salvo nome, set, porta, volume e profilo: vedi lì.
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-shard2b
+    hostname: shard2b
+    pull_policy: never
+    restart: unless-stopped
+    profiles: ["completo"]
+
+    mem_limit: ${MEMORIA_SHARD:-640m}
+    cpus: ${CPU_SHARD:-0.5}
+
+    command:
+      - mongod
+      - --shardsvr
+      - --replSet
+      - ${NOME_REPLICA_SHARD2:-shard2rs}
+      - --keyFile
+      - /keyfile/mongo-keyfile
+      - --bind_ip_all
+      - --port
+      - "27017"
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+
+    ports:
+      - "${PORTA_SHARD2_B:-27152}:27017"
+
+    volumes:
+      - keyfile:/keyfile:ro
+      - dati-shard2b:/data/db
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "const h = db.hello(); quit(h.isWritablePrimary || h.secondary || h.isreplicaset === true ? 0 : 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+    depends_on:
+      keyfile-init:
+        condition: service_completed_successfully
+
+  shard2c:
+    # Identico a shard1a salvo nome, set, porta, volume e profilo: vedi lì.
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-shard2c
+    hostname: shard2c
+    pull_policy: never
+    restart: unless-stopped
+    profiles: ["completo"]
+
+    mem_limit: ${MEMORIA_SHARD:-640m}
+    cpus: ${CPU_SHARD:-0.5}
+
+    command:
+      - mongod
+      - --shardsvr
+      - --replSet
+      - ${NOME_REPLICA_SHARD2:-shard2rs}
+      - --keyFile
+      - /keyfile/mongo-keyfile
+      - --bind_ip_all
+      - --port
+      - "27017"
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+
+    ports:
+      - "${PORTA_SHARD2_C:-27153}:27017"
+
+    volumes:
+      - keyfile:/keyfile:ro
+      - dati-shard2c:/data/db
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "const h = db.hello(); quit(h.isWritablePrimary || h.secondary || h.isreplicaset === true ? 0 : 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+    depends_on:
+      keyfile-init:
+        condition: service_completed_successfully
+
+  # ---------------------------------------------------------------------------
+  # Secondo anello: forma il replica set dei config server e crea
+  # l'amministratore del cluster. Gira una volta e muore.
+  #
+  # NON DIPENDE DA cfg2 E cfg3, e non è una dimenticanza. Un servizio selezionato
+  # non può dichiarare `depends_on` verso un servizio NON selezionato: Compose
+  # rifiuta l'intero progetto con «depends on undefined service», uscita 1. Vale
+  # in entrambe le direzioni — anche per un servizio senza profilo verso uno con
+  # profilo, che era la riserva dichiarata da ADR-0010 e che V-053 ha chiuso
+  # misurandola. Dipendere da cfg2 romperebbe quindi il profilo `palco`, dove
+  # cfg2 non esiste.
+  #
+  # L'attesa degli altri membri la fa lo script, che li interroga per nome: è più
+  # lavoro, ma è l'unico modo di ordinare l'avvio senza legare questo servizio a
+  # un profilo.
+  # ---------------------------------------------------------------------------
+
+  cfg-init:
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-cfg-init
+    pull_policy: never
+    restart: "no"
+    profiles: ["palco", "completo"]
+
+    mem_limit: 128m
+    cpus: 0.25
+
+    # LA riga del servizio. Questo container non ha un'interfaccia di rete
+    # propria: usa quella di cfg1. Quindi `localhost` qui dentro è il `localhost`
+    # del mongod, e la connessione gode dell'eccezione localhost — che permette
+    # `replSetInitiate` e il primo `createUser` su un nodo che pretende
+    # autenticazione ma non ha ancora nessun utente (ADR-0026, ADR-0040).
+    #
+    # Due conseguenze da conoscere prima di provare a violarle: cfg-init NON è
+    # raggiungibile per nome sulla rete Compose, e NON può pubblicare porte. Non
+    # gli serve nessuna delle due, ma il vincolo non è ovvio.
+    network_mode: "service:cfg1"
+
+    environment:
+      NOME_REPLICA_CFG: ${NOME_REPLICA_CFG:-cfgrs}
+      # I membri da configurare: dipendono dal profilo. Il predefinito è quello
+      # del `palco`, che è il caso del talk.
+      MEMBRI_CFG: ${MEMBRI_CFG:-cfg1:27017}
+      # Tutti i membri possibili di questo componente. NON è parametrico: è la
+      # verità sul file Compose, e serve allo script per accorgersi che gira un
+      # container che non è fra i membri da configurare.
+      CANDIDATI_CFG: "cfg1:27017,cfg2:27017,cfg3:27017"
+      UTENTE_AMMINISTRATORE: ${UTENTE_AMMINISTRATORE:-admin}
+      # La forma `:?` fa fallire l'avvio con un messaggio invece di creare un
+      # amministratore con password vuota. Per Compose una variabile vuota vale
+      # quanto una assente, quindi il segnaposto vuoto di .env.example scatta qui.
+      PASSWORD_AMMINISTRATORE: ${PASSWORD_AMMINISTRATORE:?assente — copiare docker/03-sharded/.env.example in .env e riempire la password}
+
+    command:
+      - mongosh
+      - --quiet
+      - --host
+      - localhost
+      - --file
+      - /init/10-cfg-initiate.js
+
+    volumes:
+      - ./init/10-cfg-initiate.js:/init/10-cfg-initiate.js:ro
+
+    depends_on:
+      cfg1:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # Terzo anello, in due copie. Forma i replica set dei due shard, in parallelo
+  # fra loro e in parallelo con cfg-init: uno shard non ha bisogno del config
+  # server per formarsi, ha bisogno del config server solo per essere REGISTRATO
+  # nel cluster, e quello è il Task 3.
+  #
+  # Nessun `createUser` qui: gli utenti del cluster vivono sul config server e
+  # valgono attraverso mongos (§4 dello spike). Vedi il commento in testa a
+  # 11-shard-initiate.js.
+  #
+  # Vale tutto quello che dice cfg-init su `network_mode`, sull'eccezione
+  # localhost e sul perché la dipendenza è verso il solo membro «a»: lì c'è il
+  # ragionamento, qui solo il codice.
+  # ---------------------------------------------------------------------------
+
+  shard1-init:
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-shard1-init
+    pull_policy: never
+    restart: "no"
+    profiles: ["palco", "completo"]
+
+    mem_limit: 128m
+    cpus: 0.25
+
+    network_mode: "service:shard1a"
+
+    environment:
+      NOME_REPLICA_SHARD: ${NOME_REPLICA_SHARD1:-shard1rs}
+      MEMBRI_SHARD: ${MEMBRI_SHARD1:-shard1a:27017}
+      CANDIDATI_SHARD: "shard1a:27017,shard1b:27017,shard1c:27017"
+
+    command:
+      - mongosh
+      - --quiet
+      - --host
+      - localhost
+      - --file
+      - /init/11-shard-initiate.js
+
+    volumes:
+      - ./init/11-shard-initiate.js:/init/11-shard-initiate.js:ro
+
+    depends_on:
+      shard1a:
+        condition: service_healthy
+
+  # Identico a shard1-init salvo lo shard che inizializza: vedi lì.
+
+  shard2-init:
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: sh-shard2-init
+    pull_policy: never
+    restart: "no"
+    profiles: ["palco", "completo"]
+
+    mem_limit: 128m
+    cpus: 0.25
+
+    network_mode: "service:shard2a"
+
+    environment:
+      NOME_REPLICA_SHARD: ${NOME_REPLICA_SHARD2:-shard2rs}
+      MEMBRI_SHARD: ${MEMBRI_SHARD2:-shard2a:27017}
+      CANDIDATI_SHARD: "shard2a:27017,shard2b:27017,shard2c:27017"
+
+    command:
+      - mongosh
+      - --quiet
+      - --host
+      - localhost
+      - --file
+      - /init/11-shard-initiate.js
+
+    volumes:
+      - ./init/11-shard-initiate.js:/init/11-shard-initiate.js:ro
+
+    depends_on:
+      shard2a:
+        condition: service_healthy
+
 volumes:
   keyfile:
   dati-cfg1:
   dati-cfg2:
   dati-cfg3:
+  dati-shard1a:
+  dati-shard1b:
+  dati-shard1c:
+  dati-shard2a:
+  dati-shard2b:
+  dati-shard2c:

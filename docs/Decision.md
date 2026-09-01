@@ -3455,3 +3455,83 @@ più da spiegare, oltre a rendere il file non leggibile in un repository clonato
 niente).
 
 **Fonti:** [V-052](Sources.md#v-052)
+---
+
+<a id="adr-0060"></a>
+## ADR-0060 — Quanti membri ha un set lo dice l'ambiente, e una guardia bilaterale controlla che sia vero
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto:** lo stack 03 ha tre componenti che sono replica set, e due profili che ne cambiano il
+numero di membri: uno con `palco`, tre con `completo`. Qualcuno deve dire a `rs.initiate()` chi
+sono i membri, e la via ovvia è che ogni componente abbia il suo servizio di inizializzazione con
+un `depends_on` verso tutti i membri, `condition: service_healthy`. Così l'ordine di avvio lo
+gestisce Compose e lo script non aspetta niente.
+
+Quella via è chiusa. [V-053](Sources.md#v-053) l'ha misurata: un servizio **selezionato** non può
+dichiarare `depends_on` verso un servizio **non selezionato**, e Compose rifiuta l'intero progetto
+con `service "X" depends on undefined service "Y": invalid compose project`, uscita 1. La regola è
+simmetrica — non conta chi ha il profilo — quindi non c'è nessuna combinazione di profili che salvi
+un `cfg-init` che dipende da `cfg2`, perché nel profilo `palco` `cfg2` non esiste. La misura chiude
+anche la riserva che [ADR-0010](#adr-0010) teneva aperta dal 24 agosto e quella di
+[S-015](Sources.md#s-015) da cui era nata: il caso non documentato non è ambiguo, fallisce.
+
+Restano tre strade. Sei servizi di inizializzazione invece di tre, uno per profilo, con i
+`depends_on` giusti in ciascuno: raddoppia i servizi e mette due copie della stessa logica a
+divergere. Nessun `depends_on` e nessuna attesa, lasciando che `rs.initiate()` fallisca e Compose
+riprovi: rende l'avvio un'attesa cieca e i log illeggibili. Oppure il numero di membri arriva da
+fuori, e lo script aspetta da sé.
+
+**Decisione:**
+
+1. **L'elenco dei membri arriva da una variabile d'ambiente**, per esteso e non come conteggio:
+   `MEMBRI_CFG`, `MEMBRI_SHARD1`, `MEMBRI_SHARD2`, ciascuna un elenco di `nome-servizio:27017`
+   separati da virgola. Per esteso perché è la stessa forma che finisce dentro `rs.initiate()`:
+   un numero andrebbe tradotto in nomi da qualche parte, e quella traduzione sarebbe un secondo
+   posto in cui la topologia è scritta.
+2. **Ogni servizio di inizializzazione dipende da un solo membro**, quello presente in entrambi i
+   profili — `cfg1`, `shard1a`, `shard2a` — con `condition: service_healthy`. Gli altri membri li
+   aspetta lo script, interrogandoli per nome con `hello()` fino a trenta secondi. È più lavoro di
+   un `depends_on`, ed è l'unico modo di ordinare l'avvio senza legare il servizio a un profilo.
+3. **Una guardia bilaterale**, perché il numero di membri e il numero di container ora arrivano da
+   due sorgenti diverse per lo stesso fatto, e possono divergere. Accanto a ogni elenco di membri
+   viaggia un elenco di **candidati** — tutti i membri possibili di quel componente, fisso nel file
+   Compose. Lo script rifiuta di procedere in tutte e due le direzioni:
+   - un membro elencato che non risponde entro trenta secondi → uscita **4**;
+   - un candidato **non** elencato che risponde → uscita **5**.
+
+   La seconda è la ragione per cui la guardia esiste. Elencare un membro di troppo appende
+   l'avvio, e un avvio appeso si nota; elencarne uno di meno non fallisce affatto: lo stack parte,
+   sembra sano, e i due terzi dei container girano fuori dal set. In sala si scoprirebbe nel
+   momento in cui la scena del failover non ha niente da mostrare. Vale qui la regola del
+   repository per cui una condizione che non può fallire non è un controllo.
+4. **Il verdetto di pronto si dà con il profilo addosso.** [ADR-0041](#adr-0041) già impone due
+   comandi e non uno, perché `up --wait` considera a posto un one-shot appena parte;
+   [V-054](Sources.md#v-054) lo riconferma sullo stack 03 in una forma peggiore — Compose stampa
+   `Healthy` accanto a un container uscito **5**. La novità di questo stack è che
+   `docker compose wait cfg-init` **senza** `--profile` risponde `no containers for project` e
+   esce 1. I bersagli del Makefile devono quindi passare il profilo anche al comando che aspetta,
+   e aspettare tutti e tre gli one-shot.
+
+**Conseguenze:** chi lancia `docker compose` a mano deve tenere allineati `--profile` e le tre
+variabili, e `.env.example` glielo dice con le righe del `completo` già scritte e commentate. Il
+Makefile lo farà da sé nel Task 4. In cambio i servizi di inizializzazione restano tre e non sei,
+e ogni disallineamento si presenta con un messaggio che nomina il container colpevole invece che
+con uno stack silenziosamente sbagliato. Il costo vero è che `10-cfg-initiate.js` e
+`11-shard-initiate.js` contengono un ciclo di attesa scritto a mano: quaranta righe che Compose
+avrebbe fatto gratis se i profili lo avessero permesso, e che vanno mantenute.
+
+Un effetto collaterale utile: siccome lo script interroga i membri per nome, il guasto si presenta
+con il nome del membro e del componente. Un `addShard` che fallisce nel Task 3 dirà quale dei due
+shard non aveva un primario, invece di lasciarlo dedurre.
+
+**Alternative scartate:** sei servizi di inizializzazione, tre per profilo (nessuna attesa a mano,
+ma due copie della stessa logica che divergeranno, e il numero di servizi del file Compose sale a
+diciassette); un conteggio invece di un elenco, tipo `MEMBRI_CFG=3` (più corto da scrivere e
+richiede di generare i nomi nello script, cioè di scrivere la topologia una seconda volta in
+un'altra forma); nessuna guardia, affidandosi al Makefile che tiene allineate le variabili (regge
+finché nessuno lancia Compose a mano, e il repository è materiale didattico: qualcuno lo lancerà a
+mano, è anzi lo scopo); leggere il profilo attivo da dentro lo script (Compose non lo espone ai
+container, e `COMPOSE_PROFILES` non arriva nell'ambiente del processo).
+
+**Fonti:** [V-053](Sources.md#v-053), [V-054](Sources.md#v-054)

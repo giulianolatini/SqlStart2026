@@ -1081,3 +1081,68 @@ quello che succede ogni volta che si copia un `docker-compose.yml` trovato funzi
 artefatto che gira porta con sé tutte le scelte di chi l'ha scritto, comprese quelle che non ha
 saputo di prendere, e passa la frontiera tutto insieme se nessuno lo ferma. Le righe che nessuno
 commenterebbe sono quelle da guardare.
+
+---
+
+### Tre replica set che non si conoscono
+
+> Uno sharded cluster senza `mongos` non è uno sharded cluster a cui manca un pezzo. Sono tre
+> replica set separati, ognuno funzionante, nessuno dei quali sa che gli altri esistono.
+
+Fonte: l'intestazione di `docker/03-sharded/compose.yaml` a fine Task 2, e
+[V-054](Sources.md#v-054).
+
+**Perché una slide:** è la definizione di `mongos` data per sottrazione, e regge una slide intera
+del Blocco 3. Il pubblico che conosce i replica set arriva allo sharding pensando «un replica set
+più grande»: questa frase gli dice che i pezzi che ha già in testa ci sono tutti e non bastano, e
+che la cosa nuova da capire è quella che li unisce. Funziona bene subito prima di far vedere
+`sh.status()`.
+
+---
+
+### «Healthy» accanto a un container morto
+
+> `docker compose up --wait` ha stampato `Container sh-cfg-init Healthy` per un container che
+> `docker inspect` descriveva come uscito con codice 5. Per `--wait`, un servizio senza healthcheck
+> è a posto nell'istante in cui parte.
+
+Fonte: [V-054](Sources.md#v-054), che riconferma [V-025](Sources.md#v-025) su uno stack diverso;
+la decisione è [ADR-0041](Decision.md#adr-0041).
+
+**Perché una slide:** è la trappola dell'automazione che dice «fatto» quando non lo è, e qui si
+vede con gli occhi invece di doverla spiegare. Vale per ogni pipeline, non solo per Compose: un
+comando che esce 0 sta rispondendo alla domanda che gli è stata fatta, e quasi mai è la domanda
+che interessava. Nel lab la risposta è due comandi e non uno.
+
+---
+
+### Nominare un servizio non è attivare il suo profilo
+
+> Con `--profile palco`, un servizio che dipende da uno spento fa fallire l'intero progetto.
+> Nominando lo stesso servizio sulla riga di comando, quella dipendenza spenta viene accesa e tutto
+> parte. Due modi di selezionare la stessa cosa, comportamento opposto davanti alla stessa
+> dipendenza.
+
+Fonte: [V-053](Sources.md#v-053) — quattro casi, quattordici righe di `busybox`, e la riserva che
+[ADR-0010](Decision.md#adr-0010) teneva aperta dal 24 agosto.
+
+**Perché una slide:** se resta tempo. È una finezza di Compose, non di MongoDB, ma è la prova
+visibile che una riserva dichiarata si chiude in dieci minuti quando qualcuno decide di misurarla —
+e questa era aperta da otto giorni perché il progetto le girava intorno con eleganza.
+
+---
+
+### Il confine di un permesso non si trova al centro
+
+> «L'eccezione localhost permette di creare il primo utente.» Due comandi confermavano quella
+> frase. Sette dicono altro: `replSetGetStatus` risponde per intero, `listDatabases` risponde con
+> un elenco vuoto, `serverStatus` e le letture no. Il confine ha una forma. Con due misure si
+> disegna una retta, e la retta è quasi sempre la risposta sbagliata a una domanda sul perimetro.
+
+Fonte: [V-054](Sources.md#v-054), che restringe la conclusione di [V-052](Sources.md#v-052); note
+di metodo 93 e 95 del [registro](registro-operativo-sviluppo.md).
+
+**Perché una slide:** è la slide della sicurezza detta bene, e ha il pregio raro di mostrare il
+relatore che corregge se stesso a distanza di poche ore con una misura in più. Il messaggio che
+resta non è su MongoDB: un permesso descritto in prosa va provato dove smette di funzionare, non
+dove funziona.

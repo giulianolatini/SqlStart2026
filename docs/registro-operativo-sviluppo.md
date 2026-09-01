@@ -2838,3 +2838,94 @@ sorvegliare.
     attacco diverse. Vale per qualunque permesso documentato in prosa: la prova che informa non è
     quella che riesce, è quella che individua dove smette di riuscire. La pagina della sicurezza ha
     un debito in più, e questa volta con il comando che lo dimostra.
+
+## 2026-09-01 — `feature/03`, Task 2: i tre replica set, e una riserva aperta da otto giorni
+
+Sei `mongod` di shard, tre servizi di inizializzazione, e i tre replica set che si formano da soli
+in tutti e due i profili. Il file Compose passa da 362 a 868 righe e resta dichiarato incompleto in
+testa: mancano `mongos` e `sh.addShard()`, cioè l'unica cosa che trasforma tre replica set separati
+in uno sharded cluster. La riga in testa lo dice con quelle parole, perché senza `mongos` non c'è
+un cluster a cui manca un pezzo: ci sono tre set che non si conoscono.
+
+**La riserva di ADR-0010 è chiusa, e ha cambiato il progetto del task.** Il piano prevedeva un
+servizio di inizializzazione per componente, ciascuno con `depends_on` verso tutti i suoi membri.
+Prima di scriverlo ho misurato la cosa che ADR-0010 aveva lasciato in sospeso il 24 agosto, e che
+[S-015](Sources.md#s-015) dichiarava non documentata: che cosa succede quando un servizio
+selezionato dipende da uno che il profilo attivo non seleziona. La risposta ([V-053](Sources.md#v-053))
+è che **fallisce**, che la regola è **simmetrica** — non conta chi ha il profilo — e che Compose
+rifiuta l'intero progetto prima di avviare qualsiasi cosa:
+
+```
+service "init-con-profilo" depends on undefined service "b": invalid compose project
+```
+
+Quattro casi, quattordici righe di `busybox`, e due riserve chiuse in dieci minuti. Il quarto caso
+è quello che non mi aspettavo: **nominare un servizio sulla riga di comando non è come attivare il
+suo profilo.** `docker compose create init-con-profilo` senza profili attivi esce 0 e crea anche la
+dipendenza il cui profilo è spento. È esattamente la frase di S-015, e vale solo per il servizio
+nominato. Due modi di selezionare lo stesso servizio, comportamento opposto davanti alla stessa
+dipendenza.
+
+**Che cosa ne è seguito** ([ADR-0060](Decision.md#adr-0060)): l'elenco dei membri arriva
+dall'ambiente, per esteso e non come conteggio; ogni servizio di inizializzazione dipende da un solo
+membro, quello presente in entrambi i profili; e siccome il numero di membri e il numero di
+container adesso vengono da due sorgenti diverse per lo stesso fatto, i due script hanno una
+guardia bilaterale. L'ho provata rompendola in tutte e due le direzioni
+([V-054](Sources.md#v-054)): `--profile completo` con gli elenchi del `palco` fa uscire i tre
+one-shot con **5**, `--profile palco` con gli elenchi del `completo` con **4**, e nel secondo caso
+il messaggio nomina il container che non risponde. Il caso da temere era il primo, perché di suo
+non fallirebbe: nove `mongod` in piedi, tre set a un membro solo, tutto verde, e la scena del
+failover senza niente da mostrare.
+
+**I tre set, verificati.** Con `completo`, `rs.status()` risponde `ok=1` con tre membri su tutti e
+tre, e il primario è il membro «a» in tutti e tre — `priority: 2` di [ADR-0051](Decision.md#adr-0051)
+funziona anche qui, il che per una demo cronometrata vuol dire sapere in anticipo quale container
+fermare.
+
+**`up --wait` esce 0 anche quando gli init falliscono**, ed è la riconferma di
+[V-025](Sources.md#v-025) su uno stack diverso. Qui in una forma peggiore: Compose ha stampato
+`Container sh-cfg-init Healthy` accanto a un container che `docker inspect` descrive come
+`exited uscita=5`, e in un'altra prova è uscito 0 mentre i tre one-shot erano ancora in corsa.
+[ADR-0041](Decision.md#adr-0041) aveva già deciso la cosa giusta per lo stack 02 — due comandi e non
+uno — quindi qui non c'era nessun buco da tappare, solo da applicare. Con una novità che lo stack 02
+non poteva mostrare: `docker compose wait cfg-init` **senza** `--profile` risponde `no containers
+for project` ed esce 1. Vincolo per il Task 4.
+
+**Il margine dell'eccezione localhost si è spostato.** La nota 93, scritta stamattina, concludeva
+che l'eccezione «apre la creazione del primo utente, e nient'altro». Su uno shard senza utenti la
+stessa sonda, spinta di una tacca, dice altro: `replSetGetStatus` risponde **piena** — set, membri,
+`stateStr` — e `listDatabases` risponde `ok=1` con l'elenco **vuoto**. Negati restano
+`getCmdLineOpts`, `serverStatus`, le letture e le scritture. Il confronto di controllo è su `cfg1`,
+dove l'utente esiste e quindi l'eccezione è chiusa: lì `replSetGetStatus` e `listDatabases`
+rispondono `Unauthorized`, e passa solo `hello()`. La differenza fra le due colonne è l'eccezione e
+nient'altro.
+
+**Note di metodo.**
+
+94. **Una riserva aperta è un progetto scritto al buio.** ADR-0010 aveva dichiarato la riserva sui
+    profili il 24 agosto e da allora il repository ci girava intorno: lo stack 03 la teneva
+    «aggirata per costruzione» lasciando `keyfile-init` senza profilo, che è una soluzione elegante
+    e un modo di non sapere. Il Task 2 non poteva più aggirarla, e la misura è costata dieci minuti
+    e quattordici righe di `busybox`. Il conto vero non è quello: è che il piano approvato
+    descriveva un `depends_on` che Compose avrebbe rifiutato, e sarebbe stato scritto, provato e
+    riscritto. Una riserva costa poco finché nessuno progetta sopra il buco che copre. La regola:
+    quando un task sta per appoggiarsi a una riserva, la si misura **prima** di scrivere il piano
+    del task, non prima di eseguirlo.
+95. **La stessa misura, una tacca più in là, può ribaltare la conclusione — e la conclusione
+    precedente non era sbagliata a metà: era stretta.** La nota 93 diceva che l'eccezione localhost
+    apre la creazione del primo utente «e nient'altro», e l'aveva dedotto da due comandi:
+    `hello()` che passa, `getCmdLineOpts` che no. Sette comandi dicono un'altra cosa:
+    `replSetGetStatus` passa e risponde per intero, `listDatabases` passa e risponde vuoto. Il
+    confine ha una forma, non è una porta aperta o chiusa, e con due punti si può disegnare
+    qualunque cosa. Vale in generale per i permessi documentati in prosa: due misure danno una
+    retta, e una retta è quasi sempre la risposta sbagliata a una domanda sul perimetro. La
+    correzione non va nel testo vecchio — questo registro è cronologico e non si riscrive, come
+    le decisioni — va qui, e la voce nuova nomina quella vecchia.
+96. **Un errore che nomina il colpevole vale il ciclo di attesa che è costato scrivere.** La
+    guardia bilaterale è quaranta righe che Compose avrebbe fatto gratis se i profili lo avessero
+    permesso, e la tentazione era di fidarsi del Makefile che tiene allineate le variabili. Regge
+    finché nessuno lancia `docker compose` a mano — e questo repository è materiale didattico:
+    qualcuno lo lancerà a mano, è anzi lo scopo. La prova di quelle quaranta righe non è che
+    funzionano, è che rompendole si legge `il membro «cfg2:27017» non risponde dopo 30 secondi`
+    invece di uno stack verde e sbagliato. Il valore di un controllo si misura sul testo che
+    produce quando fallisce, non sul fatto che passi quando tutto va bene.
