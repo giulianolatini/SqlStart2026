@@ -1542,3 +1542,21 @@ Fonte: [V-066](Sources.md#v-066) quinto punto, [S-075](Sources.md#s-075),
 sala pensano tutti e nessuno ha provato. È anche l'onestà del lab: spiega perché questo stack usa
 `root` invece di fingere una separazione che con una password sola non esisterebbe. Tre righe di
 console, e si vede.
+
+---
+
+### Abbiamo chiuso un buco, e con il buco se n'è andato l'unico segnale
+
+> Fino a ieri, chiedere a uno shard lo stato del bilanciatore rispondeva «non sei autorizzato»: un
+> errore reticente, ma un errore. Oggi risponde **`true`**. Non è cambiato MongoDB — abbiamo dato
+> agli shard un amministratore, come prescrive il manuale, e adesso quella lettura riesce: legge una
+> collezione che su uno shard non esiste, non trova niente, e dal niente conclude che il bilanciatore
+> è acceso. Il vuoto ha l'aspetto di una risposta.
+
+Fonte: [V-067](Sources.md#v-067) quinto punto, [ADR-0071](Decision.md#adr-0071),
+[ADR-0072](Decision.md#adr-0072).
+
+**Perché una slide:** è il prezzo di una scelta giusta, e non sta scritto in nessun manuale. Chiude
+il paio con «Il messaggio d'errore che nasconde quello vero»: là una regola ne nascondeva un'altra,
+qui a nascondere era un permesso mancante, e a toglierlo siamo stati noi. Due minuti, e in sala
+resta l'idea che rimuovere un errore può togliere un'informazione.

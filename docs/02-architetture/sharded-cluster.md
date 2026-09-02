@@ -149,12 +149,19 @@ risparmiare risorse ([S-025](../Sources.md#s-025)): «Must zero arbiters. / Must
 / Must build indexes». E uno che sembra pedanteria finché non morde: «The config server replica set
 must not same name any shard replica sets» — nel lab `cfgrs`, `shard1rs`, `shard2rs`.
 
-Una conseguenza pratica che si scopre solo provando: **gli utenti vivono qui.** Le stesse credenziali
-che entrano dal router falliscono con `Authentication failed` se le si usa in diretta su
-`shard1a`, e funzionano su `cfg1` ([V-058](../Sources.md#v-058)). Sembra un limite scomodo, ed è
-invece esattamente ciò che il manuale prescrive: «Clients should *never* connect to a single shard
-to perform read or write operations» ([S-069](../Sources.md#s-069)). La configurazione rende
-difficile la cosa che il manuale vieta.
+Una conseguenza pratica che si scopre solo provando: **gli utenti del cluster vivono qui.** Le
+credenziali che entrano dal router funzionano su `cfg1`, e fino al 2026-09-02 in diretta su
+`shard1a` fallivano con `Authentication failed` ([V-058](../Sources.md#v-058)). Sembrava un limite
+scomodo ed era una fortuna: rendeva difficile per costruzione la cosa che il manuale vieta —
+«Clients should *never* connect to a single shard to perform read or write operations»
+([S-069](../Sources.md#s-069)).
+
+Quella fortuna è finita, e va detto qui perché è una nostra scelta. Da
+[ADR-0071](../Decision.md#adr-0071) ogni shard ha un amministratore locale, con lo stesso nome e
+la stessa password del cluster: la porta si apre, e apre su un'anagrafe diversa
+([V-067](../Sources.md#v-067)). Chi sbaglia indirizzo adesso **entra** — e legge 9 860 documenti
+su 20 000 credendo di avere la collezione. La ragione per cui non si fa non è cambiata; è
+cambiato che a impedirlo non c'è più un errore, ma la disciplina di chi opera.
 
 ### 2.3 `mongos`, il router che non ha niente da perdere
 
@@ -535,10 +542,15 @@ non medie. Il fattore vale per **due** shard e documenti da 121 byte medi.
 > includes sharded *and* unsharded collections. **Clients should *never* connect to a single shard
 > to perform read or write operations.**» — [S-069](../Sources.md#s-069)
 
-Nel lab la regola è resa difficile da violare senza volerlo, perché **gli utenti stanno sui config
-server**: le credenziali del cluster, usate in diretta su `shard1a`, rispondono
-`Authentication failed` ([V-058](../Sources.md#v-058)). Chi si collega a uno shard non ottiene dati
-sbagliati: non entra.
+Nel lab la regola **non** è più resa difficile da violare, e vale la pena sapere perché. Gli utenti
+del cluster stanno sui config server, e fino a [ADR-0071](../Decision.md#adr-0071) le loro
+credenziali in diretta su `shard1a` rispondevano `Authentication failed`
+([V-058](../Sources.md#v-058)): chi sbagliava indirizzo non entrava. Adesso ogni shard ha un
+amministratore locale con le stesse credenziali, quindi entra, e non ottiene un errore ma **metà**
+dei documenti — 9 860 su 20 000 ([V-067](../Sources.md#v-067)). Il chiavistello era l'effetto
+collaterale di uno shard senza utenti, cioè di una configurazione che il manuale vieta
+([V-064](../Sources.md#v-064)): toglierlo era giusto, e lascia scoperto ciò che solo questa regola
+copriva.
 
 La stringa di connessione, per il resto, è quella di sempre: «You can connect to a `mongos` the same
 way you connect to a `mongod`».
@@ -713,7 +725,9 @@ make reset-03
 [ADR-0060](../Decision.md#adr-0060) (quanti membri ha un insieme),
 [ADR-0063](../Decision.md#adr-0063) (che cosa la guardia statica deve bocciare),
 [ADR-0014](../Decision.md#adr-0014) (il keyfile fuori dal repository),
-[ADR-0021](../Decision.md#adr-0021) (nomi host, mai indirizzi).
+[ADR-0021](../Decision.md#adr-0021) (nomi host, mai indirizzi),
+[ADR-0071](../Decision.md#adr-0071) (l'amministratore per shard, che apre la porta di §2.2),
+[ADR-0072](../Decision.md#adr-0072) (le misure che una decisione invalida si riscrivono subito).
 
 **Fonti:** [S-008](../Sources.md#s-008), [S-024](../Sources.md#s-024), [S-025](../Sources.md#s-025),
 [S-066](../Sources.md#s-066), [S-067](../Sources.md#s-067), [S-069](../Sources.md#s-069),
@@ -721,4 +735,5 @@ make reset-03
 [S-073](../Sources.md#s-073), [V-052](../Sources.md#v-052),
 [V-054](../Sources.md#v-054), [V-055](../Sources.md#v-055), [V-056](../Sources.md#v-056),
 [V-057](../Sources.md#v-057), [V-058](../Sources.md#v-058), [V-060](../Sources.md#v-060),
-[V-061](../Sources.md#v-061), [V-062](../Sources.md#v-062), [V-063](../Sources.md#v-063)
+[V-061](../Sources.md#v-061), [V-062](../Sources.md#v-062), [V-063](../Sources.md#v-063),
+[V-064](../Sources.md#v-064), [V-067](../Sources.md#v-067)

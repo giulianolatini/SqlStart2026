@@ -199,10 +199,12 @@ print("primario del config server eletto: " + db.hello().primary);
 //
 // L'utente nasce QUI e non su uno shard perché gli utenti creati sul config
 // server sono gli utenti DEL CLUSTER: valgono attraverso `mongos`. Per collegarsi
-// direttamente a uno shard servono credenziali locali a quello shard, e con
-// queste la connessione diretta risponde `Authentication failed` (§4 dello
-// spike). Non è un difetto da correggere: è il contenuto di una sezione della
-// pagina sulla sicurezza, e il Task 9 del piano la deve scrivere eseguendo.
+// direttamente a uno shard servono credenziali locali a quello shard, che sono
+// un'altra anagrafe: da ADR-0071 le crea `11-shard-initiate.js`, con lo stesso
+// nome e la stessa password, e adesso la connessione diretta entra e trova solo
+// la metà dei dati che sta lì (V-067). Fino a quel commit rispondeva
+// `Authentication failed` (V-058). Il perché di entrambe le cose sta in §4 di
+// `docs/03-amministrazione/sicurezza-keyfile-x509.md`.
 //
 // Due esiti vanno trattati come successo, e non è indulgenza: al secondo `up`
 // l'utente esiste già, e in quel caso il nodo risponde `Unauthorized` (l'eccezione

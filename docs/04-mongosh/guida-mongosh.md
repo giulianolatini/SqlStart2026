@@ -591,22 +591,37 @@ Tutto quello che segue è misurato sullo stack `03-sharded`, profilo `palco`: du
 server, un router, MongoDB 7.0.40 ([V-063](../Sources.md#v-063)). La marcatura «non eseguito» che
 stava qui è caduta, **e con lei il blocco d'errore che apriva la sezione**.
 
-**L'errore in apertura era quello di un'altra situazione.** Qui c'era scritto che `sh.status()` dato
-a un `mongod` risponde `MongoshInvalidInputError: This db does not have sharding enabled`. È vero su
-un'**istanza singola**, che il database `config` non ce l'ha. Su uno shard di un cluster vero la
-risposta è un'altra:
+**L'errore in apertura era quello di un'altra situazione, e adesso è tornato.** Qui c'era scritto
+che `sh.status()` dato a un `mongod` risponde `MongoshInvalidInputError: This db does not have
+sharding enabled`, e questa sezione lo correggeva: su uno shard di un cluster vero — dicevamo — la
+risposta è `not authorized on config to execute command { find: "version", … }`. Erano vere tutte
+e due, in momenti diversi, e la seconda nascondeva la prima. Da
+[ADR-0071](../Decision.md#adr-0071) ogni shard ha un amministratore locale, e con le credenziali in
+mano si vede che cosa c'era sotto:
 
 ```console
 $ docker exec sh-shard1a mongosh --quiet --eval 'sh.status()'
 Warning: MongoshWarning: [SHAPI-10003] You are not connected to a mongos. This command may not
 work as expected.
-MongoServerError: not authorized on config to execute command { find: "version", … }
+MongoServerError: Command find requires authentication
+
+$ docker exec sh-shard1a mongosh --quiet -u admin -p … --authenticationDatabase admin \
+    --eval 'sh.status()'
+Warning: MongoshWarning: [SHAPI-10003] You are not connected to a mongos. This command may not
+work as expected.
+MongoshInvalidInputError: [SHAPI-10003] This db does not have sharding enabled. Be sure you are
+connecting to a mongos from the shell and not to a mongod.
 ```
 
-L'avviso `SHAPI-10003` è lo stesso e resta il segnale utile; l'errore sotto no. Uno shard il
-database `config` ce l'ha davvero — è parte di un cluster — quindi non può dire «sharding non
-abilitato»: dice che chi chiede non è autorizzato a leggerlo. Chi ha imparato a riconoscere solo il
-primo dei due sintomi, davanti al secondo va a cercare un problema di permessi che non c'è.
+L'avviso `SHAPI-10003` è lo stesso nei tre casi, ed è il segnale che vale la pena imparare: dice
+l'unica cosa che conta, cioè che dall'altra parte non c'è un router. Sotto cambia tutto, e a
+cambiare non è il cluster — è chi chiede. Senza credenziali non si arriva nemmeno alla domanda
+sui permessi; con le credenziali, `mongosh` legge davvero e scopre che il documento che cerca non
+c'è. Uno shard il database `config` ce l'ha — è parte di un cluster — e dentro non ha l'anagrafe:
+`config.version` su uno shard è `null`, attraverso il router è `{ _id: 1, clusterId: … }`, e
+`config.shards` sullo shard conta **zero** ([V-067](../Sources.md#v-067)). L'errore delle istanze
+singole e quello di uno shard hanno la stessa forma perché descrivono la stessa mancanza, arrivata
+per due strade diverse.
 
 Il riconoscimento rapido resta quello di [§2.4](#24-sapere-con-chi-si-sta-parlando), con una
 precisazione misurata: `db.hello().msg` vale `isdbgrid` sul router, ed è **assente** sia sullo shard
@@ -627,16 +642,31 @@ sul config server del lab vale `cfgrs`.
 | `sh.balancerCollectionStatus("lab.ordini")` | se il cluster consideri bilanciata *questa* collezione | sì — e vedi l'avvertenza in fondo |
 | `sh.disableBalancing(<ns>)` / `sh.enableBalancing(<ns>)` | il bilanciamento di una collezione sola | **no**: il lab non ne ha bisogno, e provarlo lascerebbe uno stato da ripulire |
 
-**I comandi si danno al `mongos`, e l'errore lo dice — a volte.** Dati a uno shard:
+**I comandi si danno al `mongos`, e l'errore lo dice — a volte.** Dati a uno shard, autenticati:
 
 ```
-sh.enableSharding("prova")  → CommandNotFound: no such command: 'enableSharding'.
+sh.enableSharding("prova")  → MongoServerError: no such command: 'enableSharding'.
                               Are you connected to mongos?
-sh.getBalancerState()       → Unauthorized: not authorized on config to execute command …
+sh.isBalancerRunning()      → MongoServerError: no such command: 'balancerStatus'
+sh.getBalancerState()       → true
 ```
 
-Il primo si diagnostica da solo: la domanda giusta è dentro il messaggio. Il secondo no, e manda a
-cercare un permesso mancante invece di un indirizzo sbagliato.
+I primi due si diagnosticano da soli: la domanda giusta è dentro il messaggio, e arriva anche
+**senza** credenziali, perché un nome di comando che non esiste viene rifiutato prima che
+l'autenticazione entri in gioco. Il terzo è il caso peggiore, e va guardato bene: non è un errore,
+è una risposta plausibile e falsa. `sh.getBalancerState()` non spedisce nessun comando — legge
+`config.settings` e conclude «nessuno ha fermato il bilanciatore, quindi è acceso». Su uno shard
+quella collezione non c'è, la lettura torna vuota, e il vuoto porta alla stessa conclusione per
+puro caso ([V-067](../Sources.md#v-067)).
+
+**La regola che sopravvive ai messaggi.** Le funzioni di `sh` che si risolvono in una **lettura**
+del database `config` adesso, su uno shard, riescono e rispondono il vuoto: `sh.getBalancerState()`
+dice `true`, `sh.status()` dice che lo sharding non è abilitato, `config.shards` conta zero. Quelle
+che spediscono un **comando** trovano un `mongod` che quel comando non ce l'ha, e lo dicono. Fino a
+[ADR-0071](../Decision.md#adr-0071) la differenza non si vedeva, perché senza utenti sullo shard
+ogni lettura di `config` finiva in `Unauthorized`: l'indirizzo sbagliato veniva denunciato, ma per
+la ragione sbagliata. Adesso lo denuncia solo chi manda un comando, e per le letture il controllo
+da fare prima di credere alla risposta è quello di [§2.4](#24-sapere-con-chi-si-sta-parlando).
 
 **Rieseguire non rompe niente, e questo è voluto.** `sh.enableSharding()` su un database già
 abilitato risponde `ok: 1`; `sh.shardCollection()` su una collezione già distribuita **con la stessa
@@ -955,6 +985,9 @@ non è stato misurato), [ADR-0024](../Decision.md#adr-0024) (la gerarchia delle 
 [ADR-0026](../Decision.md#adr-0026) (le immagini pinnate e `--env-file`),
 [ADR-0034](../Decision.md#adr-0034) (come si provoca un failover),
 [ADR-0044](../Decision.md#adr-0044) (i due bersagli del failover, e i loro tempi),
-[ADR-0049](../Decision.md#adr-0049) (la §3.2 eseguita, e le due frasi che erano sbagliate).
+[ADR-0049](../Decision.md#adr-0049) (la §3.2 eseguita, e le due frasi che erano sbagliate),
+[ADR-0071](../Decision.md#adr-0071) (l'amministratore per shard, che ha cambiato tre risposte
+di §3.3), [ADR-0072](../Decision.md#adr-0072) (le misure che una decisione invalida si
+riscrivono subito).
 
-**Fonti:** [S-044](../Sources.md#s-044), [S-045](../Sources.md#s-045), [S-046](../Sources.md#s-046), [S-047](../Sources.md#s-047), [V-009](../Sources.md#v-009), [V-010](../Sources.md#v-010), [V-013](../Sources.md#v-013), [V-018](../Sources.md#v-018), [V-019](../Sources.md#v-019), [V-020](../Sources.md#v-020), [V-029](../Sources.md#v-029), [V-042](../Sources.md#v-042)
+**Fonti:** [S-044](../Sources.md#s-044), [S-045](../Sources.md#s-045), [S-046](../Sources.md#s-046), [S-047](../Sources.md#s-047), [V-009](../Sources.md#v-009), [V-010](../Sources.md#v-010), [V-013](../Sources.md#v-013), [V-018](../Sources.md#v-018), [V-019](../Sources.md#v-019), [V-020](../Sources.md#v-020), [V-029](../Sources.md#v-029), [V-042](../Sources.md#v-042), [V-063](../Sources.md#v-063), [V-067](../Sources.md#v-067)

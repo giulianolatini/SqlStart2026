@@ -6679,6 +6679,13 @@ db.ordini.find({citta: "Ancona"})               -> shard1rs, shard2rs      (2 sh
   per lo smoke: le misure interne dei nodi non si possono leggere con `hostInfo()` su tutti, e si
   leggono da `docker inspect` e dalla riga `cache_size=…` del log di avvio.
 
+  **Seguito, 2026-09-02.** Questo punto vale fino a [ADR-0071](Decision.md#adr-0071). Da quando
+  ogni shard ha un amministratore locale, le credenziali del cluster su `shard1a` **entrano** e
+  rispondono, e senza credenziali la risposta non è più `not authorized on admin to execute
+  command` ma `Command find requires authentication` ([V-067](#v-067)). Resta vero ciò che il
+  punto spiega — gli utenti del cluster vivono nel database `admin` dei config server, e uno
+  shard autentica contro i propri: adesso i propri esistono, e sono un altro elenco.
+
 - **Esito, quinto punto — che cosa distingue davvero un router da un nodo, e che cosa no.** Su
   `mongos` la sezione `wiredTiger` di `serverStatus()` **non esiste** — non è vuota, manca — e la
   stringa `cache_size` compare **zero volte** nel log, contro le nove dei nove `mongod`. Ma il
@@ -6713,7 +6720,7 @@ db.ordini.find({citta: "Ancona"})               -> shard1rs, shard2rs      (2 sh
   controllo aggiunto. Password di scarto, `.env` cancellato in coda, ogni giro chiuso con `down -v`
   e residui verificati a zero: nessun container, nessun volume, nessuna rete. Tutto su arm64.
 - **Data:** 2026-09-01
-- **Usata da:** ADR-0064, ADR-0065, ADR-0068, ADR-0071
+- **Usata da:** ADR-0064, ADR-0065, ADR-0068, ADR-0071, ADR-0072
 
 <a id="v-059"></a>
 ### V-059 — Il profilo con cui si spegne non è quello con cui si è acceso, e Compose non lo dice
@@ -7230,8 +7237,14 @@ ranged  ordered: false       248 ms    1 947 ms
   - **c.** `sh.status()` è stato letto, non riprodotto per intero: la pagina ne riporta le sezioni
     `shards`, `balancer` e `chunks`, non l'output completo.
 - **Conseguenza:** ADR-0069 (la fusione dei chunk) e ADR-0070 (la marcatura tolta)
+- **Seguito, 2026-09-02.** La riserva **a** — «gli errori `Unauthorized` e `not authorized on
+  config` sono il sintomo di **due** cose insieme … e la prova non le separa» — è stata sciolta
+  lo stesso giorno da [ADR-0071](Decision.md#adr-0071), che ha dato agli shard un
+  amministratore e quindi ha reso possibile autenticarsi. Il primo e il nono punto di questa
+  verifica non descrivono più lo stack: le risposte di oggi, e che cosa nascondevano quelle di
+  ieri, stanno in [V-067](#v-067).
 - **Data:** 2026-09-02
-- **Usata da:** ADR-0069, ADR-0070
+- **Usata da:** ADR-0069, ADR-0070, ADR-0072
 
 <a id="v-064"></a>
 ### V-064 — Gli utenti locali a uno shard: l'eccezione localhost è aperta su ogni shard, e chiude una riserva vecchia di una settimana
@@ -7603,3 +7616,116 @@ ranged  ordered: false       248 ms    1 947 ms
 
 ---
 
+<a id="v-067"></a>
+### V-067 — L'errore che indicava l'indirizzo sbagliato è sparito: adesso lo shard risponde, e risponde il vuoto
+
+- **Che cosa è stato provato:** rimisurare, dopo [ADR-0071](Decision.md#adr-0071), le risposte che
+  [V-058](#v-058) e [V-063](#v-063) avevano registrato interrogando uno shard come se fosse un
+  router. La riserva **a** di [V-063](#v-063) diceva che quegli errori erano il sintomo di **due**
+  cose insieme — comando dato all'indirizzo sbagliato e nessuna autenticazione — e che la prova non
+  le separava. L'amministratore per shard le separa, perché adesso su uno shard ci si può
+  autenticare.
+- **Ambiente:** stack `docker/03-sharded`, profilo `palco`, MongoDB 7.0.40, 2026-09-02, volumi
+  ricreati da zero. Comandi via `docker exec` sui container `sh-shard1a`, `sh-cfg1` e `sh-mongos`.
+- **Esito 1 — senza credenziali non si arriva più all'autorizzazione.** `sh.status()` in diretta su
+  uno shard:
+
+  ```console
+  $ docker exec sh-shard1a mongosh --quiet --eval 'sh.status()'
+  Warning: MongoshWarning: [SHAPI-10003] You are not connected to a mongos. This command may not
+  work as expected.
+  MongoServerError: Command find requires authentication
+  ```
+
+  Prima diceva `not authorized on config to execute command { find: "version", … }`
+  ([V-063](#v-063)). I due messaggi sembrano parenti e descrivono stati opposti: il primo è di un
+  nodo che **ti ha lasciato entrare** e ti nega quella lettura — è l'eccezione localhost, che
+  autorizza soltanto la creazione del primo utente; il secondo è di un nodo che non ti conosce. Il
+  messaggio cambiato è la prova, dal di fuori, che sullo shard l'eccezione è chiusa. Sul config
+  server, dove utenti ce n'erano già, la risposta è la stessa: `Command find requires
+  authentication`.
+- **Esito 2 — con le credenziali del cluster, lo shard risponde.**
+
+  ```
+  setName: shard1rs · lab.ordini: 9860
+  ```
+
+  [V-058](#v-058), quarto punto, aveva misurato `MongoServerError: Authentication failed` sulla
+  stessa coppia. È lo stesso cambiamento dell'esito 6 di [V-066](#v-066), qui per via di
+  `docker exec` invece che dalla porta pubblicata.
+- **Esito 3 — l'errore che la guida attribuiva alle istanze singole compare su uno shard.**
+  Autenticati:
+
+  ```console
+  $ docker exec sh-shard1a mongosh --quiet -u admin -p … --authenticationDatabase admin \
+      --eval 'sh.status()'
+  Warning: MongoshWarning: [SHAPI-10003] You are not connected to a mongos. This command may not
+  work as expected.
+  MongoshInvalidInputError: [SHAPI-10003] This db does not have sharding enabled. Be sure you are
+  connecting to a mongos from the shell and not to a mongod.
+  ```
+
+  È parola per parola l'errore che [V-063](#v-063) diceva appartenere a **un'altra situazione**,
+  quella dell'istanza singola. Non era falso allora e non lo è adesso: il primo errore ne nascondeva
+  un secondo. Finché la lettura veniva rifiutata, `mongosh` non arrivava a scoprire che cosa ci
+  fosse da leggere.
+- **Esito 4 — che cosa manca davvero, adesso che si può guardare.** Il documento che `mongosh` cerca
+  per decidere se lo sharding c'è:
+
+  ```
+  config.version su shard1a                 -> null
+  config.version attraverso il mongos       -> { "_id": 1, "clusterId": "6a9832ea14d252dc5b3ddef2" }
+  config.shards.countDocuments() su shard1a -> 0
+  ```
+
+  Il database `config` sullo shard **esiste** e ha venti collezioni — `cache.chunks.lab.ordini`,
+  `cache.collections`, `cache.databases`, `rangeDeletions`, `transactions`, `system.sessions` e le
+  altre — ma non `version`, non `shards`, non `chunks`. La frase «uno shard il database `config` ce
+  l'ha davvero» resta vera, e non basta: ce l'ha, e dentro non c'è l'anagrafe del cluster, che vive
+  sui config server.
+- **Esito 5 — il vuoto sembra una risposta.** `sh.getBalancerState()`, autenticati:
+
+  ```
+  in diretta su shard1a       -> true
+  attraverso il mongos        -> true
+  config.settings su shard1a  -> []
+  config.settings dal mongos  -> []
+  ```
+
+  La stessa risposta per due ragioni diverse. Dal router è lo stato vero: in `config.settings` non
+  c'è nessun documento che fermi il bilanciatore, e in sua assenza il bilanciatore è acceso. Dallo
+  shard è il valore che si ottiene leggendo a vuoto una collezione che lì non esiste.
+  [V-063](#v-063), nono punto, aveva misurato `Unauthorized: not authorized on config to execute
+  command …` e l'aveva chiamato un errore «che non nomina il problema vero». Adesso il problema non
+  lo nomina nessuno: chi chiede riceve `true`.
+- **Esito 6 — i comandi, invece, falliscono ancora forte.** Sulla stessa shell autenticata:
+
+  ```
+  sh.enableSharding("prova") -> MongoServerError: no such command: 'enableSharding'.
+                                Are you connected to mongos?
+  sh.isBalancerRunning()     -> MongoServerError: no such command: 'balancerStatus'
+  ```
+
+  La riga che divide i due comportamenti non è «al router sì, allo shard no»: è come `mongosh`
+  realizza la funzione. Quelle che si risolvono in una **lettura** di `config` adesso riescono e
+  tornano vuote; quelle che spediscono un **comando** trovano un `mongod` che quel comando non ce
+  l'ha, e lo dicono. `no such command` arriva anche **senza** credenziali, misurato: il nome
+  sbagliato viene rifiutato prima che l'autenticazione entri in gioco.
+- **Riserve:**
+  - **a.** `sh.enableSharding()` oggi risponde `MongoServerError: no such command`;
+    [V-063](#v-063) aveva registrato lo stesso testo con l'etichetta `CommandNotFound:`. Ciò che
+    segue i due punti è identico, l'etichetta no, e la differenza non è stata spiegata: qui vale la
+    misura di oggi.
+  - **b.** l'esito 5 dice che `true` è la risposta con `config.settings` vuoto in tutti e due i
+    posti. Non è stato provato che cosa risponda lo shard con il bilanciatore **fermo** dal router:
+    servirebbe `sh.stopBalancer()`, un secondo giro e una ripulitura dello stato.
+  - **c.** tutto è misurato sul profilo `palco`, un membro per shard, su arm64. La password è stata
+    letta da `.env` e non compare in nessun output riportato.
+- **Conseguenza:** [ADR-0072](Decision.md#adr-0072); la riscrittura di §3.3 di
+  `docs/04-mongosh/guida-mongosh.md`, dei due passaggi di `docs/02-architetture/sharded-cluster.md`,
+  del commento di `tools/reset-demo.sh` e di quello di
+  `docker/03-sharded/init/10-cfg-initiate.js`.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0072
+
+---

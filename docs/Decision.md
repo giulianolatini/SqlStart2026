@@ -4495,3 +4495,71 @@ prima password sta nello stesso file; creare l'utente **dopo** `sh.addShard()`, 
 più comodo metterlo — lascia aperta la finestra che tutto questo ADR esiste per chiudere.
 
 **Fonti:** [S-074](Sources.md#s-074) · [S-075](Sources.md#s-075) · [V-058](Sources.md#v-058) · [V-064](Sources.md#v-064) · [V-066](Sources.md#v-066)
+
+---
+
+<a id="adr-0072"></a>
+## ADR-0072 — Le misure che una nostra decisione ha invalidato si riscrivono subito, e si dice quando la risposta nuova è più comoda e meno sincera
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** [ADR-0071](#adr-0071) ha dato un amministratore a ogni shard. Nello stesso giorno,
+quattro punti di questo repository hanno cominciato a dire il falso: un commento in
+`tools/reset-demo.sh`, uno in `docker/03-sharded/init/10-cfg-initiate.js`, due passaggi di
+`docs/02-architetture/sharded-cluster.md` e un blocco `console` nella §3.3 di
+`docs/04-mongosh/guida-mongosh.md`. Riportavano tutti una misura che era vera quando è stata presa,
+e nessuno è stato invalidato da un aggiornamento di MongoDB: li ha invalidati una modifica nostra.
+
+Rimisurarli ha portato a galla qualcosa che nessuno stava cercando ([V-067](Sources.md#v-067)). Il
+cambiamento non ha scambiato un messaggio d'errore con un altro: ne ha tolto uno.
+`sh.getBalancerState()` dato a uno shard rispondeva `Unauthorized: not authorized on config to
+execute command …` — un errore che [V-063](Sources.md#v-063) aveva già giudicato reticente, «che non
+nomina il problema vero», ma che almeno era un errore. Adesso risponde **`true`**. Le letture del
+database `config` su uno shard riescono, tornano vuote, e il vuoto ha l'aspetto di una risposta.
+Nello stesso movimento `sh.status()`, autenticato su uno shard, ha smesso di dire «non sei
+autorizzato» e ha cominciato a dire `This db does not have sharding enabled`: cioè esattamente la
+frase che la guida additava come sintomo di **un'altra** situazione. Il primo errore ne nascondeva un
+secondo.
+
+**Decisione.**
+
+*Le pagine e i commenti che riportano una misura invalidata da una nostra decisione si riscrivono
+sulla misura di oggi, dentro il lavoro che ha cambiato il comportamento.* Chi apre la guida alle
+dieci di sera prima di una demo non deve datare quello che legge.
+
+*La misura vecchia non si cancella: si data.* Va dove stanno le misure — nelle voci di `Sources.md`
+che l'avevano registrata, con un «Seguito» che rimanda alla verifica nuova. [V-058](Sources.md#v-058)
+e [V-063](Sources.md#v-063) restano leggibili come erano: è la regola di [ADR-0002](#adr-0002)
+applicata alle verifiche invece che alle decisioni.
+
+*Dove la risposta nuova è più pericolosa della vecchia, la pagina lo dice.* Un `true` al posto di un
+errore non è un miglioramento raccontato male: è un segnale perso, e a perderlo siamo stati noi
+chiudendo l'eccezione localhost. Una pagina che si limitasse ad aggiornare l'output sarebbe esatta e
+lascerebbe il lettore peggio di prima.
+
+**Conseguenze.** I quattro punti sono riscritti. La §3.3 della guida guadagna la regola che li tiene
+insieme — le funzioni di `sh` che si risolvono in una lettura di `config` adesso rispondono il vuoto,
+quelle che spediscono un comando falliscono ancora — perché è quella, e non l'elenco dei messaggi,
+che sopravvive al prossimo cambiamento. Resta un obbligo pratico per le decisioni future: quando una
+decisione cambia un comportamento misurato, il testo dei messaggi vecchi si cerca nel repository
+prima di chiudere il commit. Qui la ricerca è stata fatta dopo, ed è per questo che i quattro punti
+sono vissuti falsi per un commit.
+
+Due categorie di documenti **non** rientrano in questa regola, e non per pigrizia. I verbali datati
+di `docs/00-progetto/` — lo spike del 2026-08-25, il piano, il registro operativo — dicono che cosa
+è stato misurato in un giorno, e riscriverli cancellerebbe proprio l'informazione che portano. Le
+sezioni di pagina già marcate con la loro data lo stesso: la §4.1 di
+`docs/03-amministrazione/sicurezza-keyfile-x509.md` apre con un riquadro che la dichiara anteriore
+al 2026-09-02 e rimanda alla §4.2, ed è la forma corretta quando la misura vecchia **serve** a
+spiegare perché la nuova esiste.
+
+**Alternative scartate:** tenere le due letture affiancate nella pagina, «prima di ADR-0071» e
+«dopo» — la guida diventerebbe un registro delle modifiche, e §3.3 è già una sezione che il lettore
+percorre in cerca di un comando, non di una cronologia; annotare i punti con una nota senza toccare
+il testo — chi legge in diagonale legge il testo, non la nota; aprire una trappola nuova in
+`trappole-mongodb-in-docker.md` per il `true` del bilanciatore — la trappola 21 racconta già
+l'eccezione localhost, e §3.3 è il posto dove quel comando si impara; lasciare i quattro punti come
+erano e correggerli a fine feature, con il resto della documentazione — sono quattro affermazioni
+false in un repository didattico, e il costo di rimandarle è che qualcuno le legga nel frattempo.
+
+**Fonti:** [V-058](Sources.md#v-058) · [V-063](Sources.md#v-063) · [V-067](Sources.md#v-067)

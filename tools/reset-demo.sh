@@ -258,10 +258,12 @@ elif [[ "${STACK}" == "03" ]]; then
       -f "${COMPOSE}" --profile "${PROFILO}" "$@"
   }
 
-  # Tutto passa dal router, che è il punto in cui il client parla al cluster: chiedere
-  # a un mongod direttamente non funzionerebbe comunque, perché gli utenti stanno sui
-  # config server e le credenziali del cluster su uno shard danno «Authentication
-  # failed» (V-058).
+  # Tutto passa dal router, che è il punto in cui il client parla al cluster. Chiedere
+  # a un mongod direttamente adesso funzionerebbe — da ADR-0071 ogni shard ha un
+  # amministratore locale con le stesse credenziali — e risponderebbe male: uno shard
+  # conosce solo la propria metà dei documenti e non ha l'anagrafe del cluster
+  # (V-067). Fino a quel commit non entrava nemmeno, e l'errore faceva da chiavistello
+  # (V-058); adesso il chiavistello non c'è e la regola resta.
   dal_router() {
     compose exec -T mongos \
       mongosh --quiet --host localhost \

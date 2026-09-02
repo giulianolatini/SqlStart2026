@@ -3972,3 +3972,68 @@ rispondono «già presente» ed escono `0`. Lo stack è rimasto acceso nel profi
 Stato: decisioni fino a **ADR-0071**, verifiche fino a **V-066**, fonti fino a **S-075**, note di
 metodo fino alla **122**. Task 1–9 su 11 chiusi; il **Task 10** (la riserva del Blocco 3) comincia
 adesso, e il **Task 11** chiude il branch **con la pull request** e con i tre debiti degli strumenti.
+
+---
+
+## 2026-09-02 — Il seguito di ADR-0071: quattro punti diventati falsi, e un errore che ne nascondeva un altro
+
+Il Task 10 è cominciato da una lettura, non da una registrazione. Per aggiungere a
+`tools/demo-sharded.sh` la scena del guasto serviva sapere come `tools/reset-demo.sh` rialza i nodi
+che ha buttato giù, e tre righe sopra la funzione giusta c'era un commento che spiegava perché tutto
+passa dal router: «le credenziali del cluster su uno shard danno *Authentication failed*». Da
+[ADR-0071](Decision.md#adr-0071), cioè dal commit precedente, non è più vero.
+
+Cercare il testo di quel messaggio nel repository ne ha trovati altri tre: un commento in
+`docker/03-sharded/init/10-cfg-initiate.js`, un passaggio in §2.2 e uno in §6.1 di
+`docs/02-architetture/sharded-cluster.md`, e il blocco `console` che apre la §3.3 di
+`docs/04-mongosh/guida-mongosh.md`. Quattro affermazioni vere quando sono state scritte, rese false
+da una modifica nostra, e vissute così per un commit intero.
+
+**Rimisurare ha dato più di quello che serviva.** Le due risposte attese sono arrivate — senza
+credenziali lo shard adesso dice `Command find requires authentication` invece di `not authorized on
+config`, con le credenziali entra e conta 9 860 documenti — e dietro ne sono comparse altre quattro,
+che nessuno stava cercando. La più importante è la peggiore: `sh.getBalancerState()` dato a uno
+shard **risponde `true`**. Prima rispondeva `Unauthorized`. Non spedisce nessun comando: legge
+`config.settings`, che sullo shard non esiste, e dal vuoto conclude che nessuno ha fermato il
+bilanciatore. Finché la lettura veniva rifiutata, l'errore faceva da segnale d'indirizzo sbagliato;
+adesso il segnale non c'è e al suo posto c'è una risposta plausibile.
+
+Lo stesso meccanismo, all'incontrario, spiega una frase che questa guida aveva corretto in buona
+fede. La §3.3 diceva che `MongoshInvalidInputError: This db does not have sharding enabled` è
+l'errore di un'istanza singola e che su uno shard vero la risposta è un'altra. Autenticati, su uno
+shard vero, la risposta è **esattamente quella frase**: il documento `config.version` sullo shard è
+`null`, e finché la lettura era negata `mongosh` non arrivava a scoprirlo. Il primo errore ne
+nascondeva un secondo — la stessa forma della trappola di `--oplog` misurata ieri
+([V-065](Sources.md#v-065)), e stavolta il permesso mancante non c'era per un difetto ma per una
+configurazione insicura che abbiamo appena tolto.
+
+Le sei misure stanno in [V-067](Sources.md#v-067). La regola che le governa è
+[ADR-0072](Decision.md#adr-0072): le pagine si riscrivono sulla misura di oggi, dentro il lavoro che
+ha cambiato il comportamento; la misura vecchia si data in `Sources.md` invece di sparire
+([V-058](Sources.md#v-058) e [V-063](Sources.md#v-063) hanno un «Seguito» ciascuna); e dove la
+risposta nuova è più pericolosa della vecchia, la pagina lo dice. Restano fuori dalla regola i
+verbali datati di `docs/00-progetto/` e le sezioni già marcate con la loro data, come la §4.1 della
+pagina sulla sicurezza: riscriverle cancellerebbe l'informazione che portano.
+
+La §3.3 della guida non si limita più a elencare i messaggi. Ha adesso la regola che li tiene
+insieme, e che sopravvive al prossimo cambiamento: le funzioni di `sh` che si risolvono in una
+**lettura** del database `config` su uno shard riescono e rispondono il vuoto; quelle che spediscono
+un **comando** trovano un `mongod` che non ce l'ha, e lo dicono. `make docs-check`: citazioni e
+collegamenti coerenti.
+
+123. **Cercare le pagine che una decisione ha appena reso false è parte della decisione, non della
+     pulizia successiva.** Il modo di cercarle è banale — si prende il testo del messaggio d'errore
+     vecchio e lo si cerca nel repository — e non esiste nessuna automazione che lo faccia al posto
+     di chi decide, perché nessun controllo sa quale frase la modifica ha invalidato. Qui il commit
+     di ADR-0071 è passato verde attraverso tutti e quattro i controlli con quattro affermazioni
+     false dentro, e a trovarle è stata una lettura fatta per un altro motivo.
+
+124. **Rimisurare dopo una modifica non serve a confermare che la modifica ha funzionato: serve a
+     scoprire che cosa è cambiato intorno.** Le risposte attese erano due e sono arrivate. Le altre
+     quattro no, e fra quelle c'era l'unica che conta per chi userà lo stack: un errore sostituito da
+     una risposta plausibile. Chi rimisura per confermare guarda le due, chiude, e non vede le
+     quattro.
+
+Stato: decisioni fino a **ADR-0072**, verifiche fino a **V-067**, fonti fino a **S-075**, note di
+metodo fino alla **124**. Il **Task 10** riprende dal punto in cui si era interrotto: le tre scene
+già registrate e verificate, la scena del guasto ancora da scrivere.
