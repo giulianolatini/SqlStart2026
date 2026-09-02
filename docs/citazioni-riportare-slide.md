@@ -1580,3 +1580,42 @@ fra shard non c'è: se uno shard non ha un secondario, la sua fetta di dati spar
 continua a rispondere benissimo per tutto il resto. Le due misure vanno mostrate una accanto
 all'altra, perché è il confronto a dire la cosa vera: la differenza non è il prodotto, è il numero
 di membri per shard.
+
+---
+
+### Un profilo che non esiste non è un errore: è un cluster fatto di un container solo
+
+> Compose non protesta se gli si chiede un profilo che nel file non c'è. Un profilo sconosciuto non
+> seleziona niente, quindi restano i soli servizi che non appartengono a nessun profilo — nel nostro
+> file uno, il one-shot che genera il keyfile. `make up-03 PROFILO=complteo` avvia quel container,
+> lo aspetta, lo vede uscire **0**, e muore dicendo `container sh-keyfile-init exited (0)`. Accusa
+> l'unico pezzo che ha fatto esattamente il suo mestiere. In cinque righe di errore la parola
+> «profilo» non compare mai.
+
+Fonte: [V-069](Sources.md#v-069) secondo esito, [ADR-0074](Decision.md#adr-0074).
+
+**Perché una slide:** completa il paio con «Nominare un servizio non è attivare il suo profilo». Là
+il profilo c'era e non bastava nominarlo; qui il profilo non c'è e nessuno lo dice. Chi porta a casa
+i nostri file Compose incontrerà il secondo caso al primo refuso, e la lezione generale vale oltre
+Docker: quando una selezione non trova niente, il risultato vuoto **è** una risposta valida, e a
+valle nessuno sa più che la domanda era sbagliata.
+
+---
+
+### Un errore risponde alla domanda che gli hai fatto, non a quella che volevi fare
+
+> Due messaggi raccolti nello stesso pomeriggio. `container sh-keyfile-init exited (0)`: vero — quel
+> container è uscito 0 — e il problema era un profilo scritto male. `no containers for project
+> "sqlstart-02-replicaset"`: vero anche questo, perché il comando cerca container **vivi** e quello
+> che aspettava aveva finito; nello stesso istante il progetto ne aveva **cinque**, e `ps` li
+> elencava tutti. Nessuno dei due strumenti ha mentito. Tutt'e due hanno risposto benissimo alla
+> domanda letterale, e il tempo perso è tutto nella distanza fra quella e la domanda vera.
+
+Fonte: [V-069](Sources.md#v-069) secondo e quinto esito, [ADR-0074](Decision.md#adr-0074),
+[ADR-0075](Decision.md#adr-0075).
+
+**Perché una slide:** è la lezione trasversale del blocco, e in sala si spende in un minuto perché i
+due messaggi si mostrano affiancati. Vale per il debug di uno sharded cluster quanto per quello dei
+container: prima di credere a un messaggio d'errore conviene chiedersi **quale domanda** lo strumento
+si è posto. È lo stesso meccanismo per cui un cluster senza shard risponde `[]` invece di dire che è
+rotto.

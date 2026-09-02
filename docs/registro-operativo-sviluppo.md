@@ -4134,3 +4134,117 @@ metodo fino alla **127**. Del piano di `feature/03` restano il **Task 11** — g
 mancanti, il consuntivo del branch, i tre debiti di strumentazione ancora aperti
 ([ADR-0049](Decision.md#adr-0049), [ADR-0062](Decision.md#adr-0062)), i quattro controlli eseguiti
 due volte e la PR verso `develop`.
+
+---
+
+## 2026-09-02 — `feature/03`, Task 11: i tre debiti chiusi eseguendo, e la chiusura del branch
+
+Il Task 11 chiedeva gli ADR mancanti, le fonti, il consuntivo, le citazioni, i quattro controlli
+due volte e la PR. In coda gli erano stati rinviati **tre debiti di strumentazione**, e la regola
+per chiuderli è quella di [ADR-0049](Decision.md#adr-0049): eseguendo, non ragionando.
+
+**Il Passo 1 chiedeva un ADR che esisteva già.** «Almeno una è certa: l'esito del Passo 2 del Task 4,
+l'healthcheck di `mongos`». È [ADR-0061](Decision.md#adr-0061), scritta il 1° settembre nel task che
+la produsse. La riga del piano è stata scritta prima di sapere che quella decisione sarebbe stata
+presa subito, e non c'era niente da aggiungere: scriverne una seconda avrebbe creato due sedi per
+una decisione sola, che è precisamente ciò che [ADR-0002](Decision.md#adr-0002) vieta.
+
+**Il primo debito non era un errore, ed era il più interessante dei tre.** Le porte pubblicate dai
+tre file Compose e quelle controllate da `tools/preflight.sh` coincidono: quindici e quindici,
+nessuna mancante, nessuna eccedente, in ordine, senza doppioni. Il debito non era uno sbaglio da
+correggere: era che la coincidenza reggeva **per attenzione**. Sette delle quindici porte esistono
+solo nel profilo `completo` — cioè sono esattamente quelle che nessuno vede quando lavora nel
+`palco`, e quelle che si dimenticano.
+
+**Il secondo aveva una manifestazione, e brutta.** Compose accetta qualunque stringa dopo
+`--profile`. Un profilo che non esiste non seleziona niente, quindi restano i soli servizi che non
+dichiarano `profiles:` — nel nostro file uno, `keyfile-init`. `make up-03 PROFILO=inesistente` avvia
+quel container, lo aspetta, lo vede uscire 0 e muore con `container sh-keyfile-init exited (0)`,
+uscita 2. Accusa l'unico pezzo che ha fatto il suo mestiere, e la parola «profilo» non compare in
+nessuna delle cinque righe. Il rimedio è il bersaglio `profilo-03`, che chiede l'elenco dei profili
+al file Compose con `config --profiles` invece di riscriverlo a mano; i sette bersagli che usano
+`PROFILO` lo dichiarano fra i prerequisiti. Il motivo per cui l'elenco **non** si scrive nel
+`Makefile` sta in [ADR-0074](Decision.md#adr-0074), insieme al resto.
+
+**Il terzo era una domanda, e la risposta è migliore della domanda.** [ADR-0062](Decision.md#adr-0062)
+temeva che `up-02` funzionasse per fortuna: due comandi, e il secondo regge solo finché `up --wait`
+torna prima che `rs-init` finisca. Misurato su tre avvii a freddo, il margine è di **21,6 s**, e a
+caldo `wait rs-init` blocca ancora **3,9 s**. Ma il dato che chiude il debito non è l'ampiezza:
+`rs-init` è l'ultimo anello e non ha healthcheck, quindi la soglia di `--wait` per lui è `running`.
+`up --wait` torna nell'istante in cui `rs-init` **comincia**, e la finestra del secondo comando
+coincide con l'intera durata del suo lavoro. Non si restringe con una macchina più veloce: si
+restringe solo se `rs-init` smette di lavorare. Il debito si chiude come **verificato**, non come
+corretto, e quello che entra nel repository è il motivo, scritto accanto alla riga che lo sfrutta
+([ADR-0075](Decision.md#adr-0075)).
+
+**Il fallimento temuto esiste comunque, e mente sul motivo.** Dato `docker compose wait rs-init` a
+cose finite, la risposta è `no containers for project "sqlstart-02-replicaset"` con uscita 1 — nello
+stesso istante il progetto ha cinque container e `ps -a` li elenca tutti. `compose wait` guarda solo
+i container vivi: il messaggio nomina l'intero progetto per dire che non ne trova uno. È il gemello
+del messaggio che accusa il keyfile, e i due insieme sono diventati una citazione per le slide.
+
+**Misurare lo stack 02 dentro il worktree di un altro branch.** Il `.env` dello stack 02 sta fuori
+dal repository ([ADR-0014](Decision.md#adr-0014)) e nel worktree non c'era. È stato copiato dal
+checkout principale per la durata della prova, e alla fine lo stack è stato smontato con i volumi
+dei dati cancellati e il file rimosso: `git status` è tornato pulito. Una misura presa su un altro
+stack non deve lasciare tracce nel branch che la prende, e in un worktree la traccia sarebbe
+invisibile proprio perché quel file è ignorato.
+
+**Le prove sono state viste fallire.** Le tre coerenze nuove vivono in
+`tools/tests/test_coerenza_repo.py`, il primo modulo della suite che legge i file **veri** del
+repository invece di campioni costruiti. Prima di considerarle buone sono state rotte una alla
+volta: tolta la porta 27017 dall'elenco, tolto il guardiano a `guasto-03`, sostituito `$(PROFILO)`
+con `palco` nella ricetta del guardiano. Tutte e tre hanno fallito, con il messaggio che nomina il
+file da correggere. La suite passa da 131 a **139**.
+
+I quattro controlli sono stati eseguiti due volte, come chiedeva il Passo 5. Con lo stack 03 acceso
+nel profilo `palco`: `preflight` 8 superati, 1 avviso — i filmati — 0 errori, con 4 porte tenute dal
+lab stesso; `docs-check` citazioni e collegamenti coerenti; `stack-check` 3 stack conformi;
+`tools-test` 139 passati; e in più `smoke-03` 64 controlli e 0 errori. Con tutti gli stack fermi:
+gli stessi esiti, e le 15 porte tutte libere.
+
+128. **Un debito si chiude anche accertando che non c'era, e il valore sta in quello che si vede
+     accertandolo.** Due dei tre debiti non erano errori il giorno in cui li si è misurati. Se ci si
+     fosse limitati a guardarli, la conclusione sarebbe stata «va bene così» e la marcatura sarebbe
+     stata tolta. Eseguendo si è visto **come** si manifesterebbero — cinque righe che accusano il
+     keyfile, un messaggio che nomina un progetto intero per dire che non trova un container — e
+     quelle due manifestazioni sono l'unica cosa che ha permesso di scrivere rimedi utili. Un debito
+     accertato inesistente va chiuso trasformando «corretto per attenzione» in «corretto per
+     costruzione», altrimenti lo si è solo rinviato con parole più belle.
+
+129. **Un errore risponde alla domanda che gli è stata fatta, non a quella che si voleva fare.**
+     `container sh-keyfile-init exited (0)` è vero. `no containers for project` è vero. Nessuno dei
+     due strumenti ha mentito, e tutt'e due mandano a cercare nel posto sbagliato. Prima di credere
+     a un messaggio d'errore conviene ricostruire **quale domanda** lo strumento si è posto: è lo
+     stesso meccanismo per cui un cluster senza shard risponde `[]` invece di dichiararsi rotto.
+
+130. **Una fragilità si scrive accanto alla modifica che la scatenerebbe, non accanto a una data.**
+     Il pericolo di `up-02` non era il tempo: era che qualcuno leggesse due comandi dove ne pareva
+     bastare uno e ne togliesse uno per pulizia. Un commento che dicesse «da riverificare» sarebbe
+     invecchiato senza che nessuno lo leggesse; uno che dice «chi svuota `rs-init` deve togliere
+     anche questa riga» si fa trovare esattamente da chi sta per romperla.
+
+131. **Una prova che non si è vista fallire non è una prova.** Le tre coerenze nuove sono state
+     rotte una per una prima di essere accettate, e il costo è stato due minuti. Una prova scritta
+     dopo il codice passa al primo colpo, ed è il momento in cui è indistinguibile da una prova che
+     non controlla niente — un `assert` su un dizionario vuoto passa sempre. Rompere ciò che si sta
+     proteggendo è l'unico modo economico di sapere che la protezione tocca la cosa giusta.
+
+**Consuntivo del branch, alla vigilia dell'unione.** **Venti** commit e **trentatré** file rispetto a
+`develop`: il piano, undici di task, due punti di ripresa, il commit di avvio, quello della nota di
+metodo lasciata da `feature/02`, e questo — che è compreso nel conto, come prescrive la
+**nota 37**. Il trentatreesimo file è `tools/tests/test_coerenza_repo.py`, nato oggi. Su GitHub non
+gira nessun controllo, per scelta ([ADR-0038](Decision.md#adr-0038)): i quattro sono verdi in
+locale, due volte.
+
+**Quello che resta aperto** e non appartiene a questo branch: i filmati `.mp4`, che solo il relatore
+può girare, con l'avviso di `preflight` acceso e bloccante dal 2026-09-18; e i cinque debiti di
+documentazione sui backup dei config server aperti da [ADR-0071](Decision.md#adr-0071). Lo scambio
+delle righe `MEMBRI_*` in `docker/03-sharded/.env`, necessario per rifare la scena 9, resta un
+passaggio che nessun controllo può sorvegliare perché quel file non sta nel repository: sta scritto
+nell'indice delle registrazioni, che è dove lo si legge quando serve.
+
+Stato: decisioni fino a **ADR-0075**, verifiche fino a **V-069**, fonti fino a **S-075**, note di
+metodo fino alla **131**. Il piano di `feature/03` è completo: undici task su undici. La feature si
+chiude unendo la **PR #5** su GitHub, e non con `git flow feature finish`: quella scorciatoia
+salta la revisione, ed è già successo una volta.

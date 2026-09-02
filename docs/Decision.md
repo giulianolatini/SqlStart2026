@@ -4637,3 +4637,165 @@ nome di un comando non può essere vero solo in una delle due configurazioni che
 dichiara di supportare.
 
 **Fonti:** [V-045](Sources.md#v-045) · [V-068](Sources.md#v-068)
+
+---
+
+<a id="adr-0074"></a>
+## ADR-0074 — Due file che devono dire la stessa cosa si legano con un test, e l'elenco valido lo tiene chi lo dichiara
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** Due debiti aperti da [ADR-0049](#adr-0049) e rinviati fin qui hanno la stessa forma, e
+si è capito solo misurandoli.
+
+Il primo: l'elenco `PORTE=(...)` di `tools/preflight.sh` è scritto a mano, e i file Compose
+pubblicano le loro porte per conto proprio. Il secondo: `PROFILO` è una variabile del `Makefile` e i
+profili sono dichiarati nel file Compose, e niente lega le due cose — segnato una prima volta da
+[ADR-0066](#adr-0066), aggravato dal Task 10 che ha aggiunto tre bersagli con `PROFILO`
+([ADR-0073](#adr-0073)).
+
+Misurati oggi, **nessuno dei due era in errore** ([V-069](Sources.md#v-069)): quindici porte
+pubblicate e quindici controllate, senza mancanti, senza eccedenti, in ordine. Il debito non era uno
+sbaglio: era che la coincidenza reggeva **per attenzione**, e sette delle quindici porte esistono
+solo nel profilo `completo`, cioè sono esattamente quelle che si dimenticano.
+
+Il secondo debito ha invece una manifestazione precisa, e brutta. Compose accetta qualunque stringa
+dopo `--profile` senza protestare: un profilo che non esiste non seleziona niente, quindi restano i
+soli servizi che non dichiarano `profiles:` — qui uno, `keyfile-init`. `make up-03
+PROFILO=inesistente` stampa cinque righe, muore con `container sh-keyfile-init exited (0)` e esce 2.
+Accusa il one-shot del keyfile di essere uscito 0, cioè di aver fatto il suo mestiere, e la parola
+«profilo» non compare da nessuna parte. Un refuso in `PROFILO=complteo` manda a leggere i log del
+keyfile.
+
+**Decisione.**
+
+1. **Un guardiano `profilo-03` che chiede l'elenco al file Compose.** `docker compose … config
+   --profiles` è la domanda giusta e ha una risposta pulita — `completo`, `palco`, uscita 0 — purché
+   le si passino i due `--env-file`, senza i quali fallisce sull'interpolazione di `MONGO_IMAGE`. Il
+   guardiano è un bersaglio `.PHONY` che rifiuta un profilo sconosciuto con una frase che lo nomina,
+   elenca quelli veri e dice che cosa succederebbe senza il controllo.
+
+2. **L'elenco dei profili validi non si scrive nel `Makefile`.** Scrivere `palco|completo` nella
+   ricetta sarebbe stato il debito di prima con un nome nuovo: un terzo profilo nel file Compose
+   resterebbe rifiutato, e il messaggio d'errore direbbe con sicurezza una cosa falsa. È la stessa
+   ragione per cui `DATI_03` si costruisce con `addprefix` invece che con nove nomi a mano, e una
+   prova la difende esplicitamente.
+
+3. **Ogni bersaglio che usa `$(PROFILO)` dichiara il guardiano fra i prerequisiti** — oggi sono
+   sette: `up-03`, `seed-03`, `smoke-03`, `reset-demo-03`, `stato-03`, `distribuzione-03`,
+   `guasto-03`. I tre che non avevano nemmeno `$(AMBIENTE_03)` lo acquisiscono per transitività, ed
+   è giusto: leggono comunque quel file.
+
+4. **Le coerenze fra due file diventano una prova che legge i file veri.** Nasce
+   `tools/tests/test_coerenza_repo.py`, che è il primo modulo della suite a non usare campioni
+   costruiti: apre i tre `docker/*/compose.yaml`, `tools/preflight.sh` e il `Makefile` così come
+   sono nel repository. Controlla i due versi delle porte, l'ordine e i doppioni, che nessun
+   bersaglio con `$(PROFILO)` scordi il guardiano, e che il guardiano non nomini un profilo a mano.
+
+5. **Le porte si leggono con un lettore YAML e non con `docker compose config`.** Quel comando
+   pretende i `.env` che stanno fuori dal repository per scelta ([ADR-0014](#adr-0014)): un
+   controllo che non gira su un clone appena fatto è un controllo che non gira. Il lettore risolve
+   `${NOME:-valore}` con il valore predefinito, che è la porta della mappa del design.
+
+**Conseguenze.** La suite passa da 131 a **139** prove. Le tre mutazioni provate a mano — togliere
+27017 dall'elenco, togliere il guardiano a `guasto-03`, sostituire `$(PROFILO)` con `palco` nella
+ricetta del guardiano — falliscono tutte e tre con il messaggio che dice quale file correggere:
+una prova che non può fallire non vale niente, e queste sono state viste fallire.
+
+Il costo è che `profilo-03` esegue un `docker compose config` prima di ogni `up-03`, `smoke-03`,
+`stato-03` e degli altri quattro. Sono decimi di secondo su comandi che ne durano decine, e in
+cambio un refuso si ferma **prima** di toccare il cluster: nella prova, i cinque container accesi in
+`palco` non sono stati sfiorati dal tentativo con il profilo sbagliato.
+
+Resta scoperto quello che nessuna prova statica può vedere: che le porte *dichiarate* siano quelle
+che il design §5.2 voleva. La prova lega due file fra loro, non li lega alla specifica. Se qualcuno
+spostasse una porta in un file Compose e aggiornasse `preflight.sh`, i controlli tacerebbero — ed è
+il comportamento giusto, perché quella è una modifica legittima che va discussa altrove.
+
+**Alternative scartate.** Generare `PORTE` dai file Compose a ogni esecuzione di `preflight.sh` —
+`preflight` deve girare la mattina del talk sulla macchina più scarna possibile, e farlo dipendere
+da un lettore YAML e da Python per sapere quali porte guardare è aggiungere modi di fallire proprio
+lì. Una prova che confronta `preflight.sh` con la specifica invece che con i Compose — la specifica
+è prosa, e un controllo che la interpreta è un controllo che discute. Un bersaglio `up-03-palco` e
+uno `up-03-completo` invece della variabile — è la strada che [ADR-0066](#adr-0066) ha già scartata,
+e rinunciarvi adesso significherebbe due famiglie di sette bersagli. Lasciare che sia lo smoke a
+scoprire il profilo sbagliato — lo smoke gira dopo l'avvio, e l'avvio è la cosa che era fallita.
+
+**Fonti:** [V-069](Sources.md#v-069)
+
+---
+
+<a id="adr-0075"></a>
+## ADR-0075 — Il secondo comando di `up-02` resta, e la ragione per cui regge entra nel file
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** [ADR-0062](#adr-0062) ha chiuso lo stack 03 con **un** comando di avvio e ha aperto,
+nello stesso paragrafo, un debito verso lo stack 02: «`up-02` esegue proprio i due comandi, e
+funziona perché `up --wait` torna **prima** che `rs-init` finisca. La distanza fra le due cose è di
+secondi e nessuna misura dice quanto sia stabile altrove; se un giorno `rs-init` finisse per primo,
+`wait rs-init` risponderebbe `no containers` e il bersaglio fallirebbe senza che niente sia rotto.»
+
+Il debito era indirizzato al Task 7 e non è stato saldato lì. Lo si salda qui, e la misura
+([V-069](Sources.md#v-069)) risponde più di quanto fosse stato chiesto.
+
+Il margine c'è: **21,59 / 22,16 / 21,90 s** su tre avvii a freddo, e a caldo `wait rs-init` blocca
+ancora **3,97 / 3,87 / 3,94 s**. Ma il dato che cambia la decisione non è la sua ampiezza: è che il
+margine **non è un caso fortunato**. `rs-init` è l'ultimo anello della catena e non ha healthcheck,
+quindi la soglia che `--wait` gli applica è `running` ([S-057](Sources.md#s-057)) ed è soddisfatta
+nell'istante in cui parte. `up --wait` torna dunque quando `rs-init` **comincia**, e la finestra a
+disposizione del secondo comando coincide con l'intera durata del suo lavoro. Non si restringe con
+una macchina più veloce: si restringe solo se `rs-init` smette di fare qualcosa.
+
+Il fallimento temuto esiste e si riproduce — dato `wait rs-init` a cose finite, la risposta è `no
+containers for project "sqlstart-02-replicaset"` con uscita 1, mentre il progetto ha cinque
+container e `ps -a` li elenca tutti — ma per raggiungerlo bisogna dare il comando fuori dal
+bersaglio. Dentro il bersaglio non capita, perché `up -d --wait` riavvia `rs-init` a ogni giro:
+verificato lanciando `make up-02` due volte di fila.
+
+**Decisione.**
+
+1. **`up-02` resta di due comandi**, e la regola di [ADR-0041](#adr-0041) non viene toccata. Il
+   debito si chiude come *verificato*, non come *corretto*: non c'era niente da correggere.
+
+2. **Il motivo per cui regge entra nel `Makefile`, accanto alla riga.** Il pericolo vero non era il
+   tempo: era che qualcuno leggesse due comandi dove ne bastava uno e ne togliesse uno per pulizia.
+   Il commento adesso dice che la finestra è la durata del lavoro di `rs-init` e che chi svuota
+   `rs-init` deve togliere anche quella riga — cioè lega la fragilità alla modifica che la
+   scatenerebbe, invece di lasciarla a una data futura.
+
+3. **Non si dà a `rs-init` una sentinella come quella dello stack 03.** Sarebbe la soluzione
+   simmetrica e strutturalmente più solida, ed è stata considerata sul serio: un anello finale senza
+   healthcheck da cui non dipende nessuno renderebbe `up-02` di un comando come `up-03`. Ma
+   modificherebbe un file Compose di uno stack chiuso, verificato e già registrato, dentro il task
+   di chiusura di un branch che riguarda un altro stack. Il guadagno è togliere una riga che
+   funziona; il costo è rifare le verifiche dello stack 02.
+
+4. **I due stack restano diversi, e la differenza si spiega.** Non è un'incoerenza da sanare: è che
+   lo stack 02 ha un one-shot finale che *lavora* e lo stack 03 una sentinella che *non fa niente*
+   apposta ([ADR-0062](#adr-0062)). Chi legge i due `Makefile` accanto trova adesso scritto, in
+   entrambi, perché il numero di comandi è quello.
+
+**Conseguenze.** Il debito di [ADR-0062](#adr-0062) è saldato. Resta scritto che una modifica a
+`rs-init` che lo rendesse istantaneo romperebbe `up-02` con un messaggio che nomina l'intero
+progetto per dire che non trova un container: il messaggio più fuorviante incontrato in questo
+branch, insieme a quello del keyfile accusato di uscire 0 ([ADR-0074](#adr-0074)). Sono lo stesso
+difetto visto da due parti — uno strumento che risponde alla domanda che gli è stata fatta invece
+che a quella che gli si voleva fare.
+
+La misura ha richiesto di avviare lo stack 02 in un worktree dove il suo `.env` non esiste, perché
+è fuori dal repository ([ADR-0014](#adr-0014)). Il file è stato copiato dal checkout principale per
+la durata della prova e rimosso subito dopo, con lo stack smontato e i volumi dei dati cancellati:
+una misura su un altro stack non deve lasciare tracce nel branch che la prende.
+
+**Alternative scartate.** Togliere `wait rs-init` e affidarsi al solo `up --wait` — è precisamente
+ciò che [ADR-0041](#adr-0041) ha scartato misurando, e il replica set non esisterebbe ancora al
+ritorno del comando. Sostituirlo con una lettura del codice di uscita via `docker inspect` — toglie
+la dipendenza dal container vivo, ma introduce il nome `rs-init` scritto a mano in un secondo posto
+e sostituisce un comando di Compose con uno del client Docker, contro la direzione presa dal resto
+del `Makefile`. Ingoiare l'errore con `|| true` — trasformerebbe un `rs-init` fallito in un avvio
+riuscito, che è il verso sbagliato in cui sbagliare. Rimandare ancora il debito a `feature/04` — il
+calendario di [ADR-0057](#adr-0057) non lo consente, e un debito rinviato due volte è un debito che
+nessuno salderà.
+
+**Fonti:** [V-069](Sources.md#v-069)

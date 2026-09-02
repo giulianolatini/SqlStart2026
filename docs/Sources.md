@@ -7814,3 +7814,104 @@ file                             durata  eventi   byte   il numero che porta
 - **Usata da:** ADR-0073
 
 ---
+
+<a id="v-069"></a>
+### V-069 — I tre debiti di strumentazione, misurati: quindici porte su quindici, un profilo inesistente che accusa il keyfile, e ventuno secondi di margine
+
+- **Comandi:** per le porte, un lettore YAML dei tre `docker/*/compose.yaml` confrontato con la
+  riga `PORTE=(...)` di `tools/preflight.sh`; per il profilo,
+  `make up-03 PROFILO=inesistente`, `docker compose … --profile inesistente config --services` e
+  `docker compose … config --profiles`; per il margine, tre giri a freddo e tre a caldo di
+  `docker compose … up -d --wait` seguito da `docker compose … wait rs-init`, cronometrati, con un
+  osservatore che interroga `docker inspect -f '{{.State.Status}}' rs-init` ogni 50 ms.
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.5.0, MongoDB 7.0.40. Stack 03 acceso
+  nel profilo `palco` durante la prova del profilo inesistente; stack 02 avviato e smontato apposta
+  per la terza misura, con i tre volumi dei dati rimossi prima di ogni giro a freddo.
+- **Che cosa si voleva sapere:** se i tre debiti segnati da [ADR-0049](Decision.md#adr-0049) e
+  [ADR-0062](Decision.md#adr-0062) fossero difetti reali oggi, e in che modo si manifesterebbero.
+
+- **Esito — le quindici porte coincidono, e nessuno le teneva insieme.** I tre file Compose
+  pubblicano **15** porte dell'host; `tools/preflight.sh` ne elenca **15**. Pubblicate e non
+  controllate: nessuna. Controllate e non pubblicate: nessuna. Ripetute: nessuna. L'elenco è in
+  ordine crescente.
+
+```
+27017  01-standalone/mongo-standalone
+27021  02-replicaset/mongo-rs-1      27022  …/mongo-rs-2       27023  …/mongo-rs-3
+27117  03-sharded/mongos             27118  …/mongos2 [completo]
+27131  03-sharded/cfg1               27132  …/cfg2 [completo]   27133  …/cfg3 [completo]
+27141  03-sharded/shard1a            27142  …/shard1b [completo] 27143 …/shard1c [completo]
+27151  03-sharded/shard2a            27152  …/shard2b [completo] 27153 …/shard2c [completo]
+```
+
+  Il debito non era un errore: era che i due elenchi coincidevano **per attenzione**. Sette delle
+  quindici porte esistono solo nel profilo `completo`, e sono proprio quelle che si dimenticano.
+
+- **Esito — un profilo che non esiste non è un errore per Compose, ed è la misura che sorprende.**
+  `docker compose … --profile inesistente config --services` risponde con **un solo servizio**,
+  `keyfile-init`: l'unico del file che non dichiara `profiles:`. Un profilo sconosciuto non seleziona
+  niente, quindi restano i servizi che non appartengono a nessun profilo. `make up-03
+  PROFILO=inesistente` stampa esattamente questo, e esce **2**:
+
+```
+ Container sh-keyfile-init  Starting
+ Container sh-keyfile-init  Started
+ Container sh-keyfile-init  Waiting
+container sh-keyfile-init exited (0)
+make: *** [up-03] Error 1
+```
+
+  Cinque righe che accusano il one-shot del keyfile di essere uscito 0, cioè di aver fatto il suo
+  mestiere. La parola «profilo» non compare in nessuna. Il cluster acceso in `palco` non è stato
+  toccato: i cinque container erano ancora in piedi e sani dopo il tentativo. La domanda giusta ha
+  invece una risposta pulita: `docker compose --env-file tools/images.env --env-file
+  docker/03-sharded/.env -f docker/03-sharded/compose.yaml config --profiles` stampa `completo` e
+  `palco`, e esce 0. Senza i due `--env-file` fallisce su `MONGO_IMAGE`, quindi il comando che
+  interroga i profili deve portarseli dietro.
+
+- **Esito — il margine di `up-02` è ventuno secondi a freddo e quattro a caldo, e non è fortuna.**
+  Tre giri a freddo, volumi dei dati rimossi ogni volta:
+
+```
+giro   up -d --wait torna   rs-init esce   margine   wait rs-init
+  1              7,92 s        29,51 s     21,59 s   uscita 0 in 21,55 s
+  2              7,31 s        29,46 s     22,16 s   uscita 0 in 22,06 s
+  3              7,28 s        29,18 s     21,90 s   uscita 0 in 21,83 s
+```
+
+  Tre giri a caldo, sullo stack già acceso: `up -d --wait` torna in **1,98 / 1,84 / 1,84 s** e
+  `wait rs-init` blocca ancora **3,97 / 3,87 / 3,94 s** prima di uscire 0. Il margine non è un caso
+  fortunato: `rs-init` è l'ultimo anello della catena e non ha healthcheck, quindi la soglia che
+  `--wait` gli applica è `running` ([S-057](#s-057)) ed è soddisfatta nell'istante in cui parte.
+  La finestra a disposizione del secondo comando **coincide con l'intera durata del lavoro di
+  `rs-init`**, e si chiuderebbe solo se `rs-init` smettesse di lavorare.
+
+- **Esito — il fallimento temuto esiste, si riproduce, e mente sul motivo.** Dato `wait rs-init`
+  una seconda volta, quando `rs-init` ha già finito, la risposta è `no containers for project
+  "sqlstart-02-replicaset"` con uscita **1**, in **0,08 s**. Nello stesso istante il progetto ha
+  **cinque** container — `mongo-rs-1`, `mongo-rs-2`, `mongo-rs-3` in esecuzione, `rs-init` e
+  `rs-keyfile-init` usciti — e `docker compose ps -a` li elenca tutti. `compose wait` guarda solo i
+  container **vivi**: il messaggio nomina l'intero progetto per dire che non ne trova uno solo.
+  Nell'uso reale non capita perché `up -d --wait` riavvia `rs-init` a ogni giro, verificato: al
+  secondo `make up-02` di fila la sequenza è `rs-init Starting`, `Started`, `Waiting`, `Healthy`, e
+  il `wait` che segue trova di nuovo qualcosa da attendere.
+
+- **Riserve:**
+  - **a.** L'osservatore che cronometra l'uscita di `rs-init` è stato scritto per il caso a freddo,
+    dove il container non esiste ancora. A caldo legge lo stato `exited` **residuo** del giro
+    precedente e risponde subito: i suoi timestamp a caldo sono privi di significato e non sono
+    riportati. Il margine a caldo qui sopra è la durata del blocco di `wait rs-init`, che è la
+    stessa grandezza misurata in un altro modo, ma è una misura indiretta.
+  - **b.** Tre giri per condizione su una sola macchina, arm64, con Docker Desktop. Le durate a
+    freddo dipendono dal disco e dalla cache delle immagini; il rapporto fra le due condizioni no.
+  - **c.** Che un profilo sconosciuto selezioni i soli servizi senza `profiles:` è misurato su
+    Compose **v5.5.0** e non è stato cercato nella documentazione: potrebbe cambiare. Il verso in
+    cui sbaglierebbe è innocuo — il guardiano rifiuterebbe un profilo che Compose accetta, non il
+    contrario.
+  - **d.** La coincidenza delle quindici porte è una fotografia del 2 settembre 2026. Il valore
+    della misura non è il numero: è che da oggi la coincidenza è controllata da
+    `tools/tests/test_coerenza_repo.py` e non più dall'attenzione di chi modifica.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0074, ADR-0075
+
+---
