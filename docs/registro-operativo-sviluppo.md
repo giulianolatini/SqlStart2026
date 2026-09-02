@@ -4593,3 +4593,57 @@ due canali a tre.
 Stato aggiornato: decisioni fino ad **ADR-0080**, verifiche fino a **V-074**, note di metodo fino
 alla **141**. La suite resta a **143** prove. Prossimo passo: **Task 2** del
 [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), lo scheletro di `app/`.
+
+---
+
+## 2026-09-02 — `feature/04`, Task 2: uno scheletro che non fa niente, e una guardia rotta apposta
+
+`app/` esiste: `pyproject.toml`, il pacchetto `mongolab` con i quattro strati del §6.1 e
+`cli.py`, la suite divisa in unitaria e di integrazione, tre bersagli `make`. Non fa niente, e lo
+fa in modo verificabile — **5 prove**, `mypy --strict` verde su 12 file, `make tools-test` sempre a
+143. L'ambiente è Python **3.13.15**, con `requires-python = ">=3.13,<3.14"`: l'host ha la 3.14.7,
+che il design dichiara troppo recente per garantire il supporto di tutte le dipendenze di test, e il
+tetto lo scrive invece di lasciarlo alla fortuna della risoluzione.
+
+**La prova che conta è una guardia.** Percorre i sorgenti di `domain` e `application` con `ast` e
+boccia ogni import che non sia della libreria standard o del pacchetto stesso. È il vincolo che
+rende la suite unitaria istantanea, e adesso è codice invece che buona intenzione. **Ed è stata
+rotta apposta:** aggiunto `import pymongo` a `domain/__init__.py`, la prova è fallita dicendo
+`domain/__init__.py importa ['pymongo']`, e la violazione è stata tolta. Senza quel giro la guardia
+sarebbe indistinguibile da una che non può fallire.
+
+**Tre trappole schivate scrivendo, e una lasciata dov'era.** La prima: copiare
+`tools/pyproject.toml` porterebbe con sé `pythonpath = ["."]`, che lì serve e qui disfarebbe il
+layout `src/` — gli import continuerebbero a funzionare, ma dall'albero dei sorgenti invece che dal
+pacchetto installato, cioè le prove smetterebbero di verificare ciò che si distribuisce. La seconda:
+`testpaths = ["tests"]` avrebbe trascinato l'integrazione dentro la suite veloce dal Task 8 in poi,
+senza che nessuno l'avesse deciso; è `tests/unit`, e l'integrazione si chiede per nome. La terza:
+`mypy` ha rifiutato due `conftest.py` omonimi, e la soluzione è quella che suggerisce lui —
+`__init__.py` nelle directory di test. La quarta non è mia e resta dov'è: `failover-02-maggioranza`
+è lungo 23 caratteri e sballa già l'incolonnamento di `make help`, che ne prevede 16. Toccarlo
+adesso vorrebbe dire cambiare la resa di tutti i bersagli dentro un commit che parla d'altro.
+
+**Note di metodo.**
+
+142. **Un controllo scritto quando non può fallire va rotto apposta, subito.** La guardia sul
+     dominio è passata dal primo istante, perché in quell'istante `domain` conteneva solo una
+     docstring. Un controllo che passa perché non ha niente da guardare e un controllo che passa
+     perché tutto è a posto danno lo stesso verde, e la differenza si scopre mesi dopo, quando
+     serviva. Costa trenta secondi introdurre la violazione, vedere il messaggio e toglierla — e
+     quei trenta secondi verificano due cose in una: che il controllo scatti, e che quando scatta
+     dica **dove**. Vale il doppio per le guardie architetturali, che per definizione nascono
+     davanti a un albero vuoto.
+143. **Un codice d'uscita che significa «non ho fatto niente» va tradotto, non nascosto.** Su una
+     directory di prove vuota `pytest` esce **5**, che non è un errore e non è un successo: dice
+     «non ho raccolto nulla». Lasciarlo passare come fallimento manda a cercare Docker chi non ha
+     ancora niente da eseguire; sopprimerlo con un `|| true` insegna che il verde di quel bersaglio
+     non vuol dire niente, e l'insegnamento sopravvive al Task 8, quando le prove ci saranno
+     davvero. La terza via è tradurlo: intercettare **quel** codice e stampare la frase che spiega
+     perché. È il rovescio della nota 135 — lì c'era il messaggio senza il codice, qui il codice
+     senza il messaggio — e la regola è la stessa vista dall'altro lato: le due cose servono a due
+     lettori diversi, e nessuna delle due copre l'altra.
+
+Stato aggiornato: decisioni fino ad **ADR-0080**, verifiche fino a **V-074**, note di metodo fino
+alla **143**. Le suite: **143** prove per gli strumenti, **5** per l'applicazione. Prossimo passo:
+**Task 3** del [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), gli otto eventi
+congelati e le cinque porte.

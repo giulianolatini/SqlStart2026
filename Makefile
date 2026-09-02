@@ -3,6 +3,7 @@
 
 .DEFAULT_GOAL := help
 .PHONY: help docs-check tools-test images-pull images-verify preflight stack-check \
+        app-test app-check app-test-integration \
         up-01 down-01 reset-01 logs-01 seed-01 smoke-01 reset-demo-01 \
         up-02 down-02 reset-02 logs-02 seed-02 smoke-02 reset-demo-02 \
         failover-02 failover-02-termina failover-02-maggioranza \
@@ -28,6 +29,33 @@ help: ## Elenca i target disponibili
 
 tools-test: ## Esegue la suite degli strumenti di repository
 	uv run --directory tools pytest -q
+
+# --- L'applicazione -------------------------------------------------------------------
+#
+# Due suite e due target, non uno: `app-test` non tocca Docker e finisce in un paio di
+# secondi, `app-test-integration` accende uno stack e ci mette minuti. Tenerle insieme
+# significherebbe che la suite veloce smette di essere veloce, e una suite che costa un
+# minuto non si esegue prima di ogni commit — cioè smette di proteggere proprio nella
+# fase in cui il TDD serve. La separazione è il §7 del design, letto insieme ad ADR-0020.
+
+app-test: ## Esegue la suite unitaria dell'applicazione (senza Docker)
+	uv run --directory app pytest -q
+
+app-check: ## Verifica i tipi dell'applicazione con mypy --strict
+	uv run --directory app mypy
+
+# Finché `tests/integration` è vuota pytest esce **5**, che significa «non ho raccolto
+# niente». È il codice giusto e va tradotto, non nascosto: lasciarlo passare come errore
+# manderebbe a cercare Docker chi non ha ancora nulla da eseguire, e sopprimerlo in
+# silenzio insegnerebbe che un verde qui non vuol dire niente. Dal Task 8 in poi la
+# condizione non si presenta più, e il ramo resta a costo zero.
+app-test-integration: ## Esegue la suite di integrazione dell'applicazione (richiede Docker)
+	@uv run --directory app pytest -q tests/integration; esito=$$?; \
+	if [ $$esito -eq 5 ]; then \
+		echo "Nessuna prova di integrazione: arrivano al Task 8 del piano."; \
+	else \
+		exit $$esito; \
+	fi
 
 docs-check: ## Verifica il legame fra ADR e fonti, e i collegamenti fra le pagine
 	uv run --project tools python tools/check_citations.py docs/Decision.md docs/Sources.md

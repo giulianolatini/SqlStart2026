@@ -130,25 +130,25 @@ giorno dopo significa rigirare le registrazioni.
 Il posto di `app/` nell'albero lo fissa il §4 e non si discute qui. Questo task produce un progetto
 che **non fa niente** e lo fa in modo verificabile: è ciò che rende falsificabile tutto il resto.
 
-- [ ] **Passo 1.** `app/pyproject.toml` sul modello di `tools/pyproject.toml`, che è già nel
+- [x] **Passo 1.** `app/pyproject.toml` sul modello di `tools/pyproject.toml`, che è già nel
       repository e detta lo stile: `requires-python = ">=3.13"`, dipendenze dichiarate,
       `[dependency-groups] dev` per `pytest` e `mypy`. Il layout è `src/`, quindi **non** serve il
       `pythonpath = ["."]` che `tools/` ha dovuto mettere: annotarlo nel commento, perché la
       differenza è voluta e chi copia il file si chiederà perché.
-- [ ] **Passo 2.** I cinque pacchetti del §6.1 — `domain/`, `application/`, `infrastructure/`,
+- [x] **Passo 2.** I cinque pacchetti del §6.1 — `domain/`, `application/`, `infrastructure/`,
       `presentation/`, e `cli.py` in radice — ciascuno con il suo `__init__.py`. Il file `py.typed`
       accanto, altrimenti `mypy` non guarda dentro il pacchetto quando lo importa qualcun altro.
-- [ ] **Passo 3.** `strict = true` per `mypy`, nella sezione di `pyproject.toml`.
-- [ ] **Passo 4.** Tre target nel `Makefile`, con la forma degli esistenti e la riga `##` per
+- [x] **Passo 3.** `strict = true` per `mypy`, nella sezione di `pyproject.toml`.
+- [x] **Passo 4.** Tre target nel `Makefile`, con la forma degli esistenti e la riga `##` per
       `make help`: `app-test` (suite unitaria), `app-check` (`mypy --strict`),
       `app-test-integration` (che per ora non ha nulla da eseguire, e lo dice). Il `Makefile` è il
       punto d'ingresso unico: un comando che non c'è lì, per questo repository, non esiste.
-- [ ] **Passo 5.** La prima prova unitaria, che è anche la guardia architetturale: percorrere i
+- [x] **Passo 5.** La prima prova unitaria, che è anche la guardia architetturale: percorrere i
       sorgenti di `domain/` e `application/` e fallire se compare un `import` che non sia della
       libreria standard o del pacchetto stesso. Scritta adesso, quando non può fallire, vale poco;
       scritta adesso, al Task 5 varrà molto. È la stessa idea di `tools/check_stack.py`: una regola
       che vive in una prova, non in una convenzione.
-- [ ] **Passo 6.** `make app-test` e `make app-check` verdi, `make tools-test` ancora a 143. Commit:
+- [x] **Passo 6.** `make app-test` e `make app-check` verdi, `make tools-test` ancora a 143. Commit:
       `feat: lo scheletro dell'applicazione, e la regola che tiene il dominio pulito`.
 
 ---
