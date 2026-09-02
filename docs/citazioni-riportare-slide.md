@@ -1619,3 +1619,41 @@ due messaggi si mostrano affiancati. Vale per il debug di uno sharded cluster qu
 container: prima di credere a un messaggio d'errore conviene chiedersi **quale domanda** lo strumento
 si è posto. È lo stesso meccanismo per cui un cluster senza shard risponde `[]` invece di dire che è
 rotto.
+
+---
+
+### Un avviso che non cambia il codice d'uscita è un avviso che nessuno legge
+
+> Due punti della catena dello sharded sapevano di essere in guasto e lo scrivevano. Il seed
+> stampava «ATTENZIONE: lab.ordini non risulta distribuita» — corretto, in italiano, esatto — e
+> usciva **0**. Il router ripeteva `Command find requires authentication` e restava `unhealthy`
+> senza che nessuno gli chiedesse perché. Le frasi erano giuste; finivano in uno stream che il
+> chiamante automatico non guarda. `up --wait` raccoglie codici d'uscita e stati di salute, e una
+> catena di sei anelli esiste proprio perché nessuno debba leggere sei log.
+
+Fonte: [V-071](Sources.md#v-071), [V-072](Sources.md#v-072), [ADR-0077](Decision.md#adr-0077), nota
+di metodo 135.
+
+**Perché una slide:** un messaggio diagnostico e un codice d'uscita non sono due modi di dire la
+stessa cosa. Il primo serve a chi è **già andato** a guardare, il secondo serve a **farcelo andare**.
+In sala si mostra affiancando le due righe — l'avviso e lo `exited with code 0` sotto — e la platea
+lo riconosce subito, perché è il difetto che tutti hanno in produzione da qualche parte. Il corollario
+operativo sta in una domanda: se una condizione merita la frase, merita anche il codice? Quando la
+risposta è no, va scritto perché.
+
+---
+
+### Due revisori che trovano cose diverse non sono uno bravo e uno no
+
+> La stessa PR è stata letta da due modelli. Il primo ha guardato una funzione e ha ragionato sul
+> valore di ritorno: ha trovato un difetto di messaggio e ha sbagliato la diagnosi. Il secondo ha
+> guardato la catena di avvio e ha ragionato sul codice d'uscita: ha trovato tre falsi verdi e non ha
+> sbagliato niente. Nessuno dei due ha visto quello che ha visto l'altro.
+
+Fonte: [ADR-0076](Decision.md#adr-0076), [ADR-0077](Decision.md#adr-0077), nota di metodo 136.
+
+**Perché una slide:** la conclusione comoda sarebbe «chiediamo al migliore», e non regge alla prova
+dei fatti. La domanda che si pone al revisore decide che cosa può trovare: il prompt della seconda
+review nominava esplicitamente codici d'uscita e comandi che falliscono in silenzio, e i tre rilievi
+sono arrivati esattamente da lì. Vale per i modelli e vale per le persone, ed è il motivo per cui una
+checklist di review è uno strumento e non una formalità.

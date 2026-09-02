@@ -46,6 +46,7 @@ const USCITA_PARAMETRI = 2;
 const USCITA_ATTESA_SCADUTA = 3;
 const USCITA_MEMBRO_ASSENTE = 4;
 const USCITA_MEMBRO_DI_TROPPO = 5;
+const USCITA_MEMBRI_DIVERSI = 6;
 
 // Nessun valore predefinito, a differenza di `10-cfg-initiate.js`: là il config
 // server è uno solo e il profilo `palco` è il caso normale, qui un predefinito
@@ -122,6 +123,39 @@ for (const candidato of CANDIDATI) {
 const primoSguardo = db.hello();
 
 if (primoSguardo.setName) {
+  // Formato sì — ma con QUALI membri? È la terza direzione del disallineamento
+  // descritto sopra, e le due guardie non la vedono. Se lo stack è già stato
+  // inizializzato in `palco` e adesso arriva MEMBRI_SHARD con tre nomi, tutti e
+  // tre i container rispondono (la prima guardia è contenta) e nessun candidato è
+  // di troppo (la seconda pure). Poi questo ramo salta l'inizializzazione e il set
+  // resta com'era, mentre i container nuovi girano fuori dalla replica.
+  //
+  // Misurato: la catena stampa «pronto» ed esce **0** con un set a un membro solo
+  // e due mongod sani che non ne fanno parte (V-072). È il guasto che ADR-0060
+  // chiamava «il pericoloso, perché non fallisce», arrivato da una porta che
+  // quella guardia non sorvegliava.
+  //
+  // I membri configurati li porta `hello()`, di nuovo senza credenziali. Si
+  // sommano anche `passives` e `arbiters`: in questo lab non ce ne sono, ma un
+  // membro con `priority: 0` finirebbe in `passives` e non in `hosts`, e un
+  // confronto che lo perdesse accuserebbe una differenza inesistente.
+  const configurati = (primoSguardo.hosts || [])
+    .concat(primoSguardo.passives || [])
+    .concat(primoSguardo.arbiters || [])
+    .sort();
+  const chiesti = MEMBRI.slice().sort();
+
+  if (configurati.join(",") !== chiesti.join(",")) {
+    print("ERRORE: il replica set «" + primoSguardo.setName + "» esiste già con altri membri.");
+    print("  configurati adesso: " + configurati.join(", "));
+    print("  chiesti da MEMBRI_SHARD: " + chiesti.join(", "));
+    print("Di solito significa un cambio di profilo su uno stack già inizializzato.");
+    print("Questo script NON riconfigura un set esistente: i dati sul disco sono");
+    print("quelli di prima, e una riconfigurazione non è un'operazione da avvio.");
+    print("Per cambiare profilo: «make reset-03», poi «make up-03 PROFILO=…».");
+    quit(USCITA_MEMBRI_DIVERSI);
+  }
+
   print("replica set «" + primoSguardo.setName + "» già formato: non lo reinizializzo");
 } else {
   print("inizializzo lo shard «" + NOME_REPLICA + "»");

@@ -667,8 +667,14 @@ docker exec -it sh-mongos mongosh -u admin --authenticationDatabase admin
 #   db.ordini.find({_id: 42}).explain().queryPlanner.winningPlan.shards.length
 #   db.ordini.find({_id: {$gte: 100, $lt: 200}}).explain().queryPlanner.winningPlan.shards.length
 
-# Tre membri per insieme invece di uno (18 container): serve anche scommentare
-# le tre righe MEMBRI_* nel file .env
+# Tre membri per insieme invece di uno (18 container). Sono DUE cose, non una:
+# scommentare le tre righe MEMBRI_* nel file .env, e azzerare lo stack prima di
+# riavviarlo. Gli init non riconfigurano un replica set che esiste già: su uno
+# stack acceso in «palco» il cambio di profilo lascerebbe i set com'erano e i
+# container nuovi fuori dalla replica. Dalla correzione di ADR-0077 non è più
+# silenzioso — l'anello esce 6 e nomina i membri — ma il modo di farlo resta
+# questo.
+make reset-03
 make up-03 PROFILO=completo
 
 # Rimettere i dati come all'inizio dopo aver giocato

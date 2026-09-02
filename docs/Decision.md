@@ -4868,3 +4868,111 @@ obbliga ogni futuro chiamante a ricordarsene. Aggiungere un terzo messaggio dedi
 distinguere due casi che `mongos` non distingue.
 
 **Fonti:** [V-070](Sources.md#v-070)
+
+
+---
+
+<a id="adr-0077"></a>
+## ADR-0077 — Il verdetto è il codice d'uscita: tre punti in cui la catena diceva «pronto» e non lo era
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** Dopo il recensore della [ADR-0076](#adr-0076), la PR #4 è stata data a un secondo,
+con un incarico esplicito: uno sguardo indipendente, non una conferma del primo. Ha lasciato tre
+rilievi. Arbitrati eseguendo, **tutti e tre descrivono un caso raggiungibile**, e nessuno dei tre
+era stato immaginato scrivendo il codice.
+
+Hanno in comune più di quanto sembri leggendoli separati. La PR promette in testata che «`make
+up-03` è **un** comando e il suo codice d'uscita è il verdetto». Ciascuno dei tre è un punto in cui
+quel verdetto è verde su uno stack che non fa quello che la pagina accanto promette — e in due casi
+su tre l'avviso in italiano c'era già, stampato, letto da nessuno, perché `up --wait` legge i codici
+e non le frasi.
+
+**Primo rilievo — il router senza keyfile.** La regola che pretende `--keyFile` in
+`tools/check_stack.py` vive dentro `if stack_con_replica and avvia_mongod(...)`, e un `mongos` non è
+un `mongod`. Verificato su un file vero — una copia di `docker/03-sharded/compose.yaml` con
+cancellate le sole due righe del keyfile del router — `check_stack.py` rispondeva «Stack conformi:
+1» e usciva **0** ([V-071](Sources.md#v-071)). Avviato, quello stack esce **1** con «container
+sh-mongos is unhealthy», e il log del router ripete `Command find requires authentication`: la frase
+che si legge quando la password è sbagliata, mentre la password è giusta e manca una riga.
+
+**Secondo rilievo — il cambio di profilo su uno stack già acceso.** Gli anelli di inizializzazione
+saltano il lavoro se trovano il replica set già formato, e non guardano **con quali membri**.
+[ADR-0060](#adr-0060) aveva previsto due direzioni di disallineamento fra `MEMBRI_*` e `--profile`,
+e le sorveglia entrambe. Questa è una terza, che non viene dall'ambiente ma dal disco: su uno stack
+inizializzato in `palco`, con `MEMBRI_CFG` portato a tre nomi, tutti e tre i container rispondono
+(la prima guardia è contenta), nessun candidato è fuori elenco (la seconda pure), e il ramo che
+salta fa il resto. Misurato: la catena stampa «config server pronto», esce **0**, e
+`rs.status().members.length` vale **1** mentre due config server sani girano fuori dalla replica
+([V-072](Sources.md#v-072)). È il guasto che ADR-0060 chiamava «il pericoloso, perché non
+fallisce», entrato da una porta che quella guardia non sorvegliava.
+
+**Terzo rilievo — il seed accetta qualunque ventimila.** Il caricamento dei dati si salta se
+`lab.ordini` ha già `DOCUMENTI` documenti. Il conteggio però non dice se sono **distribuiti**.
+Misurato su una collezione rifatta a mano, piena e senza riga in `config.collections`: il seed
+stampa «ATTENZIONE: lab.ordini non risulta distribuita» ed esce **0** lo stesso. Un laboratorio
+sullo sharding la cui collezione non è partizionata, consegnato verde.
+
+**Decisione.**
+
+1. **Anche il router dichiara `--keyFile`, e la regola sta accanto a quella del `mongod`, non
+   dentro.** `check_stack.py` guadagna un `if stack_con_replica and avvia_mongos(...)` parallelo al
+   precedente. Non è un `elif` e non è una condizione allargata: sono due anelli diversi della
+   stessa catena, con due messaggi diversi, perché chi legge il rilievo deve sapere quale dei due
+   sta guardando. Il messaggio porta per intero la stringa che il router stamperebbe, così chi la
+   trova nei log per un'altra strada ci arriva cercandola.
+
+2. **Un anello che trova il set già formato confronta i membri, e se differiscono si ferma.** Nuovo
+   codice d'uscita **6** (`USCITA_MEMBRI_DIVERSI`) in `10-cfg-initiate.js` e in
+   `11-shard-initiate.js`, con il messaggio che elenca i membri configurati, quelli chiesti, e il
+   modo di passare di profilo: `make reset-03`, poi `make up-03`. **Fermarsi e non riconfigurare**:
+   `rs.reconfig()` su un set che ha già dati non è un'operazione da script di avvio, e un anello
+   che la tentasse trasformerebbe un errore leggibile in un guasto a metà.
+
+3. **Il seed non salta il caricamento se la collezione non è nel catalogo.** Nuovo codice **9**
+   (`USCITA_NON_DISTRIBUITA`), con il messaggio che indica `make seed-03`. Non svuota da sé: una
+   collezione piena è dati, e cancellarli non è una decisione che uno script di avvio possa
+   prendere per conto di chi guarda.
+
+4. **I documenti su un solo shard restano un avviso, e questa è una scelta.** Unire i chunk su uno
+   shard è una **scena della demo** ([ADR-0069](#adr-0069)): un `make up-03` dato dopo quella scena
+   non deve diventare rosso per averla eseguita. Si boccia l'assenza dal catalogo, che nessuna scena
+   produce; non ogni stato diverso da quello che il seed avrebbe prodotto.
+
+5. **Il cheat sheet dice la precondizione che la pagina delle registrazioni diceva già.**
+   `docs/02-architetture/sharded-cluster.md` chiedeva di scommentare le tre righe `MEMBRI_*` e
+   basta; `docs/05-talk/registrazioni/README.md` diceva anche `make reset-03`. Due pagine che
+   descrivono la stessa manovra e ne dicono metà a testa: adesso il cheat sheet — che è dove va a
+   guardare chi cambia profilo — le dice tutte e due.
+
+6. **Le correzioni sono state viste in opera nei due versi** (nota di metodo 131). Le due prove
+   nuove di `check_stack.py` sono state fatte fallire neutralizzando la regola; le tre correzioni
+   agli script di init sono state provate riproducendo il guasto — uscite **6** e **9** con i
+   membri e i conteggi nominati — e poi rifacendo i giri leciti: `up-03` in `palco` e in `completo`,
+   da zero e ripetuto, **0** tutte e quattro le volte, e `smoke-03 PROFILO=completo` con «Superati:
+   101 · Errori: 0».
+
+**Conseguenze.** Tre stati che uscivano **0** adesso escono **1**, **6** e **9**, e nessuno di loro
+è raggiungibile da un uso corretto: le prove sui giri leciti servono a dirlo, non a decorare. Il
+prezzo è che chi cambia profilo su uno stack acceso adesso trova un errore dove prima trovava un
+avvio riuscito e uno stack sbagliato — che è il baratto per cui la guardia esiste. Le cinque
+registrazioni asciinema non sono toccate: mostrano giri leciti, e nei giri leciti niente cambia.
+
+Resta scritto che [ADR-0060](#adr-0060) **regge**: le sue due guardie funzionano, e una di loro si è
+fatta viva da sé durante una prova d'altro, fermando la catena con uscita 5. Il buco era accanto,
+non dentro. Una guardia bilaterale su due sorgenti non copre una terza sorgente che nessuno aveva
+contato — e la terza, qui, era lo stato sul disco.
+
+**Alternative scartate.** **Riconfigurare invece di fermarsi** — l'anello potrebbe chiamare
+`rs.reconfig()` e aggiungere i membri mancanti. Sarebbe comodo e sbagliato: la riconfigurazione di
+un config server con dati dentro è un'operazione che si fa guardandola, non dentro un `depends_on`,
+e il fallimento a metà lascerebbe un cluster in uno stato che nessun messaggio saprebbe descrivere.
+**Fare del seed un errore anche per il singolo shard** — renderebbe rosso il `make up-03` che segue
+la scena della fusione, cioè punirebbe l'uso previsto. **Allargare la condizione del `mongod`
+invece di scrivere una regola nuova** — un `avvia_mongod(...) or avvia_mongos(...)` costa una riga
+in meno e produce un solo messaggio per due guasti che si diagnosticano in modo diverso; il valore
+di `check_stack.py` è il messaggio, non il codice d'uscita ([ADR-0076](#adr-0076)). **Lasciare i tre
+rilievi alla revisione umana e fondere così com'è** — sono tre falsi verdi provati, e la promessa
+in testata alla PR è proprio che il verde significhi qualcosa.
+
+**Fonti:** [V-071](Sources.md#v-071), [V-072](Sources.md#v-072)

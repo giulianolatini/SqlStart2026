@@ -7992,3 +7992,169 @@ mongos --configdb /cfg1:27017
 - **Usata da:** ADR-0076
 
 ---
+
+<a id="v-071"></a>
+### V-071 — Un `mongos` senza `--keyFile`: approvato dal controllo, e un log che accusa la password
+
+- **Comandi:** una copia di `docker/03-sharded/compose.yaml` con cancellate le sole due righe
+  `--keyFile` / `/keyfile/mongo-keyfile` del `mongos`, passata a `tools/check_stack.py`; poi
+  `docker compose -f <copia> -p prova-keyfile --profile palco up -d --wait` e
+  `docker logs sh-mongos`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.5.0, immagine `mongo` pinnata per
+  digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-02
+- **Che cosa si voleva sapere:** se il rilievo lasciato dal secondo revisore sulla PR #4 — «la
+  regola che pretende `--keyFile` vive dentro il ramo di `avvia_mongod`, e un `mongos` non è un
+  `mongod`» — descriva un falso negativo reale, su un file vero e non su un documento sintetico.
+
+- **Esito, primo punto — il controllo approvava.** Prima della correzione, su quella copia:
+
+```
+Stack conformi: 1
+```
+
+  con uscita **0**. Uno sharded cluster il cui router non possiede il segreto con cui il resto del
+  cluster si autentica, dichiarato conforme.
+
+- **Esito, secondo punto — lo stack non parte.** `up -d --wait` esce **1**:
+
+```
+dependency failed to start: container sh-mongos is unhealthy
+```
+
+- **Esito, terzo punto — il log accusa l'autenticazione, non il keyfile.** Il router entra in un
+  ciclo che si ripete ogni due secondi:
+
+```
+"msg":"Failed to refresh key cache"
+"msg":"Error loading global settings from config server. Sleeping for 2 seconds and retrying"
+  error: {"code": 13, "codeName": "Unauthorized",
+          "errmsg": "Error loading clusterID :: caused by :: Command find requires authentication"}
+```
+
+  `Command find requires authentication` è la frase che si legge quando una password è sbagliata, e
+  manda a controllare `.env`. Qui la password è giusta: manca la riga che dà al router il keyfile,
+  e senza quella il router non ha nessuna identità da presentare al config server. Il messaggio è
+  vero alla lettera e indica il posto sbagliato — la stessa forma d'errore della **nota 129**.
+
+- **Esito, quarto punto — dopo la correzione il file è bocciato.** Sulla stessa copia:
+
+```
+✗ …/compose.SENZA-KEYFILE-MONGOS.yaml: mongos: avvia un mongos senza «--keyFile». Il router non
+  ha il segreto con cui il resto del cluster si autentica: parte, resta unhealthy e ripete «Error
+  loading clusterID :: caused by :: Command find requires authentication», che sembra una
+  credenziale sbagliata e invece è una riga mancante (ADR-0014, V-071)
+```
+
+- **Riserve:**
+  - **a.** Provato sul solo profilo `palco`. La copia difettosa toglieva il keyfile al **primo**
+    `mongos`; `mongos2`, che esiste solo in `completo`, non è stato provato. La regola però
+    interroga ogni servizio del file, non il primo.
+  - **b.** Le stringhe di log sono di **MongoDB 7.0.40**, l'immagine pinnata del repository, e
+    possono cambiare di versione. Quello che non cambia è che il container resta `unhealthy` e che
+    `up --wait` esce diverso da zero.
+  - **c.** La regola nuova guarda che l'opzione **ci sia**, non che il file puntato esista o sia
+    montato: quella è una verifica separata e già presente (`problemi_keyfile`).
+  - **d.** Non è stato provato che cosa succeda al contrario — un `mongos` con `--keyFile` e un
+    `mongod` senza. Quel caso era già coperto dalla regola precedente.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0077
+
+---
+
+<a id="v-072"></a>
+### V-072 — Il cambio di profilo su uno stack già inizializzato, e ventimila documenti non distribuiti dichiarati pronti
+
+- **Comandi:** `make up-03` (profilo `palco`), poi
+  `docker compose --profile completo up -d --wait cfg2 cfg3` e
+  `MEMBRI_CFG="cfg1:27017,cfg2:27017,cfg3:27017" docker compose … up --force-recreate
+  --exit-code-from cfg-init cfg-init`, con `rs.status()` subito dopo; e, separatamente,
+  `lab.ordini.drop()` seguito da un `insertMany` di 20 000 documenti senza distribuirli, poi il
+  riavvio del solo servizio `seed`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.5.0, immagine `mongo` pinnata per
+  digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-02
+- **Che cosa si voleva sapere:** se gli altri due rilievi del secondo revisore sulla PR #4
+  descrivano casi raggiungibili in cui la catena esce **0** su uno stack che non fa quello che
+  promette.
+
+- **Esito, primo punto — il cambio di profilo passa in silenzio.** L'anello dei config server
+  riceve tre membri, ne trova uno, e dichiara pronto:
+
+```
+sh-cfg-init  | membri da configurare: cfg1:27017, cfg2:27017, cfg3:27017
+sh-cfg-init  | replica set «cfgrs» già formato: non lo reinizializzo
+sh-cfg-init  | primario del config server eletto: cfg1:27017
+sh-cfg-init  | utente amministratore già presente: non lo ricreo
+sh-cfg-init  | config server pronto
+sh-cfg-init exited with code 0
+```
+
+  e subito dopo, sullo stesso set:
+
+```
+membri nel set: 1
+  - cfg1:27017 [PRIMARY]
+```
+
+  Due config server sani girano fuori dalla replica. Le due guardie di
+  [ADR-0060](Decision.md#adr-0060) non lo vedono, e non è un difetto delle guardie: cfg2 e cfg3
+  **rispondono**, quindi la prima è soddisfatta; nessun candidato è **fuori elenco**, quindi la
+  seconda pure. Il disallineamento è una terza direzione, che nasce dal disco e non dall'ambiente.
+
+- **Esito, secondo punto — la guardia esistente funziona, nella sua direzione.** Rilanciando lo
+  stesso anello con `MEMBRI_CFG` lasciato al valore del `palco` mentre cfg2 e cfg3 giravano, la
+  catena si è fermata da sé con uscita **5** (`USCITA_MEMBRO_DI_TROPPO`). Non era la misura
+  cercata — è capitata durante un'altra prova — e vale la pena scriverla: ADR-0060 regge, il buco
+  è accanto e non dentro.
+
+- **Esito, terzo punto — il seed accetta ventimila documenti non distribuiti.** Con `lab.ordini`
+  rifatta a mano, piena e senza riga in `config.collections`:
+
+```
+sh-seed  | lab.ordini ha già 20000 documenti: non ricarico.
+sh-seed  | Per ricaricare comunque: «make seed-03», che passa RICARICA=1.
+sh-seed  | ATTENZIONE: lab.ordini non risulta distribuita.
+sh-seed exited with code 0
+```
+
+  L'avviso c'era già, ed è esatto. A mancare era il codice d'uscita: un laboratorio sullo sharding
+  la cui collezione non è partizionata veniva consegnato verde.
+
+- **Esito, quarto punto — dopo le correzioni i due casi sono rumorosi.** Stessa sequenza, stack
+  ricostruito:
+
+```
+sh-cfg-init  | ERRORE: il replica set «cfgrs» esiste già con altri membri.
+sh-cfg-init  |   configurati adesso: cfg1:27017
+sh-cfg-init  |   chiesti da MEMBRI_CFG: cfg1:27017, cfg2:27017, cfg3:27017
+sh-cfg-init exited with code 6
+
+sh-seed  | ERRORE: lab.ordini ha già 20000 documenti ma NON è distribuita.
+sh-seed exited with code 9
+```
+
+- **Esito, quinto punto — i giri leciti restano verdi.** `make up-03` da zero e poi ripetuto: **0**
+  entrambe le volte. `make up-03 PROFILO=completo` da zero e poi ripetuto: **0** entrambe le volte.
+  `make seed-03`, che è la via d'uscita indicata dal messaggio di uscita 9, ricostruisce la
+  collezione distribuita (`shard1rs: 9860 · shard2rs: 10140`). `make smoke-03 PROFILO=completo`:
+  **Superati: 101 · Errori: 0**.
+
+- **Riserve:**
+  - **a.** Il cambio di profilo è stato **simulato** accendendo cfg2 e cfg3 e rilanciando il solo
+    `cfg-init` con `MEMBRI_CFG` sovrascritto. È la stessa sequenza che `make up-03
+    PROFILO=completo` esegue su uno stack `palco` acceso, ma quel bersaglio non è stato invocato in
+    quella forma: la misura riguarda l'anello, non il bersaglio.
+  - **b.** Riprodotto sui **config server**. I due anelli degli shard hanno lo stesso identico ramo
+    e hanno ricevuto la stessa correzione, ma il guasto non è stato riprodotto su di loro.
+  - **c.** La collezione non distribuita è stata prodotta a mano. Il caso è **raggiungibile**; non
+    è dimostrato che una sequenza di comandi del laboratorio lo produca, né quanto sia frequente.
+  - **d.** La distribuzione su **un solo shard** resta un avviso e non un errore. È una scelta e
+    non una dimenticanza — unire i chunk su uno shard è una scena della demo
+    ([ADR-0069](Decision.md#adr-0069)) — quindi il seed non boccia ogni stato diverso da quello che
+    avrebbe prodotto lui, solo l'assenza dal catalogo.
+  - **e.** Il confronto fra membri usa `hello()`, che risponde senza credenziali. Somma `hosts`,
+    `passives` e `arbiters` per difendersi da un membro a `priority: 0`, ma quel caso non esiste in
+    questo laboratorio e non è stato provato.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0077
+
+---

@@ -791,6 +791,49 @@ def test_configsvr_e_shardsvr_insieme_sono_un_problema():
     ), problemi
 
 
+# Regola 2-bis — anche il router dichiara `--keyFile`.
+
+
+def test_un_mongos_senza_keyfile_e_un_problema():
+    # Rilievo del secondo revisore sulla PR #4, verificato su un file vero: tolte
+    # le due righe del keyfile al mongos di docker/03-sharded/compose.yaml,
+    # check_stack.py rispondeva «Stack conformi: 1» e usciva 0. La regola che
+    # pretende il keyfile era dentro il ramo di `avvia_mongod`, e un mongos non è
+    # un mongod. Misurato che cosa succede avviandolo davvero: `up --wait` esce 1
+    # con «container sh-mongos is unhealthy», e il log del router ripete
+    # «Unauthorized: Command find requires authentication» — che sembra una
+    # credenziale sbagliata (V-071).
+    documento = sharded(
+        mongos={"command": ["mongos", "--configdb", "cfgrs/cfg1:27017"]}
+    )
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert any(
+        problema.startswith("mongos:") and "--keyFile" in problema
+        for problema in problemi
+    ), problemi
+
+
+def test_un_mongos_con_il_keyfile_non_e_un_problema():
+    # Il verso opposto, che tiene la regola onesta: il mongos conforme non deve
+    # produrre nessun rilievo sul keyfile.
+    documento = sharded(
+        mongos={
+            "command": [
+                "mongos",
+                "--configdb",
+                "cfgrs/cfg1:27017",
+                "--keyFile",
+                "/keyfile/mongo-keyfile",
+            ]
+        }
+    )
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert not any(
+        problema.startswith("mongos:") and "--keyFile" in problema
+        for problema in problemi
+    ), problemi
+
+
 # Regola 3 — `--configdb` nomina un replica set, e quel set esiste nel file.
 
 

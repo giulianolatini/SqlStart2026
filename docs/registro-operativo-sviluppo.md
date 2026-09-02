@@ -4230,7 +4230,7 @@ gli stessi esiti, e le 15 porte tutte libere.
      non controlla niente — un `assert` su un dizionario vuoto passa sempre. Rompere ciò che si sta
      proteggendo è l'unico modo economico di sapere che la protezione tocca la cosa giusta.
 
-**Consuntivo del branch, alla vigilia dell'unione.** **Ventitré** commit e **trentatré** file
+**Consuntivo del branch, alla vigilia dell'unione.** **Ventiquattro** commit e **trentatré** file
 rispetto a `develop`: il piano, undici di task, due punti di ripresa, il commit di avvio, quello
 della nota di metodo lasciata da `feature/02`, la correzione del numero della PR e questo — che è
 compreso nel conto, come prescrive la **nota 37**. La riga diceva «venti» quando fu scritta, e la
@@ -4350,3 +4350,94 @@ altri rilievi: i due commenti in linea sono tutto.
 Stato aggiornato: decisioni fino a **ADR-0076**, verifiche fino a **V-070**, note di metodo fino
 alla **134**. La suite è a **141** prove. La PR #4 resta aperta: i due thread sono stati chiusi con
 la prova, e l'unione spetta al PO.
+
+---
+
+## 2026-09-02 — La seconda review su PR #4: tre falsi verdi, e in due casi l'avviso c'era già
+
+Chiusa la prima review, Giuliano ha chiesto un secondo parere sulla stessa PR, a un altro modello,
+con un incarico scritto: uno sguardo indipendente, non una conferma del primo. Il prompt diceva
+dove guardare in ordine di valore, che cosa non segnalare — la lingua italiana, la verbosità dei
+commenti, l'assenza di CI — e che cinque rilievi provati valgono più di venti supposti.
+
+Ne sono arrivati tre. **Tutti e tre veri**, il che è una differenza di esito e non di merito
+rispetto alla prima review: là un rilievo su due nasceva da una diagnosi sbagliata, qui nessuno.
+Vale la pena scrivere perché, e la ragione non è che il secondo revisore sia più bravo. La prima
+review guardava una funzione e ragionava sul valore di ritorno; questa guardava la catena di avvio
+e ragionava sul **codice d'uscita**. Sono due punti d'osservazione, non due livelli di abilità.
+
+**Il filo che lega i tre.** La testata della PR promette che «`make up-03` è **un** comando e il
+suo codice d'uscita è il verdetto». Ognuno dei tre rilievi è un punto in cui quel verdetto è verde
+su uno stack che non fa quello che la pagina accanto promette. E in due casi su tre — il seed, e il
+log del router — **una frase che diceva la verità c'era già**, stampata, in italiano, corretta. Non
+la leggeva nessuno, perché `up --wait` legge i codici e non le frasi.
+
+**Primo — il router senza keyfile.** La regola che pretende `--keyFile` in `check_stack.py` sta
+dentro il ramo di `avvia_mongod`, e un `mongos` non è un `mongod`. Verificato su un file vero e non
+su un documento sintetico: tolte al router le sole due righe del keyfile,
+`check_stack.py` rispondeva «Stack conformi: 1» e usciva **0** ([V-071](Sources.md#v-071)). Avviato,
+quello stack esce **1** — «container sh-mongos is unhealthy» — e il router ripete in ciclo
+`Command find requires authentication`, che è la frase della password sbagliata mentre la password
+è giusta.
+
+**Secondo — il cambio di profilo su uno stack già acceso.** Gli anelli di inizializzazione saltano
+il lavoro se il replica set è già formato, e non guardano **con quali membri**.
+[ADR-0060](Decision.md#adr-0060) aveva previsto due direzioni di disallineamento fra `MEMBRI_*` e
+`--profile` e le sorveglia entrambe; questa è una terza, che non viene dall'ambiente ma dal disco.
+Misurato: la catena stampa «config server pronto», esce **0**, e il set ha **un** membro mentre due
+config server sani girano fuori dalla replica ([V-072](Sources.md#v-072)). Durante la stessa prova
+una delle due guardie esistenti si è fatta viva da sé, fermando la catena con uscita **5**: ADR-0060
+regge, il buco era accanto e non dentro.
+
+**Terzo — il seed accetta qualunque ventimila.** Il caricamento si salta se `lab.ordini` ha già
+ventimila documenti, e il conteggio non dice se sono distribuiti. Su una collezione piena e assente
+dal catalogo, il seed stampa «ATTENZIONE: lab.ordini non risulta distribuita» ed esce **0**.
+
+**Che cosa si è deciso, in [ADR-0077](Decision.md#adr-0077).** Una regola nuova per il router,
+accanto a quella del `mongod` e non dentro. Un confronto fra membri configurati e membri chiesti nei
+due anelli di init, con uscita **6** e i due elenchi stampati. Un'uscita **9** dal seed quando la
+collezione manca dal catalogo. E il cheat sheet della pagina dello sharded, che chiedeva di
+scommentare le tre righe `MEMBRI_*` senza dire che prima si azzera — mentre l'indice delle
+registrazioni lo diceva: due pagine con metà manovra a testa.
+
+**Che cosa si è deciso di NON fare.** Riconfigurare il set invece di fermarsi: `rs.reconfig()` su un
+set con dati dentro non è un'operazione da `depends_on`. Bocciare anche i documenti finiti su un solo
+shard: unire i chunk è una **scena** della demo ([ADR-0069](Decision.md#adr-0069)), e il `make up-03`
+che segue quella scena non deve diventare rosso per averla eseguita. La distinzione fra «stato che
+il seed non avrebbe prodotto» e «stato che nessuna scena può produrre» è la riga su cui passa la
+correzione.
+
+**Le prove.** Le due nuove di `check_stack.py` viste fallire con la regola neutralizzata; le
+correzioni agli script riprodotte nei due versi — uscite 6 e 9 con membri e conteggi nominati, e poi
+i giri leciti: `up-03` in `palco` e in `completo`, da zero e ripetuto, **0** tutte e quattro le
+volte, `make seed-03` che ricostruisce la collezione distribuita, e `smoke-03 PROFILO=completo` a
+«Superati: 101 · Errori: 0». Le cinque registrazioni asciinema non sono toccate: mostrano giri
+leciti, e nei giri leciti niente cambia.
+
+**Una nota sul revisore.** Non ha potuto lanciare la suite: la sua sandbox in sola lettura ha
+bloccato l'inizializzazione della cache di `uv`. È un limite della sua esecuzione, non un difetto del
+repository, e va scritto perché spiega la forma dei suoi rilievi — tutti e tre nascono da lettura del
+codice, e la misura che li ha confermati l'abbiamo fatta qui.
+
+135. **Un avviso che non cambia il codice d'uscita è un avviso che nessuno legge.** Il seed sapeva
+     che la collezione non era distribuita e lo scriveva. Il router sapeva di non potersi
+     autenticare e lo scriveva. In entrambi i casi la frase era corretta e finiva in uno stream che
+     il chiamante automatico non guarda: `up --wait` raccoglie codici d'uscita e stati di salute, e
+     una catena di sei anelli è fatta apposta perché nessuno debba leggere sei log. Un messaggio
+     diagnostico e un codice d'uscita non sono due modi di dire la stessa cosa: il primo serve a chi
+     è già andato a guardare, il secondo serve a farcelo andare. Se una condizione merita la frase,
+     bisogna decidere esplicitamente se merita anche il codice — e scrivere la ragione quando la
+     risposta è no, come qui per il singolo shard.
+
+136. **Due revisori che trovano cose diverse non sono uno bravo e uno no: guardano da due punti.**
+     Il primo revisore ha esaminato una funzione e ha ragionato sul suo valore di ritorno,
+     trovando un difetto di messaggio e sbagliando la diagnosi. Il secondo ha esaminato la catena di
+     avvio e ha ragionato sul codice d'uscita, trovando tre falsi verdi e nessuna diagnosi
+     sbagliata. Nessuno dei due ha visto quello che ha visto l'altro. La conclusione utile non è
+     «chiediamo al migliore» ma «la domanda che si pone al revisore decide che cosa può trovare»: il
+     prompt di questa seconda review nominava esplicitamente codici d'uscita e comandi che
+     falliscono in silenzio, e i tre rilievi sono arrivati esattamente da lì.
+
+Stato aggiornato: decisioni fino a **ADR-0077**, verifiche fino a **V-072**, note di metodo fino
+alla **136**. La suite resta a **143** prove. La PR #4 resta aperta: le due review sono state
+arbitrate eseguendo, e l'unione spetta al PO.

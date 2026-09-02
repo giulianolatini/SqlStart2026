@@ -663,6 +663,23 @@ def verifica(
                     "(ADR-0014)"
                 )
 
+        # Il router ha bisogno dello stesso segreto, e la regola qui sopra non lo
+        # copre: `mongos` non è un `mongod`, e per due anelli della stessa catena
+        # servivano due domande. Senza `--keyFile` il router parte, non diventa mai
+        # sano e ripete `Error loading global settings from config server` con
+        # dentro `Unauthorized: Command find requires authentication` — che manda a
+        # cercare una password sbagliata mentre manca il keyfile (V-071).
+        if stack_con_replica and avvia_mongos(servizio.get("command")):
+            if not valore_opzione(servizio.get("command"), "--keyFile"):
+                problemi.append(
+                    f"{nome}: avvia un mongos senza «--keyFile». Il router non ha "
+                    "il segreto con cui il resto del cluster si autentica: parte, "
+                    "resta unhealthy e ripete «Error loading clusterID :: caused "
+                    "by :: Command find requires authentication», che sembra una "
+                    "credenziale sbagliata e invece è una riga mancante "
+                    "(ADR-0014, V-071)"
+                )
+
         problemi.extend(problemi_keyfile(nome, servizio))
         problemi.extend(problemi_persistenza(nome, servizio))
 

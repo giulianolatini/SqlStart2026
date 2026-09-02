@@ -109,6 +109,7 @@
 // Fra 1 e 125 (ADR-0036), e distinti da quelli degli altri script della catena.
 const USCITA_NON_E_UN_ROUTER = 2;
 const USCITA_SHARDING_FALLITO = 8;
+const USCITA_NON_DISTRIBUITA = 9;
 
 const DOCUMENTI = 20000;
 const LOTTO = 5000;
@@ -220,6 +221,31 @@ function racconta() {
 const presenti = lab.ordini.countDocuments();
 
 if (presenti === DOCUMENTI && !RICARICA) {
+  // Saltare il caricamento è legittimo solo se quello che c'è è quello che
+  // avremmo fatto noi, e il conteggio da solo non lo dice. Ventimila documenti in
+  // una collezione NON distribuita sono ventimila documenti su un unico shard: un
+  // laboratorio sullo sharding la cui collezione non è partizionata non mostra la
+  // cosa per cui esiste.
+  //
+  // Prima questo ramo se ne accorgeva già — `racconta()` stampa «ATTENZIONE:
+  // lab.ordini non risulta distribuita» — e poi usciva **0** lo stesso: misurato,
+  // la catena dichiara pronto un cluster senza sharding (V-072). Un avviso che non
+  // cambia il codice d'uscita è un avviso che `up --wait` non legge, ed è la
+  // regola di ADR-0053 applicata a uno script invece che a uno strumento.
+  //
+  // I documenti su UN SOLO shard restano invece un avviso e non un errore, ed è una
+  // distinzione voluta: unire i chunk su uno shard è una SCENA della demo
+  // (ADR-0069), e un `make up-03` dato dopo quella scena non deve diventare rosso
+  // per averla eseguita. Qui si boccia solo l'assenza dal catalogo, che nessuna
+  // scena produce.
+  if (!configurazione.collections.findOne({ _id: COLLEZIONE })) {
+    print("ERRORE: " + COLLEZIONE + " ha già " + presenti + " documenti ma NON è distribuita.");
+    print("Non la ricarico da me: svuotare una collezione piena è una perdita di dati,");
+    print("e non è una decisione che uno script di avvio possa prendere da solo.");
+    print("Per rifarla distribuita: «make seed-03», che passa RICARICA=1 e la ricostruisce.");
+    quit(USCITA_NON_DISTRIBUITA);
+  }
+
   print("lab.ordini ha già " + presenti + " documenti: non ricarico.");
   print("Per ricaricare comunque: «make seed-03», che passa RICARICA=1.");
   racconta();
