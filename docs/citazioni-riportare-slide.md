@@ -1560,3 +1560,23 @@ Fonte: [V-067](Sources.md#v-067) quinto punto, [ADR-0071](Decision.md#adr-0071),
 il paio con «Il messaggio d'errore che nasconde quello vero»: là una regola ne nascondeva un'altra,
 qui a nascondere era un permesso mancante, e a toglierlo siamo stati noi. Due minuti, e in sala
 resta l'idea che rimuovere un errore può togliere un'informazione.
+
+---
+
+### La disponibilità non è del cluster: è di ogni singolo shard
+
+> Lo stesso comando, due configurazioni. Con un membro per shard, fermato quel membro, il router
+> aspetta **quindici secondi** e poi dice che per `shard1rs` non trova un primario: metà dei
+> ventimila documenti è irraggiungibile, mentre l'altra metà continua a rispondere in un secondo.
+> Con tre membri per shard lo stesso guasto quasi non si vede — il conteggio torna ventimila in
+> **zero secondi**, e il primario nel frattempo è passato da `shard1a` a `shard1b`. Uno sharded
+> cluster non cade intero: cade a pezzi, e ogni pezzo si porta via i propri documenti.
+
+Fonte: [V-068](Sources.md#v-068) quarto esito, [ADR-0010](Decision.md#adr-0010).
+
+**Perché una slide:** corregge l'idea che chi arriva dal replica set si porta dietro senza
+accorgersene — «più nodi, più resistenza». Nello sharding la ridondanza sta **dentro** ogni shard, e
+fra shard non c'è: se uno shard non ha un secondario, la sua fetta di dati sparisce e il cluster
+continua a rispondere benissimo per tutto il resto. Le due misure vanno mostrate una accanto
+all'altra, perché è il confronto a dire la cosa vera: la differenza non è il prodotto, è il numero
+di membri per shard.

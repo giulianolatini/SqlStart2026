@@ -5626,7 +5626,7 @@ file                                   durata   eventi   byte   il numero che po
   scena: i numeri sopra sono singoli, non mediane, e vanno letti accanto a [V-029](#v-029) e
   [V-031](#v-031) che le mediane le hanno.
 - **Data:** 2026-09-01
-- **Usata da:** ADR-0050
+- **Usata da:** ADR-0050, ADR-0073
 
 ---
 
@@ -7727,5 +7727,90 @@ ranged  ordered: false       248 ms    1 947 ms
   `docker/03-sharded/init/10-cfg-initiate.js`.
 - **Data:** 2026-09-02
 - **Usata da:** ADR-0072
+
+---
+
+<a id="v-068"></a>
+### V-068 — Le cinque scene dello sharded: diciotto kilobyte, quarantaquattro volte meno con `plain`, e cinque riproduzioni identiche all'originale
+
+- **Comandi:** `python3 tools/registra-terminale.py <file>.cast --titolo "…" -- make <bersaglio>`
+  con `up-03`, `stato-03`, `distribuzione-03`, `guasto-03` e `guasto-03 PROFILO=completo`; poi
+  `python3 tools/registra-terminale.py --riproduci <file>.cast` su ciascuna delle cinque
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, stack `docker/03-sharded`,
+  MongoDB 7.0.40. Terminale registrato a 100×30. Profilo `palco` per le prime quattro scene,
+  `completo` per la quinta.
+- **Che cosa si voleva sapere:** se il Blocco 3 abbia una riserva utilizzabile in sala, quanto pesi,
+  e se ciò che è stato registrato sia davvero ciò che si rivede.
+
+- **Esito, le cinque scene:**
+
+```
+file                             durata  eventi   byte   il numero che porta
+05-avvio-sharded.cast             22,9 s     53   5407   la catena finisce con sh-up-03 Healthy
+06-stato-sharded.cast              6,5 s     14   4422   2 shard · 4 chunk (2+2) · 1 router
+07-distribuzione-sharded.cast      4,0 s     12   2809   9860 + 10140 = 20000
+08-guasto-shard-palco.cast        40,1 s     18   3167   1 s sullo shard vivo, 15 s e 16 s di attesa
+09-failover-membro-shard.cast     12,3 s     15   2552   20000 in 0 s, primario shard1a → shard1b
+```
+
+  Diciotto kilobyte per cinque scene, che portano a trentun kilobyte il totale della cartella
+  insieme alle quattro di [V-045](#v-045).
+
+- **Esito — `COMPOSE_PROGRESS=plain` vale quarantaquattro volte, e non è una questione di peso.**
+  Lo **stesso** `up` sullo **stesso** stack già acceso, registrato due volte a nove secondi di
+  distanza: **134 861 byte in 205 eventi** con il renderer predefinito, **3 050 byte in 28 eventi**
+  con `COMPOSE_PROGRESS=plain`. Durata praticamente identica — 8,6 s contro 8,5 s — perché il
+  comando è lo stesso: a cambiare è solo quanto terminale viene consumato per mostrarlo. Il
+  renderer predefinito ridisegna una tabella animata e riscrive ogni riga a ogni aggiornamento;
+  riprodotto, è illeggibile. In `plain` ogni container scrive la propria riga una volta sola e
+  l'ordine della catena — keyfile, config server, shard, router, `addShard`, dati — si vede
+  scorrere. La prima registrazione dell'avvio **a freddo**, fatta prima di scoprirlo, pesava
+  **588 KB**.
+
+- **Esito — le cinque riproduzioni coincidono byte per byte con l'originale.** Ogni `.cast` è stato
+  riaperto con `--riproduci` dentro uno pseudo-terminale, il testo raccolto e confrontato con quello
+  della registrazione di partenza:
+
+```
+05-avvio-sharded.cast          22,9 s · uscita 0 · riproduzione identica · 3905 byte di testo
+06-stato-sharded.cast           6,5 s · uscita 0 · riproduzione identica · 3575 byte di testo
+07-distribuzione-sharded.cast   4,0 s · uscita 0 · riproduzione identica · 2053 byte di testo
+08-guasto-shard-palco.cast     40,1 s · uscita 0 · riproduzione identica · 2165 byte di testo
+09-failover-membro-shard.cast  12,3 s · uscita 0 · riproduzione identica · 1669 byte di testo
+```
+
+  Con una avvertenza che il primo confronto ha fatto fallire per niente: lo pseudo-terminale
+  traduce ogni `\n` in `\r\n`, quindi un `\r\n` registrato torna indietro come `\r\r\n`. Normalizzata
+  quella traduzione, le cinque coincidono senza eccezioni.
+
+- **Esito — lo stesso comando racconta due storie diverse, e sono vere tutt'e due.**
+  `make guasto-03` nel profilo `palco`: fermato l'unico membro di `shard1rs`, la lettura mirata
+  sullo shard vivo risponde in **1 s**, quella sullo shard fermo e il conteggio totale falliscono
+  dopo **15 s** e **16 s** con `FailedToSatisfyReadPreference: Could not find host matching read
+  preference { mode: "primary" } for set shard1rs`; il nodo riavviato restituisce i 20000 in
+  **3 s**. Lo stesso comando nel profilo `completo`: le tre risposte arrivano tutte — `1 s`, `1 s`,
+  **`0 s`** — e il primario di `shard1rs`, letto da un membro superstite, è passato da
+  `shard1a:27017` a `shard1b:27017` senza che nessuno intervenisse. La differenza fra le due scene
+  non è il prodotto: è il numero di membri per shard.
+
+- **Esito — la password non compare in nessuna delle cinque.** Cercata alla lettera dentro i cinque
+  `.cast`: zero occorrenze. La riga di comando del `docker` dell'host non entra nella registrazione
+  perché non viene battuta — `tools/demo-sharded.sh` legge il valore dal `.env` e lo passa a
+  `mongosh` dentro il container ([ADR-0054](Decision.md#adr-0054)).
+
+- **Riserve:**
+  - **a.** Una sola esecuzione per scena. I numeri qui sopra sono singoli, non mediane, e vale per
+    loro la lezione di [V-045](#v-045): il singolo numero balla, il rapporto fra due scene no.
+  - **b.** I **15 s** e **16 s** della scena 8 non sono un parametro documentato che sia stato
+    letto: sono il tempo che il router ha impiegato prima di rinunciare, misurato con il
+    cronometro della shell attorno alla chiamata. Il valore dipende dai timeout di scoperta del
+    router e da quando il nodo è caduto rispetto al giro di sonde; non è stato ripetuto.
+  - **c.** I **588 KB** dell'avvio a freddo con il renderer predefinito sono un'osservazione
+    singola, fatta prima del confronto controllato e non ripetuta. Il confronto che regge è quello
+    a stack acceso: 134 861 contro 3 050 byte.
+  - **d.** Una sola macchina, arm64, con Docker Desktop. Le durate dell'avvio dipendono dalla
+    cache delle immagini e dal disco.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0073
 
 ---

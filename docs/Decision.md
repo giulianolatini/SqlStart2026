@@ -4563,3 +4563,77 @@ erano e correggerli a fine feature, con il resto della documentazione — sono q
 false in un repository didattico, e il costo di rimandarle è che qualcuno le legga nel frattempo.
 
 **Fonti:** [V-058](Sources.md#v-058) · [V-063](Sources.md#v-063) · [V-067](Sources.md#v-067)
+
+---
+
+<a id="adr-0073"></a>
+## ADR-0073 — Una scena di riserva è l'uscita di un comando del repository, e misura invece di raccontare
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** Il Blocco 3 doveva avere la sua riserva registrata: l'avvio, `sh.status()`, la
+distribuzione dei documenti e il guasto di un membro di shard. Per il Blocco 2 la cosa era già
+risolta senza che nessuno l'avesse decisa: le scene erano `make failover-02` e le sue varianti,
+cioè comandi che esistevano per la sala e che registrare è costato una riga. Per lo sharded no.
+`sh.status()`, il conteggio shard per shard e la sequenza del guasto non erano comandi: erano
+gesti, da battere dentro `docker exec` uno dopo l'altro.
+
+Registrare una sequenza battuta a mano produce un artefatto che nessuno saprà rifare uguale. Il
+`.cast` resta nel repository, il gesto no: chi lo rivede fra tre mesi non ha modo di sapere quali
+`--eval` erano stati dati né in che ordine, e quando lo stack cambia niente segnala che la
+registrazione è invecchiata. È lo stesso motivo per cui i controlli di questo repository eseguono
+invece di dichiarare ([ADR-0038](#adr-0038)).
+
+**Decisione.**
+
+*Ogni scena di riserva è l'uscita di un comando che sta nel repository.* Nasce
+`tools/demo-sharded.sh` con tre scene — `stato`, `distribuzione`, `guasto` — e tre bersagli nel
+`Makefile`: `stato-03`, `distribuzione-03`, `guasto-03`. Il comando è per la sala **prima** che per
+la registrazione: se in sala il cluster parte lo si esegue, se non parte si riproduce il `.cast`, e
+le due strade mostrano le stesse parole. Una riserva che dice cose diverse dalla demo è una seconda
+demo da mantenere.
+
+*Una scena misura, non racconta.* Nessun numero è scritto nel copione: quanti membri ha ogni shard
+lo chiede allo shard, i due `_id` da cercare li chiede ai due shard invece di indovinarli, i secondi
+di ogni risposta li cronometra, e il nuovo primario dopo il guasto lo legge da un membro superstite
+invece di affermare che c'è stata un'elezione. Il costo è qualche riga in più; il ritorno è che la
+scena resta vera quando cambiano la chiave di sharding, il numero di membri o i tempi della
+macchina — e che quando smette di essere vera lo dice da sola.
+
+*Il bersaglio si chiama `guasto-03`, non `failover-03`.* Nel profilo `palco` ogni shard ha un
+membro solo: un failover lì non può avvenire, e chiamarlo così prometterebbe al pubblico una scena
+che non arriva. Il nome dice il gesto — si ferma un nodo — e lascia all'esito il compito di dire
+che cosa succede, che nei due profili è il contrario.
+
+*Una scena che rompe qualcosa lo rimette a posto, anche se la interrompono.* `guasto-03` riavvia il
+nodo che ha fermato e installa una trappola su `INT` e `TERM` per riavviarlo anche se chi guarda
+preme `Ctrl-C` a metà. Una demo che lascia il cluster peggio di come l'ha trovato non si può
+provare due volte di seguito, che è esattamente quello che si fa prima di un talk.
+
+**Conseguenze.** Il Task 10 esce dal perimetro che il piano gli aveva dato — `docs/05-talk/registrazioni/`
+— e tocca `tools/` e il `Makefile`; la deviazione è scritta nel registro operativo, il piano
+approvato non si modifica. Le cinque scene stanno in
+[`docs/05-talk/registrazioni/`](05-talk/registrazioni/README.md) con le loro misure
+([V-068](Sources.md#v-068)), e ognuna è stata riprodotta per intero prima di entrare nell'indice
+([ADR-0055](#adr-0055)); per le cinque dello sharded il confronto è stato anche byte per byte.
+
+Il debito «il `Makefile` non sa niente dei profili», aperto da [ADR-0049](#adr-0049) e ancora da
+saldare, adesso riguarda tre bersagli in più: `stato-03`, `distribuzione-03` e `guasto-03` accettano
+`PROFILO` e nessun controllo verifica che i valori ammessi siano quelli dei file Compose. Si chiude
+nel task di chiusura del branch, eseguendo.
+
+Resta un passaggio che nessun controllo può sorvegliare: la scena 9 richiede che in
+`docker/03-sharded/.env` siano attive le righe `MEMBRI_*` a tre membri. Quel file non sta nel
+repository ([ADR-0014](#adr-0014)), quindi chi rifà le registrazioni deve scambiarle a mano e
+rimetterle a posto dopo — e se non lo fa, il profilo `palco` non riparte. Sta scritto nell'indice
+delle registrazioni, che è il posto dove lo si legge nel momento in cui serve.
+
+**Alternative scartate.** Battere le scene a mano dentro `docker exec` e registrarle — è quello che
+questa decisione rifiuta, e sarebbe costato meno oggi e molto di più a ogni modifica dello stack.
+Un unico bersaglio `demo-03` che esegue le tre scene di fila — in sala non si interrompe una scena
+da settanta secondi per rispondere a una domanda, e le tre servono in momenti diversi del blocco.
+Chiamare `failover-03` la scena del guasto perché nel profilo `completo` è davvero un failover — il
+nome di un comando non può essere vero solo in una delle due configurazioni che il repository
+dichiara di supportare.
+
+**Fonti:** [V-045](Sources.md#v-045) · [V-068](Sources.md#v-068)

@@ -6,7 +6,8 @@
         up-01 down-01 reset-01 logs-01 seed-01 smoke-01 reset-demo-01 \
         up-02 down-02 reset-02 logs-02 seed-02 smoke-02 reset-demo-02 \
         failover-02 failover-02-termina failover-02-maggioranza \
-        up-03 down-03 reset-03 logs-03 seed-03 smoke-03 reset-demo-03
+        up-03 down-03 reset-03 logs-03 seed-03 smoke-03 reset-demo-03 \
+        stato-03 distribuzione-03 guasto-03
 
 # `--env-file tools/images.env` porta MONGO_IMAGE, che nei file Compose è dichiarato
 # nella forma `${MONGO_IMAGE:?...}`: senza, Compose si ferma subito dicendo cosa manca
@@ -263,3 +264,28 @@ smoke-03: ## Prova end-to-end dello stack 03 avviato (PROFILO=palco|completo)
 
 reset-demo-03: ## Riporta lo stack 03 allo stato di partenza senza ricostruirlo
 	PROFILO=$(PROFILO) ./tools/reset-demo.sh 03
+
+# --- Le due scene del Blocco 3 ---------------------------------------------------------
+#
+# Esistono come bersagli, e non come due righe di `docker exec` da copiare dalla
+# documentazione, per la ragione delle scene dello stack 02: le registrazioni di riserva
+# si girano registrando un comando (ADR-0050), e la registrazione di un comando che
+# nessuno può rieseguire non è una riserva. La seconda ragione è che la password sta in
+# `.env` e non deve comparire a schermo mentre si registra (ADR-0014, ADR-0054).
+#
+# Due e non una: `sh.status()` mostra la struttura e la si guarda una volta; la
+# distribuzione mostra l'unica cosa che distingue un cluster che partiziona da uno che
+# ha messo tutto su un nodo, e si guarda ogni volta che si tocca la chiave.
+stato-03: ## Mostra il cluster 03 come si presenta: sh.status() e le righe che contano
+	PROFILO=$(PROFILO) ./tools/demo-sharded.sh stato
+
+distribuzione-03: ## Mostra dove stanno davvero i documenti di lab.ordini, shard per shard
+	PROFILO=$(PROFILO) ./tools/demo-sharded.sh distribuzione
+
+# L'unica delle tre che TOCCA il cluster: ferma un container e lo riaccende, e alla fine
+# lo stack è come l'ha trovato. In `palco` non c'è nessuna elezione da fare e la scena
+# dura una quarantina di secondi, quasi tutti spesi ad aspettare che il router si arrenda;
+# in `completo` finisce con un'elezione. Non è `failover-03` perché nel profilo del talk
+# un failover non può avvenire, e chiamarlo così prometterebbe quello che non fa.
+guasto-03: ## Ferma il primario di uno shard 03 e misura che cosa risponde ancora (~40 s)
+	PROFILO=$(PROFILO) ./tools/demo-sharded.sh guasto

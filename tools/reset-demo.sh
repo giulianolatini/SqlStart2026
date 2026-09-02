@@ -225,8 +225,10 @@ elif [[ "${STACK}" == "02" ]]; then
 # Le differenze dal caso 02 sono tre, e nessuna cambia la forma. La prima: i container
 # da rialzare dipendono dal PROFILO, perché in `palco` gli altri sei non esistono e
 # chiederne lo stato darebbe sei errori veri su una situazione sana. La seconda: qui non
-# si aspetta un primario preferito — nello sharded non c'è una scena di failover che
-# sposta i ruoli, si aspetta che i due shard risultino registrati. La terza: il verdetto
+# si aspetta un primario preferito. La scena del guasto (`make guasto-03`) rimette in
+# piedi da sé il nodo che ha fermato, e nel profilo del talk non c'è nessun ruolo da
+# spostare perché ogni shard ha un membro solo: si aspetta che i due shard risultino
+# registrati, che è la condizione da cui il Blocco 3 riparte. La terza: il verdetto
 # sui dati non è solo l'impronta, è anche che i documenti stiano su ENTRAMBI gli shard,
 # perché una demo che li lascia tutti su uno è esattamente il guasto che il Blocco 3
 # vuole scongiurare.

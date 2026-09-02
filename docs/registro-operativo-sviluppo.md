@@ -4037,3 +4037,100 @@ collegamenti coerenti.
 Stato: decisioni fino a **ADR-0072**, verifiche fino a **V-067**, fonti fino a **S-075**, note di
 metodo fino alla **124**. Il **Task 10** riprende dal punto in cui si era interrotto: le tre scene
 già registrate e verificate, la scena del guasto ancora da scrivere.
+
+---
+
+## 2026-09-02 — `feature/03`, Task 10: cinque scene per il Blocco 3, e il comando che le produce
+
+Il Task 10 chiedeva quattro momenti registrati: l'avvio nel profilo `palco`, `sh.status()`, la
+distribuzione dei documenti, il failover di un membro di shard. Ne sono venute **cinque**, e il
+conto non torna per un motivo che vale la pena scrivere: nel profilo `palco` il failover di un
+membro di shard **non può avvenire**, perché ogni shard ha un membro solo. La scena è stata quindi
+registrata due volte — lo stesso comando, due profili. Nel `palco` finisce con un'attesa e un
+errore; nel `completo` finisce con un'elezione. Prese insieme dicono la cosa che nessuna delle due
+dice da sola: la disponibilità non è del cluster, è di ogni singolo shard.
+
+**Il perimetro che il piano aveva dato non è bastato.** Task 10 era assegnato a
+`docs/05-talk/registrazioni/`. Per il Blocco 2 sarebbe stato sufficiente: quelle scene erano
+`make failover-02` e le sue varianti, comandi che esistevano già per la sala, e registrarli è
+costato una riga. Per lo sharded no. `sh.status()`, il conteggio shard per shard e la sequenza del
+guasto non erano comandi: erano gesti da battere dentro `docker exec`. Registrare un gesto produce
+un artefatto che nessuno saprà rifare uguale, e che invecchia senza che niente lo segnali. Sono nati
+`tools/demo-sharded.sh` con tre scene e tre bersagli nel `Makefile` — `stato-03`,
+`distribuzione-03`, `guasto-03`. Il motivo e le sue conseguenze stanno in
+[ADR-0073](Decision.md#adr-0073); il piano approvato non si tocca, e la deviazione è questa riga.
+
+**Le scene misurano invece di raccontare.** Nessun numero è scritto nel copione: quanti membri ha
+ogni shard lo chiede allo shard, i due `_id` da cercare li chiede ai due shard invece di
+indovinarli, i secondi di ogni risposta li cronometra, e dopo il guasto il nuovo primario lo legge
+da un membro superstite. Costa qualche riga in più e vale la differenza fra una scena che resta vera
+quando cambia la configurazione e una che comincia a mentire senza dirlo. Il bersaglio si chiama
+`guasto-03` e non `failover-03` per la stessa ragione: nel `palco` un failover non c'è, e un nome
+vero in un solo profilo su due non è un nome.
+
+**Il renderer di Compose pesava quarantaquattro volte il comando.** La prima registrazione
+dell'avvio a freddo occupava **588 KB** per una ventina di secondi, ed era illeggibile: il renderer
+predefinito ridisegna una tabella animata e riscrive ogni riga a ogni aggiornamento. Con
+`COMPOSE_PROGRESS=plain` ogni container scrive la propria riga una volta sola e l'ordine della
+catena si vede scorrere. Il confronto controllato — stesso `up`, stesso stack già acceso, due
+registrazioni a nove secondi di distanza — dà **134 861 byte in 205 eventi** contro **3 050 byte in
+28 eventi**, a parità di durata. Registrare l'uscita di uno strumento interattivo significa
+registrare anche la sua animazione.
+
+**Riprodurre serve a due cose, e una sola si può automatizzare.** Tutte e cinque le scene sono state
+riaperte con `--riproduci` per intero prima di entrare nell'indice
+([ADR-0055](Decision.md#adr-0055)), e per tutte e cinque la riproduzione dentro uno pseudo-terminale
+coincide **byte per byte** con l'originale — dopo aver normalizzato il fatto che lo pseudo-terminale
+traduce ogni `\n` in `\r\n`, e quindi restituisce `\r\r\n` dove la registrazione aveva `\r\n`. Quel
+confronto però prova solo che il file si rivede fedelmente. Che la scena del profilo `completo`
+*affermasse* l'elezione invece di mostrarla — scriveva che il router se n'era accorto, senza mai
+chiedere chi fosse il nuovo primario — l'ha visto un occhio, non il confronto: la scena è stata
+riscritta e rigirata.
+
+**Il profilo `completo` e il file che non sta nel repository.** La quinta scena ha richiesto di
+scambiare in `docker/03-sharded/.env` le tre righe `MEMBRI_*`, portare lo stack a tre membri per
+insieme, registrare, e rimettere tutto com'era. Lo scambio è stato fatto con una trappola su `EXIT`
+che ripristina il file anche se qualcosa fallisce a metà, ed è finito con lo stack riportato a
+`palco` su volumi nuovi. Quel file è gitignored ([ADR-0014](Decision.md#adr-0014)): nessun controllo
+si accorgerebbe di un `.env` lasciato a tre membri, e chi lo lascia così si ritrova il `palco` che
+non riparte. Sta scritto nell'indice delle registrazioni, che è dove lo si legge nel momento in cui
+serve.
+
+**I filmati restano da girare, e `preflight` continua a dirlo** (Passo 4). Nessun `.mp4` finto è
+stato creato per spegnere l'avviso: la cartella `~/SqlStart2026-registrazioni` è assente, il
+controllo lo segnala, e dal 18 settembre diventerà bloccante. L'elenco dei filmati dovuti è passato
+da quattro a sei, con le due scene del Blocco 3 aggiunte in coda.
+
+Le misure delle cinque scene stanno in [V-068](Sources.md#v-068). L'indice
+[`docs/05-talk/registrazioni/README.md`](05-talk/registrazioni/README.md) è stato riscritto: due
+tabelle invece di una, i comandi per rifare ogni scena, il metodo di verifica, e la correzione della
+riga che diceva «non contiene le scene degli altri stack». Una citazione nuova in
+[`citazioni-riportare-slide.md`](citazioni-riportare-slide.md). Controlli: `make preflight`
+8 superati, 1 avviso — i filmati — 0 errori; `make docs-check` citazioni e collegamenti coerenti;
+`make stack-check` 3 stack conformi; `make tools-test` 131 passati; `make smoke-03` 64 controlli e
+0 errori nel profilo `palco`.
+
+125. **Una registrazione si giudica riproducendola, e il confronto automatico trova solo metà dei
+     problemi.** Il confronto byte per byte prova che il file si rivede identico a com'è stato
+     scritto: è una proprietà del file, non della scena. Che la scena mostri quello che dice di
+     mostrare non è verificabile da nessuna macchina, perché la macchina non sa che cosa la scena
+     doveva dimostrare. Le due verifiche vanno fatte tutt'e due, e quella che serve di più è quella
+     che costa un paio di minuti di attenzione.
+
+126. **Il peso di una registrazione di terminale dipende dal renderer, non dal comando.** Quarantaquattro
+     volte, a parità di durata e di risultato. Prima di registrare l'uscita di uno strumento
+     interattivo conviene chiedersi se quello strumento ha una modalità non interattiva: quasi
+     sempre ce l'ha, quasi sempre è una variabile d'ambiente, e quasi sempre il risultato è anche
+     più leggibile di quello animato.
+
+127. **Una scena che vale in un solo profilo è mezza scena.** Lo stesso `make guasto-03` racconta due
+     storie opposte nei due profili, e la condizione per poterlo scrivere una volta sola è stata
+     scegliere un nome che descrivesse il **gesto** — si ferma un nodo — invece dell'esito.
+     Nominare per esito significa promettere l'esito, e l'esito qui dipende dalla configurazione di
+     chi esegue.
+
+Stato: decisioni fino a **ADR-0073**, verifiche fino a **V-068**, fonti fino a **S-075**, note di
+metodo fino alla **127**. Del piano di `feature/03` restano il **Task 11** — gli ADR e le fonti
+mancanti, il consuntivo del branch, i tre debiti di strumentazione ancora aperti
+([ADR-0049](Decision.md#adr-0049), [ADR-0062](Decision.md#adr-0062)), i quattro controlli eseguiti
+due volte e la PR verso `develop`.
