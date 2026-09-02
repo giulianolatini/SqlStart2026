@@ -4544,3 +4544,52 @@ controllare.
 Stato aggiornato: decisioni fino ad **ADR-0079**, verifiche fino a **V-073**, note di metodo fino
 alla **139**. La suite resta a **143** prove. La PR #4 è stata unita in `develop` dal PO — il merge è
 `ca6f3d0` — e questo branch ci parte sopra.
+
+---
+
+## 2026-09-02 — `feature/04`, Task 1: l'appuntamento onorato, e uno zero che stavolta si può leggere
+
+Il primo passo del branch non è codice: è la data che [ADR-0058](Decision.md#adr-0058) aveva fissato
+e che [ADR-0078](Decision.md#adr-0078) ha fatto cadere qui. **La 8.0.30 non è pubblicata**
+([V-074](Sources.md#v-074)), e il lab resta su 7.0.40 — [ADR-0080](Decision.md#adr-0080).
+
+**La risposta è la stessa di ieri, la verifica no.** V-051 aveva interrogato due canali; ADR-0028 ne
+nominava tre, e il terzo — `mongodb/mongodb-community-server` — era rimasto scoperto, dichiarato fra
+le riserve. Interrogato adesso, dà zero sulla 8.0.30 e **centosessantaquattro** tag sulla 8.0.29, fra
+cui ricostruzioni marcate `20260902T071320Z`, cioè di stamattina. È la differenza fra un canale che
+tace e un canale che parla e dice un'altra cosa. Chiusa anche la seconda riserva di V-051: riletto
+il changelog, `SERVER-125742` è **ancora** sotto la 8.0.30 e non è slittato altrove
+([S-028](Sources.md#s-028)) — il numero da attendere è rimasto quello. La documentazione della patch
+è pubblicata, i binari no, e nessuna delle pagine consultate contiene una data prevista.
+
+**Il piano si è sbagliato su se stesso, e il controllo l'ha visto.** Il Task 1 diceva: se la 8.0.30
+non c'è, «non serve altro ADR — ADR-0058 prevede questo esito». Scritto V-074, `check_citations.py`
+ha rifiutato: una fonte che nessun ADR cita è orfana. La regola aveva ragione, e non per un cavillo:
+ADR-0058 aveva **programmato** un controllo, non preso in anticipo la decisione di oggi. Chi arriva
+al 16 settembre — la seconda e ultima data — deve poter sapere che il primo controllo è stato fatto
+e che cosa ha trovato, senza rifarlo di fretta. ADR-0080 è quella sede, ed estende la procedura da
+due canali a tre.
+
+**Note di metodo.**
+
+140. **Un'assenza si legge solo accanto a una prova che il canale è vivo.** `count: 0` da un servizio
+     remoto è indistinguibile da `count: 0` di un filtro rotto, di un endpoint deprecato o di un
+     repository abbandonato: la risposta è identica in tutti e quattro i casi, ed è la risposta che
+     si sperava. La difesa è una **seconda interrogazione di controllo** che deve dare un numero
+     diverso da zero — qui `name=8.0.29` che ne dà 164, con marche temporali di poche ore prima. Non
+     costa nulla e trasforma un'assenza dichiarata in un'assenza misurata. È il seguito della nota
+     91: lì il problema era una risposta ben formata a una domanda diversa, qui è una risposta
+     identica a domande diverse. In entrambi i casi la difesa non è leggere meglio, è **chiedere una
+     seconda volta in un modo che sappia fallire**.
+141. **Una regola che blocca non ha sempre torto: a volte segnala che manca una sede, non che è di
+     troppo.** L'abitudine di questo repository, quando un controllo automatico ostacola qualcosa di
+     legittimo, è aprire la sede che manca invece di aggirare la regola. Qui il caso si è presentato
+     nella forma meno ovvia: era il **piano** a sbagliare, non il controllo. Il piano aveva concluso
+     «nessun ADR» ragionando sull'esito — la versione non cambia, nessun file si tocca — mentre la
+     decisione da registrare non era sulla versione ma sul **calendario**: due appuntamenti diventati
+     uno. Un controllo che rifiuta va guardato prima come ipotesi che come attrito; qui ha trovato un
+     buco che nessun essere umano aveva visto, e l'ha trovato contando.
+
+Stato aggiornato: decisioni fino ad **ADR-0080**, verifiche fino a **V-074**, note di metodo fino
+alla **141**. La suite resta a **143** prove. Prossimo passo: **Task 2** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), lo scheletro di `app/`.

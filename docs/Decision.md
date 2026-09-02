@@ -5118,3 +5118,66 @@ recupero e non la precondizione** — è la scelta che rende accettabile sbaglia
 repository ha già l'abitudine contraria.
 
 **Fonti:** [V-073](Sources.md#v-073)
+
+---
+
+<a id="adr-0080"></a>
+## ADR-0080 — Speso il primo dei due appuntamenti: la 8.0.30 non c'è, resta il 16 settembre
+
+**Data:** 2026-09-02 · **Stato:** Accettata — attua [ADR-0058](#adr-0058)
+
+**Contesto:** [ADR-0058](#adr-0058) ha preso una clausola condizionale di [ADR-0028](#adr-0028) —
+«si ripinna appena i binari della 8.0.30 escono» — e le ha dato due date, perché «appena» non ha un
+esecutore. La prima era «il 3 settembre, alla chiusura di `feature/03`». Le due coordinate si sono
+separate: la `03` ha chiuso il 2, e [ADR-0078](#adr-0078) ha stabilito che vale **l'evento**, perché
+è l'evento a portare la ragione pratica — montare l'applicazione su una versione e ripinnarla il
+giorno dopo significa rigirare le registrazioni. L'appuntamento è quindi caduto all'apertura di
+`feature/04`, prima di scrivere una riga di codice.
+
+Il controllo è stato fatto ([V-074](Sources.md#v-074)) e la risposta è la stessa del 1º settembre:
+la **8.0.30 non è pubblicata**. Con tre differenze che valgono più della risposta. È stato
+interrogato anche il **terzo canale** che ADR-0028 nominava e che V-051 aveva lasciato scoperto,
+`mongodb/mongodb-community-server`: dà zero sulla 8.0.30 e **centosessantaquattro** tag sulla
+8.0.29, fra cui ricostruzioni con marca temporale di **stamattina**. Non è un canale fermo che tace,
+è un canale che oggi ha ripubblicato la versione precedente. È stata inoltre chiusa la riserva di
+V-051 sul changelog: la correzione che aspettiamo,
+[SERVER-125742](https://jira.mongodb.org/browse/SERVER-125742), è **ancora** attribuita alla 8.0.30
+e non è slittata a una patch successiva ([S-028](Sources.md#s-028)). E la 7.0.40 resta la punta
+della propria linea: la versione del lab non invecchia mentre la si usa.
+
+**Decisione:** il lab resta su **7.0.40** e `feature/04` monta l'applicazione su quella versione. Il
+primo dei due appuntamenti di ADR-0058 è **speso**, e ne resta uno solo: il **16 settembre**, giorno
+della `release/1.0`, ultimo momento utile per ripinnare e rigirare le registrazioni prima del talk.
+La procedura del controllo si estende da due canali a **tre** — Docker Hub `library/mongo`, il feed
+ufficiale dei download, e `mongodb/mongodb-community-server` — perché ADR-0028 li nominava tutti e
+tre e una verifica che ne copre due su tre lascia aperta proprio la domanda che dovrebbe chiudere.
+Il comando è scritto per intero in [V-074](Sources.md#v-074).
+
+**Conseguenze:** nessun file cambia. `${MONGO_IMAGE}` e i digest di `tools/images.env` restano dove
+sono, le nove registrazioni asciinema restano valide, e i tre stack non si toccano. Cambia una cosa
+sola, ed è la ragione per cui questa decisione è scritta invece che taciuta: chi arriva al 16
+settembre sa che il primo controllo **è stato fatto** e che cosa ha trovato, invece di doverselo
+chiedere. Una verifica negativa che non lascia una sede si fa due volte, e la seconda volta la si fa
+di fretta.
+
+Resta scritto anche il limite di ciò che si può concludere. Il changelog della 8.0.30 è pubblicato e
+i binari no: è documentazione di una patch preparata, non un annuncio di rilascio, e non contiene
+alcuna data. Non sappiamo quando esce, e il repository non ha modo di saperlo senza aprire un
+contatto con MongoDB, che non è previsto. Il 16 settembre si guarda di nuovo; se la risposta è
+ancora no, il talk si tiene su 7.0.40 e il muro della 8 su kernel 6.19 resta una cosa da
+raccontare — chiunque in sala provi MongoDB 8 su Docker Desktop incontra lo stesso errore e non ha
+una versione cui aggiornarsi, che è un fatto interessante di per sé.
+
+**Alternative scartate:** **non scrivere niente**, perché ADR-0058 aveva già previsto questo esito e
+il piano di `feature/04` diceva «se non c'è, non serve altro ADR» — ma un appuntamento onorato
+cambia lo stato del progetto anche quando l'esito è il previsto, e `check_citations.py` lo dice a
+suo modo rifiutando le fonti che nessuno cita: una misura senza una decisione che la usi non ha
+sede. **Aggiungere V-074 alla riga «Fonti» di ADR-0058** invece di scrivere un ADR nuovo — costa una
+riga sola, e riscrive un documento accettato per farlo parlare di un fatto successivo alla sua data;
+qui gli ADR si superano per aggiunta, non si aggiornano. **Spostare anche la seconda data**, come
+ADR-0078 ha fatto con la prima — non serve: il 16 settembre è il giorno della `release/1.0`, quindi
+data ed evento coincidono per costruzione, ed è la coincidenza a mancare che aveva creato il
+problema. **Ripinnare alla 8.2.12 per avere un «8» sulle slide** — già scartata da ADR-0028 per due
+ragioni che non sono cambiate, e riscartata da ADR-0058 un giorno fa.
+
+**Fonti:** [V-074](Sources.md#v-074), [S-028](Sources.md#s-028)

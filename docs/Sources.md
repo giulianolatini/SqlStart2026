@@ -722,7 +722,11 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   compare né in `downloads.mongodb.org/current.json`, né fra i tag di `library/mongo`, né fra
   quelli di `mongodb/mongodb-community-server` [V-007](#v-007). Il changelog documenta il ramo
   di rilascio, non la disponibilità.
-- **Usata da:** ADR-0028
+- **Riletta il 2026-09-02** ([V-074](#v-074)): la sezione `## 8.0.30 Changelog` è ancora la prima
+  del documento e contiene ancora `SERVER-125742`. La correzione non è slittata a una patch
+  successiva, quindi il numero da attendere è rimasto quello. La seconda riserva regge identica: la
+  documentazione della 8.0.30 c'è, i binari continuano a non esserci.
+- **Usata da:** ADR-0028, ADR-0080
 
 ---
 
@@ -8222,5 +8226,75 @@ Session is now back in /…/SqlStart2026.
 
 - **Data:** 2026-09-02
 - **Usata da:** ADR-0079
+
+---
+
+<a id="v-074"></a>
+### V-074 — Il primo appuntamento di ADR-0058: la 8.0.30 non è pubblicata, e il numero da aspettare non si è spostato
+
+- **Comandi:** `curl` sull'API dei tag di Docker Hub per `library/mongo` e per
+  `mongodb/mongodb-community-server`, filtrando **per nome esatto**; `curl` sul feed ufficiale dei
+  download (`https://downloads.mongodb.org/current.json`); `curl` sul changelog della serie 8.0
+  ([S-028](#s-028)) nella variante `.md`
+- **Ambiente:** macOS 26.6.2 arm64, curl 8.7.1, interrogazione del 2026-09-02 alle 23:10 CEST
+- **Che cosa si voleva sapere:** [ADR-0058](Decision.md#adr-0058) ha fissato **due date** per il
+  controllo che [ADR-0028](Decision.md#adr-0028) aveva lasciato condizionale. La prima cade
+  all'apertura di `feature/04` ([ADR-0078](Decision.md#adr-0078): vale l'evento, non la data
+  scritta), e va onorata prima di montare l'applicazione su una versione — ripinnare il giorno dopo
+  significherebbe rigirare le registrazioni. Domanda secca, la stessa di
+  [V-051](#v-051): la 8.0.30 esiste?
+
+- **Esito, primo canale — su Docker Hub non c'è.** Filtrando per nome esatto:
+
+```
+GET /v2/repositories/library/mongo/tags?page_size=100&name=8.0.30
+-> {"count": 0, "results": []}
+```
+
+  Il controllo che rende leggibile quello zero: la stessa interrogazione con `name=8.0.29` dà
+  `count: 7`. Il filtro funziona, quindi il conteggio nullo è un'assenza e non una domanda mal
+  posta. I tag mobili (`latest`, `8`) risultano aggiornati il **2026-08-31**, come alla verifica
+  precedente; `8.0` e `7.0.40` al 2026-08-18.
+
+- **Esito, secondo canale — il feed ufficiale è identico a ventiquattr'ore prima.** Le versioni
+  correnti per linea sono **8.3.8** (21/07/2026), **8.2.12** (26/06/2026), **8.0.29** (21/07/2026),
+  **7.0.40** (21/07/2026), 6.0.29, 5.0.34, 4.4.31 — tutte marcate `production_release`. La 7.0.40 è
+  ancora la punta della propria linea: la versione del lab non sta invecchiando mentre la si usa.
+
+- **Esito, terzo canale — quello che V-051 aveva lasciato scoperto.** ADR-0028 nominava anche
+  l'immagine `mongodb/mongodb-community-server`, che la verifica del 1º settembre non aveva
+  interrogato. Interrogata adesso, dà lo stesso zero — e dà anche la prova più forte di tutta la
+  verifica:
+
+```
+mongodb/mongodb-community-server, name=8.0.30 -> count: 0
+mongodb/mongodb-community-server, name=8.0.29 -> count: 164
+  fra cui  8.0.29-ubuntu2204-slim-20260902T071320Z
+           8.0.29-ubi9-slim-20260902T070906Z
+```
+
+  Quel canale ha ricostruito e ripubblicato le immagini **stamattina**, con la marca temporale nel
+  nome del tag, e ciò che ha ripubblicato è la **8.0.29**. Non è un canale fermo che tace: è un
+  canale attivo che oggi continua a non avere la 8.0.30.
+
+- **Esito, quarto punto — chiusa la riserva sul changelog.** V-051 dichiarava di non aver riletto il
+  changelog per verificare che la correzione fosse **ancora** attribuita alla 8.0.30 invece che
+  spostata a una patch successiva. Riletto ([S-028](#s-028)): la sezione `## 8.0.30 Changelog`
+  esiste, è la prima del documento, e contiene
+  [SERVER-125742](https://jira.mongodb.org/browse/SERVER-125742) «Remove the graceful exit for
+  kernel version 7.0.14 and above», cioè esattamente la correzione che ADR-0028 aspetta. Il numero
+  da attendere non si è spostato: la documentazione della 8.0.30 è pubblicata, i binari no.
+
+- **Conseguenza:** [ADR-0080](Decision.md#adr-0080). Il lab resta su 7.0.40, il primo dei due
+  appuntamenti di ADR-0058 è speso, e resta il secondo — il 16 settembre.
+- **Riserve:** il feed `current.json` elenca la versione corrente per linea, non tutte le patch
+  pubblicate; come per V-051, l'assenza da questi canali non è una prova formale che la 8.0.30 non
+  esista da nessuna parte, ma è il criterio che ADR-0028 si era dato, e adesso copre tutti e tre i
+  canali che nominava. Il changelog è documentazione, non un annuncio di rilascio: dice che cosa
+  conterrà la 8.0.30, non quando esce, e non c'è in quella pagina alcuna data prevista. Non è stato
+  chiesto a MongoDB se e quando la pubblicheranno — nessun canale del repository lo permette senza
+  aprire un contatto, e non è previsto.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0080
 
 ---

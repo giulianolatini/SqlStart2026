@@ -106,18 +106,18 @@ chiusura di `feature/03`»; le due coordinate si sono separate, e
 e va onorato **prima** di scrivere codice: montare l'applicazione su una versione e ripinnarla il
 giorno dopo significa rigirare le registrazioni.
 
-- [ ] **Passo 1.** Eseguire i due `curl` scritti in [V-051](../Sources.md#v-051): il filtro per
+- [x] **Passo 1.** Eseguire i due `curl` scritti in [V-051](../Sources.md#v-051): il filtro per
       **nome esatto** su Docker Hub e il feed ufficiale dei download. Non leggere un elenco paginato
       cercando un elemento — è la trappola della nota di metodo 91: si chiede per nome e si guarda
       il **conteggio**, perché uno `0` non dipende da dove cade il taglio della pagina.
-- [ ] **Passo 2.** Registrare l'esito come **V-074** in ogni caso, con l'ancora
+- [x] **Passo 2.** Registrare l'esito come **V-074** in ogni caso, con l'ancora
       `<a id="v-074"></a>`. Un controllo che non lascia traccia è un controllo che il 16 settembre
       qualcuno rifarà da capo senza sapere che era già stato fatto.
-- [ ] **Passo 3.** Se la 8.0.30 **non** c'è: si resta su 7.0.40 e non serve altro ADR — ADR-0058
+- [x] **Passo 3.** Se la 8.0.30 **non** c'è: si resta su 7.0.40 e non serve altro ADR — ADR-0058
       prevede questo esito, e la sua seconda data resta in piedi. Se **c'è**: fermarsi e chiedere al
       Product Owner. Ripinnare a sedici giorni dal talk tocca le cinque registrazioni della `03` e
       le tre della `02`, e non è una decisione da task.
-- [ ] **Passo 4.** `make docs-check`, poi commit: `docs: l'appuntamento di ADR-0058, onorato`.
+- [x] **Passo 4.** `make docs-check`, poi commit: `docs: l'appuntamento di ADR-0058, onorato`.
 
 ---
 
