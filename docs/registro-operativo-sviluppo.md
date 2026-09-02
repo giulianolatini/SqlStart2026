@@ -3431,3 +3431,117 @@ poteva indovinare. Nessuna fonte: il contenuto viene da ADR-0040 e ADR-0014, gi�
      appena clonata, il primo comando che scrivo funziona?** Qui la risposta era no, e nessuno se
      n'era accorto in due stack. Il corollario è che gli stati «già configurato» vanno elencati
      esplicitamente in cima a ogni procedura, perché sono invisibili proprio a chi la scrive.
+
+## 2026-09-02 — `feature/03`, Task 7: i bersagli dello stack 03, e il difetto che li aspettava
+
+Il Task 7 doveva essere il più corto del blocco: sei bersagli nel `Makefile` con gli stessi nomi
+degli altri due stack, un caso in più in `reset-demo.sh`, le porte nuove in `preflight.sh`. Due dei
+tre passi sono andati come previsto. Il terzo non c'era da fare, e nel provare i primi due è saltato
+fuori un guasto che nessuno dei sei task precedenti aveva potuto vedere.
+
+**Passo 1 — i bersagli, e il profilo come variabile.** `up-03`, `down-03`, `reset-03`, `logs-03`,
+`seed-03`, `smoke-03`, con `PROFILO=palco` predefinito. L'alternativa era due famiglie di bersagli —
+`up-03-palco`, `up-03-completo` e così via — e si è scartata perché basta sbagliare un suffisso una
+volta, `up-03-completo` seguito da `down-03-palco`, per fermare metà cluster. `up-03` è **un**
+comando solo, non i due di `up-02`: la sentinella del Task 5 rende onesto `--wait`, e quando torna
+i due shard sono registrati e `lab.ordini` è distribuita e piena.
+
+Poi la scelta è stata provata, e da sola non bastava. `down` agisce **solo sui servizi dei profili
+attivi**: spegnere in `palco` uno stack acceso in `completo` toglie undici container, ne lascia
+sette accesi, non riesce a rimuovere la rete e **esce zero**. Nessun errore. `down` senza
+`--profile` si comporta allo stesso modo. La correzione è `--profile "*"` su `down`, `reset` e
+`logs` — la forma documentata per dire «tutti» ([S-068](Sources.md#s-068)) — mentre `up` e `seed`
+tengono il profilo scelto: [ADR-0066](Decision.md#adr-0066), misure in
+[V-059](Sources.md#v-059).
+
+**Passo 2 — un ramo in più, non una riscrittura.** Il caso `03` di `reset-demo.sh` è **+128 righe,
+−2**, e le due righe tolte sono il commento di testa riscritto. Le funzioni condivise, i tempi di
+attesa e il verdetto finale restano gli stessi per tutti e tre gli stack, che era la promessa scritta
+nel file quando esisteva solo il caso `01`. Tre differenze dal caso `02`, e nessuna cambia la forma:
+i container da rialzare dipendono dal profilo; non si aspetta un primario preferito ma che i due
+shard risultino registrati; e il verdetto sui dati non è solo l'impronta, è anche che i documenti
+stiano su **entrambi** gli shard. Provato su un cluster rotto apposta in tre punti — collezioni di
+scarto, balancer spento, un container fermo — e non su uno sano, che è la nota di metodo 106.
+
+**Passo 3 — niente da fare, e non è una svista.** Il piano chiedeva di aggiungere «le sette porte
+nuove» a `preflight.sh`. Sono undici, non sette, e ci sono **già**: `git log -S` le data al commit
+`7809f7e` del **2026-08-25**, cioè a `feature/00`, quando gli stack 02 e 03 non esistevano. L'elenco
+delle quindici porte del lab è stato scritto in una volta sola guardando la mappa del design §5.2, e
+questo passo è l'ultimo pezzo di quella previsione che si avvera. Il file non è stato toccato.
+
+Resta però un debito, ed è il verso opposto: **niente lega l'elenco di `preflight.sh` alle porte
+pubblicate dai file Compose.** Oggi coincidono perché qualcuno le ha copiate bene; se domani una
+porta cambiasse, `preflight` continuerebbe a controllare quella vecchia senza dirlo. Segnato per il
+Task 9.
+
+**Passo 4 — le misure.** `make preflight` **8 · 1 · 0** due volte a stack fermi e due volte con lo
+stack 03 acceso, dove riporta «4 già in uso da container del lab in esecuzione», che è il caso che
+sa distinguere. `make up-03` uscita 0 in **24 s**, `make smoke-03` **62 · 0**, `make seed-03`
+ricarica a 9860 / 10140 su quattro chunk, `make reset-demo-03` ripara il disastro a tre guasti e
+chiude a 0 con impronta `20000 50083417.93 60278`.
+
+---
+
+**E poi il guasto.** Provando `up-03` su volumi già esistenti — cioè spegnendo e riaccendendo, che è
+la sequenza più ordinaria che ci sia — il secondo avvio falliva:
+
+```
+shard già registrati: nessuno
+ERRORE: sh.addShard(«shard2rs/shard2a:27017») ha risposto ok=0
+Messaggio: can't add shard 'shard2rs/shard2a:27017' because a local database 'lab' exists in
+another shard1rs
+```
+
+Il messaggio accusa la persona sbagliata. La riga che spiega tutto è la prima: **«shard già
+registrati: nessuno»**, su un cluster che al giro prima ne aveva due. I config server perdevano
+tutto a ogni spegnimento mentre gli shard conservavano i loro dati. Contato: `dati-cfg1` e
+`dati-cfg2` **zero file**, `dati-shard1a` **ottantatré**.
+
+La causa sono due fatti che si sommano, e nessuno dei due è un errore. L'entrypoint dell'immagine,
+quando trova `--configsvr`, porta il dbpath predefinito a `/data/configdb`; e l'immagine dichiara
+`VOLUME` su **entrambe** le cartelle dei dati, quindi Compose soddisfa quella non montata con un
+volume **anonimo**, che `down` abbandona e che il `up` dopo rifà vuoto. I config server montavano
+`dati-cfgN` su `/data/db` — il posto giusto per ogni altro mongod — e scrivevano altrove.
+
+La riparazione è `--dbpath /data/db` dichiarato sui tre config server, più **due guardie** che
+avrebbero dovuto prenderlo: una regola statica in `check_stack.py` che confronta il dbpath vero con
+la destinazione del volume, e il controllo dello smoke che smette di accontentarsi dell'esistenza
+del volume nominato. Entrambe provate rompendole. [ADR-0067](Decision.md#adr-0067),
+[V-060](Sources.md#v-060).
+
+Il ciclo adesso regge: `reset-03` 4 s, `up-03` 25 s con `dati-cfg1` a **99 file**, `down-03` 7 s,
+`up-03` di nuovo **22 s** e a posto. Il ramo idempotente di `add-shard`, scritto al Task 4, è stato
+**eseguito oggi per la prima volta**: prima di questa correzione i metadati non arrivavano mai al
+secondo giro, quindi quel ramo era coperto dai test e irraggiungibile nella realtà.
+
+**Scostamento dal piano, dichiarato.** Il Task 7 nominava tre file e ne ha toccati sei:
+`compose.yaml` è del Task 3, `check_stack.py` del Task 5, `smoke-sharded.sh` del Task 6. Non è stato
+rinviato al Task 9 perché non è un debito ma un guasto, e perché colpisce la sequenza che al talk
+capita per prima — spegnere fra una parte e l'altra e riaccendere. Aggiunto anche un settimo
+bersaglio non previsto, `reset-demo-03`, per non lasciare il caso `03` di `reset-demo.sh`
+raggiungibile solo scrivendo il percorso dello script a mano.
+
+**Verificato:** `make docs-check` verde, `make tools-test` **131 passed** (sei test nuovi),
+`make stack-check` «Stack conformi: 3», `make smoke-03` 62 · 0.
+
+110. **Il modo in cui pulisci fra una prova e l'altra decide quale classe di difetti non troverai
+     mai.** Tutte le prove dei Task 3-6 finivano con `down -v`, che cancella i volumi e riparte da
+     zero — abitudine giusta, perché tiene le misure confrontabili e la macchina pulita. Il prezzo
+     è che una perdita di dati allo spegnimento è **strutturalmente invisibile** a chi riparte
+     sempre da zero: non è che il controllo era debole, è che lo stato in cui il difetto si
+     manifesta non veniva mai raggiunto. Quattro giorni di prove verdi su uno stack che non
+     sopravviveva a un `down`. La regola che ne ricavo non è «non pulire», è che ogni procedura di
+     prova ha un **punto cieco che coincide con ciò che la procedura cancella**, e che quel punto
+     cieco va nominato per iscritto quando la si scrive. Qui il punto cieco erano i volumi, e la
+     prova mancante era la più corta possibile: accendere, spegnere **senza** `-v`, riaccendere.
+
+111. **Se verifichi con lo stesso parametro con cui hai agito, la verifica non è indipendente:
+     conferma l'errore invece di scoprirlo.** Spegnendo con `--profile palco` uno stack acceso in
+     `completo` restano sette container in piedi — ma `docker compose --profile palco ps`, cioè il
+     comando che verrebbe naturale usare per controllare, risponde «nessun container». Non mente:
+     guarda lo stesso insieme sbagliato che ha guardato `down`, e quell'insieme è davvero vuoto. Il
+     parametro che ha causato l'errore è lo stesso che lo nasconde, e più il parametro è implicito
+     — un profilo, un contesto, un namespace, una variabile d'ambiente ereditata — meno ci si pensa.
+     La contromisura è banale e va ricordata proprio perché è banale: la verifica si fa con lo
+     strumento **più stupido e meno parametrizzato** che esiste. Qui era `docker ps` senza filtri,
+     ed è l'unico che diceva la verità.

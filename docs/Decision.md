@@ -3949,3 +3949,141 @@ generatore, l'impronta `20000 50083417.93 60278` va rimisurata — e lo smoke fa
 che è il verso giusto in cui sbagliare.
 
 **Fonti:** [V-058](Sources.md#v-058)
+
+---
+
+<a id="adr-0066"></a>
+## ADR-0066 — Lo stack 03 si spegne con tutti i profili, non con quello con cui è stato acceso
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** Il Task 7 dà allo stack 03 i suoi bersagli nel `Makefile`. La prima decisione è stata
+come far entrare il profilo: `up-03-palco` e `up-03-completo`, cioè **due famiglie** di sei bersagli
+l'una, oppure `PROFILO` come variabile e una famiglia sola. La variabile ha vinto per un motivo
+semplice — con due famiglie basta sbagliare un suffisso una volta, `make up-03-completo` seguito da
+`make down-03-palco`, per fermare metà cluster — e per un motivo che vale sul proiettore, cioè che
+`make up-03 PROFILO=completo` mostra che il profilo è un parametro dello stesso stack e non un altro
+stack.
+
+Poi la scelta è stata provata, e la variabile da sola non bastava. [V-059](Sources.md#v-059) ha
+misurato che `down` agisce **solo sui servizi dei profili attivi**: spegnere in `palco` uno stack
+acceso in `completo` toglie undici container, ne lascia sette accesi, non riesce a rimuovere la rete
+— «Resource is still in use» — ed esce **zero**. Nessun errore, nessun segnale. E `down` senza
+`--profile` fa esattamente la stessa cosa, perché i servizi sempre attivi sono soltanto quelli che
+non dichiarano nessun profilo ([S-068](Sources.md#s-068)).
+
+Il difetto è dell'operazione, non della variabile: al momento di spegnere non si sa — e non si deve
+dover ricordare — con quale profilo qualcun altro ha acceso.
+
+**Decisione.** Il `Makefile` dello stack 03 usa **due** forme del comando Compose, e la seconda non è
+una comodità.
+
+`COMPOSE_03` porta `--profile $(PROFILO)` e serve ai comandi che **scelgono** che cosa esiste:
+`up-03`, `seed-03`, e lo smoke, a cui il profilo arriva per ambiente. `COMPOSE_03_OGNI` porta
+`--profile "*"` e serve ai comandi che agiscono su **tutto quello che c'è**: `down-03`, `reset-03`,
+`logs-03`. Il jolly è la forma documentata per dire «tutti i profili» ([S-068](Sources.md#s-068)),
+ed è preferito all'elenco `--profile palco --profile completo` per la stessa ragione per cui
+[ADR-0042](#adr-0042) rifiuta le liste di eccezioni: un elenco scritto a mano invecchia in silenzio
+al primo profilo nuovo, il jolly no.
+
+`reset-03` cancella i nove volumi dei dati costruendoli con `addprefix` e **non** tocca `keyfile`,
+per la stessa ragione dello stack 02: rigenerarlo significa un segreto nuovo.
+
+**Conseguenze.** `make down-03` e `make reset-03` fanno la cosa giusta qualunque sia il profilo con
+cui si è acceso, e `PROFILO` su quei tre bersagli diventa ininfluente — il che è il punto: non c'è
+una combinazione sbagliata da indovinare. Misurato: `down-03` dopo un `palco` con un servizio del
+`completo` aggiunto a mano rimuove tutti i container e la rete e lascia in piedi i cinque volumi
+([V-059](Sources.md#v-059)).
+
+Il prezzo è una riserva dichiarata. La pagina di Docker non dice da quale versione di Compose
+`--profile "*"` esista, e qui è provato su **v5.5.0**: su una versione più vecchia va riverificato.
+Il costo di sbagliarsi è basso e visibile — il jolly non riconosciuto darebbe un errore di
+argomento, non uno spegnimento silenzioso a metà — che è il verso giusto in cui sbagliare.
+
+Resta un debito, e vale per tutti e tre gli stack: **niente lega il `Makefile` ai profili dichiarati
+nel file Compose.** Se domani nascesse un terzo profilo, il jolly lo prenderebbe da sé nello
+spegnimento, ma nessun controllo direbbe che `up-03` non lo sa accendere. Il Task 9 lo valuta
+insieme agli altri debiti segnati.
+
+**Fonti:** [S-068](Sources.md#s-068) · [V-059](Sources.md#v-059)
+
+---
+
+<a id="adr-0067"></a>
+## ADR-0067 — I config server dichiarano dove scrivono, e una guardia lega il volume al dbpath
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** Il Task 7 ha scoperto, provando i bersagli nuovi, che la sequenza più ordinaria dello
+stack 03 non funzionava: `make up-03`, `make down-03`, `make up-03` falliva al secondo avvio con
+`can't add shard 'shard2rs/shard2a:27017' because a local database 'lab' exists in another
+shard1rs`.
+
+La causa non è quella che il messaggio suggerisce. I config server **perdevano tutto a ogni
+spegnimento** mentre gli shard conservavano i loro dati, quindi al riavvio il cluster non
+riconosceva più i propri shard e provava a registrarli da capo su nodi che avevano già `lab`.
+[V-060](Sources.md#v-060) l'ha contato: `dati-cfg1` e `dati-cfg2` contenevano **zero file**,
+`dati-shard1a` ottantatré.
+
+Il meccanismo sta in due fatti che si sommano, e nessuno dei due è un errore di per sé. Il primo:
+l'entrypoint dell'immagine ufficiale, quando fra gli argomenti trova `--configsvr`, porta il dbpath
+predefinito a `/data/configdb` invece che a `/data/db` — letto dentro l'immagine pinnata
+([V-060](Sources.md#v-060)), e presente con altre parole anche nel ramo 8.0 dello stesso script
+([S-022](Sources.md#s-022)). Il secondo:
+l'immagine dichiara `VOLUME` su **entrambe** le cartelle, quindi Compose soddisfa quella non montata
+con un volume **anonimo**, che `down` abbandona penzolante e che il `up` successivo rifà vuoto.
+Insieme: i tre config server montavano `dati-cfgN` su `/data/db` — il posto giusto per ogni altro
+mongod — e scrivevano altrove, in un contenitore che nessuno aveva chiesto e che nessuno conservava.
+
+Il difetto è sopravvissuto quattro giorni perché era muto in tre modi. Il file Compose sembrava a
+posto: la riga del volume c'era, con il nome giusto. Lo smoke era d'accordo, perché verificava che
+ogni mongod **avesse** il proprio volume nominato e non che ci scrivesse dentro. E tutte le prove
+dei Task 3-6 finivano con `down -v`, che cancella tutto: la perdita dei metadati è invisibile a chi
+riparte sempre da zero.
+
+**Decisione.** Tre cose, e la prima da sola non basterebbe.
+
+*I tre config server dichiarano `--dbpath /data/db`.* Sono due righe per servizio nel file Compose,
+accanto a `--port 27017`, che è là per la ragione gemella: `--configsvr` cambia più di un
+predefinito, e nessuno di quei cambiamenti si vede leggendo il file. Fra le due riparazioni
+possibili — dire a mongod dove scrivere, oppure montare il volume dove scriverebbe — si è scelta la
+prima perché tiene i nove mongod dello stack uniformi: **il volume dei dati sta su `/data/db`**, una
+regola sola per chi legge. L'altra resta legittima e la guardia la accetta.
+
+*`check_stack.py` guadagna una regola statica.* Per ogni servizio che avvia un `mongod`, calcola il
+dbpath che userà davvero — `--dbpath` se c'è, altrimenti `/data/configdb` se c'è `--configsvr`,
+altrimenti `/data/db` — e boccia il file se un volume è montato su una cartella dei dati **diversa**
+da quella. Le due cartelle sono scritte nel codice, e non è la lista di eccezioni che
+[ADR-0042](#adr-0042) proibisce: quella elencava nomi di servizio, che cambiano a ogni stack nuovo;
+queste due sono i `VOLUME` che l'immagine dichiara, leggibili con `docker image inspect`, e cambiano
+solo se cambia l'immagine. La regola giudica un montaggio **sbagliato**, non uno mancante: un mongod
+senza volumi dati non produce niente, perché lo stack 01 gira così per scelta
+([ADR-0005](#adr-0005)).
+
+*Lo smoke smette di accontentarsi.* Il controllo che aveva approvato lo stack rotto confronta adesso
+la destinazione del volume nominato con il dbpath ricavato dal comando del container. Le due guardie
+sono apposta ridondanti: quella statica giudica il file del repository, questa il processo che sta
+girando, e solo la seconda vedrebbe un container avviato con un file diverso.
+
+**Conseguenze.** Il ciclo che falliva adesso regge: `reset-03` 4 s, `up-03` 25 s con `dati-cfg1` a
+**99 file**, `down-03` 7 s, `up-03` di nuovo **22 s** e a posto. Il ramo idempotente di `add-shard`,
+scritto al Task 4, è stato **eseguito per la prima volta oggi** — prima di questa correzione non
+poteva esserlo, perché i metadati non arrivavano mai al secondo giro: un pezzo di codice provato
+solo dai test unitari lo era anche in produzione, senza che niente lo dicesse. `make smoke-03`
+resta a 62 controlli e 0 errori, `make stack-check` a «Stack conformi: 3», la suite degli strumenti
+a **131 passed** con sei test nuovi. Entrambe le guardie sono state provate rompendole
+([V-060](Sources.md#v-060)).
+
+Lo scostamento dal piano è dichiarato: il Task 7 nominava `Makefile`, `reset-demo.sh` e
+`preflight.sh`, e questa correzione tocca `compose.yaml`, `check_stack.py` e `smoke-sharded.sh`, che
+appartengono ai Task 3, 5 e 6. Non è stato rinviato al Task 9 perché non è un debito ma un guasto, e
+perché il guasto colpisce la sequenza che al talk capita per prima: spegnere fra una parte e l'altra
+e riaccendere.
+
+Resta scoperto un caso, e va detto: chi ha già dei volumi `dati-cfgN` creati **prima** di questa
+correzione se li ritrova vuoti e inutilizzabili, perché i metadati stavano nell'anonimo che intanto
+è stato buttato. La via d'uscita è `make reset-03`, che è anche l'unica cosa sensata da fare con
+metadati che non ci sono più. Nessuna migrazione: questo è un laboratorio, e i dati si rifanno in
+venticinque secondi.
+
+**Fonti:** [S-022](Sources.md#s-022) · [V-060](Sources.md#v-060)

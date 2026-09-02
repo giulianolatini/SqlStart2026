@@ -879,3 +879,121 @@ def test_la_regola_della_cache_vale_anche_su_un_config_server():
         "wiredTigerCacheSizeGB" in problema and "mem_limit" in problema
         for problema in problemi
     ), problemi
+
+
+# --- Task 7: il volume dei dati sta dove mongod scrive davvero --------------
+#
+# La regola nasce da un difetto vero, non da un'ipotesi. I tre config server
+# dello stack 03 montavano `dati-cfgN` su /data/db, che è il posto giusto per
+# qualunque altro mongod e quello sbagliato per loro: con `--configsvr`
+# l'entrypoint dell'immagine porta il dbpath predefinito a /data/configdb
+# (V-060). Lì l'immagine dichiara un VOLUME, Compose lo soddisfa con un volume
+# ANONIMO, e `down` lo abbandona: i metadati del cluster sparivano a ogni
+# spegnimento mentre gli shard conservavano i loro dati (V-060).
+#
+# Il difetto era muto due volte. Il file Compose sembrava a posto — la riga del
+# volume c'era — e lo smoke era d'accordo, perché controllava che il volume
+# nominato ESISTESSE, non che fosse quello in cui il processo scrive.
+
+
+def config_server(**modifiche):
+    """Un config server conforme, da rompere una modifica alla volta."""
+    servizio = {
+        "image": "mongo@sha256:aaa",
+        "pull_policy": "never",
+        "mem_limit": "512m",
+        "cpus": 0.5,
+        "command": [
+            "mongod",
+            "--configsvr",
+            "--replSet",
+            "cfgrs",
+            "--keyFile",
+            "/keyfile/mongo-keyfile",
+            "--dbpath",
+            "/data/db",
+            "--wiredTigerCacheSizeGB",
+            "0.25",
+        ],
+        "volumes": ["keyfile:/keyfile:ro", "dati-cfg1:/data/db"],
+    }
+    servizio.update(modifiche)
+    return {"services": {"cfg1": servizio}}
+
+
+def test_il_campione_di_config_server_non_produce_problemi():
+    assert verifica(config_server(), digest_noti={"sha256:aaa"}) == []
+
+
+def test_un_config_server_senza_dbpath_che_monta_su_data_db_e_un_problema():
+    # Il difetto misurato: `dati-cfg1` conteneva zero file mentre
+    # `dati-shard1a` ne conteneva ottantatré.
+    documento = config_server(
+        command=[
+            "mongod",
+            "--configsvr",
+            "--replSet",
+            "cfgrs",
+            "--keyFile",
+            "/keyfile/mongo-keyfile",
+            "--wiredTigerCacheSizeGB",
+            "0.25",
+        ]
+    )
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert len(problemi) == 1
+    assert "/data/configdb" in problemi[0]
+
+
+def test_un_config_server_puo_montare_i_dati_dove_l_immagine_li_mette():
+    # L'altra riparazione possibile, ed è conforme quanto la prima: invece di
+    # dire a mongod dove scrivere, si monta il volume dove scriverebbe.
+    documento = config_server(
+        command=[
+            "mongod",
+            "--configsvr",
+            "--replSet",
+            "cfgrs",
+            "--keyFile",
+            "/keyfile/mongo-keyfile",
+            "--wiredTigerCacheSizeGB",
+            "0.25",
+        ],
+        volumes=["keyfile:/keyfile:ro", "dati-cfg1:/data/configdb"],
+    )
+    assert verifica(documento, digest_noti={"sha256:aaa"}) == []
+
+
+def test_uno_shard_che_monta_i_dati_su_data_db_non_deve_dichiarare_il_dbpath():
+    # Senza `--configsvr` il predefinito è /data/db, che è dove il volume sta:
+    # pretendere qui la riga in più sarebbe una regola che sbaglia bersaglio.
+    documento = config_server(
+        command=[
+            "mongod",
+            "--shardsvr",
+            "--replSet",
+            "shard1rs",
+            "--keyFile",
+            "/keyfile/mongo-keyfile",
+            "--wiredTigerCacheSizeGB",
+            "0.25",
+        ]
+    )
+    assert verifica(documento, digest_noti={"sha256:aaa"}) == []
+
+
+def test_la_regola_tace_su_un_mongod_che_non_monta_volumi_dati():
+    # Lo stack 01 di feature/00 e i campioni di questi test: nessun volume sulle
+    # cartelle dei dati, nessun difetto da segnalare. La regola giudica un
+    # montaggio sbagliato, non un montaggio mancante.
+    assert verifica(conforme(), digest_noti={"sha256:aaa"}) == []
+
+
+def test_un_volume_dei_dati_montato_da_un_percorso_dell_host_e_un_problema():
+    # Su macOS un bind mount sulla cartella dei dati porta gli stessi guai di
+    # permessi del keyfile (ADR-0014), e in più sposta i dati del lab dentro
+    # l'albero di lavoro, dove il repository non li vuole.
+    documento = config_server(volumes=["keyfile:/keyfile:ro", "./dati:/data/db"])
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    assert len(problemi) == 1
+    assert "./dati" in problemi[0]

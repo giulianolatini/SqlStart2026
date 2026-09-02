@@ -601,7 +601,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   `--keyFile`. **`rs.initiate()` non viene mai eseguito dall'immagine: resta a nostro
   carico.** Trattandosi di sorgente, l'API non ha garanzie di stabilità fra versioni: la
   citazione deve indicare commit e riga.
-- **Usata da:** ADR-0005, ADR-0026, ADR-0040, ADR-0042, ADR-0043
+- **Usata da:** ADR-0005, ADR-0026, ADR-0040, ADR-0042, ADR-0043, ADR-0067
 
 <a id="s-023"></a>
 ### S-023 — `docker-library/mongo`: `8.0/Dockerfile`
@@ -2191,6 +2191,34 @@ web:
   entrato nel materiale perché richiede un campione di query reali, che una demo con dati generati
   non ha.
 - **Usata da:** ADR-0064
+
+<a id="s-068"></a>
+### S-068 — Docker Docs: Use profiles with Compose
+
+- **URL:** https://docs.docker.com/compose/how-tos/profiles/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** pagina senza numero di versione; nessun requisito minimo di Compose
+  dichiarato per le forme usate qui
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — un servizio senza `profiles` è sempre acceso.** «Services without
+  a `profiles` attribute are always enabled.» È la riga che rende sensato il disegno dello stack
+  03, dove `keyfile-init` non dichiara nessun profilo: il keyfile serve a tutti e due gli scenari,
+  e non doverlo elencare in entrambi è un posto in meno dove sbagliare.
+- **Cosa afferma, secondo punto — il jolly.** La pagina documenta `--profile "*"` come modo per
+  abilitare **tutti** i profili in un colpo solo, insieme alla variabile d'ambiente
+  `COMPOSE_PROFILES`. È la forma che [ADR-0066](Decision.md#adr-0066) adotta per `down`, `logs` e
+  `reset`, e la si è scelta perché è documentata: la stessa cosa si otterrebbe elencando i profili
+  a mano, cioè costruendo una lista che invecchia in silenzio al primo profilo nuovo.
+- **Cosa afferma, terzo punto — i comandi agiscono sui profili attivi.** La pagina è esplicita sul
+  fatto che l'attivazione di un profilo governa quali servizi i comandi considerano, e mostra
+  `docker compose --profile <nome> down` come il modo di fermare i servizi di quel profilo. Non
+  dice — e questo è il punto che è costato la misura di [V-059](#v-059) — che cosa succede a chi
+  spegne con un profilo diverso da quello con cui ha acceso.
+- **Riserve:** la pagina non dichiara da quale versione di Compose `--profile "*"` sia
+  disponibile. Qui è provata su v5.5.0 ([V-059](#v-059)); su una versione più vecchia il
+  comportamento va riverificato prima di fidarsene.
+- **Usata da:** ADR-0066
 
 ## Verifiche empiriche
 
@@ -6370,3 +6398,159 @@ db.ordini.find({citta: "Ancona"})               -> shard1rs, shard2rs      (2 sh
   e residui verificati a zero: nessun container, nessun volume, nessuna rete. Tutto su arm64.
 - **Data:** 2026-09-01
 - **Usata da:** ADR-0064, ADR-0065
+
+<a id="v-059"></a>
+### V-059 — Il profilo con cui si spegne non è quello con cui si è acceso, e Compose non lo dice
+
+- **Comandi:** `docker compose --profile palco|completo|"*" up -d --wait`, `… down`, `… ps`,
+  `docker network ls`, `docker volume ls` su `docker/03-sharded/compose.yaml`
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.5.0, VM Docker con
+  11,67 GiB e 8 CPU, immagine `mongo` pinnata per digest da `tools/images.env`, 2026-09-02
+- **Che cosa si voleva sapere:** il Task 7 sceglie di passare il profilo come **variabile** del
+  `Makefile` invece di generare due famiglie di bersagli. Prima di scriverlo andava verificato che
+  la variabile bastasse davvero — cioè che `PROFILO=palco make down-03` dopo un avvio in
+  `completo` lasciasse la macchina pulita, che è la sequenza che capita a chi fa una prova
+  generale e poi spegne.
+
+- **Esito, primo punto — non basta, e il modo in cui non basta è il peggiore.** Acceso in
+  `completo` (18 servizi) e spento con `--profile palco`:
+
+```
+container rimossi:   11  (quelli del profilo palco)
+container rimasti:    7  (sh-cfg2, sh-cfg3, sh-shard1b, sh-shard1c, sh-shard2b, sh-shard2c, sh-mongos2)
+rete:                 «Network sqlstart-03-sharded_rete Resource is still in use»
+codice di uscita:     0
+```
+
+  Uscita **zero**. Compose stampa il messaggio sulla rete e considera il comando riuscito: chi
+  legge solo l'esito crede di aver spento, e si ritrova sette mongod accesi che continuano a
+  tenere la RAM e le porte. Al `up` successivo la rete esiste già, quindi nemmeno lì si accorge di
+  niente.
+
+- **Esito, secondo punto — `down` senza `--profile` si comporta come `--profile palco`.** Stesso
+  identico risultato: 11 rimossi, 7 rimasti, rete viva. La forma «neutra» non è neutra, perché i
+  servizi senza profilo esplicito sono l'unico insieme sempre attivo ([S-068](#s-068)) e gli altri
+  vanno nominati.
+
+- **Esito, terzo punto — due forme funzionano, e una sola non va tenuta aggiornata a mano.**
+  `--profile completo down` toglie tutto (18 container, rete rimossa) perché `completo` è un
+  soprainsieme di `palco`; `--profile "*" down` toglie tutto senza sapere quali profili esistano.
+  Controprova a stack acceso in `palco` con un servizio del `completo` aggiunto a mano:
+  `make down-03` con il jolly ha rimosso tutti i container e la rete, e ha lasciato in piedi i
+  **5** volumi, che è esattamente ciò che `down` deve fare e `reset` no.
+
+- **Perché conta oltre lo stack 03.** La forma sbagliata non produce nessun segnale: nessun codice
+  di errore, nessuna riga rossa, e `docker compose ps` interrogato con lo stesso profilo sbagliato
+  mostra zero container, cioè **conferma** l'idea sbagliata. L'unico modo di accorgersene è
+  guardare `docker ps` senza filtri, che è quello che nessuno fa quando ha appena letto «done».
+
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0066
+
+<a id="v-060"></a>
+### V-060 — Il config server scriveva in un volume anonimo: zero file contro ottantatré
+
+- **Comandi:** `make up-03`, `make down-03`, `make reset-03`, `docker logs sh-add-shard`,
+  `docker inspect --format '{{range .Mounts}}…'`, `docker image inspect --format
+  '{{json .Config.Volumes}}'`, `docker run --rm --entrypoint cat … /usr/local/bin/docker-entrypoint.sh`,
+  `docker run --rm -v <volume>:/v alpine sh -c 'ls -1 /v | wc -l'`
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.5.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-02
+- **Che cosa si voleva sapere:** perché `make up-03` fallisse su volumi già esistenti. Il Task 7
+  provava i bersagli nuovi, e la sequenza più ordinaria di tutte — accendere, spegnere,
+  riaccendere — non funzionava.
+
+- **Esito, primo punto — il sintomo, che accusava la persona sbagliata.**
+
+```
+shard già registrati: nessuno
+registro lo shard «shard1rs» -> shard1rs/shard1a:27017
+registro lo shard «shard2rs» -> shard2rs/shard2a:27017
+ERRORE: sh.addShard(«shard2rs/shard2a:27017») ha risposto ok=0
+Messaggio: can't add shard 'shard2rs/shard2a:27017' because a local database 'lab' exists in
+another shard1rs
+```
+
+  Il messaggio dice che il secondo shard ha già il database `lab`, e in effetti ce l'ha: è il
+  dataset del giro precedente. Ma la riga che spiega tutto è la prima — **«shard già registrati:
+  nessuno»** — su un cluster che al giro prima ne aveva due. Gli shard ricordavano i loro dati, i
+  config server avevano dimenticato i propri.
+
+- **Esito, secondo punto — dove finivano i metadati, contato.** Con il cluster acceso e sano:
+
+```
+dati-cfg1       0 file
+dati-cfg2       0 file
+dati-shard1a   83 file
+dati-shard2a   76 file
+```
+
+  I volumi nominati dei config server erano **vuoti**. `docker inspect sh-cfg1` mostrava tre
+  montaggi: `keyfile -> /keyfile`, `dati-cfg1 -> /data/db` e un terzo con un nome di 64 cifre
+  esadecimali su `/data/configdb`, cioè un volume **anonimo**. I metadati stavano lì.
+
+- **Esito, terzo punto — la causa, che è una riga dell'entrypoint dell'immagine.** Letta dentro
+  l'immagine pinnata con `docker run --rm --entrypoint cat`, righe 236-238:
+
+```
+# if running as config server, then the default dbpath is /data/configdb
+dbPath=/data/configdb
+```
+
+  La citazione va attribuita con precisione, che è il seguito della nota di metodo 108.
+  [S-022](#s-022) documenta lo **stesso script nel ramo 8.0**, dove la regola c'è ma il commento
+  è scritto con altre parole — «if "--configsvr" is specified, then the default dbPath is
+  "/data/configdb"» — e il codice interroga anche `sharding.clusterRole` per il caso in cui il
+  ruolo arrivi da un file di configurazione invece che da un argomento. Le righe qui sopra sono
+  quelle dell'immagine **7.0.40** che il lab usa davvero, e sono la fonte primaria di questa
+  misura; S-022 conferma che la regola non è un'idiosincrasia della versione pinnata.
+
+  E l'immagine dichiara **due** `VOLUME`, non uno: `docker image inspect --format
+  '{{json .Config.Volumes}}'` risponde `{"/data/configdb":{},"/data/db":{}}`. Le due cose insieme
+  fanno il guasto: un `mongod --configsvr` scrive in /data/configdb, e se lì non c'è un montaggio
+  Compose ne crea uno anonimo, che `down` abbandona penzolante e che il `up` successivo rifà
+  vuoto. Il volume nominato che il file Compose chiedeva per nome esisteva, era montato, ed era
+  inutile.
+
+- **Esito, quarto punto — perché nessuno se n'era accorto in quattro giorni.** Tutte le prove dei
+  Task 3-6 finivano con `down -v`, che cancella tutto e riparte da zero: la perdita dei metadati
+  è invisibile a chi non riaccende **conservando** i dati. Lo smoke, dal canto suo, verificava che
+  ogni mongod avesse il proprio volume nominato — e ce l'aveva. Il controllo era giusto per metà,
+  che è la metà che non serve: non chiedeva se il processo ci scrivesse dentro.
+
+- **Esito, quinto punto — la riparazione, misurata.** Dichiarando `--dbpath /data/db` sui tre
+  config server ([ADR-0067](Decision.md#adr-0067)):
+
+```
+make reset-03   uscita 0 in  4 s
+make up-03      uscita 0 in 25 s      dati-cfg1: 99 file
+make down-03    uscita 0 in  7 s
+make up-03      uscita 0 in 22 s      <- il giro che prima falliva
+
+shard già registrati: shard1rs, shard2rs
+shard «shard1rs» già registrato: non lo riaggiungo
+shard «shard2rs» già registrato: non lo riaggiungo
+cluster pronto: 2 shard registrati
+```
+
+  Il ramo idempotente di `add-shard` — scritto al Task 4 e fino a oggi mai eseguito su un vero
+  riavvio, perché i metadati non arrivavano mai al secondo giro — ha funzionato al primo colpo.
+  `make smoke-03` chiude a **62 controlli e 0 errori** come prima della correzione.
+
+- **Esito, sesto punto — le due guardie, provate rompendole.** La regola statica di
+  `check_stack.py` sul file corretto: «Stack conformi: 3». Sullo stesso file con `--dbpath` tolto
+  al solo `cfg1`:
+
+```
+✗ cfg1: monta «dati-cfg1» su «/data/db» ma scriverà in «/data/configdb». Là l'immagine dichiara
+  un VOLUME, che Compose soddisfa con un volume ANONIMO: «down» lo abbandona e i dati spariscono
+  a ogni spegnimento, senza un errore (ADR-0067)
+```
+
+  Il controllo a runtime dello smoke confronta due valori distinti e non due copie della stessa
+  cosa: `cfg1` volume su `/data/db`, mongod scrive in `/data/db`; togliendo `--dbpath` dal comando
+  del container la funzione risponde `/data/configdb`, cioè il disaccordo che deve segnalare. Sei
+  test nuovi in `tools/tests/test_check_stack.py`, suite a **131 passed**.
+
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0067

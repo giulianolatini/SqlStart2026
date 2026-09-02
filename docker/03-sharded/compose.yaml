@@ -210,6 +210,25 @@ services:
       # senza un avviso. È il caso che `make stack-check` intercetta (ADR-0004).
       - --wiredTigerCacheSizeGB
       - "0.25"
+      # DOVE scrive, dichiarato — e non è ridondante, è la riparazione di un difetto
+      # che ha rotto il secondo avvio. L'entrypoint dell'immagine, quando fra gli
+      # argomenti trova `--configsvr`, porta il dbpath predefinito a /data/configdb
+      # invece che a /data/db. Letto dentro l'immagine pinnata, righe 236-238 di
+      # `docker-entrypoint.sh`: «if running as config server, then the default dbpath
+      # is /data/configdb» (V-060). La stessa regola sta nel ramo 8.0 dello stesso
+      # script, scritta con altre parole (S-022). Il volume `dati-cfg1` qui sotto è
+      # montato su /data/db: senza questa riga il config server scriveva altrove.
+      #
+      # E «altrove» non era una cartella qualunque. L'immagine dichiara `VOLUME
+      # /data/configdb`, che Compose soddisfa creando un volume ANONIMO: `down` lo
+      # abbandona penzolante e il `up` successivo ne fabbrica un altro vuoto. I
+      # metadati del cluster sparivano a ogni spegnimento mentre gli shard
+      # conservavano i loro, e al riavvio `sh.addShard()` rifiutava il secondo con
+      # «can't add shard 'shard2rs/shard2a:27017' because a local database 'lab'
+      # exists in another shard1rs». Misurato in V-060, dove `dati-cfg1` conteneva
+      # zero file e `dati-shard1a` ottantatré (ADR-0067).
+      - --dbpath
+      - /data/db
 
     ports:
       # 27131-27133 dalla mappa del design §5.2. Gli intervalli dei tre stack non
@@ -293,6 +312,11 @@ services:
       - "27017"
       - --wiredTigerCacheSizeGB
       - "0.25"
+      # Come cfg1, e per la stessa ragione: con `--configsvr` il dbpath predefinito
+      # è /data/configdb, dove finirebbe in un volume anonimo che `down` butta via
+      # (S-022, V-060, ADR-0067).
+      - --dbpath
+      - /data/db
 
     ports:
       - "${PORTA_CFG_2:-27132}:27017"
@@ -352,6 +376,11 @@ services:
       - "27017"
       - --wiredTigerCacheSizeGB
       - "0.25"
+      # Come cfg1, e per la stessa ragione: con `--configsvr` il dbpath predefinito
+      # è /data/configdb, dove finirebbe in un volume anonimo che `down` butta via
+      # (S-022, V-060, ADR-0067).
+      - --dbpath
+      - /data/db
 
     ports:
       - "${PORTA_CFG_3:-27133}:27017"

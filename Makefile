@@ -5,7 +5,8 @@
 .PHONY: help docs-check tools-test images-pull images-verify preflight stack-check \
         up-01 down-01 reset-01 logs-01 seed-01 smoke-01 reset-demo-01 \
         up-02 down-02 reset-02 logs-02 seed-02 smoke-02 reset-demo-02 \
-        failover-02 failover-02-termina failover-02-maggioranza
+        failover-02 failover-02-termina failover-02-maggioranza \
+        up-03 down-03 reset-03 logs-03 seed-03 smoke-03 reset-demo-03
 
 # `--env-file tools/images.env` porta MONGO_IMAGE, che nei file Compose è dichiarato
 # nella forma `${MONGO_IMAGE:?...}`: senza, Compose si ferma subito dicendo cosa manca
@@ -172,3 +173,93 @@ failover-02-termina: ## Demo di failover: il primario esce da sé (~0,5 s, e il 
 
 failover-02-maggioranza: ## Demo: due membri su tre giù, il superstite va in sola lettura (~9 s)
 	./tools/failover-replicaset.sh maggioranza
+
+# --- Stack 03 — sharded cluster a due profili -----------------------------------------
+
+# UN bersaglio per profilo sarebbe stato due famiglie di comandi: `up-03-palco`,
+# `up-03-completo`, e così per gli altri sei. Il profilo è una VARIABILE, così `down`,
+# `logs` e `reset` guardano per forza lo stesso insieme che `up` ha acceso — con due
+# famiglie sarebbe bastato sbagliare suffisso una volta per fermare metà cluster.
+#
+#   make up-03                    undici servizi, il profilo del palco
+#   make up-03 PROFILO=completo   diciotto, tre membri per componente
+#
+# Il valore predefinito è quello che deve partire su qualunque macchina: il `completo`
+# vuole 12 GiB assegnati alla VM Docker (ADR-0025) e su un portatile da 8 non parte.
+PROFILO ?= palco
+
+COMPOSE_03 := docker compose --env-file tools/images.env --env-file docker/03-sharded/.env \
+              -f docker/03-sharded/compose.yaml --profile $(PROFILO)
+
+# DUE forme del comando, e la seconda non è una comodità: è una correzione a un difetto
+# misurato. `down` agisce solo sui servizi dei profili ATTIVI, quindi `--profile palco
+# down` dopo un avvio in `completo` toglie gli undici del palco, lascia i sette in piedi
+# e nemmeno riesce a togliere la rete — «resource is still in use» — senza che il codice
+# di uscita se ne accorga (V-059). Chi spegne dopo una prova generale si ritroverebbe
+# mezzo cluster acceso e nessun avviso.
+#
+# `--profile "*"` accende tutti i profili insieme, ed è la forma documentata per dire
+# «tutti» (S-068). Si spegne e si guardano i log SEMPRE così, perché al momento di
+# spegnere non si sa con quale profilo qualcun altro ha acceso.
+COMPOSE_03_OGNI := docker compose --env-file tools/images.env --env-file docker/03-sharded/.env \
+              -f docker/03-sharded/compose.yaml --profile "*"
+
+AMBIENTE_03 := docker/03-sharded/.env
+
+# Nove volumi dei dati, uno per mongod, più `keyfile` che NON è in questa lista: vale
+# qui la stessa ragione dello stack 02, cioè che rigenerarlo significa un segreto nuovo.
+# `addprefix` invece di nove nomi scritti a mano perché nove nomi scritti a mano sono
+# nove occasioni di scriverne uno sbagliato, e un volume mancato da `reset-03` non dà
+# errore: dà dati vecchi al giro dopo, che è molto peggio.
+PROGETTO_03 := sqlstart-03-sharded
+DATI_03 := $(addprefix $(PROGETTO_03)_dati-, \
+             cfg1 cfg2 cfg3 shard1a shard1b shard1c shard2a shard2b shard2c)
+
+# Stessa regola su file dello stack 02, stesso motivo: se il `.env` manca ci si ferma
+# qui con una frase che dice cosa fare (ADR-0014), invece di lasciare a Compose un «env
+# file not found» che non spiega perché quel file non è nel repository.
+$(AMBIENTE_03):
+	@printf 'Manca %s.\n' "$(AMBIENTE_03)" >&2
+	@printf 'Contiene la password dell'"'"'amministratore e sta fuori dal repository apposta.\n' >&2
+	@printf 'Crearlo con: cp %s.example %s, poi riempire PASSWORD_AMMINISTRATORE.\n' \
+		"$(AMBIENTE_03)" "$(AMBIENTE_03)" >&2
+	@exit 1
+
+# UN comando, non i due di `up-02`, ed è la differenza che ADR-0062 ha reso possibile.
+# Lo stack 02 ha bisogno del secondo perché `up --wait` gli torna quattordici secondi
+# prima che la replica esista (V-025). Qui l'ultimo anello della catena è la sentinella
+# `up-03`, che `--wait` aspetta come qualunque altro servizio: quando il comando torna,
+# i due shard sono registrati e `lab.ordini` è distribuita e piena.
+#
+# Aggiungerne un secondo per simmetria sarebbe peggio che inutile: `compose wait` su un
+# one-shot che ha già finito risponde «no containers for project» e esce 1, cioè
+# trasformerebbe un avvio riuscito in un errore.
+up-03: $(AMBIENTE_03) ## Avvia lo stack 03 (sharded, PROFILO=palco|completo) e attende il cluster
+	$(COMPOSE_03) up -d --wait
+
+down-03: $(AMBIENTE_03) ## Ferma lo stack 03 conservando i dati e il keyfile
+	$(COMPOSE_03_OGNI) down
+
+reset-03: $(AMBIENTE_03) ## Ferma lo stack 03 e CANCELLA i dati, conservando il keyfile
+	$(COMPOSE_03_OGNI) down
+	docker volume rm --force $(DATI_03)
+
+logs-03: $(AMBIENTE_03) ## Segue i log dello stack 03
+	$(COMPOSE_03_OGNI) logs -f
+
+# Rilancia lo STESSO servizio che semina all'avvio, con `RICARICA=1` che gli dice di
+# ricaricare anche se i ventimila documenti ci sono già. La collezione resta distribuita:
+# `30-dati-demo.js` chiama `sh.shardCollection()` prima di riempire e la trova già fatta,
+# che è idempotente per costruzione. La password non compare qui perché sta già
+# nell'ambiente del servizio.
+seed-03: $(AMBIENTE_03) ## Ricarica i dati di demo su uno stack 03 già avviato
+	$(COMPOSE_03) run --rm -e RICARICA=1 seed
+
+# Il profilo arriva allo smoke per ambiente e non per argomento, perché è la stessa
+# variabile che sceglie i servizi: passarla due volte in due modi diversi è il modo di
+# ritrovarsi a provare `palco` su un cluster avviato in `completo`.
+smoke-03: ## Prova end-to-end dello stack 03 avviato (PROFILO=palco|completo)
+	PROFILO=$(PROFILO) ./tools/smoke-sharded.sh
+
+reset-demo-03: ## Riporta lo stack 03 allo stato di partenza senza ricostruirlo
+	PROFILO=$(PROFILO) ./tools/reset-demo.sh 03

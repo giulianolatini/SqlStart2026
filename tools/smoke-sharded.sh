@@ -345,16 +345,50 @@ done
 # E il contrario, che è la metà della coppia che conta: ogni mongod deve avere il SUO
 # volume nominato. Un nodo che gira sul volume anonimo dell'immagine funziona benissimo
 # e perde tutto al primo `docker compose down`, senza dire niente a nessuno.
+#
+# Fino al Task 7 il controllo finiva qui, e per questo ha approvato per quattro giorni
+# uno stack rotto. Che il volume nominato ESISTA non dice niente su DOVE il processo
+# scrive: i config server avevano `dati-cfgN` regolarmente montato su /data/db e
+# scrivevano in /data/configdb, perché l'entrypoint dell'immagine porta là il dbpath
+# predefinito quando trova `--configsvr`. Il volume nominato restava vuoto, i
+# metadati stavano nell'anonimo, e `down` li buttava: al riavvio il cluster non
+# riconosceva più i propri shard (V-060, ADR-0067).
+#
+# Da qui in avanti il controllo confronta le due cose. Il dbpath si ricava dal comando
+# del container con la stessa regola di `check_stack.py`, e le due guardie sono apposta
+# ridondanti: quella statica giudica il file, questa il processo che sta girando, e
+# solo la seconda vede un container avviato con un file diverso da quello del repo.
+dbpath_di() {
+  comando="$(docker inspect "sh-$1" --format '{{join .Config.Cmd " "}}' 2>/dev/null)"
+  if [[ "${comando}" == *"--dbpath "* ]]; then
+    resto="${comando#*--dbpath }"
+    printf '%s' "${resto%% *}"
+  elif [[ "${comando}" == *"--configsvr"* ]]; then
+    printf '/data/configdb'
+  else
+    printf '/data/db'
+  fi
+}
+
 SENZA_VOLUME=0
 for servizio in "${MONGOD[@]}"; do
   nominati="$(docker inspect "sh-${servizio}" --format '{{range .Mounts}}{{.Name}} {{end}}' 2>/dev/null)"
-  [[ "${nominati}" == *"dati-${servizio}"* ]] || {
+  if [[ "${nominati}" != *"dati-${servizio}"* ]]; then
     errore "${servizio} non ha il volume nominato dati-${servizio}: i dati non sopravvivono a down"
     SENZA_VOLUME=$((SENZA_VOLUME + 1))
-  }
+    continue
+  fi
+  destinazione="$(docker inspect "sh-${servizio}" \
+    --format '{{range .Mounts}}{{.Name}}={{.Destination}}
+{{end}}' 2>/dev/null | grep "dati-${servizio}=" | cut -d= -f2)"
+  percorso="$(dbpath_di "${servizio}")"
+  if [[ "${destinazione}" != "${percorso}" ]]; then
+    errore "${servizio}: dati-${servizio} è montato su «${destinazione}» ma mongod scrive in «${percorso}»"
+    SENZA_VOLUME=$((SENZA_VOLUME + 1))
+  fi
 done
 if (( SENZA_VOLUME == 0 )); then
-  ok "ciascuno dei ${#MONGOD[@]} mongod ha il proprio volume nominato dati-…"
+  ok "ciascuno dei ${#MONGOD[@]} mongod scrive nel proprio volume nominato dati-…"
 fi
 
 # --- Senza credenziali non si entra ---------------------------------------------------

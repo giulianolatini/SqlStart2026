@@ -585,6 +585,22 @@ No, ed è scritto.
 
 ---
 
+### Il volume c'era, aveva il nome giusto, ed era vuoto
+
+> Il config server aveva il suo volume `dati-cfg1`, montato su `/data/db` come tutti gli altri
+> nodi. Dentro: zero file. Scriveva in `/data/configdb`, perché con `--configsvr` l'immagine
+> cambia il dbpath predefinito, e là Docker gli aveva messo un volume anonimo — che `down`
+> butta via. Gli shard ricordavano i loro dati, i config server dimenticavano i propri, e al
+> riavvio il cluster non riconosceva più i propri shard.
+
+Fonte: [V-060](Sources.md#v-060), [ADR-0067](Decision.md#adr-0067).
+
+**Perché una slide:** perché il messaggio d'errore accusava la persona sbagliata — parlava di un
+database `lab` di troppo su uno shard — mentre la riga che spiegava tutto era «shard già
+registrati: nessuno». È l'esempio migliore che ho di un guasto in cui la diagnosi sta due righe
+sopra l'errore, e di uno stato che sopravvive dove non dovrebbe accanto a uno che sparisce dove
+dovrebbe restare.
+
 ## Backup e restore
 
 ### `--oplog` non funziona su uno sharded cluster
@@ -942,6 +958,21 @@ diventasse un container, non ha trovato quella variabile **nel proprio ambiente*
 stringa vuota. Misurato: `singolo=[]  doppio=[valore-del-container]`, e con la stessa variabile
 esportata nella shell che lancia, il dollaro singolo stampa il valore **dell'host**
 ([V-046](Sources.md#v-046)). `docker compose config` esce `0` e si limita a un avviso.
+
+### Con i profili, `down` spegne solo quello che il profilo dichiara
+
+> Acceso in `completo`, spento con `--profile palco`: undici container rimossi, sette rimasti
+> accesi, la rete che non si lascia togliere perché «resource is still in use». Codice di
+> uscita: **zero**. E `down` senza `--profile` fa esattamente la stessa cosa, perché i servizi
+> sempre attivi sono soltanto quelli che un profilo non ce l'hanno.
+
+Fonte: [V-059](Sources.md#v-059), [S-068](Sources.md#s-068), [ADR-0066](Decision.md#adr-0066).
+
+**Perché una slide:** è il tranello dei profili, e non ha nessun segnale — nessun errore, nessuna
+riga rossa, e `docker compose ps` interrogato con lo stesso profilo sbagliato risponde «zero
+container», cioè conferma l'idea sbagliata. La regola pratica sta in una riga: si accende con il
+profilo che si vuole, si spegne con `--profile "*"`, perché al momento di spegnere non si sa con
+quale profilo qualcun altro ha acceso.
 
 ## Installazione su una macchina vera
 

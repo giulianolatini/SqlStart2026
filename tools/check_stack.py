@@ -89,6 +89,12 @@ def _risolvi_ovunque(nodo, ambiente: dict[str, str]):
     return nodo
 
 
+# I due `VOLUME` dichiarati dall'immagine ufficiale di MongoDB. Sono i soli
+# percorsi dove dimenticare un montaggio non dà un errore ma un volume anonimo,
+# che è la differenza fra accorgersene subito e accorgersene al secondo avvio.
+CARTELLE_DATI = ("/data/db", "/data/configdb")
+
+
 def leggi_documento(percorso) -> dict:
     """Legge un file Compose senza toccarne le variabili.
 
@@ -325,6 +331,82 @@ def problemi_keyfile(nome: str, servizio: dict) -> list[str]:
         "percorso. Il processo parte e muore, e il file Compose sembra a posto "
         "perché la riga c'è (ADR-0014)"
     ]
+
+
+def dbpath_effettivo(comando: object) -> str:
+    """Il percorso in cui `mongod` scriverà davvero, dichiarato o no.
+
+    Tre casi, e il secondo è quello che nessuno si aspetta. Se il comando porta
+    `--dbpath`, vale quello. Altrimenti, se porta `--configsvr`, l'entrypoint
+    dell'immagine ufficiale porta il predefinito a **/data/configdb** e non a
+    /data/db. Righe 236-238 dell'entrypoint dentro l'immagine pinnata, lette
+    con `docker run --rm --entrypoint cat` (V-060):
+
+        # if running as config server, then the default dbpath is /data/configdb
+        dbPath=/data/configdb
+
+    Il ramo 8.0 dello stesso script dice la stessa cosa con altre parole
+    ([S-022]). In tutti gli altri casi è /data/db, il predefinito di `mongod`.
+    """
+    dichiarato = valore_opzione(comando, "--dbpath")
+    if dichiarato:
+        return dichiarato
+    if ha_opzione(comando, "--configsvr"):
+        return "/data/configdb"
+    return "/data/db"
+
+
+def problemi_persistenza(nome: str, servizio: dict) -> list[str]:
+    """Un volume dei dati va montato dove il processo scrive, non dove sembra.
+
+    La regola nasce da un difetto misurato, non da un timore. I config server
+    dello stack 03 montavano `dati-cfgN` su /data/db — il posto giusto per
+    qualunque altro mongod — mentre con `--configsvr` scrivevano in
+    /data/configdb. Lì l'immagine dichiara `VOLUME`, quindi Compose ce ne
+    metteva uno ANONIMO: `down` lo lasciava penzolante e il `up` successivo ne
+    fabbricava un altro vuoto. Risultato, i metadati del cluster sparivano a
+    ogni spegnimento mentre gli shard conservavano i loro dati, e il giro dopo
+    `sh.addShard()` rifiutava il secondo shard con «a local database 'lab'
+    exists in another shard1rs». Il volume nominato conteneva zero file, quello
+    di uno shard ottantatré (V-060, ADR-0067).
+
+    Le due cartelle sono scritte qui, e non è la lista di eccezioni che [ADR-0042]
+    proibisce: quella elencava NOMI DI SERVIZIO, che cambiano a ogni stack nuovo.
+    Queste due sono i `VOLUME` che l'immagine ufficiale dichiara — si leggono con
+    `docker image inspect --format '{{json .Config.Volumes}}'` — e sono l'elenco
+    esatto dei posti dove un montaggio mancato diventa un volume anonimo invece
+    di un errore. Cambiano solo se cambia l'immagine.
+
+    La regola giudica un montaggio SBAGLIATO, non un montaggio mancante: un
+    mongod senza volumi dati non produce niente, perché lo stack 01 gira così
+    per scelta e perché «questo servizio non conserva niente» è una decisione
+    legittima che un file può prendere.
+    """
+    comando = servizio.get("command")
+    if not avvia_mongod(comando):
+        return []
+
+    percorso = dbpath_effettivo(comando).rstrip("/")
+    problemi: list[str] = []
+    for sorgente, destinazione in montaggi(servizio):
+        destinazione = destinazione.rstrip("/")
+        if destinazione not in CARTELLE_DATI:
+            continue
+        if destinazione != percorso:
+            problemi.append(
+                f"{nome}: monta «{sorgente}» su «{destinazione}» ma scriverà in "
+                f"«{percorso}». Là l'immagine dichiara un VOLUME, che Compose "
+                "soddisfa con un volume ANONIMO: «down» lo abbandona e i dati "
+                "spariscono a ogni spegnimento, senza un errore (ADR-0067)"
+            )
+        elif not e_volume_nominato(sorgente):
+            problemi.append(
+                f"{nome}: il dbpath «{percorso}» arriva da «{sorgente}», che è "
+                "un percorso dell'host. I dati del lab finiscono nell'albero di "
+                "lavoro e su macOS ereditano i permessi che mongod rifiuta: "
+                "serve un volume nominato (ADR-0014)"
+            )
+    return problemi
 
 
 def problemi_di_ruolo(
@@ -573,6 +655,7 @@ def verifica(
                 )
 
         problemi.extend(problemi_keyfile(nome, servizio))
+        problemi.extend(problemi_persistenza(nome, servizio))
 
         problemi.extend(
             problemi_di_ruolo(
