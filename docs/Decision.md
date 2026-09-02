@@ -4186,3 +4186,200 @@ una bugia comoda e questa è la pagina sbagliata dove dirla; rimandare la trappo
 colpisce chi ha scelto bene non si tiene in un cassetto per due settimane.
 
 **Fonti:** [S-066](Sources.md#s-066) · [S-067](Sources.md#s-067) · [S-069](Sources.md#s-069) · [S-070](Sources.md#s-070) · [S-071](Sources.md#s-071) · [V-058](Sources.md#v-058) · [V-061](Sources.md#v-061)
+
+---
+
+<a id="adr-0069"></a>
+## ADR-0069 — Il balancer entra in scena, e la pagina di ieri va corretta: la fusione non è una migrazione
+
+**Data:** 2026-09-02 · **Stato:** Accettata · **Corregge:** [ADR-0068](#adr-0068)
+
+**Contesto.** Il Task 9 chiude i debiti marcati eseguendoli, e [ADR-0049](#adr-0049) avverte che
+l'esecuzione trova righe sbagliate: la prima volta che è stata applicata ne ha trovate due. Questa
+volta la prima riga sbagliata è saltata fuori **prima** di arrivare al debito, riaccendendo lo stack.
+
+`sh.status()` mostrava **due** chunk su `lab.ordini`. [V-061](Sources.md#v-061), poche ore prima, ne
+aveva contati **quattro**, e su quel numero è costruita la sezione 4 di
+`docs/02-architetture/sharded-cluster.md`. Nessuno aveva inserito, cancellato o spostato niente: fra
+le due misure c'era solo un `make down-03` e un `make up-03`, che conservano i volumi.
+
+[V-062](Sources.md#v-062) ha trovato la ragione nel registro del cluster: due eventi `merge`, alle
+`12:34:16.530Z` e alle `12:34:31.450Z`, **3,8 secondi dopo l'avvio del config server** e sei secondi
+prima che il router esistesse. Il campo `server` di tutti e due dice `cfg1:27017`. La spiegazione è
+l'**AutoMerger**, che [S-070](Sources.md#s-070) non nomina e che [S-072](Sources.md#s-072) descrive:
+«Starting in MongoDB 7.0, the balancer can automatically merge chunks that meet the mergeability
+requirements», e «unless explicitly disabled, the AutoMerger **starts the first time the balancer is
+enabled**».
+
+**Decisione.**
+
+*La frase «il balancer non entra mai in scena» è falsa e si corregge, non si sfuma.* Stava nella
+pagina, in [ADR-0068](#adr-0068) e nella riga dell'indice, ed è smentita da un evento registrato con
+data, ora e nodo. La pagina la sostituisce con quella vera, che è più interessante: **il balancer di
+una 7.0 fa due mestieri, e nel lab ne esercita esattamente uno.** Non migra mai — la differenza fra i
+due shard è 34 409 byte contro una soglia di 384 MB — e intanto fonde, perché la fusione non ha
+soglia di squilibrio: ha condizioni di età.
+
+*L'errore da nominare è l'identificazione, non il numero.* Quattro chunk erano quattro davvero, e due
+sono due davvero: [V-062](Sources.md#v-062) mostra che il fenomeno ha due fasi e che le due misure
+guardano fasi diverse. Lo sbaglio non è stato contare male, è stato **assumere che «balancer» e
+«migrazione» fossero la stessa parola** — un'assunzione che il manuale non autorizza e che la pagina
+del balancer, parlando quasi solo di migrazioni, incoraggia. È il tipo di errore che nessuna rilettura
+avrebbe preso, perché il testo era coerente con sé stesso.
+
+*La sezione 4 della pagina si riscrive attorno alla nuova sequenza, e ci guadagna.* Prima diceva: i
+quattro chunk sono geometria di `shardCollection()`, e poi non succede più niente. Adesso dice che i
+quattro chunk sono geometria, che restano quattro finché il cluster non viene riavviato, e che al
+primo giro del balancer diventano due — perché due coppie contigue sullo stesso shard sono
+«mergeable» e il confine fra i due shard non lo è. È una storia con un prima e un dopo, ed è più
+facile da mostrare dal vivo di una fotografia ferma: **basta un `make down-03 && make up-03`.**
+
+*Il numero dei chunk esce dalle frasi in cui era un dato di fatto.* Dove serviva «quattro», adesso
+serve «quattro appena distribuita, due dopo il primo riavvio», e dove la cifra non aggiungeva niente
+sparisce. Lo stesso vale per la riga dell'indice, che vendeva la pagina con «il balancer che non entra
+mai in scena»: è la prima cosa che un lettore legge, e prometteva il falso.
+
+*`sh.stopBalancer()` va raccontato per quello che fa davvero.* Dalla 7.0 spegne **anche**
+l'AutoMerger ([S-073](Sources.md#s-073)), cioè in questo laboratorio spegne l'unica cosa che il
+balancer stia facendo. Un comando il cui nome descrive metà del proprio effetto merita una riga sia
+nella pagina dell'architettura sia nella guida a `mongosh`.
+
+*[ADR-0068](#adr-0068) non si riscrive.* Resta com'è, con la sua data, e questa decisione lo corregge
+per intero sul punto del balancer: la regola del repository è che una decisione si supera, non si
+emenda ([ADR-0002](#adr-0002)). Lo stesso vale per [V-061](Sources.md#v-061), che registra ciò che è
+stato misurato in quella finestra: ha ricevuto una **riserva aggiunta**, non una modifica dei numeri.
+
+**Conseguenze.** Cambiano `docs/02-architetture/sharded-cluster.md` (sezione 4, l'apertura della 4.3,
+la voce di «cosa questa pagina non dice» sul balancer), la riga 70 di `docs/README.md` e
+`tools/smoke-sharded.sh`, che verificava un'uguaglianza a quattro e adesso verifica un pavimento —
+almeno un chunk per shard, con quattro e due riconosciuti per nome. Entrano due
+fonti — [S-072](Sources.md#s-072) e [S-073](Sources.md#s-073) — e due verifiche,
+[V-062](Sources.md#v-062) e [V-063](Sources.md#v-063). [V-061](Sources.md#v-061) prende una riserva
+in coda.
+
+Il talk ci guadagna una scena che prima non c'era, e che costa un comando: distribuire, contare
+quattro, spegnere, riaccendere, contare due. Se il tempo del Blocco 3 non la regge, è la prima da
+tagliare — ma sta scritta ([feedback dal vivo a parte](00-progetto/2026-08-24-design.md)).
+
+**Alternative scartate:** lasciare la frase e aggiungere una nota a piè di pagina — sarebbe stato un
+modo di avere ragione senza correggersi, e la frase sbagliata è nel titolo di una sezione e nella
+riga dell'indice, cioè nei due punti che si leggono per primi; dire «il balancer non migra mai» e
+tacere la fusione — vero e reticente insieme, e taciuto proprio il pezzo che si può mostrare dal
+vivo; rifare la misura sperando che i quattro chunk tornassero — sarebbe stato aspettare che il
+laboratorio confermasse la pagina invece del contrario; attribuire la fusione al riavvio senza
+provarlo — è la [riserva **b**](Sources.md#v-062) di V-062, e resta una riserva.
+
+**Fonti:** [S-070](Sources.md#s-070) · [S-072](Sources.md#s-072) · [S-073](Sources.md#s-073) · [V-061](Sources.md#v-061) · [V-062](Sources.md#v-062) · [V-063](Sources.md#v-063)
+
+---
+
+<a id="adr-0070"></a>
+## ADR-0070 — I debiti dello sharded, saldati eseguendo: quattro marcature tolte, e quello che togliendole si è visto
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** Il Task 9 del piano di `feature/03` non aggiunge funzioni: chiude i debiti che le
+pagine si portano scritti addosso. La regola è [ADR-0049](#adr-0049) — un debito si chiude
+**eseguendo** — e la prima volta che è stata applicata l'esecuzione ha rivelato due righe sbagliate.
+È successo di nuovo, e prima ancora di arrivare ai debiti: la fusione dei chunk, che è
+[ADR-0069](#adr-0069).
+
+Le marcature da togliere erano quattro, ciascuna con un indirizzo: la §3.3 di
+[`guida-mongosh.md`](04-mongosh/guida-mongosh.md), dichiarata **non eseguita** per intero; gli
+utenti locali a uno shard in [`sicurezza-keyfile-x509.md`](03-amministrazione/sicurezza-keyfile-x509.md),
+marcati «mai provato»; `--oplog` sullo sharded cluster in
+[`backup-restore.md`](03-amministrazione/backup-restore.md), che [S-011](Sources.md#s-011) vieta e
+che nessuno aveva visto vietare; le trappole dei config server e del bilanciamento, che
+[ADR-0033](#adr-0033) intesta per nome a questo branch. Più la riga 55 del `README` alla radice, che
+diceva `docker/03-sharded` «in lavorazione».
+
+L'esecuzione ha trovato quattro cose che nessuna rilettura avrebbe trovato. La guida documentava
+l'errore **sbagliato**: `sh.status()` su un nodo di shard non risponde
+`MongoshInvalidInputError: This db does not have sharding enabled` — quello è lo standalone — ma un
+avviso `[SHAPI-10003]` seguito da `MongoServerError: not authorized on config to execute command`
+([V-063](Sources.md#v-063)). L'eccezione localhost si è rivelata aperta **su ogni shard**, e
+raggiungibile da un container che ne condivida la rete senza mai leggere il keyfile
+([V-064](Sources.md#v-064)). `mongodump --oplog` ha **due** messaggi di rifiuto, e quello che si
+incontra per primo non nomina `mongos` ([V-065](Sources.md#v-065)). E il `mongorestore` che riporta
+ventimila documenti senza un errore lascia la collezione **non distribuita**.
+
+**Decisione.**
+
+*Una marcatura si toglie mostrando la misura, mai perché il debito è invecchiato.* Ogni riga
+«non eseguito» cancellata in questo task ha dietro una verifica numerata — [V-063](Sources.md#v-063),
+[V-064](Sources.md#v-064), [V-065](Sources.md#v-065) — e ciò che le pagine dicono adesso è ciò che è
+uscito dal terminale. Dove l'esecuzione ha smentito la pagina, la pagina cambia nel corpo del testo:
+la §3.3 apre dichiarando che l'errore che documentava era di un'altra architettura, invece di
+correggerlo in silenzio.
+
+*L'eccezione localhost sugli shard resta aperta in questo laboratorio, e la pagina lo dice a voce
+alta.* La documentazione prescrive un dovere — creato l'amministratore dal `mongos`, «you **must**
+still prevent unauthorized access to the individual shards» ([S-074](Sources.md#s-074)) — e questo
+stack non lo adempie. Le ragioni sono due, e sono di questo contesto, non generali: le porte
+pubblicate sull'host **non** aprono l'eccezione, perché a `mongod` la connessione arriva dal gateway
+di Docker, quindi la sola via è condividere la rete di un container, che richiede accesso al demone
+Docker — e chi ce l'ha può già leggere il volume del keyfile, cioè ha di più; e i due rimedi
+possibili costano l'inizializzazione dello stack, perché `enableLocalhostAuthBypass=0` sugli shard
+impedisce a `rs.initiate()` di partire. **Questo punto è una scelta di laboratorio, reversibile, e
+va rivista se il cluster esce di qui:** la strada corretta fuori dal lab — un amministratore sul
+primario di ogni shard, oppure il parametro a `0` applicato *dopo* l'inizializzazione — è scritta
+nella pagina e resta un debito aperto e indirizzato, non un fatto taciuto.
+
+*Il divieto di `--oplog` si racconta con tutte e due le sue facce, in quest'ordine.* La pagina
+mostra prima `can't use --oplog option when dumping from a mongos`, che è la regola, e poi
+`bad option: --oplog mode only supported on full dumps`, che è ciò che si incontra davvero se si è
+sbagliato anche `--db`. Tacere il secondo sarebbe stato più ordinato e meno utile: manda a togliere
+`--db`, che non è il problema.
+
+*Il restore che non ridistribuisce entra nelle pagine come trappola, non come nota.* Ventimila
+documenti ripristinati, zero errori, l'indice `_id_hashed` ricreato, e la collezione su un solo
+shard. È il caso peggiore per un lettore — nessun segnale — e per questo sta nel corpo della §6 di
+`backup-restore.md` con il conteggio a fianco.
+
+*Le trappole nuove si aggiungono in coda, e le diciotto esistenti non si toccano.* Numerazione
+stabile, come vuole [ADR-0033](#adr-0033). Entrano le voci **19** (il config server che scrive in un
+volume anonimo), **20** (i chunk che da quattro diventano due) e **21** (l'eccezione localhost shard
+per shard). La 19 e la 20 sono i due nomi che ADR-0033 aveva scritto in anticipo; la 21 entra per
+[ADR-0052](#adr-0052), che ammette una trappola già misurata anche quando il piano non la nominava.
+
+*Il `README` dichiara lo stack nel repository, e non promette l'applicazione.* La riga 55 passa a
+«nel repository» come le due sopra; la riga che dice l'applicazione Python «in lavorazione» resta
+intatta, perché è vera fino a `feature/04` e cancellarla qui trasformerebbe il `README` in una
+promessa.
+
+*Quello che resta non eseguito resta dichiarato tale* ([ADR-0037](#adr-0037)). Sopravvivono, marcati:
+`sh.disableBalancing()` e `sh.enableBalancing()` nella guida; i secondari degli shard, provati solo
+sui primari; il restore preceduto da `sh.shardCollection()`, che è dedotto e non misurato; gli
+«extra steps» che [S-060](Sources.md#s-060) attribuisce al backup di un cluster e non elenca; il
+backup dei config server. Un debito saldato che ne lascia scoperti cinque nuovi non è un fallimento
+del task: è il task che ha guardato più da vicino.
+
+**Conseguenze.** Cambiano quattro pagine e il `README` alla radice:
+`docs/04-mongosh/guida-mongosh.md` (§3.3 riscritta, l'apertura della §3),
+`docs/03-amministrazione/sicurezza-keyfile-x509.md` (la nuova §4.1, e il debito diviso in due righe
+più precise), `docs/03-amministrazione/backup-restore.md` (la nuova §6, con la vecchia §6
+rinumerata a §7, e tre righe nuove fra ciò che non copre),
+`docs/02-architetture/trappole-mongodb-in-docker.md` (voci 19-21, indice e chiusa),
+`README.md` riga 55. Entrano una fonte — [S-074](Sources.md#s-074) — e tre verifiche,
+[V-063](Sources.md#v-063), [V-064](Sources.md#v-064) e [V-065](Sources.md#v-065).
+[S-006](Sources.md#s-006) chiude per misura la riserva aperta il 2026-08-25 sull'eccezione
+localhost, e ne tiene aperta una bibliografica: che l'eccezione richieda il loopback è misurato qui,
+e continua a non essere scritto in nessuna fonte primaria trovata.
+
+Nessuna configurazione dello stack cambia: il Task 9 tocca documentazione, e l'unica riga di codice
+che ha spostato è in [ADR-0069](#adr-0069). Il talk ci guadagna una scena — un container che diventa
+amministratore di uno shard senza credenziali — e un avvertimento da dire a voce se il tempo lo
+regge: il restore che sembra riuscito.
+
+**Alternative scartate:** togliere le marcature dichiarando i debiti «superati dal branch» — è
+esattamente il modo in cui un debito diventa una bugia, e [ADR-0049](#adr-0049) esiste per
+impedirlo; creare l'amministratore per shard subito, senza discuterlo — sarebbe stata una modifica
+alla sicurezza dello stack decisa da chi stava saldando un debito di documentazione, e la scelta
+appartiene a chi risponde del laboratorio; scrivere solo il messaggio d'errore «giusto» di
+`mongodump` — più pulito, e avrebbe lasciato il lettore a togliere `--db` per scoprire da solo il
+resto; rimandare le trappole a un branch successivo perché lo sharded «ne prometterebbe di più» —
+si sarebbe perso il momento in cui erano state misurate, che è la sola cosa che le rende scrivibili
+([ADR-0052](#adr-0052)); rinumerare le trappole per raggrupparle per argomento — la numerazione è
+un riferimento stabile citato da altre pagine, e riordinarla vale meno di quanto costa.
+
+**Fonti:** [S-006](Sources.md#s-006) · [S-011](Sources.md#s-011) · [S-074](Sources.md#s-074) · [V-063](Sources.md#v-063) · [V-064](Sources.md#v-064) · [V-065](Sources.md#v-065)

@@ -206,7 +206,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   all'assunzione di progetto: l'eccezione decade anche con `createRole`, e non si attiva
   affatto se esiste già un ruolo — perimetro più stretto di quello che avevamo scritto. I
   config server non sono menzionati.
-- **Usata da:** ADR-0005, ADR-0040, ADR-0048
+- **Usata da:** ADR-0005, ADR-0040, ADR-0048, ADR-0070
 
 <a id="s-007"></a>
 ### S-007 — MongoDB Manual: Connection String Options
@@ -335,7 +335,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   in time» e «does not guarantee» non compaiono: il paradosso dello standalone — senza oplog
   `--oplog` non è utilizzabile, quindi il dump non può essere coerente a un istante — è vero
   ma **non è scritto**.
-- **Usata da:** ADR-0022, ADR-0047
+- **Usata da:** ADR-0022, ADR-0047, ADR-0070
 
 <a id="s-012"></a>
 ### S-012 — Docker Docs: `depends_on`
@@ -2338,7 +2338,7 @@ web:
   `sh.balancerCollectionStatus()`). E la soglia dei 384 MB **non è mai stata superata** in nessuna
   misura di questo repository: quello che è provato è che sotto la soglia il balancer sta fermo,
   non che sopra si muova.
-- **Usata da:** ADR-0068
+- **Usata da:** ADR-0068, ADR-0069
 
 <a id="s-071"></a>
 ### S-071 — MongoDB Manual 7.0: Bulk Write Operations (l'ordine, e il collo di bottiglia monotono)
@@ -2384,6 +2384,157 @@ web:
   La pagina è quella del ramo v7.0, cioè della versione pinnata; sul ramo 8.x la stessa materia è
   riorganizzata sotto `bulkWrite`.
 - **Usata da:** ADR-0068
+
+<a id="s-072"></a>
+### S-072 — MongoDB Manual 7.0: The AutoMerger
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/automerger-concept/ (citazioni dalla variante
+  `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Perché è stata cercata.** Non per scrupolo: per spiegare una misura che non tornava. I quattro
+  chunk contati da [V-061](#v-061) erano diventati **due** dopo uno spegnimento e una riaccensione,
+  senza che nessuno avesse toccato niente ([V-062](#v-062)). La pagina del balancer
+  ([S-070](#s-070)) non nomina la fusione automatica; questa sì, ed è il pezzo di manuale che
+  mancava.
+- **Cosa afferma, primo punto — esiste, ed è nuova nella versione pinnata del lab.** «Starting in
+  MongoDB 7.0, the balancer can automatically merge chunks that meet the mergeability
+  requirements.» Il laboratorio gira su 7.0 ([ADR-0009](Decision.md#adr-0009)): è una funzione che
+  su una 6.x non ci sarebbe.
+- **Cosa afferma, secondo punto — che cosa fa quando gira.** «The AutoMerger runs in the background
+  as part of balancing operations.» E, senza mezzi termini: «When the AutoMerger runs, it squashes
+  together all sequences of mergeable chunks for each shard of each collection.» *Squashes
+  together*: non sposta dati fra shard, riduce il numero di intervalli in cui sono divisi quelli che
+  uno shard ha già.
+- **Cosa afferma, terzo punto — quando parte, che è la riga che spiega la misura.** «Unless
+  explicitly disabled, **the AutoMerger starts the first time the balancer is enabled** and pauses
+  for the next `autoMergerIntervalSecs` after the routine drains. When AutoMerger is enabled,
+  automerging happens every `autoMergerIntervalSecs` seconds.» La prima volta è all'accensione del
+  cluster, non dopo un'attesa: è il motivo per cui la fusione nel lab si vede pochi secondi dopo un
+  riavvio e **non** durante la sessione in cui la collezione è stata distribuita
+  ([V-062](#v-062)).
+- **Cosa afferma, quarto punto — che cosa è «fondibile».** «`mergeAllChunksOnShard` finds and merges
+  all mergeable chunks for a collection on the same shard. Two or more contiguous chunks in the same
+  collection are **mergeable** when they meet all of these conditions: They are owned by the same
+  shard. They are not jumbo chunks. […] Their history can be purged safely, without breaking
+  transactions and snapshot reads: The last migration involving the chunk happened at least as many
+  seconds ago as the value of `minSnapshotHistoryWindowInSeconds`. The last migration involving the
+  chunk happened at least as many seconds ago as the value of `transactionLifetimeLimitSeconds`.»
+  Contigui **e** dello stesso shard: la fusione non tocca il confine fra i due shard, e infatti nel
+  lab i due chunk che restano sono uno per shard.
+- **Cosa afferma, quinto punto — l'esempio, che è la forma esatta di ciò che è successo nel lab.**
+  Nove chunk su due shard diventano quattro: «This command merges the contiguous sequences of
+  chunks: A-B-C-D […] G-H», e su Shard1 «the contiguous sequences of chunks E-F». Con quattro chunk
+  e due shard, due sequenze contigue di due: due fusioni, due chunk finali. Che è esattamente il
+  conto di [V-062](#v-062).
+- **Cosa non afferma:** il **valore predefinito** di `autoMergerIntervalSecs`, che rimanda alla
+  pagina dei parametri e non riporta. La pagina non dice nemmeno se la fusione abbia un costo
+  misurabile per le operazioni in corso — dice solo che «runs in the background» — né che cosa
+  succeda se il cluster viene riavviato prima che l'intervallo scada.
+- **Riserve:** l'esempio del manuale usa una shard key per intervalli (`x`), non hashed; la forma
+  del ragionamento è la stessa ma i confini no. La precedenza fra impostazioni globali, per
+  collezione, del balancer e dell'AutoMerger è dichiarata in quattro punti e nel lab **non è mai
+  stata toccata**: tutto è predefinito, quindi nessuno dei quattro livelli è stato provato.
+- **Usata da:** ADR-0069
+
+<a id="s-073"></a>
+### S-073 — MongoDB Manual 7.0: Manage Sharded Cluster Balancer
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/manage-sharded-cluster-balancer/ (citazioni
+  dalla variante `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — il balancer si è spostato, e il manuale lo dice al passato.** «The
+  balancer process has moved from the `mongos` instances to the primary member of the config server
+  replica set.» È la stessa cosa di [S-070](#s-070) detta in forma di storia, e spiega perché
+  l'idea sbagliata — «il balancer gira sul router» — sia così diffusa: **è stata vera**, in una
+  versione precedente.
+- **Cosa afferma, secondo punto — spegnere il balancer spegne anche la fusione.** «Starting in
+  MongoDB 7.0, stopping the balancer also disables the AutoMerger for the sharded cluster.» E
+  simmetricamente: «Starting in MongoDB 7.0, starting the balancer also enables the AutoMerger for
+  the sharded cluster.» I due interruttori sono uno solo, ed è la riga che rende `sh.stopBalancer()`
+  più potente di quanto il nome prometta.
+- **Cosa afferma, terzo punto — `getBalancerState()` e `isBalancerRunning()` non rispondono alla
+  stessa domanda.** «`sh.getBalancerState()` checks if the balancer is enabled (i.e. that the
+  balancer is permitted to run). `sh.getBalancerState()` does **not** check if the balancer is
+  actively migrating data.» Il primo dice *può*, il secondo dice *sta*. Nel lab i due valgono
+  rispettivamente `true` e `"full"` ([V-063](#v-063)).
+- **Cosa afferma, quarto punto — come si verifica che sia davvero fermo.** «Before starting a backup
+  operation, confirm that the balancer is not active. You can use the following command to determine
+  if the balancer is active: `!sh.getBalancerState() && !sh.isBalancerRunning()`» Servono
+  **entrambi**, e il manuale lo scrive come una sola espressione perché è così che va usata.
+- **Cosa afferma, quinto punto — e il balancer va spento per i backup fatti a mano.** «Disabling the
+  balancer is only necessary when **manually** taking backups, either by calling `mongodump` or
+  scheduling a task that calls `mongodump` at a specific time.» E: «If MongoDB migrates a chunk
+  during a backup, you can end with an inconsistent snapshot of your sharded cluster. Never run a
+  backup while the balancer is active.» È la riga che governa il `--oplog` mancato di
+  [`backup-restore.md`](03-amministrazione/backup-restore.md).
+- **Cosa non afferma:** quanto tempo passi fra `sh.stopBalancer()` e l'effettiva quiete. Dice che
+  «if a migration is in progress, the system will complete the in-progress migration before
+  stopping», ma non dà una durata massima, e per questo propone l'attesa a polling invece di un
+  numero.
+- **Riserve:** la finestra di bilanciamento (`activeWindow`), la soglia per i chunk jumbo
+  (`attemptToBalanceJumboChunks`) e il `_secondaryThrottle` sono documentati qui e **non** sono
+  stati provati nel lab: la demo lascia tutto predefinito. Il consiglio sui backup è stato applicato
+  in [`backup-restore.md`](03-amministrazione/backup-restore.md) ma la sua **necessità** — cioè un
+  backup incoerente causato da una migrazione — non è dimostrabile su questo stack, dove nessuna
+  migrazione è mai avvenuta ([V-061](#v-061), [V-062](#v-062)).
+- **Usata da:** ADR-0069
+
+<a id="s-074"></a>
+### S-074 — MongoDB Manual 7.0: Localhost Exception in Self-Managed Deployments
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/localhost-exception/ (citazioni dalla variante
+  `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Perché è stata cercata.** [S-006](#s-006) è la stessa pagina, ma nella variante 8.3, ed è stata
+  letta quando il laboratorio non aveva shard. Il Task 9 doveva provare l'eccezione localhost su uno
+  sharded cluster **7.0**, che è la versione pinnata ([ADR-0009](Decision.md#adr-0009)): la fonte va
+  riletta nella versione che si sta misurando, non in quella corrente.
+- **Cosa afferma, primo punto — il testo sugli shard è identico a quello della 8.3.** «On a
+  `mongos`, the localhost exception only applies when there are no sharded cluster users or roles
+  created.» E: «In a sharded cluster, the localhost exception applies to each shard individually as
+  well as to the cluster as a whole.» Nessuna differenza fra le due versioni sui punti che
+  interessano qui.
+- **Cosa afferma, secondo punto — è un obbligo, e la pagina lo scrive in grassetto.** «Once you
+  create a sharded cluster and add a user administrator through the `mongos` instance, you **must**
+  still prevent unauthorized access to the individual shards.» I rimedi ammessi sono due, e sono
+  elencati come alternativa: «Create a user administrator on the shard's primary», oppure «Disable
+  the localhost exception at startup. To disable the localhost exception, set the
+  `enableLocalhostAuthBypass` parameter to `0`.»
+- **Cosa afferma, terzo punto — l'eccezione si spende una volta sola.** «Connections using the
+  localhost exception have access to create *only* the **first user OR role**.» E, nell'elenco dei
+  permessi: eseguire `createUser` «ends the localhost exception», eseguire `createRole` «ends the
+  localhost exception».
+- **Cosa afferma, quarto punto — che cosa dovrebbe essere il primo utente.** «After you enable
+  access control, connect to the localhost interface and create the first user in the `admin`
+  database. The first user must have privileges to create other users. The `userAdmin` or
+  `userAdminAnyDatabase` role both confer the privilege to create other users.»
+- **Cosa afferma, quinto punto — l'eccezione serve anche a formare un replica set.** «You can use
+  the localhost exception to initiate a replica set»; fra i permessi ci sono `replSetInitiate`,
+  `replSetGetStatus` e `replSetReconfig`. È la riga che spiega perché nel lab l'eccezione **non si
+  può** semplicemente disattivare: `11-shard-initiate.js` ci si appoggia per fare `rs.initiate()` su
+  un nodo che pretende autenticazione e non ha ancora nessun utente.
+- **Cosa non afferma:** che il primo utente venga **rifiutato** se chiede ruoli su un database
+  diverso da `admin` — la pagina raccomanda `userAdmin`, non dice che altri ruoli siano vietati, e
+  [V-064](#v-064) misura un rifiuto che la pagina non prevede. Non dice nemmeno che cosa succeda
+  **dopo** che gli utenti sono stati cancellati: la formulazione «only applies when there are no
+  users or roles created» si legge come una condizione di stato, e [V-064](#v-064) misura che è una
+  condizione del **processo**. E non dice che il primo utente possa essere creato senza alcun
+  ruolo, spendendo l'eccezione senza guadagnarci niente.
+- **Riserve:** resta aperta, esattamente come in [S-006](#s-006), la riserva bibliografica sul
+  loopback: la pagina 7.0 nomina «the localhost interface» e non enuncia da quale indirizzo la
+  connessione debba arrivare. Il comportamento è adesso misurato ([V-064](#v-064)), ma la fonte
+  continua a non dirlo. `enableLocalhostAuthBypass` è citato e non è stato provato: il lab non può
+  metterlo a `0` senza rompere `rs.initiate()`.
+- **Usata da:** ADR-0070
 
 ## Verifiche empiriche
 
@@ -6861,7 +7012,408 @@ ranged  ordered: false       248 ms    1 947 ms
   Quello che è costante è che sia **uno solo**. *(d)* Il fattore venticinque vale per due shard e
   per documenti di 121 byte medi; con più shard il divario può solo peggiorare, ma non è stato
   provato. *(e)* Tutto sul profilo `palco`, cioè con un membro per insieme, e su arm64.
+- **Riserva aggiunta il 2026-09-02, a poche ore di distanza:** i **quattro** chunk del terzo punto
+  sono quattro **in quella finestra**. Spento e riacceso lo stack sugli stessi volumi, l'AutoMerger
+  di MongoDB 7.0 ha fuso le due coppie contigue e ne restano **due**, uno per shard, senza che
+  nessun documento si sia mosso ([V-062](#v-062), [S-072](#s-072)). I numeri qui sopra restano
+  quelli misurati; quello che non regge è la frase «il balancer non entra mai in scena», e la
+  correzione è in [ADR-0069](Decision.md#adr-0069).
 - **Conseguenza:** [ADR-0068](Decision.md#adr-0068), e le sezioni 4 e 3.2 di
   `docs/02-architetture/sharded-cluster.md`.
 - **Data:** 2026-09-02
-- **Usata da:** ADR-0068
+- **Usata da:** ADR-0068, ADR-0069
+
+<a id="v-062"></a>
+### V-062 — I quattro chunk erano diventati due: il balancer entra in scena, e non è una migrazione
+
+- **Che cosa è stato verificato:** perché lo stesso cluster, riacceso sugli stessi volumi, mostri
+  **due** chunk dove [V-061](#v-061) ne aveva contati **quattro**, senza che nessuno abbia inserito,
+  cancellato o spostato niente. E se questo smentisca la frase «il balancer non entra mai in scena»
+  scritta lo stesso giorno in [`sharded-cluster.md`](02-architetture/sharded-cluster.md).
+- **Ambiente:** stack `docker/03-sharded`, profilo `palco`, MongoDB 7.0.40. Spento con `make down-03`
+  (che conserva i volumi) e riacceso con `make up-03`. Nessun dato toccato: `lab.ordini` a 20 000
+  documenti prima e dopo.
+- **Comandi:** `config.changelog` interrogato per `what` e per esteso sugli eventi `merge`;
+  `config.chunks` per i confini e per `history`; `docker inspect --format '{{.State.StartedAt}}'`
+  per l'istante di avvio dei container; `db.collection.getShardDistribution()` per la
+  distribuzione.
+
+- **Esito, primo punto — la fusione è successa, ed è registrata.** Il registro del cluster contiene
+  **due** eventi `merge`, che in [V-061](#v-061) non c'erano:
+
+  ```
+  12:34:16.530Z   merge   lab.ordini   server cfg1:27017   owningShard shard1rs   numChunks 2
+                          min {_id: 0}          ->  max {_id: MaxKey}
+  12:34:31.450Z   merge   lab.ordini   server cfg1:27017   owningShard shard2rs   numChunks 2
+                          min {_id: MinKey}     ->  max {_id: 0}
+  ```
+
+  Due fusioni, due chunk consumati ciascuna: dai quattro di [V-061](#v-061) ai due di adesso, uno
+  per shard, con i confini `MinKey → 0` su `shard2rs` e `0 → MaxKey` su `shard1rs`. I due confini
+  interni — −2⁶²+2 e +2⁶²−2 — sono spariti; **quello fra i due shard, lo zero, no.**
+
+- **Esito, secondo punto — il campo `server` dice dove gira il balancer, e conferma la fonte.** Tutti
+  e due gli eventi portano `server: cfg1:27017`. [S-070](#s-070) afferma «the balancer runs on the
+  primary of the config server replica set (CSRS)» e [S-073](#s-073) aggiunge che il processo «has
+  moved from the `mongos` instances to the primary member of the config server replica set»: qui
+  non è una citazione, è un campo di un documento scritto dal cluster. Il container che sembra non
+  fare niente è l'unico che ha fatto qualcosa.
+
+- **Esito, terzo punto — è successo all'accensione, non dopo un'attesa.** I container dei dati sono
+  partiti alle `12:34:12.735Z`, il router alle `12:34:22.418Z`. La prima fusione è delle
+  `12:34:16.530Z`: **3,8 secondi** dopo l'avvio del config server, e sei secondi *prima* che il
+  router esistesse. La seconda arriva 15 secondi dopo la prima. [S-072](#s-072) lo dice: «Unless
+  explicitly disabled, the AutoMerger **starts the first time the balancer is enabled**».
+
+- **Esito, quarto punto — e questo spiega perché [V-061](#v-061) vedeva quattro chunk.** Non era un
+  errore di misura: era la stessa cosa guardata prima. La collezione è stata distribuita alle
+  `10:41:09Z`, e la fusione richiede che la storia del chunk sia purgabile — [S-072](#s-072) elenca
+  `minSnapshotHistoryWindowInSeconds` e `transactionLifetimeLimitSeconds` — quindi al primo giro,
+  fatto subito dopo l'accensione, i chunk erano troppo freschi. Poi l'AutoMerger «pauses for the
+  next `autoMergerIntervalSecs`», e in quella sessione lo stack è stato spento **prima** che
+  l'intervallo scadesse. Al riavvio delle `12:34` la prima condizione è tornata vera — il balancer
+  veniva abilitato per la prima volta — e la seconda pure, perché di tempo ne era passato quasi due
+  ore. Le due misure sono tutte e due giuste; è il fenomeno che ha due fasi.
+
+- **Esito, quinto punto — nessun documento si è mosso.** La distribuzione è identica a prima della
+  fusione e identica a [V-058](#v-058): `shard1rs` 9860 documenti e 1.14 MiB, `shard2rs` 10 140 e
+  1.17 MiB, 49,3 % / 50,7 %, `avgObjSize` 121 byte. Il conteggio degli eventi resta a **zero**
+  `moveChunk` e **zero** `moveRange`. E la `history` dei chunk superstiti riporta un solo elemento,
+  con `validAfter` all'istante della distribuzione iniziale: nessuna migrazione, mai. La fusione
+  cambia **la mappa**, non i dati.
+
+- **Esito, sesto punto — che cosa era falso, e in che misura.** La frase «il balancer non entra mai
+  in scena» di [`sharded-cluster.md`](02-architetture/sharded-cluster.md) e di
+  [ADR-0068](Decision.md#adr-0068) è **falsa**: il balancer entra in scena, alle 12:34:16, e fa una
+  cosa visibile. Restano vere le due affermazioni che le stavano accanto — non **migra** mai, e non
+  lo fa perché la differenza di 34 409 byte è mille volte sotto la soglia dei 384 MB. Sbagliata era
+  l'identificazione fra «il balancer» e «le migrazioni»: il balancer di una 7.0 fa due mestieri, e
+  nel lab ne esercita esattamente uno.
+
+- **Riserve:**
+  - **a.** Il valore predefinito di `autoMergerIntervalSecs` non è stato letto dal cluster:
+    `getClusterParameter` interrogato per `*` non restituisce nessun parametro con «merge» nel nome
+    su questo deployment, e `getParameter` risponde `InvalidOptions`. Che l'intervallo fra due giri
+    esista è del manuale ([S-072](#s-072)); **quanto** duri non è misurato qui, e la finestra fra le
+    `10:41` e le `12:34` dice solo che è più lungo di zero e che in mezzo lo stack era spento.
+  - **b.** Non è provato che senza il riavvio la fusione sarebbe comunque avvenuta. Lo spegnimento e
+    la riaccensione sono l'occasione in cui è stata osservata, non necessariamente la causa: il
+    manuale dice che l'AutoMerger riparte al primo avvio del balancer, il che rende il riavvio
+    *sufficiente* ma non dimostra che fosse *necessario*.
+  - **c.** Durante la stessa sessione è stato eseguito `sh.stopBalancer()` seguito da
+    `sh.startBalancer()` ([V-063](#v-063)), che secondo [S-073](#s-073) spegne e riaccende anche
+    l'AutoMerger. Non ha prodotto nuove fusioni, ma con due soli chunk non contigui sullo stesso
+    shard non c'era più niente da fondere: la prova non distingue «non è ripartito» da «è ripartito
+    e non ha trovato lavoro».
+  - **d.** Vale per due shard e per una collezione con chiave hashed distribuita da vuota. Con più
+    shard le sequenze contigue sarebbero più d'una per shard, e il conto finale sarebbe diverso.
+- **Conseguenza:** ADR-0069
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0069
+
+<a id="v-063"></a>
+### V-063 — La §3.3 della guida a `mongosh`, eseguita: sette risposte che la marcatura nascondeva
+
+- **Che cosa è stato verificato:** tutti i comandi della tabella di
+  [`guida-mongosh.md` §3.3](04-mongosh/guida-mongosh.md#33-sharded-cluster), marcata «non eseguito
+  su questo branch» dalla `feature/00`. La regola è [ADR-0049](Decision.md#adr-0049) — un debito si
+  chiude eseguendo — e [ADR-0036](Decision.md#adr-0036): in automazione il codice di uscita di
+  `mongosh` non è una prova, l'esito si legge dall'output.
+- **Ambiente:** stack `docker/03-sharded`, profilo `palco`, MongoDB 7.0.40, 2026-09-02.
+- **Comandi:** dal router `sh-mongos` autenticato; in diretta su `sh-shard1a` e `sh-cfg1` per i casi
+  d'errore.
+
+- **Esito, primo punto — `sh.status()` a un `mongod` di un cluster vero dà un errore diverso da
+  quello scritto in pagina.** Il blocco che stava in §3.3, preso su un'istanza singola, mostra
+  `MongoshInvalidInputError: This db does not have sharding enabled`. Su uno shard di questo
+  cluster la risposta è un'altra:
+
+  ```console
+  $ docker exec sh-shard1a mongosh --quiet --eval 'sh.status()'
+  Warning: MongoshWarning: [SHAPI-10003] You are not connected to a mongos.
+  MongoServerError: not authorized on config to execute command { find: "version", … }
+  ```
+
+  L'avviso `SHAPI-10003` è lo stesso; l'errore no. Un `mongod` che *fa parte* di un cluster il
+  database `config` ce l'ha davvero, quindi non può dire «sharding non abilitato»: dice che chi
+  chiede non è autorizzato a leggerlo. Sono due sintomi dello stesso sbaglio, e riconoscerne uno
+  solo porta fuori strada.
+
+- **Esito, secondo punto — `db.hello().msg` distingue i tre ruoli, ma solo uno dà una risposta.**
+  Sul router `isdbgrid`; su `shard1a` **stringa vuota** (il campo non c'è); su `cfg1` `undefined` con
+  `setName: cfgrs`. La regola di [§2.4](04-mongosh/guida-mongosh.md#24-sapere-con-chi-si-sta-parlando)
+  regge, ma è una regola a senso unico: `isdbgrid` prova che si è sul router, la sua assenza non dice
+  su quale dei due altri ruoli si sia.
+
+- **Esito, terzo punto — `sh.enableSharding()` e `sh.shardCollection()` rieseguiti non protestano.**
+  `sh.enableSharding("lab")` su un database già abilitato risponde `ok: 1`. E
+  `sh.shardCollection("lab.ordini", {_id: "hashed"})` su una collezione già distribuita **con la
+  stessa chiave** risponde `collectionsharded: 'lab.ordini', ok: 1`. Sono idempotenti, ed è la
+  ragione per cui lo script di avvio del lab può girare due volte senza rompere niente
+  ([ADR-0065](Decision.md#adr-0065)).
+
+- **Esito, quarto punto — e l'irreversibilità si manifesta come un errore solo se si cambia la
+  chiave.** `sh.shardCollection("lab.ordini", {_id: 1})` sulla stessa collezione:
+
+  ```
+  AlreadyInitialized: sharding already enabled for collection lab.ordini
+  ```
+
+  Il cluster non offre di ridistribuire e non chiede conferma: dice che la cosa è già stata fatta.
+  È la faccia operativa del «MongoDB provides no method to unshard a sharded collection» di
+  [S-069](#s-069) — la porta non è chiusa a chiave, non c'è proprio.
+
+- **Esito, quinto punto — i due errori di `sh.addShard()`, che accusano cose diverse.** Rieseguito
+  su uno shard già registrato: `IllegalOperation: A shard named shard1rs containing the replica set
+  'shard1rs' already exists`. Su un insieme che non esiste:
+  `FailedToSatisfyReadPreference: Could not find host matching read preference { mode: "primary" }
+  for set shard9rs`. Il secondo è quello che si prende chi sbaglia un nome host in un file Compose,
+  e **non nomina** né Docker né la rete: parla di read preference, e manda a cercare nel posto
+  sbagliato.
+
+- **Esito, sesto punto — il bilanciatore, i tre comandi in sequenza.**
+
+  ```
+  sh.getBalancerState()   true
+  sh.isBalancerRunning()  "full"
+  sh.stopBalancer()       { ok: 1 }
+  sh.getBalancerState()   false
+  sh.startBalancer()      { ok: 1 }
+  sh.getBalancerState()   true
+  ```
+
+  I due interrogativi non chiedono la stessa cosa: [S-073](#s-073) — «`sh.getBalancerState()` checks
+  if the balancer is enabled […] does **not** check if the balancer is actively migrating data».
+  Il primo dice *può*, il secondo dice *sta*. E `stopBalancer()` fa più di quel che dice: dalla 7.0
+  spegne anche l'AutoMerger ([S-073](#s-073)), cioè la cosa che in questo lab il balancer fa davvero
+  ([V-062](#v-062)).
+
+- **Esito, settimo punto — `getShardDistribution()` su una collezione non distribuita non è un
+  errore normale.** Su `lab.ordini` stampa le due righe per shard e i totali. Su una collezione
+  qualunque creata al volo:
+
+  ```
+  undefined: [SHAPI-10001] Collection nondistribuita is not sharded
+  ```
+
+  Il `codeName` è `undefined`: è un errore di `mongosh`, non del server, e chi filtra per
+  `e.codeName` in uno script non lo intercetta.
+
+- **Esito, ottavo punto — il codice di uscita conferma [ADR-0036](Decision.md#adr-0036), e lo fa nel
+  modo peggiore.** Lo stesso comando che fallisce con `AlreadyInitialized`:
+
+  ```console
+  $ mongosh … --eval 'try { sh.shardCollection("lab.ordini", {_id: 1}) } catch (e) { … }'   → 0
+  $ mongosh … --eval 'sh.shardCollection("lab.ordini", {_id: 1})'                           → 1
+  ```
+
+  Il codice di uscita segue l'eccezione **non catturata**, non l'esito dell'operazione. Uno script
+  scritto bene — che cattura gli errori per stamparli — esce sempre `0`, cioè proprio lo script
+  prudente è quello di cui l'uscita non dice niente.
+
+- **Esito, nono punto — i comandi del router dati a uno shard.**
+  `sh.enableSharding()` risponde `CommandNotFound: no such command: 'enableSharding'. Are you
+  connected to mongos?` — un errore che si diagnostica da solo. `sh.getBalancerState()` invece
+  risponde `Unauthorized: not authorized on config to execute command …`, che non nomina il
+  problema vero.
+
+- **Riserve:**
+  - **a.** Le tre righe eseguite su `sh-shard1a` e la prima su `sh-cfg1` lo sono state **senza
+    autenticarsi**, perché le credenziali del cluster su uno shard non funzionano
+    ([V-058](#v-058)). Gli errori `Unauthorized` e `not authorized on config` sono quindi il
+    sintomo di **due** cose insieme — comando sbagliato e nessuna autenticazione — e la prova non le
+    separa.
+  - **b.** `sh.startBalancer()` e `sh.stopBalancer()` sono stati eseguiti a cluster fermo, senza
+    nessuna migrazione in corso: l'avvertenza del manuale secondo cui «if a migration is in
+    progress, the system will complete the in-progress migration before stopping»
+    ([S-073](#s-073)) non è stata provata, e su questo stack non è provabile.
+  - **c.** `sh.status()` è stato letto, non riprodotto per intero: la pagina ne riporta le sezioni
+    `shards`, `balancer` e `chunks`, non l'output completo.
+- **Conseguenza:** ADR-0069 (la fusione dei chunk) e ADR-0070 (la marcatura tolta)
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0069, ADR-0070
+
+<a id="v-064"></a>
+### V-064 — Gli utenti locali a uno shard: l'eccezione localhost è aperta su ogni shard, e chiude una riserva vecchia di una settimana
+
+- **Che cosa è stato provato:** lo stack `03-sharded`, profilo `palco`, MongoDB 7.0.40. Il debito
+  marcato in [`sicurezza-keyfile-x509.md`](03-amministrazione/sicurezza-keyfile-x509.md) §4 diceva
+  che sullo sharded cluster gli utenti locali a uno shard «esistono davvero» e che l'eccezione
+  localhost «applies to each shard individually» ([S-006](#s-006), [S-074](#s-074)), e che niente di
+  questo era stato provato. Provato.
+- **Esito 1 — il cluster ha un utente solo, e non sta sugli shard.** Su `cfg1`, autenticati come
+  amministratore: `[{"user":"admin","db":"admin"}]`. Su `shard1a` e su `shard2a`, letti con
+  l'identità interna: **zero utenti** su entrambi. Gli utenti del cluster vivono sul config server,
+  come dichiara il file Compose, e gli shard non ne ricevono copia.
+- **Esito 2 — le credenziali del cluster non aprono uno shard.** `admin` con la sua password, dato
+  direttamente a `shard1a` e a `shard2a`: `MongoServerError: Authentication failed.`, uscita **1**.
+  Non è un problema di permessi: quell'utente su quel nodo non esiste.
+- **Esito 3 — sul cluster l'eccezione è chiusa, e su ogni shard è aperta.** Da dentro `sh-mongos`,
+  senza credenziali: `createUser` → `Unauthorized: Command createUser requires authentication`. Da
+  dentro `sh-shard2a`, sul suo loopback, senza credenziali:
+  `db.getSiblingDB("admin").createUser({user: "radice-locale", pwd: …, roles: [{role: "root", db: "admin"}]})`
+  → **creato**. Ripetuto in modo indipendente su `shard1a`: creato anche lì. Un `root` sullo shard,
+  senza presentare niente.
+- **Esito 4 — serve il loopback, e la prova è nello stesso istante.** Riavviato `shard2a` per
+  riaprire l'eccezione, due tentativi identici a pochi secondi l'uno dall'altro:
+
+  ```
+  da host.docker.internal:27151 (porta pubblicata)   whatsmyuri  192.168.65.1:44239
+                                                     createUser  Unauthorized: Command createUser
+                                                                 requires authentication
+  da localhost:27017 (dentro il container)           whatsmyuri  127.0.0.1:48626
+                                                     createUser  CREATO
+  ```
+
+  Stesso nodo, stesso stato, stesso comando: cambia solo l'indirizzo da cui la connessione arriva.
+  **Le porte pubblicate sull'host non aprono l'eccezione**, perché a `mongod` la connessione arriva
+  dal gateway di Docker.
+- **Esito 5 — e in Docker «da localhost» è più largo di quanto sembri.** Un container qualunque,
+  avviato con `--network container:sh-shard2a`, condivide il **network namespace** dello shard: il
+  suo `localhost` è il loopback dello shard. Riavviato `shard2a` per riaprire l'eccezione, da quel
+  container:
+
+  ```
+  il keyfile qui: non c'è
+  whatsmyuri      "127.0.0.1:46146"
+  createUser root su admin   →  CREATO
+  ```
+
+  Il container non ha il volume del keyfile e non potrebbe leggerlo, e ciononostante si è fatto un
+  `root` sullo shard. Non è un caso di laboratorio: è esattamente il meccanismo con cui i servizi
+  `shard1-init` e `shard2-init` del file Compose eseguono `rs.initiate()`
+  ([S-074](#s-074)). La stessa porta che serve ad avviare lo stack resta aperta dopo.
+- **Esito 6 — il primo utente non può avere ruoli su un altro database.** Quattro tentativi, tutti
+  come primo utente, tutti da loopback:
+
+  ```
+  roles: [ {userAdminAnyDatabase, admin}, {read, lab} ]  →  Unauthorized: not authorized on admin
+                                                            to execute command { createUser: … }
+  roles: [ {read, lab} ]                                 →  Unauthorized: … stessa forma
+  roles: [ {root, admin} ]                               →  creato
+  roles: [ ]                                             →  creato
+  ```
+
+  Il manuale dice che il primo utente «must have privileges to create other users»
+  ([S-074](#s-074)): **non è imposto** — un utente senza alcun ruolo viene accettato e spende
+  l'eccezione. Quello che è imposto, e che il manuale non dice, è che i ruoli stiano su `admin`.
+- **Esito 7 — l'eccezione non si riapre cancellando l'ultimo utente.** Su `shard1a`, dopo aver
+  creato e poi cancellato l'utente di prova, con **zero utenti** in `admin.system.users`:
+  `createUser` da loopback → `Unauthorized: Command createUser requires authentication`. Dopo
+  `docker restart sh-shard1a`, stesso comando, stessi zero utenti → **creato**. La condizione «there
+  are no users or roles created» è una condizione del **processo**, non del database: una volta che
+  un utente è esistito, l'eccezione resta chiusa fino al riavvio.
+- **Esito 8 — chi ha il keyfile è amministratore del nodo, ed è la via di rientro.** Con
+  `-u __system -p "$(tr -d '\n\r ' < /keyfile/mongo-keyfile)" --authenticationDatabase local` si
+  legge `admin.system.users` e si cancellano utenti su qualunque nodo. È servito davvero: l'utente
+  senza ruoli dell'esito 5 non poteva cancellarsi da solo e aveva chiuso l'eccezione dietro di sé.
+- **Esito 9 — un amministratore locale vede il suo shard e basta.** Autenticato su `shard2a`:
+  `lab.ordini` **10 140** documenti, `db.hello().setName` `shard2rs`. Dal router la stessa
+  collezione ne ha 20 000. La stessa credenziale presentata al `mongos`:
+  `MongoServerError: Authentication failed.`
+- **Esito 10 — un amministratore locale può cancellare se stesso, e la connessione muore con lui.**
+  `dropUser` sul proprio utente riesce; il comando **successivo sulla stessa connessione** fallisce
+  con `MongoServerError: Authentication failed.`, perché l'identità è appena stata rimossa. Da uno
+  script sembra un errore di autenticazione, ed è invece la conseguenza dell'operazione precedente
+  riuscita.
+- **Esito 11 — `whatsmyuri` risponde sempre.** `db.adminCommand({whatsmyuri: 1})` ha risposto senza
+  credenziali anche con l'eccezione chiusa (`"127.0.0.1:44086"`). È il modo di sapere quale
+  indirizzo il server attribuisce al client, cioè di rispondere alla domanda «sono davvero su
+  localhost, per lui?» prima di chiedersi perché l'eccezione non si applichi.
+- **Riserve:**
+  - **a.** il profilo `palco` ha **un solo membro per shard**, che è quindi sempre il primario. Che
+    l'eccezione si comporti allo stesso modo sui secondari di uno shard a tre membri non è stato
+    provato; il manuale parla di «the shard's primary» quando prescrive il rimedio.
+  - **b.** `enableLocalhostAuthBypass: 0` non è stato provato: metterlo a `0` sugli shard
+    impedirebbe a `11-shard-initiate.js` di eseguire `rs.initiate()`, e lo stack non partirebbe.
+    Che sia questa la ragione è dedotto dalla fonte ([S-074](#s-074), quinto punto), non misurato
+    disattivandolo.
+  - **c.** l'esito 4 è misurato su Docker Desktop per macOS, dove il gateway è `192.168.65.1`.
+    L'indirizzo cambia altrove; quello che si generalizza è che **non** è il loopback, non il numero.
+  - **c-bis.** l'esito 5 dice che il network namespace condiviso basta; non dice che sia l'unica
+    via. Chi può parlare al demone Docker può anche leggere il volume del keyfile con un altro
+    container, e a quel punto l'eccezione non gli serve.
+  - **d.** l'esito 6 descrive che cosa il server accetta, non perché. La lettura plausibile — che
+    l'eccezione conceda `createUser` su `admin` e non `grantRole` su altri database — non è
+    confermata da nessuna fonte trovata.
+  - **e.** ogni utente creato durante la misura è stato cancellato; lo stato finale, letto con
+    l'identità interna, è **zero utenti su entrambi gli shard**. Due shard sono stati riavviati
+    durante la prova, e `make smoke-03` dopo è verde.
+- **Conseguenza:** [ADR-0070](Decision.md#adr-0070), e la sezione 4 di
+  `docs/03-amministrazione/sicurezza-keyfile-x509.md`.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0070
+
+---
+
+<a id="v-065"></a>
+### V-065 — `--oplog` sullo sharded cluster: il divieto ha due facce, e il restore riporta i dati senza la distribuzione
+
+- **Che cosa è stato provato:** lo stack `03-sharded`, profilo `palco`, MongoDB 7.0.40, database
+  `lab` con 20 000 documenti distribuiti. Il debito marcato in
+  [`backup-restore.md`](03-amministrazione/backup-restore.md) citava
+  [S-011](#s-011) — «You can't run `mongodump` with `--oplog` on a sharded cluster» — e rinviava la
+  prova a `feature/03`. Provato: `mongodump` e `mongorestore` attraverso il `mongos`, e `mongodump`
+  dato direttamente a uno shard.
+- **Esito 1 — il divieto, quando il comando è per il resto corretto.** `mongodump --oplog --out …`
+  contro `sh-mongos`: `Failed: can't use --oplog option when dumping from a mongos`, uscita **1**.
+  Nessun file scritto.
+- **Esito 2 — la stessa proibizione, con un'accusa diversa e fuorviante.**
+  `mongodump --oplog --db lab --out …`, sullo stesso router nello stesso istante:
+  `Failed: bad option: --oplog mode only supported on full dumps`, uscita **1**. Il messaggio non
+  nomina più `mongos`, e manda a togliere `--db`. Le due regole sono verificate in quest'ordine, e
+  la prima nasconde la seconda: chi sbaglia due cose ne vede riferita una sola, e non è quella che
+  conta.
+- **Esito 3 — uno shard singolo, invece, `--oplog` lo accetta.** Lo stesso comando dato dentro
+  `sh-shard1a` con l'identità interna: uscita **0**, e nella cartella `admin/  lab/  oplog.bson
+  (103 byte)  prelude.json`. Uno shard è un replica set, e ha il suo oplog. Che tanti dump coerenti
+  per singolo shard non facciano un dump coerente del cluster è ragionamento, non misura: vedi
+  riserva **b**.
+- **Esito 4 — il dump attraverso il router funziona.** `mongodump --db lab --out …` su `sh-mongos`:
+  uscita **0**, `lab/ordini.bson` di **2 437 499 byte**, 20 000 documenti. Un dump completo (senza
+  `--db`) porta via anche `config/` per intero e `admin/system.users.bson` (524 byte): le credenziali
+  del cluster finiscono nel backup, e vale [ADR-0014](Decision.md#adr-0014) su dove si posa.
+- **Esito 5 — l'avviso che non si può togliere.** Ogni dump attraverso il router emette, una volta:
+
+  ```
+  Warning: using a non-primary readPreference with a connection to mongos may produce
+  inconsistent duplicates or miss some documents.
+  ```
+
+  Ripetuto **passando esplicitamente `--readPreference=primary`**: l'avviso compare identico, una
+  volta, e il dump riesce lo stesso. Non è un'opzione mancante da aggiungere: è un avvertimento su
+  cui dalla riga di comando non si può agire.
+- **Esito 6 — il restore riesce, e la collezione non è distribuita.**
+  `mongorestore --nsFrom 'lab.ordini' --nsTo 'lab.ordini_ripristinata'` attraverso il router: uscita
+  **0**, `finished restoring lab.ordini_ripristinata (20000 documents, 0 failures)`, e l'indice
+  `_id_hashed` **ricreato**. Ma:
+
+  ```
+  documenti                20000
+  indici                   _id_, _id_hashed
+  in config.collections    assente  →  non distribuita
+  getShardDistribution()   [SHAPI-10001] Collection ordini_ripristinata is not sharded
+  ```
+
+  La collezione di partenza sta `shard1rs=9860  shard2rs=10140`; la ripristinata sta tutta sul
+  primary shard di `lab`, che è `shard2rs`. `mongorestore` ricrea gli indici e non chiama
+  `shardCollection()`: c'è la chiave, non c'è la distribuzione, e nessun errore lo dice.
+- **Esito 7 — il balancer era acceso per tutta la prova.**
+  `!sh.getBalancerState() && !sh.isBalancerRunning()` → `fermo: false`. [S-073](#s-073) prescrive di
+  fermarlo prima di un backup manuale; qui non è stato fermato di proposito, per misurare il caso
+  peggiore, e nessuno degli esiti sopra dipende da quella scelta.
+- **Riserve:**
+  - **a.** nessun esito misura una **incoerenza** effettiva: l'avviso dell'esito 5 dice che può
+    accadere, e per farla accadere servirebbe una migrazione in corso durante il dump. Non provocata.
+  - **b.** che il restore preceduto da `sh.shardCollection()` sulla collezione vuota produca una
+    collezione distribuita è dedotto dall'ordine con cui lo stack si costruisce, **non** misurato.
+  - **c.** i «extra steps» che [S-060](#s-060) attribuisce al backup di uno sharded cluster restano
+    non identificati: la fonte li nomina in una casella di tabella e non li elenca.
+  - **d.** che il `config/` presente nel dump basti a ricostruire un cluster non è stato provato, e
+    nessuna fonte letta lo afferma.
+  - **e.** `lab.ordini_ripristinata` è stata cancellata, tutte le cartelle di dump rimosse dai
+    container, e `make smoke-03` dopo la prova è verde.
+- **Conseguenza:** [ADR-0070](Decision.md#adr-0070), e la sezione 6 di
+  `docs/03-amministrazione/backup-restore.md`.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0070

@@ -3703,3 +3703,139 @@ Blocco 3) e il Task 11, che chiude il branch **con la pull request** e non con
 
 Stato: decisioni fino a **ADR-0068**, verifiche fino a **V-061**, fonti fino a **S-071**, note di
 metodo fino alla **113**. Task 1–8 su 11 chiusi.
+
+---
+
+## 2026-09-02 — `feature/03`, Task 9: i debiti marcati, saldati eseguendo
+
+Il Task 9 non aggiunge funzioni: toglie marcature. Quattro pagine dichiaravano di non aver provato
+qualcosa, e [ADR-0049](Decision.md#adr-0049) dice come si chiude un debito così — **eseguendolo**.
+La prima volta che quella regola è stata applicata, l'esecuzione ha trovato due righe sbagliate. È
+successo di nuovo, quattro volte, e una prima ancora di cominciare.
+
+**Una divergenza da dichiarare, prima di tutto il resto.** Il punto di ripresa del Task 8 nominava
+come candidati del Task 9 due debiti diversi — che niente lega le `PORTE` di `preflight.sh` ai file
+Compose, e che niente lega il `Makefile` ai profili dichiarati nel Compose — e la ripresa li ha
+ripetuti. Il [piano](00-progetto/2026-09-01-piano-feature-03-stack-sharded.md) però intesta al
+Task 9 sei passi che sono altri: la §3.3 della guida a `mongosh`, gli utenti locali a uno shard,
+`--oplog` sullo sharded cluster, le trappole dei config server e del bilanciamento, la riga 55 del
+`README`, il commit. Ha vinto il piano, che è il documento approvato; i due debiti degli strumenti
+restano annotati e senza sede, insieme a quello di [ADR-0062](Decision.md#adr-0062) sul doppio
+comando dello stack 02.
+
+**La riga sbagliata trovata prima del primo passo.** Riaccendendo lo stack per lavorare, `sh.status()`
+mostrava **due** chunk dove [V-061](Sources.md#v-061) ne aveva contati quattro poche ore prima, e su
+quel numero era costruita la sezione 4 di [`sharded-cluster.md`](02-architetture/sharded-cluster.md).
+Non era un errore di misura: era l'**AutoMerger**, che dalla 7.0 fonde i chunk contigui dello stesso
+shard e che parte la prima volta che il balancer viene abilitato — cioè, in uno stack Compose, a
+ogni `up`. Il registro del cluster ha data, ora e nodo: due `merge` alle `12:34:16.530Z` e alle
+`12:34:31.450Z`, `server cfg1:27017`, 3,8 secondi dopo l'avvio del config server e sei secondi prima
+che il router esistesse ([V-062](Sources.md#v-062)). La frase «il balancer non entra mai in scena»
+era falsa e si corregge: [ADR-0069](Decision.md#adr-0069). Ne è seguita anche una modifica di
+codice, l'unica del task — `tools/smoke-sharded.sh` verificava un'uguaglianza a quattro, e adesso
+verifica un pavimento.
+
+**Passo 1 — la §3.3 della guida, eseguita.** Era marcata non eseguita per intero, e documentava
+l'errore **di un'altra architettura**: `sh.status()` su un nodo di shard non risponde
+`MongoshInvalidInputError: This db does not have sharding enabled` — quello è lo standalone — ma un
+avviso `[SHAPI-10003]` seguito da `MongoServerError: not authorized on config to execute command`.
+Dieci comandi eseguiti con la colonna «eseguito» accanto, i due errori di `addShard`, la differenza
+fra `getBalancerState()` e `isBalancerRunning()`, e quattro avvertenze — fra cui che
+`sh.stopBalancer()` spegne anche l'AutoMerger, e che il codice di uscita di `mongosh` non è l'esito
+([ADR-0036](Decision.md#adr-0036)). Restano marcati `sh.disableBalancing()` e
+`sh.enableBalancing()` ([V-063](Sources.md#v-063)).
+
+**Passo 2 — gli utenti locali a uno shard, provati.** È il passo che ha reso di più.
+[S-074](Sources.md#s-074) afferma che su un cluster «the localhost exception applies to each shard
+individually», e la misura lo conferma e lo estende. Gli utenti del cluster vivono sui config
+server: gli shard sono replica set **senza utenti**, quindi con l'eccezione aperta, e da dentro il
+container di uno shard si crea un `root` senza presentare niente. Le porte pubblicate sull'host
+**non** aprono l'eccezione, perché a `mongod` la connessione arriva dal gateway di Docker
+(`192.168.65.1`, letto con `whatsmyuri`); un container che condivide il *network namespace* dello
+shard sì, e non gli serve il keyfile. Tre comportamenti che il manuale non scrive: il primo utente è
+rifiutato se chiede ruoli su un database diverso da `admin` ma **accettato** con `roles: []`, il che
+spende l'eccezione e chiude fuori chi l'ha usata; l'eccezione **non si riapre** cancellando l'ultimo
+utente, perché è un fermo per processo che solo il riavvio rilascia; e il loopback serve davvero, il
+che chiude per misura una riserva aperta in [S-006](Sources.md#s-006) dal 2026-08-25 — restando
+aperta quella bibliografica, perché nessuna fonte primaria trovata lo scrive
+([V-064](Sources.md#v-064)).
+
+Da questa misura **non** è seguita una modifica allo stack. Il dovere che la documentazione
+prescrive — «you must still prevent unauthorized access to the individual shards» — ha due rimedi, e
+tutti e due sono decisioni di sicurezza: creare un amministratore sul primario di ogni shard, oppure
+`enableLocalhostAuthBypass=0`, che applicato prima dell'inizializzazione impedisce `rs.initiate()` e
+lascia lo stack spento. Sono scritte nella pagina come debito aperto e indirizzato, e la scelta
+spetta a chi risponde del laboratorio.
+
+**Passo 3 — `--oplog` sullo sharded cluster.** Il divieto è confermato — `can't use --oplog option
+when dumping from a mongos` — ma ha una seconda faccia peggiore: con `--db` insieme, la risposta
+diventa `bad option: --oplog mode only supported on full dumps`, che non nomina più il router e
+manda a togliere l'opzione sbagliata. Il dump attraverso il `mongos` funziona ed emette sempre
+l'avviso sul `readPreference` non primario, **anche passando `--readPreference=primary`**. Uno shard
+singolo `--oplog` lo accetta, perché è un replica set. E il restore riporta ventimila documenti con
+zero errori, ricrea l'indice `_id_hashed`, e lascia la collezione **non distribuita**, tutta sul
+primary shard: nessun segnale, e il controllo che verrebbe naturale fare — contare i documenti —
+conferma che è tutto a posto ([V-065](Sources.md#v-065)).
+
+**Passo 4 — tre trappole in coda, e le diciotto intatte.** Voce **19**, il config server che scrive
+in `/data/configdb` mentre il volume nominato è su `/data/db`, e Compose ci mette un volume anonimo
+che `down` abbandona ([V-060](Sources.md#v-060)); voce **20**, i chunk che da quattro diventano due
+fra due accensioni ([V-062](Sources.md#v-062)); voce **21**, l'eccezione localhost aperta shard per
+shard ([V-064](Sources.md#v-064)). Le prime due sono i nomi che [ADR-0033](Decision.md#adr-0033)
+aveva scritto in anticipo; la terza entra per [ADR-0052](Decision.md#adr-0052).
+
+**Passo 5 — il `README`.** La riga 55 passa a «nel repository»; la riga 57, che dice l'applicazione
+Python in lavorazione, resta intatta perché è vera fino a `feature/04`. Con la tabella cambiata,
+«i primi due stack» due righe sotto sarebbe diventato falso: è diventato «i tre stack». Quattro
+righe dell'indice di [`docs/README.md`](README.md) sono state allineate per la stessa ragione, fra
+cui quella che prometteva i comandi dello sharded cluster «ancora solo scritti».
+
+**Che cosa resta non eseguito, e dichiarato tale** ([ADR-0037](Decision.md#adr-0037)): i due comandi
+di bilanciamento della guida; i secondari degli shard, provati solo sui primari; il restore
+preceduto da `sh.shardCollection()`, che è dedotto e non misurato; gli «extra steps» che
+[S-060](Sources.md#s-060) attribuisce al backup di un cluster e non elenca da nessuna parte; il
+backup dei config server.
+
+Le prove distruttive hanno lasciato l'ambiente pulito, verificato con l'identità interna: **zero
+utenti su entrambi gli shard**, `lab.ordini_ripristinata` cancellata, tutte le cartelle di dump
+rimosse. `make docs-check` verde, `make tools-test` **131 passed**, `make stack-check` «Stack
+conformi: 3», `make smoke-03` **62 controlli e 0 errori**, `lab.ordini` a 20 000 documenti.
+
+**Note di metodo.**
+
+114. **Quando il punto di ripresa e il piano nominano debiti diversi, vince il piano — e la
+     divergenza si scrive.** Il punto di ripresa è un appunto scritto di corsa alla fine di una
+     sessione; il piano è il documento approvato. Seguire l'appunto perché è quello che si è letto
+     per ultimo significa lasciare che la fretta di ieri decida il lavoro di oggi. La cosa da non
+     fare è la terza: accorgersi della differenza e non dirla, perché allora i due debiti che
+     l'appunto nominava sparirebbero senza che nessuno li abbia né fatti né rinviati.
+
+115. **Un controllo che verifica un'uguaglianza su un numero che il sistema può cambiare da solo ha
+     una data di scadenza che nessuno ha scritto in calendario.** `chunk == 4` è passato per giorni
+     ed è diventato rosso senza che nessuno toccasse niente. Il valore che regge non è il numero
+     osservato ma il **pavimento** che la struttura impone — almeno un chunk per shard, perché un
+     chunk non può stare a cavallo di due shard — con i valori noti riconosciuti per nome e non
+     imposti. La differenza fra le due forme si vede solo il giorno in cui il sistema si muove, ed
+     è il giorno peggiore per scoprirla.
+
+116. **Provare un divieto vuol dire provare anche il modo sbagliato di incontrarlo.** Il messaggio
+     che la documentazione lascia prevedere — «can't use `--oplog` when dumping from a mongos» — si
+     ottiene solo se tutto il resto del comando è corretto. Chi sbaglia due cose ne vede riferita
+     una sola, e non è quella che conta. Documentare il solo messaggio «giusto» sarebbe stato più
+     ordinato e avrebbe lasciato il lettore a togliere `--db` per scoprire il resto da solo.
+
+117. **Misurare una falla non autorizza a chiuderla.** Il passo chiedeva di *provare* che
+     l'eccezione localhost fosse aperta su ogni shard; provato, la tentazione era di aggiungere
+     l'amministratore per shard e togliersi il pensiero. Sarebbe stata una modifica alla sicurezza
+     dello stack decisa da chi stava saldando un debito di documentazione, con un rimedio — il
+     parametro a `0` — che se messo nel posto sbagliato impedisce allo stack di partire. La misura
+     si pubblica, il rimedio si propone, la scelta appartiene a chi risponde del laboratorio.
+
+118. **Un debito saldato che ne lascia scoperti cinque non è un task fallito: è un task che ha
+     guardato più da vicino.** Prima dell'esecuzione il debito era uno e generico — «non provato».
+     Dopo sono cinque, ciascuno con un confine netto e una ragione. Contare i debiti aperti come
+     misura della salute di un repository premia chi non guarda.
+
+Stato: decisioni fino a **ADR-0070**, verifiche fino a **V-065**, fonti fino a **S-074**, note di
+metodo fino alla **118**. Task 1–9 su 11 chiusi; restano il **Task 10** (la riserva del Blocco 3) e
+il **Task 11**, che chiude il branch **con la pull request**.

@@ -12,7 +12,9 @@ riscrivono, così la numerazione resta un riferimento stabile.
 La pagina nasce con `feature/01` e cresce: `feature/02` ha aggiunto le due trappole del replica
 set — i **permessi del keyfile**, voce [12](#t-12), e la **scoperta della topologia**, voce
 [13](#t-13) — più le quattro incontrate lungo la strada, voci da [14](#t-14) a [17](#t-17), e il
-terzo `ENOTFOUND`, voce [18](#t-18). `feature/03` aggiungerà quelle dello sharded cluster.
+terzo `ENOTFOUND`, voce [18](#t-18). `feature/03` ha aggiunto le tre dello sharded cluster,
+voci da [19](#t-19) a [21](#t-21): il **volume del config server**, il **conteggio dei chunk**
+che cambia da solo, e l'**eccezione localhost** che su un cluster è aperta shard per shard.
 
 Le voci da 14 a 17 non parlano di MongoDB: sono trappole di **Compose e del runtime**, e stanno qui
 perché è qui che le incontra chi monta uno stack MongoDB. Il criterio con cui sono entrate è
@@ -41,6 +43,9 @@ misurata, anche quando il piano di quel branch non la nominava.
 | [16](#t-16) | la variabile è dichiarata due righe sopra, e dentro il container è vuota |
 | [17](#t-17) | il container lavora e `docker logs` è fermo a ieri sera |
 | [18](#t-18) | «getaddrinfo ENOTFOUND» quando il problema non è il nome |
+| [19](#t-19) | riaccendo il cluster senza cancellare niente, e i config server hanno dimenticato tutto |
+| [20](#t-20) | i chunk erano quattro, adesso sono due, e nessuno ha toccato niente |
+| [21](#t-21) | il cluster chiede la password e i suoi shard, singolarmente, no |
 
 ---
 
@@ -810,11 +815,209 @@ così conclude che il set funziona ancora. L'applicazione, che usa l'URI del rep
 
 ---
 
+<a id="t-19"></a>
+## 19. Riaccendo il cluster senza cancellare niente, e i config server hanno dimenticato tutto
+
+**Sintomo.** Lo sharded cluster funziona. Lo si spegne con un comando che **conserva i volumi**, lo
+si riaccende, e l'avvio si ferma con un errore che accusa gli shard:
+
+```
+shard già registrati: nessuno
+registro lo shard «shard1rs» -> shard1rs/shard1a:27017
+registro lo shard «shard2rs» -> shard2rs/shard2a:27017
+ERRORE: sh.addShard(«shard2rs/shard2a:27017») ha risposto ok=0
+Messaggio: can't add shard 'shard2rs/shard2a:27017' because a local database 'lab' exists in
+another shard1rs
+```
+
+Il messaggio è vero — il secondo shard ha davvero il database `lab`, del giro precedente — ed è la
+pista sbagliata. La riga che spiega tutto è **la prima**: «shard già registrati: nessuno», su un
+cluster che al giro prima ne aveva due. Gli shard ricordano i loro dati; i config server hanno
+dimenticato i propri.
+
+**Causa.** L'immagine `mongo` dichiara **due** `VOLUME`, non uno:
+
+```console
+$ docker image inspect --format '{{json .Config.Volumes}}' mongo:7.0
+{"/data/configdb":{},"/data/db":{}}
+```
+
+e l'entrypoint, quando il ruolo è quello di config server, cambia la destinazione delle scritture
+(righe 236-238 dell'immagine 7.0.40, lette dentro l'immagine stessa):
+
+```sh
+# if running as config server, then the default dbpath is /data/configdb
+dbPath=/data/configdb
+```
+
+Chi monta il volume nominato nel posto abituale, `/data/db`, ha fatto una cosa che *sembra* giusta
+e non lo è: il processo scrive in `/data/configdb`, dove non c'è nessun montaggio dichiarato.
+Compose soddisfa il `VOLUME` dell'immagine con un volume **anonimo** — un nome di 64 cifre
+esadecimali — che `down` abbandona penzolante e che il `up` successivo ricrea **vuoto**. Il volume
+nominato che il file Compose chiedeva esiste, è montato, ed è inutile: contiene zero file mentre
+quelli degli shard ne contengono ottantatré e settantasei ([V-060](../Sources.md#v-060)).
+
+**Perché nessuno se ne accorge subito.** Finché le prove finiscono con `down -v`, che cancella
+tutto, la perdita è invisibile: si riparte da zero ogni volta, ed è esattamente ciò che il guasto
+produce. Si vede solo la prima volta che si riaccende **conservando** i dati.
+
+**Rimedio.** Dichiarare esplicitamente il percorso nel comando del config server, così che il
+montaggio e le scritture parlino dello stesso posto ([ADR-0067](../Decision.md#adr-0067)):
+
+```yaml
+command: ["mongod", "--configsvr", "--replSet", "cfgrs", "--dbpath", "/data/db", …]
+```
+
+Montare il volume su `/data/configdb` funziona altrettanto bene; quello che non funziona è lasciare
+la questione implicita. E la verifica che regge nel tempo non è «ogni mongod ha il suo volume» — è
+vera anche mentre il guasto è in corso — ma **il confronto fra dove il volume è montato e dove il
+processo scrive**: sono due valori distinti, e vanno letti da due posti distinti.
+
+**Fonte.** [V-060](../Sources.md#v-060) (i conteggi, l'entrypoint, la riparazione misurata),
+[S-022](../Sources.md#s-022) (la stessa regola nel ramo 8.0, scritta con altre parole),
+[ADR-0067](../Decision.md#adr-0067). Il parente stretto è la voce [3](#t-03), che ha la stessa
+causa profonda — il `dbPath` di un config server non è quello di tutti gli altri — vista dall'altro
+capo.
+
+---
+
+<a id="t-20"></a>
+## 20. I chunk erano quattro, adesso sono due, e nessuno ha toccato niente
+
+**Sintomo.** Un controllo automatico che contava i chunk di una collezione distribuita comincia a
+fallire dopo uno spegnimento e una riaccensione:
+
+```
+✗ chunk di lab.ordini: 2, attesi 4
+```
+
+Nessuno ha inserito, cancellato o spostato documenti: sono 20 000 prima e 20 000 dopo, e la
+distribuzione fra i due shard è identica al byte.
+
+**Causa.** Non è una migrazione: è una **fusione**. Dalla 7.0 il balancer ha due mestieri, e il
+secondo è l'**AutoMerger**, che riunisce i chunk contigui dello stesso shard quando la loro storia
+è abbastanza vecchia da poter essere scartata ([S-072](../Sources.md#s-072)). Il registro del
+cluster lo dice per esteso:
+
+```
+12:34:16.530Z   merge   lab.ordini   server cfg1:27017   owningShard shard1rs   numChunks 2
+12:34:31.450Z   merge   lab.ordini   server cfg1:27017   owningShard shard2rs   numChunks 2
+```
+
+Due fusioni, due chunk consumati ciascuna, quattro che diventano due — uno per shard. Il campo
+`server` dice dove gira il balancer: sul primario dei config server, non sul router. Il container
+che sembra non fare niente è l'unico che ha fatto qualcosa.
+
+Il legame con Docker è nell'orario. La prima fusione è **3,8 secondi** dopo l'avvio del config
+server, e **sei secondi prima** che il container del router esistesse: «Unless explicitly disabled,
+the AutoMerger **starts the first time the balancer is enabled**» ([S-072](../Sources.md#s-072)),
+e nel ciclo di vita di uno stack Compose quel «first time» capita a ogni `up`. Il conteggio non
+cambia mentre si guarda: cambia **fra due accensioni**, che è il momento in cui non si sta
+guardando.
+
+**Che cosa *non* è successo.** Zero `moveChunk` e zero `moveRange` nel registro; la `history` dei
+chunk superstiti ha un solo elemento, con `validAfter` all'istante della distribuzione iniziale.
+Nessun documento si è mosso, mai. La fusione cambia **la mappa**, non i dati — e il confine fra i
+due shard, lo zero della chiave hashed, è rimasto dov'era.
+
+**Rimedio.** Non c'è un guasto da riparare: c'è un'aspettativa da correggere. Il numero dei chunk
+**non è una costante del deployment**, e un controllo che lo tratta come tale ha una data di
+scadenza che nessuno ha scritto in calendario. Quello che regge è il pavimento — almeno un chunk
+per shard, perché un chunk non può stare a cavallo di due shard — con il numero iniziale trattato
+come un caso riconosciuto e non come l'unico ammesso
+([`tools/smoke-sharded.sh`](../../tools/smoke-sharded.sh),
+[ADR-0069](../Decision.md#adr-0069)).
+
+Se si vuole davvero congelare la mappa per la durata di una demo, `sh.stopBalancer()` spegne
+**anche** l'AutoMerger ([S-073](../Sources.md#s-073)) — e spegne pure tutto il resto, quindi è una
+scelta da prendere sapendo che cosa costa.
+
+**Fonte.** [V-062](../Sources.md#v-062) (il registro delle fusioni, gli orari, la distribuzione
+invariata), [S-072](../Sources.md#s-072), [S-073](../Sources.md#s-073),
+[ADR-0069](../Decision.md#adr-0069).
+
+---
+
+<a id="t-21"></a>
+## 21. Il cluster chiede la password, e i suoi shard singolarmente no
+
+**Sintomo.** Lo sharded cluster è autenticato: dal router, senza credenziali, non si fa niente.
+
+```console
+$ mongosh --host sh-mongos          # dentro la rete, nessuna credenziale
+> db.getSiblingDB("admin").createUser({user: "x", pwd: "…", roles: ["root"]})
+MongoServerError: Command createUser requires authentication
+```
+
+Sembra chiuso. Ma lo stesso comando, dato **dentro il container di uno shard**, riesce:
+
+```console
+$ docker exec -it sh-shard2a mongosh          # nessuna credenziale, nessun keyfile
+> db.getSiblingDB("admin").createUser({user: "radice-locale", pwd: "…",
+                                       roles: [{role: "root", db: "admin"}]})
+{ ok: 1 }
+```
+
+Un `root` sullo shard, senza presentare niente.
+
+**Causa.** È l'eccezione localhost, e su un cluster non è una sola: «In a sharded cluster, the
+localhost exception applies to **each shard individually** as well as to the cluster as a whole»
+([S-074](../Sources.md#s-074)). Gli utenti del cluster vivono sui config server; gli shard non ne
+ricevono copia, quindi ciascuno di essi è un replica set **senza utenti**, e per un deployment
+senza utenti l'eccezione è aperta. La documentazione lo dice con un dovere esplicito: creato
+l'amministratore attraverso il `mongos`, «you **must** still prevent unauthorized access to the
+individual shards».
+
+Il pezzo che riguarda Docker è **quale** connessione conta come locale. L'eccezione guarda
+l'indirizzo di provenienza, e `localhost` appartiene al **network namespace**, non al container:
+
+| da dove | l'indirizzo che `mongod` vede | `createUser` senza credenziali |
+|---|---|---|
+| porta pubblicata sull'host | `192.168.65.1:44239` (il gateway di Docker) | `Unauthorized` |
+| `docker exec` dentro il container | `127.0.0.1:48626` | **creato** |
+| `docker run --network container:sh-shard2a` | `127.0.0.1` | **creato** |
+
+Le due misure di mezzo sono state prese sullo stesso nodo a pochi secondi l'una dall'altra, con
+`db.adminCommand({whatsmyuri: 1})` a dire l'indirizzo: cambia solo da dove arriva la connessione
+([V-064](../Sources.md#v-064)). La terza riga è quella scomoda: **un container qualsiasi che
+condivide la rete dello shard è sul suo loopback**, e non ha bisogno di leggere il keyfile.
+
+**Due comportamenti che il manuale non scrive, e che si pagano.**
+
+- **L'eccezione non si riapre.** Cancellato l'utente, il deployment torna a zero utenti e
+  l'eccezione resta **chiusa**: è un fermo per processo, e solo il riavvio del `mongod` lo rilascia.
+  Su Docker questo è quasi una consolazione — un `docker restart` riapre la porta.
+- **Il primo utente si può sbagliare una volta sola.** «Connections using the localhost exception
+  have access to create only the **first user or role**» ([S-074](../Sources.md#s-074)): un utente
+  con `roles: []` viene **accettato**, spende l'eccezione, e non può cancellare se stesso. A quel
+  punto sullo shard non entra più nessuno, se non con l'identità interna del keyfile o riavviando
+  il processo.
+
+**Rimedio.** Dipende da dove gira il cluster, e vale la pena dirlo senza addolcirlo.
+
+- In un lab in cui gli shard non pubblicano porte, la porta d'ingresso è **l'accesso al demone
+  Docker** — e chi ce l'ha può già leggere il volume del keyfile con un altro container, quindi
+  l'eccezione non gli aggiunge potere. È il motivo per cui questo stack la lascia aperta: la stessa
+  strada serve a `rs.initiate()` durante l'inizializzazione degli shard.
+- Fuori da questo caso il «must» della documentazione morde davvero, e ha due risposte: **creare un
+  amministratore sul primario di ogni shard**, oppure avviare i `mongod` degli shard con
+  `setParameter enableLocalhostAuthBypass=0`. La seconda, applicata a uno stack che inizializza i
+  replica set da uno script, impedisce anche `rs.initiate()`: va messa **dopo** l'inizializzazione,
+  non prima.
+
+**Fonte.** [V-064](../Sources.md#v-064) (le misure, compresa quella del network namespace),
+[S-074](../Sources.md#s-074), [S-006](../Sources.md#s-006),
+[ADR-0070](../Decision.md#adr-0070). La voce [11](#t-11) è la stessa falla su un nodo singolo; qui
+la novità è che un cluster autenticato ne ha una per shard.
+
+---
+
 ## Cosa questa pagina non dice
 
 - **Non è un elenco completo.** È l'elenco di ciò che è stato incontrato *e misurato* qui. Le sei
-  di `feature/02` sono arrivate una alla volta, mentre lo stack veniva costruito; quelle dello
-  sharded cluster — config server, bilanciamento — arrivano con `feature/03`. Un fenomeno letto in
+  di `feature/02` sono arrivate una alla volta, mentre lo stack veniva costruito; le tre dello
+  sharded cluster — config server, bilanciamento, eccezione localhost — sono arrivate con
+  `feature/03`, e sono meno di quante il cluster ne prometta. Un fenomeno letto in
   una fonte e mai riprodotto qui resta **fuori**: la pagina promette il sintomo così come si è
   visto ([ADR-0052](../Decision.md#adr-0052)).
 - **Non copre le trappole di MongoDB fuori da Docker.** Quelle di un'installazione su sistema
@@ -836,7 +1039,10 @@ un volume e non entra nel repository),
 [ADR-0049](../Decision.md#adr-0049) (le due voci del replica set),
 [ADR-0041](../Decision.md#adr-0041) (i due `--env-file` e le due attese dell'avvio),
 [ADR-0045](../Decision.md#adr-0045) (la maggioranza persa, e il log che non si crede),
-[ADR-0052](../Decision.md#adr-0052) (una trappola misurata si scrive nel branch che l'ha misurata).
+[ADR-0052](../Decision.md#adr-0052) (una trappola misurata si scrive nel branch che l'ha misurata),
+[ADR-0067](../Decision.md#adr-0067) (il volume del config server),
+[ADR-0069](../Decision.md#adr-0069) (il numero dei chunk non è una costante),
+[ADR-0070](../Decision.md#adr-0070) (i debiti dello sharded, saldati eseguendo).
 
 **Fonti:** [S-020](../Sources.md#s-020), [S-022](../Sources.md#s-022),
 [S-032](../Sources.md#s-032), [S-033](../Sources.md#s-033), [S-034](../Sources.md#s-034),
@@ -847,4 +1053,7 @@ un volume e non entra nel repository),
 [V-017](../Sources.md#v-017), [V-018](../Sources.md#v-018), [V-041](../Sources.md#v-041),
 [V-043](../Sources.md#v-043), [S-056](../Sources.md#s-056), [S-057](../Sources.md#s-057),
 [S-064](../Sources.md#s-064), [V-025](../Sources.md#v-025), [V-028](../Sources.md#v-028),
-[V-031](../Sources.md#v-031), [V-032](../Sources.md#v-032), [V-046](../Sources.md#v-046)
+[V-031](../Sources.md#v-031), [V-032](../Sources.md#v-032), [V-046](../Sources.md#v-046),
+[S-006](../Sources.md#s-006), [S-072](../Sources.md#s-072), [S-073](../Sources.md#s-073),
+[S-074](../Sources.md#s-074), [V-060](../Sources.md#v-060), [V-062](../Sources.md#v-062),
+[V-064](../Sources.md#v-064)

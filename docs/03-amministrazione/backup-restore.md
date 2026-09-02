@@ -268,7 +268,102 @@ il messaggio d'errore sono quelli veri, la scala no.
 
 ---
 
-## 6. Provarlo in due minuti
+<a id="6-sullo-sharded-cluster"></a>
+## 6. Sullo sharded cluster: `--oplog` non si può, e il restore non ridistribuisce
+
+Il divieto era già citato in fondo a questa pagina, con la promessa di provarlo. Provato, sullo
+stack `03-sharded`, profilo `palco` ([V-065](../Sources.md#v-065)). Tutto quello che segue vale
+**attraverso il `mongos`**, che è l'unico indirizzo a cui si parla a un cluster.
+
+**Il divieto, e la sua faccia.** La documentazione dice «You can't run `mongodump` with `--oplog` on
+a sharded cluster» ([S-011](../Sources.md#s-011)), e il comando lo conferma senza girarci intorno:
+
+```console
+$ mongodump --oplog --out /tmp/dump-03
+Failed: can't use --oplog option when dumping from a mongos
+```
+
+**Ma l'accusa cambia se si sbaglia anche qualcos'altro,** e cambia in peggio:
+
+```console
+$ mongodump --oplog --db lab --out /tmp/dump-03
+Failed: bad option: --oplog mode only supported on full dumps
+```
+
+È lo stesso comando, sullo stesso cluster, e non nomina più `mongos`. Chi lo legge toglie `--db`,
+riprova, e **solo allora** scopre il divieto vero. Le due regole — `--oplog` vuole il dump completo
+([§2](#2-il-dump-a-caldo-eseguito)), e `--oplog` non si dà a un router — sono verificate in
+quest'ordine, quindi la prima nasconde la seconda.
+
+**Che cosa si fa invece.** Non c'è un'opzione sostitutiva: quello che si perde è la garanzia, non il
+comando. Il dump attraverso il router funziona, ed è coerente per singolo documento e per niente
+altro:
+
+```console
+$ mongodump --db lab --out /tmp/dump-03
+Warning: using a non-primary readPreference with a connection to mongos may produce
+inconsistent duplicates or miss some documents.
+writing lab.ordini to /tmp/dump-03/lab/ordini.bson
+done dumping lab.ordini (20000 documents)
+```
+
+Due cose su quell'avviso. La prima è che compare **anche passando `--readPreference=primary`**: è
+un consiglio su cui non si può agire dalla riga di comando. La seconda è che dice la verità sul
+perché `--oplog` è vietato: un dump che attraversa un router legge da più repliche, e non esiste un
+oplog solo in cui il «prima» e il «dopo» siano gli stessi per tutti gli shard.
+
+La strada che la documentazione lascia aperta è **fermare il balancer**. «Never run a backup while
+the balancer is active», e la verifica non è una sola domanda ma due:
+`!sh.getBalancerState() && !sh.isBalancerRunning()` ([S-073](../Sources.md#s-073)). Serve perché una
+migrazione in corso durante il dump può far comparire un documento due volte o mai — che è
+esattamente ciò di cui l'avviso qui sopra parla. Attenzione all'effetto collaterale: dalla 7.0
+`sh.stopBalancer()` spegne anche l'AutoMerger
+([`sharded-cluster.md` §4.3](../02-architetture/sharded-cluster.md#43-il-balancer-le-sue-due-mansioni-e-quella-che-qui-non-esercita-mai)).
+
+**Un singolo shard, invece, `--oplog` lo accetta.** Uno shard *è* un replica set, con il suo oplog:
+
+```console
+$ mongodump --oplog --out /tmp/dump-shard        # dato direttamente a shard1a
+$ ls /tmp/dump-shard
+admin  lab  oplog.bson  prelude.json
+```
+
+Esce `0`, `oplog.bson` c'è. È un backup coerente **di quello shard**, e tanti backup coerenti presi
+uno per uno non fanno un backup coerente del cluster: ciascuno è fermo a un istante diverso, e una
+transazione distribuita può stare di qua o di là. La documentazione dei metodi di backup lo dice
+con una riga di tabella — sharded cluster: «High, requires extra steps»
+([S-060](../Sources.md#s-060)) — e questa pagina non sa quali siano i passi in più.
+
+**Il restore riporta i dati, non la distribuzione.** È la trappola vera, perché non dà nessun
+errore. Ripristinando i ventimila documenti in un namespace nuovo, attraverso il router:
+
+```
+finished restoring lab.ordini_ripristinata (20000 documents, 0 failures)
+index: _id_hashed
+```
+
+Ventimila documenti, zero errori, e persino l'**indice hashed** ricreato. Ma:
+
+```
+indici:                  _id_,_id_hashed
+distribuita:             no
+getShardDistribution():  [SHAPI-10001] Collection ordini_ripristinata is not sharded
+```
+
+La collezione originale sta 9 860 / 10 140 sui due shard; la ripristinata sta **tutta sul primary
+shard** del database `lab`. C'è l'indice che serve a distribuirla e non è distribuita: `mongorestore`
+ricrea gli indici e non chiama `shardCollection()`. Chi ripristina un cluster e guarda solo il
+conteggio dei documenti trova tutto a posto, e ha appena trasformato uno sharded cluster in un
+replica set con un indice inutile.
+
+Il rimedio è dichiarare la distribuzione **prima** del restore — `sh.shardCollection()` sulla
+collezione vuota, poi `mongorestore` — che è lo stesso ordine con cui lo stack si costruisce
+([`sharded-cluster.md` §3](../02-architetture/sharded-cluster.md)). Questa pagina non l'ha provato:
+è dichiarato fra le cose che non copre.
+
+---
+
+## 7. Provarlo in due minuti
 
 Dallo stack già in piedi (`make up-02`), con la password letta da `docker/02-replicaset/.env`:
 
@@ -336,9 +431,15 @@ Non è stato provato, e la pagina non ne parla:
 - **Portare il dump fuori dal container** e conservarlo. Qui il dump vive in `/tmp` dentro
   `mongo-rs-1` e viene cancellato a fine prova: dove vada in una installazione vera, con quale
   rotazione e con quale cifratura, è una decisione che questo repository non prende.
-- **`--oplog` su uno sharded cluster**, che la documentazione vieta in modo netto — «You can't run
-  `mongodump` with `--oplog` on a sharded cluster» ([S-011](../Sources.md#s-011)). Il seguito, se
-  ci sarà, è in `feature/03`.
+- **Il restore preceduto da `shardCollection()`**, che è il rimedio alla trappola della
+  [§6](#6-sullo-sharded-cluster): dichiarare la distribuzione sulla collezione vuota e poi
+  ripristinare. Il ragionamento c'è, la misura no.
+- **I «extra steps» del backup di uno sharded cluster**, che [S-060](../Sources.md#s-060) nomina in
+  una casella di tabella e non elenca da nessuna parte. Questa pagina ha provato che cosa **non**
+  funziona; che cosa faccia un backup coerente di un cluster intero resta fuori.
+- **Il backup dei config server**, che contengono la mappa dei chunk. Il dump attraverso il router
+  porta via anche `config`, ma che quella copia basti a ricostruire un cluster non è stato provato,
+  e nessuna fonte letta lo afferma.
 
 ---
 
@@ -346,8 +447,10 @@ Non è stato provato, e la pagina non ne parla:
 [ADR-0022](../Decision.md#adr-0022) (il paradosso che questa pagina chiude),
 [ADR-0014](../Decision.md#adr-0014) (i segreti fuori dal repository),
 [ADR-0043](../Decision.md#adr-0043) (il dataset di demo e la sua impronta),
-[ADR-0046](../Decision.md#adr-0046) (il replica set su cui tutto questo gira).
+[ADR-0046](../Decision.md#adr-0046) (il replica set su cui tutto questo gira),
+[ADR-0070](../Decision.md#adr-0070) (i debiti dello sharded, saldati eseguendo).
 
 **Fonti:** [S-011](../Sources.md#s-011), [S-059](../Sources.md#s-059),
-[S-060](../Sources.md#s-060), [V-034](../Sources.md#v-034), [V-035](../Sources.md#v-035),
-[V-036](../Sources.md#v-036), [V-037](../Sources.md#v-037)
+[S-060](../Sources.md#s-060), [S-073](../Sources.md#s-073), [V-034](../Sources.md#v-034),
+[V-035](../Sources.md#v-035), [V-036](../Sources.md#v-036), [V-037](../Sources.md#v-037),
+[V-065](../Sources.md#v-065)

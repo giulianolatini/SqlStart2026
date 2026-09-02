@@ -1444,3 +1444,73 @@ Fonte: [V-061](Sources.md#v-061) sesto punto, [S-071](Sources.md#s-071) primo pu
 **Perché una slide:** perché ribalta l'aspettativa. Il pubblico si aspetta che a pagare sia chi
 sbaglia la chiave, e invece paga chi l'ha azzeccata e non ha toccato il codice di caricamento che
 funzionava sul replica set. Un ordine di grandezza, senza un errore e senza un avviso.
+
+---
+
+### I chunk erano quattro. Adesso sono due. Nessuno ha toccato niente
+
+> Spengo il cluster conservando i volumi, lo riaccendo, e i chunk sono la metà. Ventimila documenti
+> prima, ventimila dopo, distribuiti uguale al byte. Non è una migrazione: è una **fusione**, e il
+> registro dice l'ora — tre secondi e otto dopo l'avvio del config server, sei secondi prima che il
+> router esistesse. Dalla 7.0 il balancer fa due mestieri, e in questo laboratorio ne esercita
+> esattamente uno: quello che nessuno guarda.
+
+Fonte: [V-062](Sources.md#v-062) primo e terzo punto, [S-072](Sources.md#s-072),
+[ADR-0069](Decision.md#adr-0069).
+
+**Perché una slide:** perché è una scena da fare dal vivo in un comando — distribuire, contare
+quattro, spegnere, riaccendere, contare due — e perché smonta l'equazione «balancer = migrazione»
+che la documentazione stessa incoraggia. È anche una lezione su come si sbaglia una pagina: la
+misura era giusta, l'aspettativa no.
+
+---
+
+### Un container che condivide la rete di uno shard è amministratore di quello shard
+
+> Il cluster è autenticato: dal router, senza password, non fai niente. Ma gli utenti del cluster
+> vivono sui config server, e gli shard non ne ricevono copia: ogni shard è un replica set **senza
+> utenti**, e per un deployment senza utenti l'eccezione localhost è aperta. Dalla porta pubblicata
+> sull'host non passi — la connessione arriva dal gateway di Docker. Da un container che condivide
+> la rete dello shard sì, perché `localhost` appartiene al network namespace, non al container. E
+> non ti serve il keyfile.
+
+Fonte: [V-064](Sources.md#v-064) terzo, quarto e quinto punto, [S-074](Sources.md#s-074),
+[ADR-0070](Decision.md#adr-0070).
+
+**Perché una slide:** è la frase che fa la differenza fra sapere che l'eccezione localhost esiste e
+sapere dove finisce. Il manuale la enuncia — «applies to each shard individually» — e la misura
+mostra la conseguenza in Docker, che il manuale non può conoscere. Da dire con il comando a
+schermo: due righe, e un `root` che non esisteva.
+
+---
+
+### Il messaggio d'errore che nasconde quello vero
+
+> `mongodump --oplog` su un cluster: «can't use `--oplog` option when dumping from a mongos».
+> Chiaro. Ma se insieme hai messo anche `--db`, la risposta cambia: «`--oplog` mode only supported
+> on full dumps». Non nomina più il router. Togli `--db`, riprovi, e **solo allora** scopri che il
+> problema era un altro. Le due regole sono verificate in quest'ordine, e la prima nasconde la
+> seconda.
+
+Fonte: [V-065](Sources.md#v-065) primo e secondo punto, [S-011](Sources.md#s-011),
+[ADR-0070](Decision.md#adr-0070).
+
+**Perché una slide:** dice una cosa sui messaggi d'errore che vale oltre MongoDB — chi sbaglia due
+cose ne vede riferita una sola, e non è detto che sia quella che conta. Costa dieci secondi e
+resta.
+
+---
+
+### Il restore è riuscito. La collezione non è più distribuita
+
+> Ventimila documenti ripristinati, zero errori, e persino l'indice hashed ricreato. Guardi il
+> conteggio, torna. Guardi dove stanno: **tutti su un solo shard**. `mongorestore` ricrea gli
+> indici e non chiama `shardCollection`. Hai la chiave che serve a distribuire e non hai la
+> distribuzione, e niente te lo dice: hai appena trasformato uno sharded cluster in un replica set
+> con un indice inutile.
+
+Fonte: [V-065](Sources.md#v-065) sesto punto, [ADR-0070](Decision.md#adr-0070).
+
+**Perché una slide:** è il caso peggiore per chi ripristina — nessun errore, nessun avviso, e il
+controllo che verrebbe naturale fare (contare i documenti) conferma che è tutto a posto. Se il
+Blocco 3 ha tempo per un solo avvertimento operativo, è questo.

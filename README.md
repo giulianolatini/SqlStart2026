@@ -52,10 +52,10 @@ Il repository è in costruzione fino a metà settembre 2026. Questo è quello ch
 |---|---|---|
 | `docker/01-standalone` | **nel repository** | `feature/01-stack-standalone` |
 | `docker/02-replicaset` | **nel repository** | `feature/02-stack-replicaset` |
-| `docker/03-sharded` | in lavorazione | `feature/03-stack-sharded` |
+| `docker/03-sharded` | **nel repository** | `feature/03-stack-sharded` |
 
 Anche l'applicazione Python in `app/` è in lavorazione, su `feature/04-app-python`. Oggi
-sono pronti l'impianto documentale, gli strumenti di repository e i primi due stack: le
+sono pronti l'impianto documentale, gli strumenti di repository e i tre stack: le
 sezioni della documentazione non ancora scritte sono elencate
 nell'[indice](docs/README.md) con la feature che le produrrà.
 

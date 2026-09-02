@@ -258,7 +258,7 @@ balancerCompliant: true
 
 Il cluster considera **bilanciata** una distribuzione cento a zero. E ha ragione: la differenza fra
 i due shard è 1,2 MB, la soglia perché il balancer si muova è 384 MB
-([§4.3](#43-il-balancer-dove-gira-quando-si-muove-e-perché-qui-non-si-muove-mai)). Non è un guasto
+([§4.3](#43-il-balancer-le-sue-due-mansioni-e-quella-che-qui-non-esercita-mai)). Non è un guasto
 del balancer, è la sua specifica.
 
 Quindi: l'errore non ha sintomo. Il cluster funziona, le scritture riescono, `sh.status()` mostra
@@ -343,7 +343,7 @@ per quello che è ([ADR-0064](../Decision.md#adr-0064)).
 
 ## 4. Chunk e balancer
 
-### 4.1 I quattro chunk non emergono: sono geometria
+### 4.1 I quattro chunk non emergono: sono geometria — e non restano quattro
 
 Distribuire una collezione **vuota** con una chiave hashed fa una cosa che distribuire una collezione
 piena non fa: MongoDB crea i chunk in anticipo e li spalma sugli shard prima che esista un documento.
@@ -365,6 +365,18 @@ shard1rs    4 611 686 018 427 387 902   ->  MaxKey
 due per shard. La distribuzione 49,3 / 50,7 non è il risultato di un bilanciamento: è il risultato
 di venti­mila hash che cadono in quattro caselle decise prima.
 
+**Ma quattro è un numero con una scadenza.** Spegnere lo stack e riaccenderlo sugli stessi volumi —
+`make down-03 && make up-03`, nessun dato toccato — e i chunk diventano **due**:
+
+```
+shard2rs   MinKey  ->  0
+shard1rs        0  ->  MaxKey
+```
+
+Non è un guasto e non è una migrazione: è la seconda cosa che il balancer sa fare, ed è raccontata
+in [§4.3](#43-il-balancer-le-sue-due-mansioni-e-quella-che-qui-non-esercita-mai). Notare quale
+confine è sopravvissuto: i due interni sono spariti, **lo zero — quello fra i due shard — no.**
+
 ### 4.2 Prima si distribuisce, poi si riempie
 
 L'ordine non è indifferente, ed è il motivo per cui nel lab `sh.shardCollection()` viene **prima**
@@ -379,9 +391,15 @@ collection has only one initial chunk, which resides on a single shard»
 Quel «one initial chunk» è esattamente ciò che è stato contato distribuendo una collezione vuota con
 `{_id: 1}` in [§3.2](#32-la-chiave-sbagliata-provata).
 
-### 4.3 Il balancer: dove gira, quando si muove, e perché qui non si muove mai
+### 4.3 Il balancer, le sue due mansioni, e quella che qui non esercita mai
 
-Tre fatti, nell'ordine in cui vengono dimenticati.
+Prima di tutto una distinzione che quasi tutte le spiegazioni saltano, questa pagina compresa fino
+al giorno dopo averla scritta: **«balancer» e «migrazione» non sono la stessa parola.** Dalla 7.0 il
+balancer fa due mestieri — sposta dati fra shard, e **fonde** chunk contigui che stanno già sullo
+stesso shard. Il primo ha una soglia di squilibrio; il secondo no. In questo laboratorio il primo non
+scatta mai e il secondo sì, quattro secondi dopo l'accensione.
+
+Poi tre fatti, nell'ordine in cui vengono dimenticati.
 
 **Dove gira.** «The balancer runs on the primary of the config server replica set (CSRS)»
 ([S-070](../Sources.md#s-070)). Non su `mongos`, che è dove quasi tutti lo collocano.
@@ -412,9 +430,45 @@ config.changelog: 6 eventi in tutto — 2 addShard, 2 shardCollection, 2 setClus
 migrazioni (moveChunk | moveRange): 0
 ```
 
-**Il balancer, in questa demo, non entra mai in scena.** È acceso, guarda, e non ha mai avuto niente
-da fare: i quattro chunk sono opera di `shardCollection()`, non sua. Raccontare la demo dicendo «e
-qui il balancer ridistribuisce» sarebbe una didascalia falsa su una fotografia vera.
+**Il balancer, in questa demo, non sposta un solo documento.** È acceso, guarda, e la differenza è
+undicimila volte sotto la soglia. Raccontare la demo dicendo «e qui il balancer ridistribuisce»
+resta una didascalia falsa su una fotografia vera.
+
+**Quello che invece fa, e si vede.** Al riavvio i quattro chunk diventano due
+([§4.1](#41-i-quattro-chunk-non-emergono-sono-geometria--e-non-restano-quattro)), e il registro del
+cluster dice chi, quando e da dove:
+
+```
+12:34:16.530Z   merge   lab.ordini   server cfg1:27017   owningShard shard1rs   numChunks 2
+12:34:31.450Z   merge   lab.ordini   server cfg1:27017   owningShard shard2rs   numChunks 2
+
+container dei dati avviati alle 12:34:12.735Z   →  la prima fusione dopo 3,8 secondi
+router avviato alle          12:34:22.418Z      →  sei secondi DOPO la prima fusione
+```
+
+Quel `server: cfg1:27017` è la conferma migliore che questa pagina abbia della riga di
+[S-070](../Sources.md#s-070) sul primario dei config server: non una citazione, un campo scritto dal
+cluster. E la fusione è avvenuta prima che il router esistesse, il che chiude la questione su chi
+bilanci.
+
+Si chiama **AutoMerger**, è nuova nella 7.0, e il manuale la descrive senza giri di parole: «When
+the AutoMerger runs, it squashes together all sequences of mergeable chunks for each shard of each
+collection» ([S-072](../Sources.md#s-072)). *Mergeable* vuol dire contigui, **dello stesso shard**,
+non jumbo, e con la storia abbastanza vecchia da poter essere buttata. Ecco perché lo zero
+sopravvive: separa due shard diversi, e non è fondibile per definizione.
+
+Perché al primo giro non era successo niente e al riavvio sì: «unless explicitly disabled, the
+AutoMerger **starts the first time the balancer is enabled** and pauses for the next
+`autoMergerIntervalSecs`» ([S-072](../Sources.md#s-072)). Alla prima accensione i chunk avevano nove
+secondi di vita ed erano troppo freschi; l'intervallo successivo non è mai scaduto perché lo stack è
+stato spento prima; al riavvio il balancer è stato abilitato «per la prima volta» un'altra volta, e
+stavolta i chunk avevano quasi due ore ([V-062](../Sources.md#v-062)).
+
+Un effetto collaterale che il nome non lascia intuire: **`sh.stopBalancer()` spegne anche
+l'AutoMerger.** «Starting in MongoDB 7.0, stopping the balancer also disables the AutoMerger for the
+sharded cluster», e simmetricamente per `sh.startBalancer()` ([S-073](../Sources.md#s-073)). Su
+questo laboratorio vuol dire che l'unico comando che sembra innocuo — fermare un balancer che tanto
+non migra — è quello che ferma l'unica cosa che il balancer sta facendo.
 
 Che cosa costerebbe, se si muovesse: «Range migrations carry some overhead in terms of bandwidth and
 workload», e il momento più caro è nominato con precisione — «MongoDB briefly pauses all application
@@ -617,9 +671,14 @@ make reset-03
 
 ## Cosa questa pagina non dice
 
-- **Non mostra il balancer al lavoro.** La soglia è 384 MB e la demo ne muove 2,4: è provato che
-  sotto la soglia sta fermo, non che sopra si muova ([V-061](../Sources.md#v-061)). Farlo vedere
-  richiederebbe un dataset di scala diversa da quella di un portatile.
+- **Non mostra una migrazione.** La soglia è 384 MB e la demo ne muove 2,4: è provato che sotto la
+  soglia il balancer non sposta niente, non che sopra si muova ([V-061](../Sources.md#v-061)).
+  Vederlo richiederebbe un dataset di scala diversa da quella di un portatile. La **fusione** invece
+  si vede, ed è l'altra metà del mestiere ([§4.3](#43-il-balancer-le-sue-due-mansioni-e-quella-che-qui-non-esercita-mai)).
+- **Non misura ogni quanto l'AutoMerger torni a girare.** Che esista un intervallo è del manuale;
+  quanto valga su questo deployment non è stato letto, perché il cluster non espone il parametro
+  ([V-062](../Sources.md#v-062), riserva *a*). Ed è osservato dopo un riavvio, che rende il riavvio
+  sufficiente e non dimostra che fosse necessario.
 - **Non copre le zone.** Sono il modo di legare intervalli di shard key a shard specifici, tipico
   dei cluster su più data center. Lo stack non ne ha.
 - **Non copre il resharding.** È la via d'uscita da una shard key sbagliata dalla 5.0, ed è
@@ -648,6 +707,7 @@ make reset-03
 [ADR-0065](../Decision.md#adr-0065) (i dati come sesto anello della catena),
 [ADR-0062](../Decision.md#adr-0062) (un comando solo, e la sentinella),
 [ADR-0061](../Decision.md#adr-0061) (che cosa chiede la sonda di `mongos`),
+[ADR-0069](../Decision.md#adr-0069) (la correzione sul balancer, e l'AutoMerger),
 [ADR-0067](../Decision.md#adr-0067) (dove scrivono i config server),
 [ADR-0066](../Decision.md#adr-0066) (con quale profilo si spegne),
 [ADR-0060](../Decision.md#adr-0060) (quanti membri ha un insieme),
@@ -657,7 +717,8 @@ make reset-03
 
 **Fonti:** [S-008](../Sources.md#s-008), [S-024](../Sources.md#s-024), [S-025](../Sources.md#s-025),
 [S-066](../Sources.md#s-066), [S-067](../Sources.md#s-067), [S-069](../Sources.md#s-069),
-[S-070](../Sources.md#s-070), [S-071](../Sources.md#s-071), [V-052](../Sources.md#v-052),
+[S-070](../Sources.md#s-070), [S-071](../Sources.md#s-071), [S-072](../Sources.md#s-072),
+[S-073](../Sources.md#s-073), [V-052](../Sources.md#v-052),
 [V-054](../Sources.md#v-054), [V-055](../Sources.md#v-055), [V-056](../Sources.md#v-056),
 [V-057](../Sources.md#v-057), [V-058](../Sources.md#v-058), [V-060](../Sources.md#v-060),
-[V-061](../Sources.md#v-061)
+[V-061](../Sources.md#v-061), [V-062](../Sources.md#v-062), [V-063](../Sources.md#v-063)

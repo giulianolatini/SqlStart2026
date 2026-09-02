@@ -49,7 +49,17 @@ RIGHE_ATTESE=60278
 # La distribuzione. Quattro chunk non è un caso: distribuendo una collezione VUOTA con
 # una chiave hashed MongoDB crea due chunk per shard, ed è il valore predefinito
 # documentato (S-066). Due shard, quattro chunk.
-CHUNK_ATTESI=4
+#
+# Quattro però NON è un invariante, e pretenderlo ha fatto fallire questo smoke la prima
+# volta che lo stack è stato spento e riacceso sugli stessi volumi. Dalla 7.0 il balancer
+# fonde da sé i chunk contigui che stanno sullo stesso shard (S-072), e i quattro
+# diventano due senza che un solo documento si sposti (V-062, ADR-0069).
+#
+# Il pavimento è due, e non è una stima: un chunk non può stare a cavallo di due shard,
+# quindi finché gli shard con documenti sono due i chunk non possono essere meno di due.
+# Quello che questo controllo deve bocciare è UNO — cioè tutto su uno shard solo.
+CHUNK_MINIMI=2
+CHUNK_INIZIALI=4
 # La quota minima per shard. Misurata: 49,3 % / 50,7 %. La soglia è larga perché la
 # distribuzione è statistica e non esatta: quello che deve fallire è il caso vero, cioè
 # uno shard a zero, non una fluttuazione di qualche punto.
@@ -540,14 +550,16 @@ confronta "shard key di lab.ordini" '{"_id":"hashed"}' \
   "$(interroga 'const m = db.getSiblingDB("config").collections.findOne({_id: "lab.ordini"}); print(m ? JSON.stringify(m.key) : "non distribuita")')"
 
 chunk="$(interroga 'const c = db.getSiblingDB("config"); const m = c.collections.findOne({_id: "lab.ordini"}); print(m ? c.chunks.countDocuments({uuid: m.uuid}) : 0)')"
-if [[ "${chunk}" == "${CHUNK_ATTESI}" ]]; then
-  ok "chunk di lab.ordini: ${chunk}"
-elif [[ "${chunk}" =~ ^[0-9]+$ ]] && (( chunk > CHUNK_ATTESI )); then
-  ok "chunk di lab.ordini: ${chunk} (attesi ${CHUNK_ATTESI})"
-  nota "più chunk del previsto è un'informazione, non un guasto: o gli shard sono"
-  nota "aumentati, o qualcuno ha passato numInitialChunks, o un chunk si è diviso"
+if [[ ! "${chunk}" =~ ^[0-9]+$ ]] || (( chunk < CHUNK_MINIMI )); then
+  errore "chunk di lab.ordini: ${chunk}, attesi almeno ${CHUNK_MINIMI} (uno per shard)"
+elif (( chunk == CHUNK_INIZIALI )); then
+  ok "chunk di lab.ordini: ${chunk} — la geometria iniziale, due per shard"
+elif (( chunk == CHUNK_MINIMI )); then
+  ok "chunk di lab.ordini: ${chunk} — uno per shard: l'AutoMerger ha già fuso"
 else
-  errore "chunk di lab.ordini: ${chunk}, attesi ${CHUNK_ATTESI}"
+  ok "chunk di lab.ordini: ${chunk}"
+  nota "né ${CHUNK_INIZIALI} né ${CHUNK_MINIMI}: o gli shard sono aumentati, o qualcuno"
+  nota "ha passato numInitialChunks, o un chunk si è diviso"
 fi
 
 # `getShardDistribution()` è il comando da mostrare dal vivo e stampa soltanto;
