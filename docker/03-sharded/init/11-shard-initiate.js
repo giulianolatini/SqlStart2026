@@ -12,13 +12,19 @@
 // che dice `10-cfg-initiate.js` sull'eccezione localhost, su `--file` con
 // percorso assoluto e sui codici di uscita: lì c'è il perché, qui solo il cosa.
 //
-// QUESTO SCRIPT NON CREA UTENTI, ed è una decisione. Gli utenti del cluster
-// vivono sul config server e valgono attraverso `mongos` (§4 dello spike). Uno
-// shard resta quindi senza utenti finché `sh.addShard()` non lo aggancia al
-// cluster, e in quella finestra l'eccezione localhost è aperta sul suo
-// `localhost` — che dentro Compose non è raggiungibile da nessun altro
-// container. Il caso «utente locale a uno shard», che serve per ispezionarlo
-// direttamente, è un debito intestato al Task 9 del piano.
+// QUESTO SCRIPT CREA UN UTENTE, e fino al Task 10 non lo faceva. Gli utenti
+// del cluster vivono sul config server e valgono attraverso `mongos`: uno shard
+// non ne riceve copia, quindi restava senza utenti per tutta la vita del
+// container — cioè con l'eccezione localhost aperta, e chiunque potesse avviare
+// un processo nel suo namespace di rete ne diventava `root` senza presentare
+// niente (V-064). L'utente creato qui in fondo chiude quella porta.
+//
+// È la procedura del manuale — «Create the shard-local user administrator»,
+// passo 4 della creazione dei replica set di shard (S-075) — eseguita con tre
+// semplificazioni che valgono SOLO in questo laboratorio. Sono elencate, con
+// accanto la forma canonica, in `docs/03-amministrazione/sicurezza-keyfile-x509.md`
+// §4.2. Il dettaglio sta là; qui basti che il pezzo in fondo a questo file NON
+// va copiato in un cluster di produzione così com'è.
 
 const NOME_REPLICA = process.env.NOME_REPLICA_SHARD;
 const MEMBRI = (process.env.MEMBRI_SHARD || "")
@@ -29,6 +35,12 @@ const CANDIDATI = (process.env.CANDIDATI_SHARD || "")
   .split(",")
   .map((h) => h.trim())
   .filter((h) => h.length > 0);
+
+// Le stesse due variabili di `10-cfg-initiate.js`, e lo stesso valore: una sola
+// password per il cluster e per i suoi shard. È una semplificazione di
+// laboratorio, non un modo di fare — vedi la testata.
+const UTENTE = process.env.UTENTE_AMMINISTRATORE;
+const PASSWORD = process.env.PASSWORD_AMMINISTRATORE;
 
 const USCITA_PARAMETRI = 2;
 const USCITA_ATTESA_SCADUTA = 3;
@@ -41,6 +53,15 @@ const USCITA_MEMBRO_DI_TROPPO = 5;
 if (!NOME_REPLICA || MEMBRI.length === 0 || CANDIDATI.length === 0) {
   print("ERRORE: NOME_REPLICA_SHARD, MEMBRI_SHARD o CANDIDATI_SHARD non valorizzate.");
   print("Le passa il file Compose: se mancano, è stato modificato quel file.");
+  quit(USCITA_PARAMETRI);
+}
+
+// Stesso codice di uscita, perché è la stessa causa — il file Compose non ha
+// passato quello che doveva — ma messaggio diverso, perché la riparazione è
+// diversa: là si guarda il file Compose, qui si guarda `.env`.
+if (!UTENTE || !PASSWORD) {
+  print("ERRORE: UTENTE_AMMINISTRATORE o PASSWORD_AMMINISTRATORE non valorizzate.");
+  print("Copiare docker/03-sharded/.env.example in .env e riempire la password.");
   quit(USCITA_PARAMETRI);
 }
 
@@ -149,4 +170,55 @@ if (!primario) {
   quit(USCITA_ATTESA_SCADUTA);
 }
 
-print("shard «" + NOME_REPLICA + "» pronto, primario: " + db.hello().primary);
+print("primario dello shard «" + NOME_REPLICA + "» eletto: " + db.hello().primary);
+
+// --- L'amministratore locale a questo shard ----------------------------------
+//
+// PRIMA DI COPIARE QUESTO PEZZO ALTROVE, leggere
+// `docs/03-amministrazione/sicurezza-keyfile-x509.md` §4.2. Il manuale crea
+// questo utente in due passi, con due utenti distinti e due password digitate a
+// `passwordPrompt()`; qui è uno solo, con la password del cluster, letta da un
+// file. In produzione NON si fa così.
+//
+// L'ECCEZIONE LOCALHOST NON È LA SCORCIATOIA. Anche il manuale crea questo
+// utente sotto eccezione localhost, collegato al primario dello shard: è il solo
+// modo di creare il PRIMO utente su un nodo che pretende autenticazione e non ha
+// ancora nessuno da autenticare (S-075, ADR-0026, ADR-0040). Quello che questo
+// script fa di suo è farlo senza nessuno davanti.
+//
+// PERCHÉ QUI E NON DOPO `sh.addShard()`. Il manuale mette questi passi prima di
+// registrare gli shard: «Executing them now ensures that there are users
+// available for each shard to perform shard-level maintenance» (S-075). Farlo
+// dopo lascerebbe una finestra — fra `rs.initiate()` e la creazione dell'utente
+// — in cui lo shard è in piedi e non ha utenti, che è la condizione che apre
+// l'eccezione.
+//
+// PERCHÉ DOPO L'ATTESA DEL PRIMARIO. «You must be connected to the primary to
+// create users» (S-075): un `createUser` su un nodo non ancora eletto fallisce
+// con `NotWritablePrimary`. L'attesa qui sopra serviva già a `sh.addShard()`;
+// adesso serve anche a questo.
+//
+// DUE ESITI VANNO TRATTATI COME SUCCESSO, per la ragione di
+// `10-cfg-initiate.js`: al secondo `up` l'utente esiste già, e il nodo risponde
+// `Unauthorized` (l'eccezione è chiusa dietro di lui) oppure «User already
+// exists». Un one-shot che fallisce al secondo avvio è un `make up-03` che
+// fallisce davanti al pubblico.
+
+try {
+  db.getSiblingDB("admin").createUser({
+    user: UTENTE,
+    pwd: PASSWORD,
+    roles: [{ role: "root", db: "admin" }],
+  });
+  print("amministratore locale «" + UTENTE + "» creato su «" + NOME_REPLICA + "»");
+} catch (errore) {
+  const gia = errore.codeName === "Unauthorized" || errore.codeName === "Location51003";
+  const esiste = /already exists/i.test(errore.message || "");
+  if (gia || esiste) {
+    print("amministratore locale già presente su «" + NOME_REPLICA + "»: non lo ricreo");
+  } else {
+    throw errore;
+  }
+}
+
+print("shard «" + NOME_REPLICA + "» pronto, eccezione localhost chiusa");

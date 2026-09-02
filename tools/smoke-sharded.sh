@@ -426,24 +426,60 @@ else
   errore "una password sbagliata non è stata rifiutata come atteso: «${sbagliata}»"
 fi
 
-# IL CONTROLLO CHE SULLO STACK 02 NON ESISTE, e che è una lezione prima di essere una
-# verifica: l'amministratore del cluster NON È un utente degli shard. In uno sharded
-# cluster gli utenti stanno nel database `admin` dei config server, e un `mongod` di
-# shard interrogato in diretta autentica contro i propri, che non ci sono. Misurato: la
-# stessa coppia utente/password che funziona sul router risponde «Authentication failed»
-# su shard1a (V-058).
+# I CONTROLLI CHE SULLO STACK 02 NON ESISTONO, e che sono una lezione prima di essere una
+# verifica. Fino ad ADR-0070 qui ce n'era uno solo, di segno opposto: verificava che le
+# credenziali del cluster NON aprissero uno shard, perché gli utenti di uno sharded
+# cluster vivono nel database `admin` dei config server e gli shard non ne ricevono copia
+# (V-058). Restava vero, e lasciava aperto quello che V-064 ha misurato: uno shard senza
+# utenti è uno shard con l'eccezione localhost aperta per tutta la vita del processo.
 #
-# Va verificato perché è la porta di servizio del cluster: se un giorno passasse,
-# significherebbe che qualcuno ha creato utenti direttamente sugli shard, e da lì in poi
-# esisterebbero due anagrafiche che nessuno tiene allineate.
-diretto="$(compose exec -T "${SHARD1[0]}" mongosh --quiet --host localhost \
+# ADR-0071 ha creato l'amministratore locale a ciascuno shard, e le invarianti da
+# sorvegliare sono diventate due — una che deve passare e una che deve essere rifiutata.
+# Sono legate: la prima è la ragione per cui la seconda vale.
+
+# 1. L'amministratore locale c'è, ed è LOCALE. La password è la stessa del cluster (è la
+#    semplificazione di laboratorio dichiarata in sicurezza-keyfile-x509.md §4.2), quindi
+#    che l'autenticazione riesca non basta a dire che l'utente sia quello dello shard.
+#    La prova che sia un'altra anagrafe è quello che vede: il proprio pezzo di collezione,
+#    non i 20 000 documenti del cluster.
+locale="$(compose exec -T "${SHARD1[0]}" mongosh --quiet --host localhost \
   --username "${UTENTE}" --password "${PASSWORD}" --authenticationDatabase admin \
-  --eval 'print("PASSATO")' 2>&1 | grep -o 'MongoServerError.*' | head -1)"
-if [[ "${diretto}" =~ [Aa]uthentication ]]; then
-  ok "l'amministratore del cluster non è un utente dello shard (è la regola, non un guasto)"
-  nota "gli utenti di uno sharded cluster vivono sui config server, non sugli shard"
+  --eval 'print(db.getSiblingDB("admin").system.users.countDocuments({}) + "|" + db.getSiblingDB("lab").ordini.countDocuments({}))' \
+  2>&1 | tr -d '\r' | tail -1)"
+utenti_shard="${locale%%|*}"
+documenti_shard="${locale##*|}"
+if [[ "${utenti_shard}" == "1" && "${documenti_shard}" =~ ^[0-9]+$ ]] \
+   && (( documenti_shard > 0 && documenti_shard < DOCUMENTI_ATTESI )); then
+  ok "l'amministratore locale a ${SHARD1[0]} esiste ed è locale: 1 utente, ${documenti_shard} documenti su ${DOCUMENTI_ATTESI}"
+  nota "stessa password del cluster, anagrafe diversa: dal router la collezione ne ha ${DOCUMENTI_ATTESI}"
 else
-  errore "una connessione diretta a ${SHARD1[0]} con le credenziali del cluster non è stata rifiutata: «${diretto}»"
+  errore "l'amministratore locale a ${SHARD1[0]} non risponde come atteso: «${locale}»"
+fi
+
+# 2. E per questo l'eccezione localhost è CHIUSA. È il controllo che vale il branch: prima
+#    di ADR-0071 questo comando creava un `root` sullo shard senza presentare niente, da
+#    qualunque processo condividesse il namespace di rete del container (V-064 esito 5).
+#    Se un giorno tornasse a passare, vorrebbe dire che uno shard è ripartito senza il suo
+#    amministratore — e che la porta è di nuovo aperta.
+eccezione="$(compose exec -T "${SHARD1[0]}" mongosh --quiet --host localhost --eval '
+  try { db.getSiblingDB("admin").createUser({user: "smoke-non-deve-esistere", pwd: "x", roles: [{role: "root", db: "admin"}]}); print("CREATO"); }
+  catch (e) { print(e.codeName); }' 2>&1 | tr -d '\r' | tail -1)"
+if [[ "${eccezione}" == "Unauthorized" ]]; then
+  ok "l'eccezione localhost su ${SHARD1[0]} è chiusa (createUser senza credenziali: Unauthorized)"
+else
+  errore "l'eccezione localhost su ${SHARD1[0]} non è chiusa: «${eccezione}»"
+fi
+
+# 3. Lo stesso sul secondo shard, e non è una ripetizione pigra: l'eccezione è una
+#    condizione DI PROCESSO, per nodo. Uno shard riavviato senza il suo init la riapre da
+#    solo, e un controllo su un nodo solo non se ne accorgerebbe.
+eccezione2="$(compose exec -T "${SHARD2[0]}" mongosh --quiet --host localhost --eval '
+  try { db.getSiblingDB("admin").createUser({user: "smoke-non-deve-esistere", pwd: "x", roles: [{role: "root", db: "admin"}]}); print("CREATO"); }
+  catch (e) { print(e.codeName); }' 2>&1 | tr -d '\r' | tail -1)"
+if [[ "${eccezione2}" == "Unauthorized" ]]; then
+  ok "l'eccezione localhost su ${SHARD2[0]} è chiusa"
+else
+  errore "l'eccezione localhost su ${SHARD2[0]} non è chiusa: «${eccezione2}»"
 fi
 
 # --- Quello che gira è quello che abbiamo pinnato -------------------------------------

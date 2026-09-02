@@ -842,9 +842,15 @@ services:
   # server per formarsi, ha bisogno del config server solo per essere REGISTRATO
   # nel cluster, e quello è il Task 3.
   #
-  # Nessun `createUser` qui: gli utenti del cluster vivono sul config server e
-  # valgono attraverso mongos (§4 dello spike). Vedi il commento in testa a
-  # 11-shard-initiate.js.
+  # UN `createUser` QUI C'È, e fino al Task 10 non c'era. Gli utenti del cluster
+  # vivono sul config server e valgono attraverso mongos (§4 dello spike): uno
+  # shard non ne riceve copia e restava senza utenti, cioè con l'eccezione
+  # localhost aperta per tutta la vita del container (V-064). L'amministratore
+  # locale creato da 11-shard-initiate.js la chiude. È la ragione per cui le due
+  # credenziali arrivano fin qui, e sono le STESSE del config server: una sola
+  # password per il cluster e per i suoi shard è una semplificazione di
+  # laboratorio, spiegata e circoscritta in
+  # docs/03-amministrazione/sicurezza-keyfile-x509.md §4.2.
   #
   # Vale tutto quello che dice cfg-init su `network_mode`, sull'eccezione
   # localhost e sul perché la dipendenza è verso il solo membro «a»: lì c'è il
@@ -867,6 +873,8 @@ services:
       NOME_REPLICA_SHARD: ${NOME_REPLICA_SHARD1:-shard1rs}
       MEMBRI_SHARD: ${MEMBRI_SHARD1:-shard1a:27017}
       CANDIDATI_SHARD: "shard1a:27017,shard1b:27017,shard1c:27017"
+      UTENTE_AMMINISTRATORE: ${UTENTE_AMMINISTRATORE:-admin}
+      PASSWORD_AMMINISTRATORE: ${PASSWORD_AMMINISTRATORE:?assente — copiare docker/03-sharded/.env.example in .env e riempire la password}
 
     command:
       - mongosh
@@ -901,6 +909,8 @@ services:
       NOME_REPLICA_SHARD: ${NOME_REPLICA_SHARD2:-shard2rs}
       MEMBRI_SHARD: ${MEMBRI_SHARD2:-shard2a:27017}
       CANDIDATI_SHARD: "shard2a:27017,shard2b:27017,shard2c:27017"
+      UTENTE_AMMINISTRATORE: ${UTENTE_AMMINISTRATORE:-admin}
+      PASSWORD_AMMINISTRATORE: ${PASSWORD_AMMINISTRATORE:?assente — copiare docker/03-sharded/.env.example in .env e riempire la password}
 
     command:
       - mongosh

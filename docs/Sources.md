@@ -2534,7 +2534,7 @@ web:
   connessione debba arrivare. Il comportamento è adesso misurato ([V-064](#v-064)), ma la fonte
   continua a non dirlo. `enableLocalhostAuthBypass` è citato e non è stato provato: il lab non può
   metterlo a `0` senza rompere `rs.initiate()`.
-- **Usata da:** ADR-0070
+- **Usata da:** ADR-0070, ADR-0071
 
 ## Verifiche empiriche
 
@@ -6713,7 +6713,7 @@ db.ordini.find({citta: "Ancona"})               -> shard1rs, shard2rs      (2 sh
   controllo aggiunto. Password di scarto, `.env` cancellato in coda, ogni giro chiuso con `down -v`
   e residui verificati a zero: nessun container, nessun volume, nessuna rete. Tutto su arm64.
 - **Data:** 2026-09-01
-- **Usata da:** ADR-0064, ADR-0065, ADR-0068
+- **Usata da:** ADR-0064, ADR-0065, ADR-0068, ADR-0071
 
 <a id="v-059"></a>
 ### V-059 — Il profilo con cui si spegne non è quello con cui si è acceso, e Compose non lo dice
@@ -7341,8 +7341,12 @@ ranged  ordered: false       248 ms    1 947 ms
     durante la prova, e `make smoke-03` dopo è verde.
 - **Conseguenza:** [ADR-0070](Decision.md#adr-0070), e la sezione 4 di
   `docs/03-amministrazione/sicurezza-keyfile-x509.md`.
+- **Seguito, 2026-09-02:** questa verifica descrive lo stack **prima** di
+  [ADR-0071](Decision.md#adr-0071), che ha creato un amministratore locale su ogni shard. Gli esiti
+  restano veri di quello stato e sono riproducibili su uno shard riavviato senza il suo init; sullo
+  stack di oggi l'esito 5 non passa più, ed è [V-066](#v-066) a misurarlo.
 - **Data:** 2026-09-02
-- **Usata da:** ADR-0070
+- **Usata da:** ADR-0070, ADR-0071
 
 ---
 
@@ -7417,3 +7421,185 @@ ranged  ordered: false       248 ms    1 947 ms
   `docs/03-amministrazione/backup-restore.md`.
 - **Data:** 2026-09-02
 - **Usata da:** ADR-0070
+
+<a id="s-075"></a>
+### S-075 — MongoDB Manual 7.0: Keyfile Authentication for Self-Managed Sharded Clusters
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/deploy-sharded-cluster-with-keyfile-access-control/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma, e sposta una premessa
+- **Perché è stata cercata.** [S-074](#s-074) prescrive un obbligo — «you **must** still prevent
+  unauthorized access to the individual shards» — e nomina il rimedio in tre parole: «Create a user
+  administrator on the shard's primary». Prima di scriverlo in uno script di avvio serviva la
+  procedura per esteso, nella versione pinnata, dalla pagina che la possiede: il tutorial completo di
+  autenticazione a keyfile su sharded cluster.
+- **Cosa afferma, primo punto — la procedura c'è, ed è un passo numerato.** Dentro «Create the Shard
+  Replica Sets», il passo 4 è «Create the shard-local user administrator (optional).» Preceduto da
+  «Connect to the primary before continuing. Use `rs.status()` to locate the primary member.» e da
+  «You must be connected to the primary to create users.» L'esempio è questo:
+
+  ```js
+  admin = db.getSiblingDB("admin")
+  admin.createUser({
+    user: "fred",
+    pwd: passwordPrompt(),
+    roles: [ { role: "userAdminAnyDatabase", db: "admin" } ]
+  })
+  ```
+
+- **Cosa afferma, secondo punto — e lo fa sotto eccezione localhost.** «The localhost interface is
+  only available since no users have been created for the deployment. The localhost interface closes
+  after the creation of the first user.» Non è una scorciatoia da laboratorio: è il modo in cui il
+  manuale stesso crea il primo utente di uno shard, collegandosi al primario. Chi lo scrive in uno
+  script di avvio non sta deviando dalla procedura, la sta eseguendo.
+- **Cosa afferma, terzo punto — l'ordine non è indifferente.** L'intestazione della sezione lo
+  motiva: «These steps include optional procedures for adding shard-local users. Executing them now
+  ensures that there are users available for each shard to perform shard-level maintenance.» «Now»
+  vuol dire **prima** di `sh.addShard()`, che nel tutorial viene dopo, insieme al `mongos` e
+  all'amministratore del cluster.
+- **Cosa afferma, quarto punto — a che cosa servono, e a che cosa non servono.** Nelle
+  considerazioni: «some maintenance operations require direct connections to specific shards… you
+  must connect directly to the shard and authenticate as a shard-local administrative user». E il
+  confine: «Shard-local users exist only in the specific shard and should only be used for
+  shard-specific maintenance and configuration. **You cannot connect to the `mongos` with
+  shard-local users.**»
+- **Cosa afferma, quinto punto — un secondo utente, sempre facoltativo.** Dopo l'amministratore degli
+  utenti la pagina prevede uno «shard-local cluster administrator» con ruolo `clusterAdmin`, creato
+  autenticandosi come il primo. Sono due utenti distinti con due password distinte, ciascuna
+  digitata a `passwordPrompt()`.
+- **Cosa afferma, sesto punto — sulle password e sul keyfile.** «Passwords should be random, long,
+  and complex to ensure system security and to prevent or delay malicious access.» E, sulla
+  tecnologia scelta: «Keyfiles are bare-minimum forms of security and are best suited for testing or
+  development environments. For production environments we recommend using X.509 certificates.»
+- **Riserve:**
+  - **a.** la pagina **non** contiene, per i config server, nessun passo di creazione utenti: il
+    replica set dei config server si inizializza e basta, e l'amministratore del cluster nasce più
+    avanti attraverso il `mongos`. Che l'utente del cluster si crei sul config server — come fa
+    questo laboratorio — è una via equivalente nei risultati e diversa nella forma, e la differenza
+    non è discussa da questa fonte.
+  - **b.** la pagina non dice che cosa accada agli shard che restano **senza** utenti locali, se non
+    per il rimando dell'obbligo di [S-074](#s-074). Non c'è, in tutta la pagina, una frase che
+    avverta che uno shard senza utenti ha l'eccezione localhost aperta: la si deduce mettendo
+    insieme le due fonti.
+  - **c.** `passwordPrompt()` presuppone qualcuno alla tastiera. La pagina non descrive nessuna forma
+    non presidiata della stessa procedura, e quindi non copre — né benedice — quello che fa uno
+    script di avvio automatico.
+- **Usata da:** ADR-0071
+
+---
+
+<a id="v-066"></a>
+### V-066 — L'amministratore locale a uno shard: la porta di V-064 si chiude, e se ne apre una con la chiave
+
+- **Che cosa è stato provato:** lo stack `03-sharded`, profilo `palco`, MongoDB 7.0.40, dopo la
+  modifica di [ADR-0071](Decision.md#adr-0071) a `docker/03-sharded/init/11-shard-initiate.js`. La
+  domanda: il rimedio che [S-074](#s-074) prescrive e che [S-075](#s-075) descrive chiude davvero
+  quello che [V-064](#v-064) aveva misurato, e che cos'altro cambia.
+- **Esito 1 — l'utente nasce anche su volumi già inizializzati.** Lo stack è stato riacceso sui
+  volumi esistenti, dove i due replica set di shard erano già formati. Gli init hanno saltato
+  `rs.initiate()` e creato l'utente lo stesso:
+
+  ```
+  replica set «shard1rs» già formato: non lo reinizializzo
+  primario dello shard «shard1rs» eletto: shard1a:27017
+  amministratore locale «admin» creato su «shard1rs»
+  shard «shard1rs» pronto, eccezione localhost chiusa
+  ```
+
+  È la conferma pratica dell'esito 7 di [V-064](#v-064): l'eccezione è una condizione del
+  **processo**, non del disco. Un container nuovo su un volume vecchio la trova aperta.
+- **Esito 2 — l'attacco di V-064 non passa più.** Ripetuto identico, stesso comando, stesso
+  bersaglio:
+
+  ```
+  keyfile in questo container: assente
+  whatsmyuri: 127.0.0.1:36768
+  createUser: Unauthorized: Command createUser requires authentication
+  ```
+
+  Il container condivide ancora il network namespace dello shard e il server lo vede ancora arrivare
+  da `127.0.0.1`. Cambia solo che adesso un utente c'è. Lo stesso vale per `docker exec` sullo shard
+  senza credenziali.
+- **Esito 3 — l'amministratore locale funziona, ed è locale.** Autenticato su `shard1a`:
+
+  ```
+  setName: shard1rs
+  utenti su questo shard: [{"user":"admin","db":"admin"}]
+  ruoli: [{"role":"root","db":"admin"}]
+  lab.ordini su questo shard: 9860        (dal router: 20 000)
+  rs.status().set: shard1rs, membri 1
+  ```
+
+  Un utente solo per shard, con `root` su `admin`, che vede il proprio pezzo di collezione.
+- **Esito 4 — «you cannot connect to the mongos with shard-local users», misurato.** La
+  dimostrazione richiede un nome diverso, perché in questo laboratorio l'utente dello shard e quello
+  del cluster hanno **lo stesso nome e la stessa password** e dall'esterno sono indistinguibili.
+  Creato `solo-shard1` sul solo `shard1a`:
+
+  ```
+  presentato a shard1a   lab.ordini: 9860
+  presentato al mongos   MongoServerError: Authentication failed.
+  ```
+
+  Conferma [S-075](#s-075) e spiega perché l'esito 3 non basta da solo a provare che le due
+  anagrafiche siano due.
+- **Esito 5 — `userAdminAnyDatabase` si fa `root` da solo, in un comando.** È il ruolo che
+  [S-075](#s-075) prescrive per l'amministratore locale, ed è stato provato per capire quanto costi
+  scostarsene:
+
+  ```
+  legge lab.ordini:         Unauthorized
+  grantRolesToUser(root):   riuscito
+  adesso legge lab.ordini:  9860
+  ```
+
+  Un amministratore degli utenti **è** un amministratore, per definizione: può concedere a se stesso
+  qualunque ruolo. Fra `userAdminAnyDatabase` e `root`, su questo nodo, non c'è una barriera di
+  privilegio: c'è un comando in più.
+- **Esito 6 — la porta pubblicata dello shard adesso accetta credenziali.** È il cambiamento con il
+  segno opposto, e va scritto. Prima nessuno poteva autenticarsi su `shard1a` perché non c'erano
+  utenti; adesso, da fuori Docker:
+
+  ```
+  mongodb://admin:…@host.docker.internal:27141/?directConnection=true&authSource=admin
+  setName: shard1rs · documenti: 9860
+  ```
+
+  L'eccezione localhost non c'entra — quella via non l'ha mai aperta ([V-064](#v-064) esito 4). Ciò
+  che è cambiato è che ora esiste una credenziale che quella porta riconosce, ed è la stessa del
+  cluster.
+- **Esito 7 — idempotente al secondo avvio.** Rieseguito `make up-03` a stack acceso, i due init
+  hanno risposto «amministratore locale già presente … non lo ricreo» e sono usciti `0`. Il ramo
+  percorso è quello di `Unauthorized`, non quello di «already exists»: a eccezione chiusa il nodo
+  non arriva nemmeno a valutare se l'utente esista.
+- **Esito 8 — lo smoke test.** Sostituito il controllo che verificava l'invariante vecchia — le
+  credenziali del cluster rifiutate dallo shard ([V-058](#v-058)) — con tre controlli nuovi:
+  l'amministratore locale esiste ed è locale (1 utente, 9 860 documenti su 20 000), e l'eccezione
+  localhost è chiusa **su entrambi** gli shard. `make smoke-03`: **64 controlli, 0 errori**.
+  `make stack-check`: «Stack conformi: 3».
+- **Riserve:**
+  - **a.** vale per il profilo `palco`, un membro per shard. Sui **secondari** di uno shard a tre
+    membri non è stato provato: `createUser` su un secondario fallisce comunque con
+    `NotWritablePrimary`, ma che l'eccezione si comporti allo stesso modo resta la riserva **a** di
+    [V-064](#v-064), non chiusa qui.
+  - **b.** l'esito 5 prova che `userAdminAnyDatabase` può concedersi `root` **su quel nodo**. Non
+    dice niente su che cosa accada in un'installazione con ruoli personalizzati o con
+    `authorization` delegata altrove.
+  - **c.** l'esito 6 è misurato su Docker Desktop per macOS con le porte pubblicate dal profilo
+    `palco`. Uno stack che non pubblichi le porte degli shard non ha quella via, e la modifica di
+    ADR-0071 non gliene aggiunge.
+  - **d.** non è stato provato che cosa succeda se uno **solo** dei due init fallisce: lo stack si
+    fermerebbe prima, perché `add-shard` dipende da entrambi, ma lo stato intermedio — uno shard con
+    l'utente e uno senza — non è stato osservato.
+  - **e.** gli utenti di prova (`solo-shard1`, `solo-utenti`) sono stati cancellati; lo stato finale,
+    letto autenticati, è **un solo utente `admin` per shard**.
+- **Conseguenza:** [ADR-0071](Decision.md#adr-0071), la nuova §4.2 di
+  `docs/03-amministrazione/sicurezza-keyfile-x509.md` e i tre controlli nuovi di
+  `tools/smoke-sharded.sh`.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0071
+
+---
+

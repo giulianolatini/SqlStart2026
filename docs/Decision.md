@@ -4278,6 +4278,11 @@ provarlo — è la [riserva **b**](Sources.md#v-062) di V-062, e resta una riser
 
 **Data:** 2026-09-02 · **Stato:** Accettata
 
+> **Nota di allineamento, 2026-09-02.** Il resto di questo ADR regge intatto. Il solo punto superato
+> è quello che lasciava l'eccezione localhost aperta sugli shard: il Product Owner ha scelto di
+> creare l'amministratore per shard, e come lo si è fatto è in [ADR-0071](#adr-0071). Il corpo non
+> viene toccato: si legge com'era, con questo rimando davanti.
+
 **Contesto.** Il Task 9 del piano di `feature/03` non aggiunge funzioni: chiude i debiti che le
 pagine si portano scritti addosso. La regola è [ADR-0049](#adr-0049) — un debito si chiude
 **eseguendo** — e la prima volta che è stata applicata l'esecuzione ha rivelato due righe sbagliate.
@@ -4383,3 +4388,110 @@ si sarebbe perso il momento in cui erano state misurate, che è la sola cosa che
 un riferimento stabile citato da altre pagine, e riordinarla vale meno di quanto costa.
 
 **Fonti:** [S-006](Sources.md#s-006) · [S-011](Sources.md#s-011) · [S-074](Sources.md#s-074) · [V-063](Sources.md#v-063) · [V-064](Sources.md#v-064) · [V-065](Sources.md#v-065)
+
+---
+
+<a id="adr-0071"></a>
+## ADR-0071 — L'amministratore locale a ogni shard: l'obbligo del manuale, adempiuto, e le tre semplificazioni che restano di laboratorio
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** [ADR-0070](#adr-0070) ha lasciato una porta aperta e l'ha scritto: gli shard di questo
+stack non hanno utenti, quindi l'eccezione localhost è aperta su ciascuno di essi per tutta la vita
+del processo, e chiunque possa avviare un container nel loro *network namespace* diventa `root` di
+uno shard senza presentare niente ([V-064](Sources.md#v-064)). La documentazione non lascia margini
+su che cosa vada fatto — «you **must** still prevent unauthorized access to the individual shards»
+([S-074](Sources.md#s-074)) — e ADR-0070 ha deciso di non decidere: la misura si pubblica, il rimedio
+si propone, la scelta appartiene a chi risponde del laboratorio (nota di metodo 117). Il Product
+Owner ha scelto, il 2026-09-02: si crea l'amministratore per shard, con l'eccezione localhost, per
+questo laboratorio, e la documentazione deve dire ad alta voce che la forma automatica **non** va
+riprodotta in produzione.
+
+Prima di scrivere una riga è stata cercata la procedura canonica, ed è stata trovata: il tutorial di
+autenticazione a keyfile su sharded cluster ([S-075](Sources.md#s-075)), passo 4 della creazione dei
+replica set di shard, «Create the shard-local user administrator». La lettura ha spostato una
+premessa che sembrava acquisita, e va detta subito perché cambia dove punta l'avvertenza.
+
+**L'eccezione localhost non è la scorciatoia.** Il manuale crea quell'utente **usando proprio
+l'eccezione localhost**, collegato al primario dello shard: «The localhost interface is only
+available since no users have been created for the deployment. The localhost interface closes after
+the creation of the first user.» È il solo modo di creare il primo utente su un nodo che pretende
+autenticazione e non ha ancora nessuno da autenticare. Chi lo fa non devia dalla procedura: la
+esegue. Le deviazioni di questo laboratorio sono altre tre, e sono quelle da segnalare.
+
+**Decisione.**
+
+*I due servizi `shard1-init` e `shard2-init` creano un amministratore locale sul primario del proprio
+shard, subito dopo l'attesa dell'elezione e prima che `sh.addShard()` registri gli shard nel
+cluster.* L'ordine è quello del manuale, e la ragione è scritta lì: «Executing them now ensures that
+there are users available for each shard to perform shard-level maintenance»
+([S-075](Sources.md#s-075)). Farlo dopo lascerebbe una finestra in cui lo shard è in piedi e non ha
+utenti, che è esattamente la condizione che apre l'eccezione. L'attesa del primario, che c'era già
+per `sh.addShard()`, adempie ora anche a «You must be connected to the primary to create users».
+
+*Le tre semplificazioni sono dichiarate una per una, e nessuna delle tre va in produzione.* Sono
+scritte in `docs/03-amministrazione/sicurezza-keyfile-x509.md` §4.2 accanto alla forma canonica, con
+i comandi del manuale riportati per esteso. In breve: **una sola password** per l'amministratore del
+cluster e per quelli dei due shard, dove il manuale vuole credenziali distinte; **letta da un file**
+`.env` da uno script non presidiato, dove il manuale vuole `passwordPrompt()` e «random, long, and
+complex»; **il ruolo `root`** invece del `userAdminAnyDatabase` del passo 4, e senza il secondo
+utente `clusterAdmin` del passo 5.
+
+*Il ruolo è `root`, e la ragione è misurata, non comoda.* [V-066](Sources.md#v-066) esito 5:
+`userAdminAnyDatabase` non legge `lab.ordini`, ma si concede `root` da solo in un comando e subito
+dopo la legge. Fra i due ruoli, su quel nodo, non c'è una barriera di privilegio — c'è un comando in
+più. Con una password condivisa, scegliere il ruolo minimo avrebbe avuto l'aspetto della sicurezza
+senza esserlo, e in cambio avrebbe reso impossibile la sola cosa per cui
+[ADR-0026](#adr-0026) prevede questi utenti: «dove una demo debba ispezionare un singolo shard». La
+scelta di `root` è dichiarata come deviazione, non presentata come buona pratica.
+
+*Lo smoke test cambia invariante, e ne sorveglia una in più.* Il controllo che verificava che le
+credenziali del cluster **non** aprissero uno shard ([V-058](Sources.md#v-058)) era vero e adesso è
+falso per costruzione: al suo posto tre controlli. Che l'amministratore locale esista e sia locale —
+un utente solo, e una fetta della collezione, non i ventimila documenti del cluster — e che
+l'eccezione localhost sia chiusa **su tutti e due** gli shard, perché è una condizione di processo e
+un nodo riavviato senza il suo init la riaprirebbe da solo. `make smoke-03` passa da 62 a 64
+controlli.
+
+*Quello che si guadagna e quello che si perde si scrivono insieme.* Si guadagna che l'attacco di
+[V-064](Sources.md#v-064) non passa più: stesso container, stesso `127.0.0.1`, stesso comando, e la
+risposta è `Unauthorized`. Si perde che le porte pubblicate degli shard — 27141 e 27151 nel profilo
+`palco` — adesso **riconoscono una credenziale**, che è quella del cluster. Prima non c'era niente
+da presentare loro. L'eccezione localhost non c'entra, quella via non l'ha mai aperta: cambia che
+esiste un utente. Sul lab non sposta nulla, perché lo stack non va esposto fuori dalla macchina di
+chi presenta ([ADR-0005](#adr-0005)); su una macchina esposta sarebbe la cosa da guardare per prima.
+
+**Conseguenze.** Cambiano quattro file dello stack e quattro pagine.
+`docker/03-sharded/init/11-shard-initiate.js` crea l'utente e porta in testa l'avvertenza;
+`docker/03-sharded/compose.yaml` passa `UTENTE_AMMINISTRATORE` e `PASSWORD_AMMINISTRATORE` ai due
+init, e il commento che diceva «Nessun `createUser` qui» dice adesso il contrario e perché;
+`docker/03-sharded/.env.example` dichiara che la stessa password serve a quattro utenti;
+`tools/smoke-sharded.sh` sostituisce un controllo con tre. In documentazione: la nuova §4.2 di
+`sicurezza-keyfile-x509.md` con la procedura canonica per esteso, la trappola **21** di
+`trappole-mongodb-in-docker.md` che cambia esito, e una fonte nuova
+([S-075](Sources.md#s-075)) con la verifica che l'accompagna ([V-066](Sources.md#v-066)).
+
+L'avvio non rallenta in modo percepibile: è un `createUser` per shard, in parallelo fra i due init.
+Al secondo `up` i due init rispondono «già presente» e escono `0`, per il ramo `Unauthorized` — a
+eccezione chiusa il nodo non arriva nemmeno a valutare se l'utente esista.
+
+Resta aperto, e dichiarato: l'eccezione sui **secondari** di uno shard a tre membri, che il profilo
+`palco` non ha; `enableLocalhostAuthBypass: 0` applicato **dopo** l'inizializzazione, che sarebbe il
+secondo rimedio ammesso da [S-074](Sources.md#s-074) e che questo stack non prova; e lo stato
+intermedio in cui uno solo dei due init fallisse.
+
+**Alternative scartate:** lasciare l'eccezione aperta come decideva ADR-0070 — la scelta era del
+Product Owner e il Product Owner ha scelto diversamente; `enableLocalhostAuthBypass: 0` sugli shard —
+applicato prima dell'inizializzazione impedisce `rs.initiate()` e lo stack non parte
+([V-064](Sources.md#v-064) riserva b), applicato dopo servirebbe un riavvio dentro la catena di
+avvio, cioè un anello in più per ottenere quello che un `createUser` ottiene senza; usare
+`userAdminAnyDatabase` come prescrive il passo 4 — è misurato che si concede `root` da solo, quindi
+avrebbe l'aspetto della sicurezza e non la sostanza, e toglierebbe alla demo l'unica cosa che questi
+utenti servono a fare; creare due utenti distinti come i passi 4 e 5 del manuale — con una sola
+password nel `.env` sarebbero due nomi per la stessa chiave, cioè cerimonia; usare una password
+diversa per gli shard — sarebbe più fedele al manuale e chiederebbe una seconda riga in `.env`, che
+è il file che ADR-0056 racconta essere già stato perso una volta: il guadagno è simbolico finché la
+prima password sta nello stesso file; creare l'utente **dopo** `sh.addShard()`, dove sarebbe stato
+più comodo metterlo — lascia aperta la finestra che tutto questo ADR esiste per chiudere.
+
+**Fonti:** [S-074](Sources.md#s-074) · [S-075](Sources.md#s-075) · [V-058](Sources.md#v-058) · [V-064](Sources.md#v-064) · [V-066](Sources.md#v-066)

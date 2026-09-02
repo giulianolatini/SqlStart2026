@@ -1482,6 +1482,15 @@ sapere dove finisce. Il manuale la enuncia — «applies to each shard individua
 mostra la conseguenza in Docker, che il manuale non può conoscere. Da dire con il comando a
 schermo: due righe, e un `root` che non esisteva.
 
+**Seguito, e va detto sulla stessa slide:** su questo stack, da [ADR-0071](Decision.md#adr-0071),
+quel comando risponde `Unauthorized`. I due shard hanno un amministratore locale, creato dal loro
+init sul primario appena eletto, e il primo utente chiude l'eccezione dietro di sé. La slide non
+perde niente — la falla è di **qualunque** shard senza utenti, che è la condizione predefinita di
+ogni replica set appena inizializzato — ma finire con «e questo è come si chiude» vale più che
+finire con lo spavento. Chiuderla ha un prezzo che sta in una riga: prima le porte pubblicate degli
+shard non accettavano nessuna credenziale, perché non c'era nessun utente; adesso ne accettano una
+([V-066](Sources.md#v-066)).
+
 ---
 
 ### Il messaggio d'errore che nasconde quello vero
@@ -1514,3 +1523,22 @@ Fonte: [V-065](Sources.md#v-065) sesto punto, [ADR-0070](Decision.md#adr-0070).
 **Perché una slide:** è il caso peggiore per chi ripristina — nessun errore, nessun avviso, e il
 controllo che verrebbe naturale fare (contare i documenti) conferma che è tutto a posto. Se il
 Blocco 3 ha tempo per un solo avvertimento operativo, è questo.
+
+
+---
+
+### Il ruolo minimo che si promuove da solo
+
+> Il manuale, per l'amministratore di uno shard, prescrive `userAdminAnyDatabase`: amministra gli
+> utenti, **non legge i dati**. Provato: `lab.ordini` risponde `Unauthorized`. Poi quello stesso
+> utente si concede `root` — è un comando, ed è esattamente ciò che «amministra gli utenti»
+> significa — e la collezione la legge. Fra il ruolo minimo e `root`, su quel nodo, non c'è una
+> barriera di privilegio: c'è un comando in più. La barriera vera è **chi conosce la password**.
+
+Fonte: [V-066](Sources.md#v-066) quinto punto, [S-075](Sources.md#s-075),
+[ADR-0071](Decision.md#adr-0071).
+
+**Perché una slide:** smonta l'automatismo per cui «ruolo minimo» equivale a «più sicuro», che in
+sala pensano tutti e nessuno ha provato. È anche l'onestà del lab: spiega perché questo stack usa
+`root` invece di fingere una separazione che con una password sola non esisterebbe. Tre righe di
+console, e si vede.

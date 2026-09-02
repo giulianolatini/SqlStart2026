@@ -960,6 +960,14 @@ $ docker exec -it sh-shard2a mongosh          # nessuna credenziale, nessun keyf
 
 Un `root` sullo shard, senza presentare niente.
 
+> **Su questo stack non si riproduce più, e la trappola resta.** Dal 2026-09-02 i due shard hanno
+> un amministratore locale, creato dal loro init: il primo utente c'è, e l'eccezione si chiude
+> dietro di lui ([ADR-0071](../Decision.md#adr-0071),
+> [V-066](../Sources.md#v-066)). Il comando qui sopra oggi risponde `Unauthorized`. Resta scritto
+> perché la trappola non era dello stack: era di **qualunque shard senza utenti**, che è la
+> condizione predefinita di ogni replica set appena inizializzato — e perché un nodo riavviato
+> senza il suo init ci ricasca da solo.
+
 **Causa.** È l'eccezione localhost, e su un cluster non è una sola: «In a sharded cluster, the
 localhost exception applies to **each shard individually** as well as to the cluster as a whole»
 ([S-074](../Sources.md#s-074)). Gli utenti del cluster vivono sui config server; gli shard non ne
@@ -997,18 +1005,32 @@ condivide la rete dello shard è sul suo loopback**, e non ha bisogno di leggere
 
 - In un lab in cui gli shard non pubblicano porte, la porta d'ingresso è **l'accesso al demone
   Docker** — e chi ce l'ha può già leggere il volume del keyfile con un altro container, quindi
-  l'eccezione non gli aggiunge potere. È il motivo per cui questo stack la lascia aperta: la stessa
-  strada serve a `rs.initiate()` durante l'inizializzazione degli shard.
-- Fuori da questo caso il «must» della documentazione morde davvero, e ha due risposte: **creare un
-  amministratore sul primario di ogni shard**, oppure avviare i `mongod` degli shard con
-  `setParameter enableLocalhostAuthBypass=0`. La seconda, applicata a uno stack che inizializza i
-  replica set da uno script, impedisce anche `rs.initiate()`: va messa **dopo** l'inizializzazione,
-  non prima.
+  l'eccezione non gli aggiunge potere. È l'argomento con cui questo stack l'ha lasciata aperta per
+  un po', e non era sbagliato: era solo un argomento sul lab, non sul rimedio.
+- Il «must» della documentazione ha due risposte: **creare un amministratore sul primario di ogni
+  shard**, oppure avviare i `mongod` degli shard con `setParameter enableLocalhostAuthBypass=0`. La
+  seconda, applicata a uno stack che inizializza i replica set da uno script, impedisce anche
+  `rs.initiate()`: va messa **dopo** l'inizializzazione, non prima — cioè richiede un riavvio dentro
+  la catena di avvio.
+- **Questo stack ha preso la prima**, e le è costata dieci righe in `11-shard-initiate.js`: l'utente
+  si crea sul primario appena eletto, prima di `sh.addShard()`, sotto la stessa eccezione localhost
+  che chiude. Non è un aggiramento: è la procedura del manuale
+  ([S-075](../Sources.md#s-075)), perché su un nodo che pretende autenticazione e non ha nessuno da
+  autenticare non c'è altra via per il primo utente. Quello che il lab fa di suo — una password sola,
+  letta da un file, e il ruolo `root` — è dichiarato in
+  [`sicurezza-keyfile-x509.md` §4.2](../03-amministrazione/sicurezza-keyfile-x509.md#42-lamministratore-per-shard)
+  e **non va copiato in produzione**.
+- **Chiudere l'eccezione apre una porta di segno opposto**, e conviene saperlo prima: finché sullo
+  shard non c'era nessun utente, la sua porta pubblicata non accettava **nessuna** credenziale.
+  Adesso ne accetta una. Su un lab non sposta niente; su una macchina raggiungibile, chiudere
+  l'eccezione e pubblicare le porte degli shard sono due decisioni da prendere insieme
+  ([V-066](../Sources.md#v-066)).
 
 **Fonte.** [V-064](../Sources.md#v-064) (le misure, compresa quella del network namespace),
-[S-074](../Sources.md#s-074), [S-006](../Sources.md#s-006),
-[ADR-0070](../Decision.md#adr-0070). La voce [11](#t-11) è la stessa falla su un nodo singolo; qui
-la novità è che un cluster autenticato ne ha una per shard.
+[V-066](../Sources.md#v-066) (le stesse, rifatte dopo il rimedio), [S-074](../Sources.md#s-074),
+[S-075](../Sources.md#s-075), [S-006](../Sources.md#s-006),
+[ADR-0070](../Decision.md#adr-0070), [ADR-0071](../Decision.md#adr-0071). La voce [11](#t-11) è la
+stessa falla su un nodo singolo; qui la novità è che un cluster autenticato ne ha una per shard.
 
 ---
 

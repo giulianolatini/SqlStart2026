@@ -3839,3 +3839,136 @@ conformi: 3», `make smoke-03` **62 controlli e 0 errori**, `lab.ordini` a 20 00
 Stato: decisioni fino a **ADR-0070**, verifiche fino a **V-065**, fonti fino a **S-074**, note di
 metodo fino alla **118**. Task 1–9 su 11 chiusi; restano il **Task 10** (la riserva del Blocco 3) e
 il **Task 11**, che chiude il branch **con la pull request**.
+
+---
+
+## 2026-09-02 — Prima del Task 10: l'amministratore per shard, e la porta che si chiude
+
+Il Task 9 ha chiuso lasciando una decisione al Product Owner, come prescrive la nota di metodo 117:
+la misura si pubblica, il rimedio si propone, la scelta appartiene a chi risponde del laboratorio.
+[V-064](Sources.md#v-064) aveva misurato che ogni shard di questo stack è un replica set **senza
+utenti**, quindi con l'eccezione localhost aperta per tutta la vita del processo, e che un container
+qualunque che ne condivide il *network namespace* ci diventa `root` senza presentare niente.
+[ADR-0070](Decision.md#adr-0070) aveva deciso di non decidere.
+
+Il Product Owner ha deciso: **si crea l'amministratore per shard**, con l'eccezione localhost, per
+questo laboratorio, e la documentazione deve dire ad alta voce che la forma automatica non va
+riprodotta in produzione, indicando la procedura canonica. È
+[ADR-0071](Decision.md#adr-0071).
+
+**Prima di scrivere una riga, cercare la procedura — e trovarla ha spostato l'avvertenza.** Il
+tutorial di autenticazione a keyfile su sharded cluster ([S-075](Sources.md#s-075)) ha un passo 4
+intitolato «Create the shard-local user administrator», e lo esegue **usando proprio l'eccezione
+localhost**: ci si collega al primario dello shard e si crea lì il primo utente, perché su un nodo
+che pretende autenticazione e non ha ancora nessuno da autenticare non c'è altra via. L'eccezione,
+che era il problema, è anche l'unico strumento del rimedio. Le deviazioni di questo laboratorio sono
+dunque altre tre, e sono quelle su cui puntare il dito: una **sola password** per il cluster e per i
+due shard dove il manuale ne vuole una per shard; **letta da un file** da uno script non presidiato
+dove il manuale vuole `passwordPrompt()`; il ruolo **`root`** invece del `userAdminAnyDatabase` del
+passo 4, e senza il secondo utente `clusterAdmin` del passo 5.
+
+**Dove va messo il `createUser`, e perché non dove sarebbe stato comodo.** Nel primario di ogni
+shard, dentro `11-shard-initiate.js`, dopo l'attesa dell'elezione e **prima** che `add-shard`
+registri gli shard. L'ordine è del manuale e la ragione è scritta lì — «Executing them now ensures
+that there are users available for each shard to perform shard-level maintenance» — perché farlo
+dopo lascerebbe una finestra in cui lo shard è in piedi, non ha utenti, e ha la porta aperta.
+L'attesa del primario, che c'era già per `sh.addShard()`, adempie ora anche a «You must be connected
+to the primary to create users»: un `createUser` su un nodo non ancora eletto risponde
+`NotWritablePrimary`. I due `catch` che trattano `Unauthorized` e «already exists» come successo
+sono la stessa scelta di `10-cfg-initiate.js`: un one-shot che fallisce al secondo `up` è un
+`make up-03` che fallisce davanti al pubblico.
+
+**Il ruolo si è scelto misurando, non ragionando.** La scelta ovvia era `userAdminAnyDatabase`,
+perché è quello che prescrive il manuale ed è il minimo. Provato ([V-066](Sources.md#v-066), quinto
+esito): non legge `lab.ordini`, si concede `root` **da solo in un comando**, e subito dopo la legge.
+Fra i due ruoli, su quel nodo, non c'è una barriera di privilegio — c'è un comando in più. Con una
+password condivisa il ruolo minimo avrebbe avuto l'aspetto della sicurezza senza la sostanza, e in
+cambio avrebbe tolto alla demo l'unica cosa per cui [ADR-0026](Decision.md#adr-0026) prevede questi
+utenti: ispezionare un singolo shard. `root`, dichiarato come deviazione.
+
+**Che l'utente sia davvero locale non si dimostra autenticandosi.** La password è la stessa del
+cluster, quindi un login riuscito non prova niente: proverebbe solo che la password funziona. Due
+prove indirette lo hanno stabilito. La prima è **quello che vede**: 9 860 documenti di `lab.ordini`
+sullo shard, contro i 20 000 che si contano dal router. La seconda è un utente con **un nome
+diverso**, `solo-shard1`, creato apposta sul solo `shard1a`: accettato da `shard1a`, rifiutato dal
+`mongos` con «Authentication failed». È il «you cannot connect to the `mongos` with shard-local
+users» del manuale, in due righe. L'utente di prova è stato cancellato subito dopo, e la cancellazione
+verificata.
+
+**Quello che si guadagna, e quello che si perde.** Si guadagna che l'attacco di V-064 non passa più:
+stesso container nel namespace dello shard, stesso `127.0.0.1` visto da `mongod`, nessun keyfile, e
+la risposta è `Unauthorized`. Si perde che le porte pubblicate degli shard — 27141 e 27151 nel
+profilo `palco` — adesso **riconoscono una credenziale**, quella del cluster, dove prima non c'era
+niente da presentare loro. L'eccezione localhost non c'entra, quella via non l'ha mai aperta: cambia
+che esiste un utente. Sul lab non sposta nulla ([ADR-0005](Decision.md#adr-0005)); su una macchina
+raggiungibile sarebbe la prima cosa da guardare. Le due cose sono scritte insieme ovunque compaiano.
+
+**Lo smoke test perde un'invariante e ne guadagna tre.** Il controllo che verificava che le
+credenziali del cluster **non** aprissero uno shard ([V-058](Sources.md#v-058)) era vero e adesso è
+falso per costruzione: `make smoke-03` è fallito al primo giro, ed è fallito bene, perché è così che
+un repository chiede di aggiornare un'invariante. Al suo posto tre controlli: che l'amministratore
+locale esista e sia locale (un utente solo, e una fetta della collezione, non i ventimila del
+cluster) e che l'eccezione sia chiusa **su tutti e due** gli shard, perché è una condizione di
+processo e un nodo riavviato senza il suo init la riaprirebbe da solo. Da 62 a **64** controlli.
+
+**Che cosa è cambiato.** Nello stack: `docker/03-sharded/init/11-shard-initiate.js` (crea l'utente e
+porta in testa l'avvertenza), `docker/03-sharded/compose.yaml` (passa le due credenziali ai due init,
+e il commento che diceva «Nessun `createUser` qui» dice adesso il contrario e perché),
+`docker/03-sharded/.env.example`, `tools/smoke-sharded.sh`. In documentazione: la nuova **§4.2** di
+[`sicurezza-keyfile-x509.md`](03-amministrazione/sicurezza-keyfile-x509.md) con l'avvertenza in
+evidenza, la procedura canonica citata passo per passo e la tabella delle tre differenze; la §4.1 che
+resta com'era con davanti la data oltre la quale non si riproduce; la trappola **21** di
+[`trappole-mongodb-in-docker.md`](02-architetture/trappole-mongodb-in-docker.md), che cambia esito;
+due righe dell'indice; una citazione nuova e il seguito di una vecchia in
+[`citazioni-riportare-slide.md`](citazioni-riportare-slide.md). E le fonti: [S-075](Sources.md#s-075)
+con la verifica che l'accompagna, [V-066](Sources.md#v-066).
+
+**I tre debiti degli strumenti: sede assegnata, ed è il Task 11.** Restavano annotati e senza sede —
+niente lega le `PORTE` di `preflight.sh` ai file Compose, niente lega il `Makefile` ai profili
+dichiarati nel Compose, e [ADR-0062](Decision.md#adr-0062) ne ha lasciato uno verso lo stack 02, dove
+`up-02` esegue ancora i due comandi che la sentinella dello stack 03 ha reso inutili. Vanno chiusi
+**eseguendo** ([ADR-0049](Decision.md#adr-0049)) nel **Task 11**, prima dei quattro controlli e della
+pull request, e non nel Task 10, per tre ragioni. Sono **un solo genere di debito** — gli strumenti
+del repository che si scollano dai file Compose — e un genere solo merita una sede sola e un giro di
+verifica solo. Il Task 10 **registra terminali**: cambiare `preflight.sh` o il `Makefile` dopo aver
+registrato `make up-03` significa avere registrazioni che mostrano un output che gli strumenti non
+producono più, e [ADR-0055](Decision.md#adr-0055) chiede di riprodurre ogni registrazione per intero
+prima di dichiararla buona. Il terzo debito, infine, tocca lo **stack 02**: per chiuderlo eseguendo
+serve accendere quello stack, che è un ambiente diverso da quello del Task 10.
+
+**Misurato.** `make smoke-03` **64 controlli e 0 errori** (era 62), `make stack-check` «Stack
+conformi: 3», `make docs-check` verde, `make tools-test` **131 passed**, `lab.ordini` 20 000 documenti
+dal router e 9 860 su `shard1a`. Le prove distruttive hanno lasciato l'ambiente pulito, verificato
+con le credenziali: **un solo utente `admin` per shard**. Il secondo `up` è idempotente: i due init
+rispondono «già presente» ed escono `0`. Lo stack è rimasto acceso nel profilo `palco`.
+
+**Note di metodo.**
+
+119. **Prima di dichiarare una deviazione, cercare la procedura: può darsi che la scorciatoia che si
+     sta per confessare sia il manuale.** L'eccezione localhost sembrava evidentemente il trucco del
+     lab, e l'avvertenza stava per finire lì sopra. Il manuale la usa. Puntare il dito nel posto
+     sbagliato non è un errore innocuo: consuma l'attenzione di chi legge dove non serve, e la toglie
+     dai tre punti — password sola, letta da un file, ruolo `root` — dove serviva davvero.
+
+120. **Un ruolo minimo che può promuoversi non è una barriera, ed è una cosa che si misura in tre
+     righe invece di dedurla.** «Amministra gli utenti ma non legge i dati» descrive due privilegi e
+     nasconde che il primo contiene il secondo. La difesa vera non era il ruolo: era chi conosce la
+     password. Scegliere il ruolo minimo per abitudine avrebbe prodotto sicurezza apparente e una
+     demo mutilata.
+
+121. **Un rimedio si documenta con la porta che apre, non solo con quella che chiude.** Creare
+     l'amministratore per shard chiude l'eccezione localhost e nello stesso momento rende
+     autenticabile una porta pubblicata che prima non accettava nulla, perché non c'era nessun utente
+     da presentarle. Scrivere solo il guadagno avrebbe reso il documento più convincente e meno
+     vero, e avrebbe lasciato la sorpresa a chi un giorno esporrà quelle porte.
+
+122. **Uno smoke test che diventa rosso per una decisione, e non per un guasto, è il momento in cui
+     un'invariante va riscritta — mai silenziata.** Il controllo diceva il vero fino al commit prima.
+     La tentazione è cancellarlo, perché «adesso è normale che passi»: e così sparisce la sorveglianza
+     insieme all'invariante vecchia. Al suo posto vanno le invarianti nuove, che qui erano tre e non
+     una, e una di esse — l'eccezione chiusa **su entrambi** gli shard — controlla proprio la cosa che
+     la decisione ha appena messo in gioco.
+
+Stato: decisioni fino a **ADR-0071**, verifiche fino a **V-066**, fonti fino a **S-075**, note di
+metodo fino alla **122**. Task 1–9 su 11 chiusi; il **Task 10** (la riserva del Blocco 3) comincia
+adesso, e il **Task 11** chiude il branch **con la pull request** e con i tre debiti degli strumenti.
