@@ -4230,12 +4230,15 @@ gli stessi esiti, e le 15 porte tutte libere.
      non controlla niente — un `assert` su un dizionario vuoto passa sempre. Rompere ciò che si sta
      proteggendo è l'unico modo economico di sapere che la protezione tocca la cosa giusta.
 
-**Consuntivo del branch, alla vigilia dell'unione.** **Venti** commit e **trentatré** file rispetto a
-`develop`: il piano, undici di task, due punti di ripresa, il commit di avvio, quello della nota di
-metodo lasciata da `feature/02`, e questo — che è compreso nel conto, come prescrive la
-**nota 37**. Il trentatreesimo file è `tools/tests/test_coerenza_repo.py`, nato oggi. Su GitHub non
-gira nessun controllo, per scelta ([ADR-0038](Decision.md#adr-0038)): i quattro sono verdi in
-locale, due volte.
+**Consuntivo del branch, alla vigilia dell'unione.** **Ventidue** commit e **trentatré** file
+rispetto a `develop`: il piano, undici di task, due punti di ripresa, il commit di avvio, quello
+della nota di metodo lasciata da `feature/02`, la correzione del numero della PR e questo — che è
+compreso nel conto, come prescrive la **nota 37**. La riga diceva «venti» quando fu scritta, e la
+sta riscrivendo per la seconda volta lo stesso meccanismo che la nota 37 descrive: un numero che
+parla del branch e vive dentro il branch cambia ogni volta che il branch cambia. Il trentatreesimo
+file è `tools/tests/test_coerenza_repo.py`, nato oggi; il conto dei file non si muove perché gli
+ultimi due commit toccano solo questa pagina. Su GitHub non gira nessun controllo, per scelta
+([ADR-0038](Decision.md#adr-0038)): i quattro sono verdi in locale, due volte.
 
 **Quello che resta aperto** e non appartiene a questo branch: i filmati `.mp4`, che solo il relatore
 può girare, con l'avviso di `preflight` acceso e bloccante dal 2026-09-18; e i cinque debiti di
