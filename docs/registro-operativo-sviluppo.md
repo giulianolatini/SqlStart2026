@@ -3545,3 +3545,35 @@ raggiungibile solo scrivendo il percorso dello script a mano.
      La contromisura è banale e va ricordata proprio perché è banale: la verifica si fa con lo
      strumento **più stupido e meno parametrizzato** che esiste. Qui era `docker ps` senza filtri,
      ed è l'unico che diceva la verità.
+
+## 2026-09-02 — Coda del Task 7: `alpine` resta fuori dalle immagini del lab
+
+Chiudendo il Task 7 avevo segnalato che l'indagine sul guasto dei config server aveva tirato in
+cache `alpine`, e il PO ha chiesto la cosa giusta: a che cosa è servita, per decidere se pinnarla
+o buttarla. Le tre risposte, misurate invece che ricordate.
+
+**A che cosa è servita.** A una sola cosa, sempre nella stessa forma: contare i file dentro un
+volume nominato senza accendere un mongod — `docker run --rm -v <volume>:/v alpine sh -c 'ls -1 /v
+| wc -l'`. È così che sono stati presi i numeri che hanno inchiodato il difetto: `dati-cfg1` a zero
+file contro `dati-shard1a` a ottantatré, e poi `dati-cfg1` a novantanove dopo la riparazione
+([V-060](Sources.md#v-060)).
+
+**Se il repository la usa.** No: `grep -rn alpine` fuori da `docs/` non trova **niente**. Non è nei
+file Compose, non nel `Makefile`, non negli script, non in `tools/images.env`. Nei documenti compare
+solo dentro le verifiche empiriche, cioè come racconto di misure già prese, mai come qualcosa che il
+lab esegue.
+
+**Se serve pinnarla.** No, e non perché sia poco importante contare i file in un volume — quello
+serve eccome — ma perché **l'immagine pinnata lo fa già**: `docker run --rm --entrypoint sh -v
+<volume>:/v "$MONGO_IMAGE" -c 'ls -1 /v | wc -l'` risponde uguale, provato oggi. Pinnare `alpine`
+vorrebbe dire allargare il fardello offline ([ADR-0009](Decision.md#adr-0009)) e aggiungere un
+digest da mantenere per una capacità che il lab ha già. La riserva è scritta in coda a V-060, così
+chi rifà quella misura scollegato trova subito la forma che funziona.
+
+Un dettaglio che vale la pena aver guardato invece di darlo per scontato: `alpine:latest` e
+`alpine:3` su questa macchina sono lo **stesso** identificatore d'immagine, `28bd5fe8b56d`.
+`alpine:3` c'era già il 1º settembre — «dalla cache locale», dice l'ambiente di
+[V-046](Sources.md#v-046) — quindi il `docker run alpine` del Task 7 non ha scaricato un byte: ha
+attaccato una seconda etichetta alla stessa immagine. Tolta l'etichetta di troppo con
+`docker image rm alpine:latest`, che risponde `Untagged` e non `Deleted`, il disco è esattamente
+com'era.

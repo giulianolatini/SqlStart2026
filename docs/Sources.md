@@ -6552,5 +6552,13 @@ cluster pronto: 2 shard registrati
   del container la funzione risponde `/data/configdb`, cioè il disaccordo che deve segnalare. Sei
   test nuovi in `tools/tests/test_check_stack.py`, suite a **131 passed**.
 
+- **Riserve:** i conteggi dei file dentro i volumi sono stati presi con `docker run --rm -v
+  <volume>:/v alpine sh -c 'ls -1 /v | wc -l'`, e `alpine` **non è fra le immagini pinnate del
+  lab**: chi rifacesse questa misura su una macchina scollegata non troverebbe l'immagine
+  ([ADR-0009](Decision.md#adr-0009)). Non serve pinnarla — la stessa misura viene con la sola
+  immagine già pinnata, scavalcando l'entrypoint, verificato lo stesso giorno:
+  `docker run --rm --entrypoint sh -v <volume>:/v "$MONGO_IMAGE" -c 'ls -1 /v | wc -l'`. Il numero
+  non dipende da quale immagine lo conta: dipende dal volume, che è montato allo stesso modo nei
+  due casi. Le sei misure qui sopra restano quelle prese davvero, con `alpine`.
 - **Data:** 2026-09-02
 - **Usata da:** ADR-0067
