@@ -97,6 +97,7 @@ sono state eseguite qui, perché qui non c'è né un Ubuntu né un Windows
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
 | [`06-sviluppo/gestione-risorse-compose.md`](06-sviluppo/gestione-risorse-compose.md) | `mem_limit` e `cpus`, la cache WiredTiger nei container, come si dimostra che i limiti sono applicati; i due profili dello sharded cluster — a chi serve ciascuno, quanto costa, come si sceglie | già nel repository |
+| [`06-sviluppo/worktree-e-branch-di-lavoro.md`](06-sviluppo/worktree-e-branch-di-lavoro.md) | come si apre un branch di feature con il suo worktree e come lo si chiude dopo la PR; l'ordine vincolante della rimozione, e come si esce se una sessione è rimasta agganciata a un worktree cancellato | già nel repository |
 | `06-sviluppo/architettura-app.md` | stratificazione dell'applicazione, porte, modello a eventi, composition root | `feature/04-app-python` |
 | `06-sviluppo/tdd-e-doppi.md` | separazione fra suite unitaria e di integrazione, fake contro mock, come si prova il failover senza aspettarlo | `feature/04-app-python` |
 

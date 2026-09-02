@@ -8158,3 +8158,69 @@ sh-seed exited with code 9
 - **Usata da:** ADR-0077
 
 ---
+
+<a id="v-073"></a>
+### V-073 — Rimosso il worktree, la sessione che ci stava dentro resta agganciata al percorso e non può più fare niente
+
+- **Comandi:** `git worktree remove`, `git worktree list`, `git branch`, e gli strumenti di sessione
+  `EnterWorktree` / `ExitWorktree`
+- **Ambiente:** macOS 26.6.2 arm64, git 2.50.1 (Apple Git-155), sessione Claude Code avviata
+  isolata dentro `.claude/worktrees/feature-03-stack-sharded`
+- **Che cosa si voleva sapere:** non era una prova progettata, è un guasto capitato e poi
+  ricostruito. Chiusa e unita la PR #4, la pulizia prevista da [ADR-0056](Decision.md#adr-0056) è
+  stata eseguita dal checkout principale **mentre la sessione che aveva sviluppato il branch era
+  ancora viva dentro il worktree**. La domanda che ne è nata: che cosa succede a una sessione
+  isolata quando la directory a cui è agganciata sparisce, e come se ne esce.
+
+- **Esito, primo punto — la guardia sopravvive alla directory, e blocca tutto.** L'isolamento è
+  **stato della sessione**: un percorso assoluto registrato all'avvio, che nessun comando git
+  aggiorna. Rimosso il worktree, ogni comando di shell è stato rifiutato, compresi quelli che non
+  nominavano git e quelli che puntavano altrove:
+
+```
+This session is isolated in the worktree /…/.claude/worktrees/feature-03-stack-sharded,
+but this command's working directory resolved to the shared checkout
+(/…/.claude/worktrees/feature-04-app-python). Refusing to run it there
+```
+
+  Rifiutata anche ogni scrittura, con un invito impossibile da soddisfare:
+
+```
+This session is isolated in the worktree /…/feature-03-stack-sharded.
+Edit the worktree copy of this file instead of the shared-checkout path.
+```
+
+  Lo strumento di lettura ha continuato a funzionare. La sessione poteva guardare e non toccare.
+
+- **Esito, secondo punto — il rientro diretto nel worktree nuovo non funziona.** `EnterWorktree`
+  con il percorso del worktree appena creato è stato rifiutato due volte, per due ragioni diverse.
+  Finché la directory di lavoro era ripiegata sulla home dell'utente: `Cannot enter an existing
+  worktree: the current directory is not in a git repository`. Dopo che un `cd` riuscito l'aveva
+  portata dentro il worktree nuovo: `Cannot enter worktree: /…/feature-04-app-python is the current
+  working directory`. Non si può riagganciare rientrando: bisogna prima uscire.
+
+- **Esito, terzo punto — `ExitWorktree` in modalità `keep` sgancia, anche se non dovrebbe.** La sua
+  documentazione dichiara che fuori da una sessione aperta con `EnterWorktree` l'operazione è nulla.
+  L'isolamento ricevuto **all'avvio** conta come sessione aperta: il comando ha sganciato il pin e
+  riportato la sessione nel checkout principale, dopodiché git, la shell e la scrittura sono tornati
+  a funzionare, e `EnterWorktree` con `path:` ha agganciato il worktree nuovo al primo tentativo.
+
+```
+Exited worktree. Your work is preserved at /…/feature-03-stack-sharded
+on branch worktree-feature-03-stack-sharded.
+Session is now back in /…/SqlStart2026.
+```
+
+- **Riserva sul messaggio.** Le due cose che quella riga promette **non esistono**: la directory era
+  già stata cancellata, e il branch `worktree-feature-03-stack-sharded` non compare in `git branch`
+  né prima né dopo. Il messaggio è composto senza verificare, ed è innocuo purché non lo si segua:
+  non c'è nessun ramo di salvataggio da andare a cercare, e nessuno da cancellare.
+
+- **Che cosa non è stato provato:** se `ExitWorktree` sganci allo stesso modo una sessione il cui
+  worktree esiste ancora — qui la directory era già sparita. E se il blocco si presenti identico su
+  un sistema operativo diverso: la misura è di una macchina sola.
+
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0079
+
+---

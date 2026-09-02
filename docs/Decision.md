@@ -4976,3 +4976,145 @@ rilievi alla revisione umana e fondere così com'è** — sono tre falsi verdi p
 in testata alla PR è proprio che il verde significhi qualcosa.
 
 **Fonti:** [V-071](Sources.md#v-071), [V-072](Sources.md#v-072)
+
+
+---
+
+<a id="adr-0078"></a>
+## ADR-0078 — `feature/04` comincia il 2 settembre, perché la condizione che ADR-0057 pretendeva è arrivata prima della data
+
+**Data:** 2026-09-02 · **Stato:** Accettata — modifica la clausola di data di [ADR-0057](#adr-0057)
+
+**Contesto:** [ADR-0057](#adr-0057) porta due frasi che vanno lette insieme, e la seconda è nelle
+alternative scartate. La decisione dice «**`feature/04-app-python` conserva la sua data di inizio,
+il 4 settembre**». Lo scarto dice perché: «anticipare `feature/04` al 2 settembre, che avrebbe usato
+l'anticipo sul pezzo grande — scartata perché l'applicazione ha bisogno di **giorni consecutivi e
+pieni**, e due giorni intestati a un branch di due settimane non lo accorciano, lo frammentano».
+
+Il 2 settembre `feature/03-stack-sharded` è stata chiusa e unita in `develop` (merge `ca6f3d0`):
+undici task su undici e due review esterne arbitrate, nel 1º e nel 2, non nel 2 e nel 3. La clausola
+di sospensione di ADR-0057 non è stata azionata perché non è servita.
+
+Questo cambia il fatto su cui poggiava lo scarto, e conviene essere precisi su come. Lo scenario
+respinto era **due giorni intestati a `feature/04` mentre lo sharded era ancora aperto**: due giorni
+che sarebbero stati interrotti e ripresi, cioè frammentazione travestita da anticipo. Lo scenario
+che si presenta adesso è diverso in natura, non in grado — il 2, il 3 e tutti i successivi sono
+liberi e contigui, quindi `feature/04` non riceve due giorni staccati ma una finestra continua che
+passa da otto giorni a **dieci**. È esattamente la condizione — «giorni consecutivi e pieni» — la
+cui assenza motivava lo scarto.
+
+**Decisione:** `feature/04-app-python` si apre il **2 settembre 2026** e la sua finestra va dal 2
+all'11 settembre. Il branch è stato creato lo stesso giorno dal Product Owner, con
+`git worktree add -b feature/04-app-python .claude/worktrees/feature-04-app-python develop` e la
+spinta su `origin`: questo ADR è la sede della decisione, non il suo annuncio.
+
+Restano in piedi invariate le altre disposizioni di ADR-0057: il 14 e il 15 settembre sono margine
+prima della `release/1.0` del 16, e la regola che un branch che sfora si sospende scrivendo il punto
+di ripresa, invece di mangiare la finestra successiva, vale qui come valeva lì.
+
+Il primo appuntamento di [ADR-0058](#adr-0058) — il controllo della 8.0.30 — è fissato «il 3
+settembre, alla chiusura di `feature/03`». Le sue due coordinate si sono separate: l'evento è
+successo il 2, la data dice il 3. **Vale l'evento**, e il controllo si esegue come primo passo di
+questo branch. La ragione dell'appuntamento è che montare l'applicazione su una versione e
+ripinnarla il giorno dopo costringe a rigirare le registrazioni, e quella ragione appartiene
+all'inizio del branch, non a una casella di calendario. La seconda data, il 16 settembre, non è
+toccata.
+
+**Conseguenze:** la finestra di `feature/04` è di dieci giorni invece di otto, e la scadenza
+dell'11 settembre **resta quella che era** — l'anticipo si spende in margine, non in ambizione. Il
+calendario del design non viene riscritto: chi legge la §10 trova la finestra originale con la sua
+motivazione, chi legge qui trova che cosa è successo dopo.
+
+Va scritto anche ciò che questo ADR non compra. Dieci giorni invece di otto non rendono
+`feature/04` più piccola, e il rischio che ADR-0057 nominava — un branch aperto «perché c'è tempo»
+— non sparisce, cambia forma: qui prende quella di un piano che si allarga per riempire lo spazio
+disponibile. La difesa resta la stessa di allora, cioè una data e un piano scritto prima di toccare
+un file.
+
+**Alternative scartate:** **aspettare il 4 e tenere fermi il 2 e il 3**, che rispetta la lettera di
+ADR-0057 — scartata perché ne tradisce la ragione: quella clausola difendeva la **continuità** della
+finestra dell'applicazione, e tenerla ferma due giorni la accorcia senza proteggere nulla.
+**Aprire il branch e non scrivere niente**, lasciando che la data del primo commit raccontasse da
+sé la deviazione — è la forma che ADR-0057 stesso boccia in coda alle proprie alternative, perché
+lascia in piedi due verità in conflitto. **Spostare in avanti anche la scadenza dell'11**,
+trasformando i due giorni in lavoro in più invece che in margine — scartata perché il 16 è la
+`release/1.0` e il 18 è il talk: ciò che sta fra l'11 e il 16 è la riserva che assorbe gli
+imprevisti di un branch che comincia da zero righe di codice, ed è la cosa che meno conviene
+spendere in anticipo.
+
+**Fonti:** nessuna (decisione organizzativa)
+
+
+---
+
+<a id="adr-0079"></a>
+## ADR-0079 — Prima di rimuovere un worktree si sgancia chi ci sta dentro: una sessione viva è stato che git non vede
+
+**Data:** 2026-09-02 · **Stato:** Accettata — estende [ADR-0056](#adr-0056)
+
+**Contesto:** [ADR-0056](#adr-0056) ha scoperto che `git worktree remove` cancella in silenzio i
+file ignorati, e ne ha ricavato una precondizione: prima di rimuovere, si guarda dentro. Il 2
+settembre la stessa manovra ha rivelato una **seconda** categoria di cosa che vive dentro un
+worktree e che git non conta — la sessione di lavoro che ci sta in piedi.
+
+La sessione che aveva sviluppato `feature/03` era stata avviata dentro
+`.claude/worktrees/feature-03-stack-sharded` ed era isolata lì da una guardia: ogni comando viene
+confrontato con quel percorso e rifiutato se risolve altrove. È il meccanismo che impedisce a
+sessioni parallele di pestarsi i piedi, ed è giusto che esista.
+
+Quel percorso però è **stato della sessione**, registrato all'avvio. Non è un file, non è un ref,
+non è un'informazione che git possieda: `git worktree remove` non può aggiornarlo e non ci prova.
+Eseguito il comando dal checkout principale, con la sessione ancora viva, la directory è sparita e
+la guardia ha continuato a pretenderla. Il risultato, misurato in [V-073](Sources.md#v-073): ogni
+comando di shell rifiutato — anche quelli che non nominavano git e quelli che puntavano altrove,
+perché nessuna directory di lavoro può risolvere dentro una directory che non esiste — e ogni
+scrittura rifiutata con l'invito a modificare «la copia nel worktree» di un worktree che non c'è
+più. La sessione poteva leggere e non toccare, per il resto del suo lavoro utile.
+
+**Il comando che ha fatto il danno è il comando giusto.** `git worktree remove` è la forma
+documentata per la pulizia, si rifiuta di girare se ci sono modifiche in sospeso, ed è uscito `0`.
+Non era sbagliato: era **fuori ordine**. È la stessa forma di ADR-0056 — la rete di sicurezza
+esiste e non copre questa categoria, perché una sessione viva non lascia tracce nel working tree e
+da fuori il worktree è una directory pulita.
+
+**Decisione:** alla chiusura di un branch, **la sessione si sgancia prima che la directory
+sparisca**. L'ordine è vincolante quanto quello di ADR-0056:
+
+1. la PR è unita in `develop` sul remoto;
+2. **si sgancia la sessione** — `ExitWorktree` in modalità `keep`, oppure la si chiude, se era stata
+   avviata da un terminale dentro il worktree;
+3. si riallinea il checkout principale — `git fetch --prune`, poi `git merge --ff-only origin/develop`;
+4. si guarda dentro il worktree e si salva ciò che è ignorato e non si rigenera ([ADR-0056](#adr-0056));
+5. `git worktree remove`, `git branch -d`, `git worktree prune`;
+6. si verifica con `git worktree list` e `git branch`.
+
+I passi dal 3 in poi si eseguono **dal checkout principale**. La procedura per esteso — apertura,
+chiusura, e la manovra di recupero se il blocco si presenta comunque — sta in
+[`06-sviluppo/worktree-e-branch-di-lavoro.md`](06-sviluppo/worktree-e-branch-di-lavoro.md).
+
+**Conseguenze:** un passo in più prima della rimozione, e uno stesso comando che adesso ha due
+precondizioni scritte invece di una. Le due sono la stessa lezione applicata a categorie diverse —
+ADR-0056 ai file che git ha ricevuto istruzione di non guardare, questo ai processi che git non ha
+modo di vedere. La forma è quella di `umount` prima di staccare il disco, e la ragione è identica:
+chi tiene aperto il riferimento non è chi cancella, e il secondo non ha modo di accorgersi del
+primo.
+
+Resta scritta anche la via d'uscita, perché una procedura che protegge da un errore serve poco a chi
+l'errore l'ha già fatto: `ExitWorktree` con `action: "keep"` sgancia il pin **anche quando il
+worktree agganciato non esiste più**, nonostante la sua documentazione dichiari di essere
+un'operazione nulla fuori da una sessione aperta con `EnterWorktree`. Il rientro diretto invece non
+funziona: `EnterWorktree` rifiuta se la directory corrente non è in un repository, e rifiuta anche
+se il bersaglio è già la directory corrente. Si esce e poi si entra, in quest'ordine.
+
+**Alternative scartate:** **rinunciare ai worktree e lavorare sempre nel checkout principale** —
+toglie il problema e con lui la ragione per cui i worktree ci sono, cioè tenere `develop` fermo e
+leggibile mentre un branch corre, e permettere a più sessioni di lavorare senza contendersi
+l'albero. **Rimandare la rimozione a dopo la fine della sessione**, lasciando i worktree chiusi sul
+disco fino all'apertura successiva — evita il blocco e accumula directory di cui nessuno ricorda
+più a quale branch appartengano; la memoria di «questo si può togliere» dura meno del disordine.
+**Affidarsi al rifiuto di `git worktree remove`** — non copre questo caso e non può: git guarda il
+working tree, e una sessione viva non ci lascia niente da guardare. **Scrivere solo la manovra di
+recupero e non la precondizione** — è la scelta che rende accettabile sbagliare, e questo
+repository ha già l'abitudine contraria.
+
+**Fonti:** [V-073](Sources.md#v-073)
