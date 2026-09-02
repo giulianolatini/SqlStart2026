@@ -4248,3 +4248,26 @@ Stato: decisioni fino a **ADR-0075**, verifiche fino a **V-069**, fonti fino a *
 metodo fino alla **131**. Il piano di `feature/03` è completo: undici task su undici. La feature si
 chiude unendo la **PR #5** su GitHub, e non con `git flow feature finish`: quella scorciatoia
 salta la revisione, ed è già successo una volta.
+
+**Correzione, mezz'ora dopo: la PR è la #4, non la #5.** Le righe qui sopra, il Passo 6 del piano e
+la tabella §10 del design dicono tutti «PR #5», e si sbagliano per la stessa ragione. Il calendario
+del design faceva chiudere `feature/04` per prima, con la #4, e a `feature/03` toccava la #5.
+[ADR-0057](Decision.md#adr-0057) ha invertito i due branch il 1° settembre e ha riscritto le date,
+ma nessuno ha ripensato ai numeri: GitHub li assegna in ordine di apertura, e con tre PR aperte —
+#1, #2, #3 — e nessuna issue, questa è la **#4**. È
+[https://github.com/giulianolatini/SqlStart2026/pull/4](https://github.com/giulianolatini/SqlStart2026/pull/4).
+
+Le righe di prima restano come sono: il registro è cronologico e non si riscrive, e un numero
+sbagliato con accanto la ragione per cui lo era vale più di un numero giusto comparso dal niente.
+Il piano non si tocca per la regola di sempre. La tabella del design non si tocca perché ADR-0057 la
+supera già per intero: chi la legge deve arrivare all'ADR comunque, e adesso ci arriva sapendo che
+anche i numeri delle PR erano dentro il pacchetto invertito.
+
+132. **Quando si inverte l'ordine di due cose, si inverte anche tutto quello che era numerato in
+     quell'ordine.** ADR-0057 ha spostato date, motivazioni e dipendenze fra i due branch, e ha
+     lasciato indietro l'unica cosa che nessuno assegna a mano: il numero che GitHub darà alla PR.
+     Il costo qui è stato nullo — se ne è accorto `gh pr list` due minuti prima di aprirla — ma la
+     forma dell'errore è la solita: un identificatore che sembra un'etichetta e invece è una
+     posizione.
+
+Stato aggiornato: note di metodo fino alla **132**.
