@@ -4441,3 +4441,106 @@ codice, e la misura che li ha confermati l'abbiamo fatta qui.
 Stato aggiornato: decisioni fino a **ADR-0077**, verifiche fino a **V-072**, note di metodo fino
 alla **136**. La suite resta a **143** prove. La PR #4 resta aperta: le due review sono state
 arbitrate eseguendo, e l'unione spetta al PO.
+
+---
+
+## 2026-09-02 — `feature/04`, avvio: una data anticipata, un worktree che ha murato la sessione, e un rischio già chiuso
+
+Il branch dell'applicazione è aperto, e come la `03` ha tre cose da mettere per iscritto prima di
+toccare un file: perché comincia oggi invece del 4, che cosa è successo chiudendo il worktree
+precedente, e quale pezzo del design non vale più.
+
+**Perché oggi.** [ADR-0057](Decision.md#adr-0057) aveva chiuso l'anticipo della `03` con una
+clausola secca: «`feature/04` non si muove dal 4 settembre». `feature/03` è finita il 2, con undici
+task su undici e la PR #4 aperta. La tentazione era leggere la clausola come un divieto e aspettare
+un giorno; la lettura giusta stava nelle **alternative scartate** dello stesso ADR, che bocciavano
+«spostare `feature/04` di due giorni» perché avrebbe prodotto un branch **frammentato**, cioè
+lavorato a pezzi separati. Chiudendo il 2, i giorni dal 2 all'11 sono contigui: la condizione la cui
+assenza motivava il rifiuto c'è. [ADR-0078](Decision.md#adr-0078) modifica la clausola di data e
+lascia intatto il resto — la scadenza dell'11 non si muove, e i due giorni guadagnati restano
+margine.
+
+**Un worktree rimosso ha murato la sessione.** Chiudendo la `03` il worktree è stato eliminato
+mentre una sessione ci stava dentro, e da quel momento la sessione non ha più potuto fare niente:
+ogni comando di shell e ogni scrittura rifiutati, perché nessuna directory di lavoro può risolvere
+dentro un percorso che non esiste. Restava la sola lettura. L'isolamento non è uno stato del
+filesystem né del repository: è un **percorso assoluto registrato all'avvio**, e `git worktree
+remove` non ha modo di aggiornarlo. Il comando che ha fatto il danno era quello giusto, dato fuori
+ordine.
+
+La via d'uscita esiste ed è stata misurata ([V-073](Sources.md#v-073)): `ExitWorktree` in modalità
+`keep` sgancia l'aggancio **anche quando il worktree è già stato cancellato** e **anche quando
+l'isolamento veniva dall'avvio** invece che da un `EnterWorktree` — la sua documentazione dice il
+contrario, e la documentazione ha torto. Poi `EnterWorktree` con il percorso nuovo. Il rientro
+diretto non funziona, e il branch che il messaggio di successo annuncia non viene mai creato: un
+messaggio corretto nella forma e falso nel contenuto, che è la categoria di errore più cara.
+[ADR-0079](Decision.md#adr-0079) fissa l'ordine vincolante della chiusura — **si sgancia chi sta
+dentro, poi si rimuove** — e la procedura completa, apertura e chiusura, sta in
+[`06-sviluppo/worktree-e-branch-di-lavoro.md`](06-sviluppo/worktree-e-branch-di-lavoro.md), che
+prima non esisteva: la manovra si tramandava a voce, ed è esattamente il modo in cui la si sbaglia
+due volte.
+
+È la seconda volta che il repository scopre la stessa cosa sullo stesso comando.
+[ADR-0056](Decision.md#adr-0056) era nato perché `git worktree remove` porta via i file **ignorati**
+insieme alla directory; ADR-0079 nasce perché porta via anche il terreno sotto i **processi**. In
+entrambi i casi il comando esce `0` e in entrambi i casi la perdita è di qualcosa che git non
+considera suo.
+
+**Il rischio numero uno del design è chiuso da otto giorni, e il design non lo sa.** Il §7 di
+[`2026-08-24-design.md`](00-progetto/2026-08-24-design.md) elenca come rischio 1 il supporto di
+`testcontainers-python` ai replica set e scrive: «la verifica è il primo passo di `feature/04`;
+l'esito è un ADR in ogni caso». Quell'ADR esiste dal 25 agosto: è
+[ADR-0020](Decision.md#adr-0020), che supera [ADR-0011](Decision.md#adr-0011) e sceglie gli stack
+del repository invece di un facsimile. Il primo passo di questo branch **non** è quella verifica, e
+per la stessa ragione è superata la riga del §7 che vuole le fixture con «un Compose minimale
+proprio, non quello di `docker/`»: ADR-0020 dice il contrario ed è del giorno dopo. Il piano lo
+dichiara in testa, perché è l'unico posto dove chi esegue guarderà.
+
+**Il primo passo vero è un appuntamento.** [ADR-0058](Decision.md#adr-0058) aveva trasformato la
+clausola «appena escono i binari» in due date: il 3 settembre, «alla chiusura di `feature/03`», e il
+16. Le due coordinate si sono separate — l'evento è arrivato il 2 — e ADR-0078 stabilisce che vale
+**l'evento**, perché è l'evento a portare la ragione pratica: montare l'applicazione su una versione
+e ripinnarla il giorno dopo significa rigirare le registrazioni. Il controllo della 8.0.30 è quindi
+il Task 1 di questo branch, e lascia una voce in `Sources.md` in ogni caso.
+
+**Il piano è scritto:** [`2026-09-02-piano-feature-04-app-python.md`](00-progetto/2026-09-02-piano-feature-04-app-python.md),
+diciotto task. È l'opposto della `03`: lì lo spike del 25 agosto faceva da mappa e il branch partiva
+con la topologia già montata, qui si comincia da **zero righe di codice** e la mappa è il §6 del
+design. Il piano porta anche i debiti che quattro pagine hanno intestato per iscritto a questa
+feature — le misure che «hanno senso solo sotto carico controllato» — e le tre pagine che
+`docs/README.md` promette qui. Scrivendo l'indice è saltata fuori una quinta assenza: il piano della
+`03` era stato scritto il 1º settembre e **mai iscritto** in `docs/README.md`. Il controllo dei
+collegamenti verifica quelli che ci sono; una pagina che nessuno cita non ha un'ancora da
+controllare.
+
+**Note di metodo.**
+
+137. **Le alternative scartate di un ADR contengono il ragionamento che la decisione comprime.** La
+     clausola di ADR-0057 diceva «non prima del 4 settembre» e sembrava chiusa. Il perché stava
+     dodici righe più sotto, fra le alternative: si era rifiutato di anticipare per non
+     **frammentare** il branch, non per la data in sé. Con la `03` chiusa il 2, la frammentazione
+     non c'era, e la decisione originale — letta per intero — **permetteva** ciò che la sua clausola
+     sembrava vietare. La regola operativa: prima di concludere che una decisione passata vieta
+     qualcosa, leggerne le alternative scartate. Una clausola è un riassunto, e i riassunti perdono
+     proprio le condizioni.
+138. **Un documento superato è più pericoloso dove assegna lavoro che dove afferma un fatto.** Il §7
+     del design assegna a `feature/04` la verifica di `testcontainers`. Un'affermazione sbagliata
+     dà fastidio quando qualcuno la controlla; un **compito** sbagliato invece si autoconserva,
+     perché resta nella lista, sembra da fare, e chi lo esegue non ha motivo di sospettare — ha
+     appena letto il documento che glielo assegna. ADR-0020 esisteva da otto giorni ed era corretto:
+     nessuno dei due documenti era sbagliato da solo. Quando si supera una decisione, vale la pena
+     chiedersi non solo quali affermazioni cadono, ma **quali compiti restano intestati a qualcuno**
+     che non saprà di poterli saltare.
+139. **Uno strumento che non vede lo stato di un altro non può proteggerlo, e la difesa è l'ordine.**
+     `git worktree remove` non conosce le sessioni vive più di quanto conosca i file ignorati: esce
+     `0` e ha ragione, perché tutto ciò che git considera suo è stato gestito. Il danno non viene da
+     un difetto del comando, viene dal fatto che il suo dominio è più stretto di quello del
+     problema. Quando due strumenti si dividono un pezzo di filesystem, l'unica protezione possibile
+     non è un controllo — nessuno dei due può implementarlo — ma una **sequenza**: si sgancia prima
+     di rimuovere, come si smonta un disco prima di staccarlo. Ed è per questo che una sequenza del
+     genere va scritta in una pagina invece che ricordata: un controllo che non esiste non può
+     ricordarsela al posto tuo.
+
+Stato aggiornato: decisioni fino ad **ADR-0079**, verifiche fino a **V-073**, note di metodo fino
+alla **139**. La suite resta a **143** prove. La PR #4 è stata unita in `develop` dal PO — il merge è
+`ca6f3d0` — e questo branch ci parte sopra.
