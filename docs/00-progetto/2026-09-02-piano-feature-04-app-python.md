@@ -158,26 +158,26 @@ che **non fa niente** e lo fa in modo verificabile: è ciò che rende falsificab
 **File:** creare `app/src/mongolab/domain/eventi.py`, `domain/porte.py`, `domain/modelli.py`,
 `app/tests/unit/test_dominio.py`.
 
-- [ ] **Passo 1.** Gli otto eventi del §6.3 come `@dataclass(frozen=True, slots=True)`:
+- [x] **Passo 1.** Gli otto eventi del §6.3 come `@dataclass(frozen=True, slots=True)`:
       `WriteSucceeded`, `WriteFailed`, `RetryAttempted`, `LatencySampled`, `TopologyChanged`,
       `ServerStateChanged`, `BackupProgressed`, `ChunkMigrated`. Immutabili non per eleganza:
       l'evento nasce dentro un callback di pymongo e viene letto dal thread principale, e un oggetto
       congelato è ciò che rende la coda un punto di **consegna** e non una condivisione di stato.
-- [ ] **Passo 2.** Ogni evento porta il proprio istante come campo esplicito, preso dal `Clock` e
+- [x] **Passo 2.** Ogni evento porta il proprio istante come campo esplicito, preso dal `Clock` e
       **non** da `time.time()` chiamato dentro. È la condizione che rende riproducibile la cronaca
       del failover in una prova: senza, i timestamp li decide l'orologio della macchina e
       l'asserzione diventa una tolleranza.
-- [ ] **Passo 3.** Le cinque porte del §6.2 come `typing.Protocol`, con le firme esatte della
+- [x] **Passo 3.** Le cinque porte del §6.2 come `typing.Protocol`, con le firme esatte della
       tabella: `DocumentStore` (`insert_many`, `find_page`, `count`, `aggregate`),
       `ClusterInspector` (`topology`, `server_status`, `db_stats`, `shard_distribution`),
       `BackupTool` (`dump` che ritorna `Iterator[Progress]`, `restore`), `EventSink` (`emit`),
       `Clock` (`now`, `sleep`).
-- [ ] **Passo 4.** I modelli che le porte si scambiano — `Progress`, la descrizione di topologia, lo
+- [x] **Passo 4.** I modelli che le porte si scambiano — `Progress`, la descrizione di topologia, lo
       stato di un server — anch'essi congelati e senza dipendenze.
-- [ ] **Passo 5.** Prove: che gli eventi siano davvero immutabili (un'assegnazione solleva), e che
+- [x] **Passo 5.** Prove: che gli eventi siano davvero immutabili (un'assegnazione solleva), e che
       un oggetto qualunque con i metodi giusti soddisfi la porta senza ereditarietà — è la proprietà
       per cui i `Protocol` sono stati scelti, e va vista funzionare almeno una volta.
-- [ ] **Passo 6.** `make app-test`, `make app-check`. Commit:
+- [x] **Passo 6.** `make app-test`, `make app-check`. Commit:
       `feat: il dominio — otto eventi congelati e cinque porte strutturali`.
 
 ---

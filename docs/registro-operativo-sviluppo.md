@@ -4647,3 +4647,68 @@ Stato aggiornato: decisioni fino ad **ADR-0080**, verifiche fino a **V-074**, no
 alla **143**. Le suite: **143** prove per gli strumenti, **5** per l'applicazione. Prossimo passo:
 **Task 3** del [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), gli otto eventi
 congelati e le cinque porte.
+
+## 2026-09-02 — `feature/04`, Task 3: otto eventi congelati, cinque porte, e una guardia che si è rivelata superflua
+
+Il dominio c'è: `modelli.py` con i dati che le porte si scambiano, `eventi.py` con gli otto eventi
+del §6.3, `porte.py` con le cinque `Protocol` del §6.2. Nessun import di terze parti — la guardia
+del Task 2 lo verifica adesso su codice vero e non più su un albero vuoto. **19 prove** per
+l'applicazione, `mypy --strict` verde su 16 file, `make tools-test` sempre a 143, `docs-check`
+pulito.
+
+**Tre scelte prese scrivendo, e scritte dove servono.** La prima: gli eventi hanno una base
+`Evento` che porta un solo campo, `istante`. Serve a dare a `EventSink.emit` un tipo solo da
+accettare, e costa l'ordine dei parametri — `istante` viene sempre per primo. La seconda:
+quell'istante è un **campo**, non una chiamata all'orologio dentro l'evento. È la condizione che
+rende esatta un'asserzione con `FakeClock` invece che una tolleranza, ed è anche la differenza fra
+il momento in cui il fatto è accaduto e quello in cui qualcuno si è ricordato di registrarlo — che
+sotto carico è proprio la latenza che si sta misurando. La terza: `BackupTool.restore` restituisce
+un `Iterator[Progress]` come `dump`, mentre il design nomina solo il tipo di ritorno di `dump`. Il
+copione mostra anche il restore mentre avviene, e due firme diverse per due operazioni simmetriche
+costringerebbero `presentation` a due strade dove ne basta una. La ragione sta nella docstring, non
+qui: chi legge il codice deve trovarla lì.
+
+**La guardia rotta apposta ha risposto una cosa che non mi aspettavo.** Applicando la nota 142 al
+controllo riflessivo sugli eventi — quello che li scopre invece di elencarli — ho introdotto un
+nono evento mutabile per vederlo fallire. Non è fallito: Python si è rifiutato di creare la classe,
+`TypeError: cannot inherit non-frozen dataclass from a frozen one`. L'asserzione su `frozen` non
+poteva fallire, perché il linguaggio la garantisce già a partire dalla base congelata; e per la
+stessa ragione non poteva fallire quella sull'ordine dei campi, dato che i campi della base
+precedono sempre quelli di chi eredita. Restava viva solo `slots`, che si dimentica in silenzio: un
+nono evento `frozen=True` senza `slots=True` nasce senza protestare, e le sue istanze tornano ad
+avere un `__dict__`. Quella variante ha fatto fallire due prove nominando la classe colpevole. Il
+controllo è stato riscritto in due: uno sulla base — l'unico punto dove `frozen` e l'ordine si
+possono ancora perdere, e infatti togliendo `slots=True` a `Evento` fallisce — e uno sulle
+sottoclassi che asserisce solo ciò che può ancora andare storto.
+
+**Il limite dei `Protocol` a runtime è scritto come prova, non come commento.** Le cinque porte sono
+`@runtime_checkable` perché una prova mostri che a un oggetto incompleto la porta si chiude. Ma
+`isinstance` contro un `Protocol` guarda i **nomi** dei metodi, non le firme: un orologio con
+`sleep(self)` senza argomenti passa il controllo a runtime e viene bocciato da `mypy`. La prova che
+lo dice **asserisce che quell'oggetto passa** — è verde, e sarebbe la prima a fallire se un giorno
+Python stringesse la regola. Il guardiano vero resta `make app-check`; questa riga dice perché.
+
+**Note di metodo.**
+
+144. **Rompere una guardia apposta può rivelare che è superflua, non che è debole.** La nota 142
+     prescrive di introdurre la violazione e vedere il messaggio. Ci sono tre esiti, non due: il
+     controllo scatta e va bene; il controllo tace e va corretto; oppure **la violazione non è
+     costruibile**, perché il linguaggio o il compilatore la vietano prima. Il terzo esito è il più
+     facile da leggere male, perché somiglia al primo: entrambi finiscono con la suite verde. La
+     differenza è che nel terzo caso l'asserzione è decorazione — controlla il compilatore, e chi
+     la legge crede che stia sorvegliando qualcosa che invece nessuno può violare. Va tolta, e va
+     tolta **nominando l'esperimento** che l'ha dimostrata superflua: senza, il prossimo lettore la
+     riaggiunge in buona fede. Quel che resta è la sola proprietà che può ancora perdersi, e su
+     quella la guardia va vista fallire davvero.
+145. **Un limite noto si scrive come prova che passa, non come commento.** Che `isinstance` contro
+     un `Protocol` guardi i nomi e non le firme è una frase che in un commento invecchia senza
+     dirlo. Scritta come prova — un oggetto con la firma sbagliata che **supera** il controllo, e
+     l'asserzione che dice proprio questo — diventa due cose insieme: documentazione che il lettore
+     incontra dove serve, e sentinella che fallirebbe il giorno in cui il comportamento cambiasse.
+     Costa una prova verde in più, e la si paga volentieri: è l'unico modo di far sì che un buco
+     conosciuto resti conosciuto anche quando chi lo conosceva non c'è più.
+
+Stato aggiornato: decisioni fino ad **ADR-0080**, verifiche fino a **V-074**, note di metodo fino
+alla **145**. Le suite: **143** prove per gli strumenti, **19** per l'applicazione. Prossimo passo:
+**Task 4** del [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), i doppi in memoria —
+non mock, ma implementazioni vere delle porte.
