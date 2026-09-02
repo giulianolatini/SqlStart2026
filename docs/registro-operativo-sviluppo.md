@@ -3670,3 +3670,36 @@ tutte nel repository.
      conforme. Quella riga non sta in nessuna delle tre citazioni: si vede solo eseguendo. Vale come
      regola di dosaggio dello sforzo, perché provare costa ore: si prova ciò che il talk deve
      **mostrare**, e si cita ciò che il talk deve solo dire.
+
+---
+
+## 2026-09-02 — Punto di ripresa: chiuso il Task 8, si riparte dal Task 9
+
+Sessione sospesa per limite di contesto, non per un ostacolo tecnico. Il branch
+`feature/03-stack-sharded` è allineato con l'origine.
+
+**Deciso.** La forma della pagina dello sharded cluster ([ADR-0068](Decision.md#adr-0068)): si apre
+sull'irreversibilità, si dichiara che il manuale non dice quando *non* servirebbe, la chiave
+sbagliata si mostra con i numeri invece di descriverla, e il file Compose non si ripete riga per
+riga. Deciso anche che `alpine` resta fuori dalle immagini pinnate: la misura dei volumi si rifà con
+l'immagine già pinnata scavalcando l'entrypoint, e la riserva è scritta in coda a
+[V-060](Sources.md#v-060).
+
+**Misurato.** [V-061](Sources.md#v-061): il balancer in questa demo non entra mai in scena — 34 409
+byte di differenza contro una soglia di 384 MB, zero migrazioni su sei eventi; la chiave `{_id: 1}`
+mette 20 000 documenti su un solo shard e il cluster risponde `balancerCompliant: true`; con chiave
+hashed un `insertMany` ordinato costa fra venti e trenta volte uno non ordinato, mentre con chiave
+monotona le due forme costano uguale. `make docs-check` verde, `make smoke-03` 62 controlli e 0
+errori, `lab.ordini` a 20 000 documenti. Lo stack è stato spento con `make down-03`, che conserva i
+volumi.
+
+**Prossimo passo.** **Task 9** del [piano](00-progetto/2026-09-01-piano-feature-03-stack-sharded.md):
+i debiti segnati si chiudono eseguendo, come vuole [ADR-0049](Decision.md#adr-0049). I due candidati
+già annotati sono che niente lega le `PORTE` di `preflight.sh` ai file Compose, e che niente lega il
+`Makefile` ai profili dichiarati nel Compose; resta da riguardare anche il debito di
+[ADR-0062](Decision.md#adr-0062) sul doppio comando dello stack 02. Restano poi il Task 10 (la riserva del
+Blocco 3) e il Task 11, che chiude il branch **con la pull request** e non con
+`git flow feature finish`.
+
+Stato: decisioni fino a **ADR-0068**, verifiche fino a **V-061**, fonti fino a **S-071**, note di
+metodo fino alla **113**. Task 1–8 su 11 chiusi.
