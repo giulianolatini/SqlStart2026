@@ -3379,3 +3379,55 @@ docker ps -a --filter name=sh- -q | wc -l                           # 0
 docker volume ls --filter name=sqlstart-03 -q | wc -l               # 0
 make tools-test && make stack-check && make docs-check              # 125 · 3 · verde
 ```
+
+## 2026-09-02 — `feature/03`, prima del Task 7: il passo che manca a chi clona
+
+Riprendendo il lavoro, il PO ha chiesto **chi** debba compilare il `.env` che il punto di ripresa
+dava per mancante, e se la cosa sia chiarita dove la troverà **il pubblico del talk**, che il
+laboratorio lo userà da solo dopo la presentazione. La prima è una domanda di un minuto; la seconda
+ha scoperto un difetto.
+
+**La risposta alla prima.** Il `.env` lo compila chi esegue il lab, e ha **una sola riga** da
+scrivere: `PASSWORD_AMMINISTRATORE`. Tutto il resto di `.env.example` porta già i valori del lab.
+La riga è vuota di proposito ([ADR-0040](Decision.md#adr-0040)) e il `Makefile` non la riempie: la
+regola è su un **file**, e se manca si ferma stampando come crearlo. Per lo stack 03 la password è
+stata copiata da quella dello stack 02 — un solo segreto per tutto il laboratorio, così dal palco
+non se ne ricordano due — con il valore mai passato per la chat né per la riga di comando.
+
+**Una correzione al punto di ripresa di ieri.** Diceva che il `.env` va nel checkout principale
+(ADR-0056). Oggi **non è possibile**: il checkout principale è su `develop`, dove
+`docker/03-sharded/` non esiste ancora perché il ramo non è unito. Finché dura `feature/03` quel
+file vive nel worktree ed è per forza usa-e-getta, cancellato in silenzio da `git worktree remove`.
+La sede indicata dall'ADR resta quella giusta, ma vale **da merge avvenuto**: è una precisazione,
+non un cambio di decisione, e non serve un ADR nuovo.
+
+**Il difetto, che la seconda domanda ha trovato.** La guida di avvio del `README.md` porta da
+`git clone` a `make up-01` e finisce lì. Funziona, perché l'istanza singola non ha utenti e quindi
+non ha `.env`. Ma dal secondo stack in poi il file serve, e nessuna pagina lo diceva **prima** del
+comando che lo pretende: né il `README.md`, né la §6 «Provarlo in due minuti» della pagina sul
+[replica set](02-architetture/replica-set.md), che comincia anch'essa da `make up-02`. Il vuoto era
+doppio, perché la stessa riga del `README.md` affermava «dei tre stack Compose oggi c'è il primo»
+mentre la tabella dello stato, dodici righe più in su, ne dichiarava **due** nel repository: un
+paragrafo rimasto fermo a `feature/01`.
+
+Non era un vicolo cieco — la regola del `Makefile` stampa il file mancante e il comando per crearlo,
+ed è scritta apposta ([ADR-0014](Decision.md#adr-0014)) — ma è attrito: lo scopri sbagliando, e chi
+prova il lab a casa la sera dopo il talk non ha nessuno a cui chiedere. Corretti tutti e due i
+punti: il `README.md` ha una sezione «Dal secondo stack in poi serve un file che il repository non
+contiene» che dice il perché prima del come, e la §6 una premessa di quattro righe.
+
+Nessun ADR: non si è deciso niente di nuovo, si è scritto un passo che c'era già e che nessun lettore
+poteva indovinare. Nessuna fonte: il contenuto viene da ADR-0040 e ADR-0014, già citati.
+
+**Verificato:** `make docs-check` verde, `make tools-test` 125 passed.
+
+109. **La documentazione di avvio la scrive sempre qualcuno che il primo passo l'ha già fatto, e
+     per questo è il passo che sparisce.** Chi ha scritto la guida aveva il `.env` sul disco da
+     settimane: per lui `make up-02` *è* il primo comando, e la sequenza gli sembrava completa
+     perché sulla sua macchina lo era. Il difetto non si vede rileggendo — rileggendo si ricostruisce
+     mentalmente lo stato che si ha già — e non lo prende nessun controllo automatico, perché
+     `check_links` verifica che i rimandi esistano, non che la procedura sia eseguibile da zero.
+     Lo prende una domanda sola, che conviene farsi a ogni pagina di istruzioni: **su una macchina
+     appena clonata, il primo comando che scrivo funziona?** Qui la risposta era no, e nessuno se
+     n'era accorto in due stack. Il corollario è che gli stati «già configurato» vanno elencati
+     esplicitamente in cima a ogni procedura, perché sono invisibili proprio a chi la scrive.

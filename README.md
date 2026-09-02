@@ -73,7 +73,7 @@ nell'[indice](docs/README.md) con la feature che le produrrà.
 
 ## Avvio rapido
 
-Dei tre stack Compose oggi c'è il primo, l'istanza singola. Su un clone appena fatto:
+Su un clone appena fatto, l'istanza singola parte senza premesse:
 
 ```bash
 git clone https://github.com/giulianolatini/SqlStart2026.git
@@ -97,6 +97,36 @@ le immagini sono pinnate per digest ([ADR-0018](docs/Decision.md#adr-0018)). Cos
 di quei comandi, e cosa succede dentro il container mentre li esegui, sta nella pagina
 sull'[istanza singola](docs/02-architetture/standalone.md); `make help` elenca gli altri
 target.
+
+### Dal secondo stack in poi serve un file che il repository non contiene
+
+L'istanza singola non ha utenti, quindi non ha password. Il replica set sì — e lo sharded
+cluster, quando arriverà, pure. Quella password **non è nel repository e non ci sarà mai**:
+`.env.example` è versionato e porta un segnaposto vuoto, `.env` è ignorato da git e porta il
+valore ([ADR-0040](docs/Decision.md#adr-0040)). È il motivo per cui il file non si può
+scaricare insieme al resto: va creato una volta, sulla propria macchina.
+
+```bash
+cp docker/02-replicaset/.env.example docker/02-replicaset/.env
+# poi aprire il file e scrivere la password dopo «PASSWORD_AMMINISTRATORE=»
+```
+
+Sono credenziali da **laboratorio**, su uno stack che non va esposto fuori dalla macchina di
+chi lo esegue: una password semplice va benissimo. Quello che non va bene è che stia in un
+file versionato, dove sopravvive alla demo e viene copiata altrove insieme al resto.
+
+Chi salta il passo non rompe niente e non resta senza indizi: `make up-02` si ferma prima di
+toccare Docker e stampa quale file manca e come crearlo, invece di lasciare a Compose un «env
+file not found» che non spiega perché quel file non c'è. Il resto di `.env.example` ha già i
+valori del lab: **l'unica riga da riempire è la password**.
+
+Fatto quello, il replica set si accende come l'istanza singola:
+
+```bash
+make up-02     # due comandi in uno: il secondo attende che la replica esista davvero
+make smoke-02  # quarantadue controlli end-to-end
+make down-02   # ferma conservando i dati e il keyfile
+```
 
 Senza avviare niente, quello che si può eseguire su qualunque clone è l'impianto
 documentale:
