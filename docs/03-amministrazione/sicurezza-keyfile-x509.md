@@ -15,8 +15,8 @@ tre membri l'opzione `--auth` non compare**, e ciononostante ogni comando preten
 L'autenticazione interna se le porta dietro, in tutti e due i modi.
 
 La forma di questa pagina è [ADR-0048](../Decision.md#adr-0048). Quello che è stato eseguito è
-eseguito sullo stack `docker/02-replicaset` o su istanze usa-e-getta con la stessa immagine
-pinnata, e porta accanto la verifica che lo ha prodotto; quello che non è stato eseguito è
+eseguito sullo stack `docker/02-replicaset`, su `docker/03-sharded` per la sola
+[§4.1](#41-sullo-sharded-cluster), o su istanze usa-e-getta con la stessa immagine pinnata, e porta accanto la verifica che lo ha prodotto; quello che non è stato eseguito è
 **marcato come non eseguito**, secondo la regola di [ADR-0035](../Decision.md#adr-0035) e
 [ADR-0036](../Decision.md#adr-0036).
 
@@ -394,13 +394,303 @@ nel database**: sta nel keyfile — o, con X.509, nel certificato. È il motivo 
 keyfile non è come perdere una password: non c'è un documento da riscrivere, c'è un file da
 ridistribuire ovunque.
 
-> **Non eseguito.** Il caso dello **sharded cluster** è diverso, e qui non c'è. Là ogni shard è un
-> replica set con il proprio `admin`, quindi gli utenti locali a uno shard esistono davvero — sono
-> quelli che [ADR-0026](../Decision.md#adr-0026) prevede «dove una demo debba ispezionare un singolo
-> shard». E l'eccezione localhost si comporta diversamente: «In a sharded cluster, the localhost
-> exception applies to each shard individually as well as to the cluster as a whole»
-> ([S-006](../Sources.md#s-006)). Niente di tutto questo è stato provato su questo branch: è materia
-> di `feature/03`.
+<a id="41-sullo-sharded-cluster"></a>
+### 4.1 Sullo sharded cluster: gli utenti locali esistono, e l'eccezione localhost è aperta su ogni shard che non ne ha
+
+Qui stava una marcatura «non eseguito», con dentro una citazione e una promessa. La promessa è stata
+mantenuta: tutto quello che segue è misurato sullo stack `03-sharded`, profilo `palco`, MongoDB
+7.0.40 ([V-064](../Sources.md#v-064)). Non ha smentito niente di quello che c'era scritto — ha
+trovato quattro cose che non c'erano.
+
+> **Da leggere prima delle misure.** Questa sezione fotografa lo stack **prima** del 2026-09-02,
+> quando i suoi shard non avevano utenti. Da [ADR-0071](../Decision.md#adr-0071) ne hanno uno
+> ciascuno, e l'eccezione localhost su di essi è **chiusa**: quello che si legge qui sotto non si
+> riproduce più su questo stack, e la [§4.2](#42-lamministratore-per-shard) racconta che cosa è
+> cambiato e che cosa costa. Resta com'è perché è la ragione per cui §4.2 esiste, e perché su
+> qualunque shard senza utenti — compreso uno di questi, riavviato senza il suo init — vale ancora
+> parola per parola.
+
+**Gli utenti del cluster non stanno sugli shard.** Sul config server, `admin.system.users` contiene
+`[{"user": "admin", "db": "admin"}]`. Su `shard1a` e su `shard2a`: **zero**. Non è una svista dello
+script di avvio, è dove MongoDB li mette. La conseguenza si tocca subito:
+
+```console
+$ docker exec sh-shard1a mongosh -u admin -p '…' --authenticationDatabase admin --eval '…'
+MongoServerError: Authentication failed.
+```
+
+Le credenziali che aprono il cluster non aprono uno shard. Non è un problema di permessi: quell'utente
+su quel nodo **non esiste**. È il primo posto dove il modello «ogni shard è un replica set con il
+proprio `admin`» smette di essere una frase e diventa un errore in console.
+
+**Su ogni shard l'eccezione localhost è aperta.** Sul router è chiusa da tempo, perché un utente c'è:
+
+```
+sh-mongos    createUser senza credenziali  →  Unauthorized: Command createUser requires authentication
+sh-shard2a   createUser senza credenziali  →  CREATO
+```
+
+Il secondo è un `root` su `admin`, ottenuto senza presentare niente. Vale su tutti e due gli shard, e
+vale da quando il processo parte. È esattamente quello che la documentazione annuncia — «the localhost
+exception applies to each shard individually as well as to the cluster as a whole» — e che prosegue
+con un obbligo: «Once you create a sharded cluster and add a user administrator through the `mongos`
+instance, you **must** still prevent unauthorized access to the individual shards»
+([S-074](../Sources.md#s-074)).
+
+**Serve il loopback — e adesso c'è la prova.** Nessuna fonte primaria trovata, in una settimana di
+letture, enuncia che la connessione debba arrivare da `127.0.0.1`: la riserva di
+[S-006](../Sources.md#s-006) è ancora lì, ed è una riserva **bibliografica**. Il comportamento però è
+misurabile, e la misura è stata fatta sullo stesso nodo a pochi secondi di distanza, con l'eccezione
+aperta in tutti e due i momenti:
+
+```
+dalla porta pubblicata sull'host (27151)   whatsmyuri  192.168.65.1:44239   createUser  Unauthorized
+dal loopback, dentro il container          whatsmyuri  127.0.0.1:48626      createUser  CREATO
+```
+
+Cambia solo l'indirizzo da cui il server vede arrivare la connessione. Da cui una cosa che tranquillizza
+e una che no. Tranquillizza: **pubblicare la porta di uno shard sull'host non apre l'eccezione**, perché
+a `mongod` quella connessione arriva dal gateway di Docker.
+
+E `db.adminCommand({whatsmyuri: 1})` è il comando che chiude la discussione prima che cominci: risponde
+**senza credenziali**, anche a eccezione chiusa, e dice quale indirizzo il server attribuisce al client.
+Prima di chiedersi perché l'eccezione non si applichi, conviene chiedere a lui se si è davvero su
+localhost.
+
+**Quello che non tranquillizza: in Docker «localhost» è del network namespace, non del container.** Un
+container avviato con `--network container:sh-shard2a` condivide il namespace di rete dello shard, e il
+suo `localhost` **è** il loopback dello shard:
+
+```console
+$ docker run --rm --network container:sh-shard2a <immagine> mongosh --quiet --eval '…'
+il keyfile qui: non c'è
+"127.0.0.1:46146"
+CREATO
+```
+
+Quel container il keyfile non ce l'ha e non potrebbe leggerlo, e si è fatto un `root` sullo shard. Non
+è un caso di scuola: è il meccanismo con cui i servizi `shard1-init` e `shard2-init` di questo stack
+eseguono `rs.initiate()` su nodi che pretendono autenticazione e non hanno ancora utenti. La porta che
+serve ad accendere lo stack rimane aperta dopo.
+
+**L'eccezione si spende una volta sola, e si può spendere male.** La documentazione dice che il primo
+utente «must have privileges to create other users». Misurando, quel requisito **non è imposto** — e
+ne è imposto un altro, che la documentazione non nomina:
+
+```
+roles: [ {userAdminAnyDatabase, admin}, {read, lab} ]   →  Unauthorized
+roles: [ {read, lab} ]                                  →  Unauthorized
+roles: [ {root, admin} ]                                →  creato
+roles: [ ]                                              →  creato
+```
+
+I ruoli devono stare su `admin`; che servano a qualcosa, no. Un utente **senza alcun ruolo** viene
+accettato, chiude l'eccezione dietro di sé e non può fare niente — nemmeno cancellare se stesso. È
+successo davvero, durante questa misura.
+
+**E non si riapre cancellando l'ultimo utente.** Con `admin.system.users` di nuovo vuoto, `createUser`
+da loopback risponde ancora `Unauthorized`. Dopo un `docker restart` dello stesso container, stesso
+comando e stessi zero utenti: **creato**. La condizione «there are no users or roles created» è una
+condizione del **processo**, non del database: una volta che un utente è esistito, l'eccezione resta
+chiusa fino al riavvio. Chi legge la frase del manuale come una condizione di stato — ed è la lettura
+naturale — si aspetta il contrario.
+
+**La via di rientro è il keyfile.** Quando l'eccezione è stata spesa male, l'unico modo di rimettere a
+posto il nodo senza spegnerlo è l'identità interna:
+
+```
+mongosh -u __system -p "$(tr -d '\n\r ' < /keyfile/mongo-keyfile)" --authenticationDatabase local
+```
+
+Legge `admin.system.users`, cancella utenti, fa tutto. È la faccia operativa di quello che §1 dice in
+astratto — perdere il keyfile non è come perdere una password. Chi lo ha, **è** il cluster.
+
+**Che cosa vede un amministratore locale a uno shard.** Il suo shard, e basta:
+
+```
+lab.ordini su shard2rs: 10 140 documenti      (dal router: 20 000)
+db.hello().setName:     shard2rs
+la stessa credenziale, presentata al mongos:  MongoServerError: Authentication failed.
+```
+
+Ed è il motivo per cui [ADR-0026](../Decision.md#adr-0026) li prevede «dove una demo debba ispezionare
+un singolo shard»: sono l'unico modo di guardare uno shard da dentro. Un dettaglio da script: un
+amministratore locale **può cancellare se stesso**, il `dropUser` riesce, e il comando successivo sulla
+stessa connessione fallisce con `Authentication failed`. Sembra un errore di autenticazione, ed è la
+conseguenza dell'operazione precedente andata a buon fine.
+
+**Che cosa faceva questo laboratorio fino al 2026-09-02.** Non creava utenti locali agli shard e non
+disattivava l'eccezione: la lasciava aperta, e la scriveva qui ([ADR-0070](../Decision.md#adr-0070)).
+Dei due rimedi ammessi dalla documentazione uno era escluso in partenza — mettere
+`enableLocalhostAuthBypass` a `0` **non si può**, perché gli shard di questo stack si formano con
+`rs.initiate()` proprio sotto l'eccezione — e l'altro cambiava la catena di avvio, che è una decisione
+da prendere apposta invece che di striscio. È stata presa: [§4.2](#42-lamministratore-per-shard).
+
+Resta il perimetro, che è la parte da portarsi via: per usare l'eccezione su uno di questi shard
+bisogna poter avviare un processo dentro il suo namespace di rete, cioè poter parlare al demone Docker
+— e chi può parlare al demone Docker può anche leggere il volume del keyfile, che dà di più. In una
+installazione non containerizzata le due cose si separano: là il loopback di uno shard lo ha chiunque
+abbia una shell su quella macchina, keyfile o no, e l'obbligo del manuale morde davvero.
+
+<a id="42-lamministratore-per-shard"></a>
+### 4.2 L'amministratore per shard: come lo fa il manuale, come lo fa questo lab, e perché non sono la stessa cosa
+
+> ## ⚠️ Quello che questo laboratorio fa qui **non va portato in produzione**
+>
+> Lo stack `03-sharded` crea l'amministratore di ogni shard da uno script di avvio non presidiato,
+> con **una sola password condivisa** fra cluster e shard, **scritta in chiaro** in un file `.env`, e
+> con il ruolo **`root`**. Sono tre semplificazioni deliberate, prese per un lab da talk che gira su
+> un portatile e non è esposto fuori da quella macchina ([ADR-0005](../Decision.md#adr-0005),
+> [ADR-0071](../Decision.md#adr-0071)).
+>
+> **La procedura da seguire in un cluster vero è quella del manuale, riportata qui sotto per
+> intero** ([S-075](../Sources.md#s-075)): un utente per shard con credenziali proprie, digitate a
+> `passwordPrompt()`, con il ruolo minimo. Copiare `11-shard-initiate.js` in un'installazione reale
+> significa mettere la chiave del cluster e quella di ogni shard nello stesso file di testo.
+
+**Una premessa che rovescia l'intuizione: l'eccezione localhost non è la scorciatoia.** È facile
+pensare che il modo «serio» di creare l'amministratore di uno shard eviti l'eccezione, e che usarla
+sia il trucco del lab. Non è così. Il manuale la usa: collega `mongosh` al primario dello shard e
+crea lì il primo utente, perché su un nodo che pretende autenticazione e non ha ancora nessuno da
+autenticare non c'è altra via. «The localhost interface is only available since no users have been
+created for the deployment. The localhost interface closes after the creation of the first user»
+([S-075](../Sources.md#s-075)). Chi automatizza quel passo non devia dalla procedura: la esegue senza
+nessuno davanti, ed è quello — non l'eccezione — il punto su cui si deve stare attenti.
+
+#### La procedura canonica, passo per passo
+
+Dal tutorial «Keyfile Authentication for Self-Managed Sharded Clusters», sezione «Create the Shard
+Replica Sets», nella versione 7.0 che è quella pinnata da questo repository
+([S-075](../Sources.md#s-075), [ADR-0009](../Decision.md#adr-0009)).
+
+**Dove sta, nell'ordine delle cose.** I passi degli utenti locali stanno **prima** di `sh.addShard()`
+e prima del `mongos`, ed è motivato nella pagina stessa: «These steps include optional procedures for
+adding shard-local users. Executing them now ensures that there are users available for each shard to
+perform shard-level maintenance.» Farli dopo lascia una finestra in cui lo shard è in piedi, non ha
+utenti, e ha l'eccezione aperta.
+
+**1. Collegarsi al primario.** «Connect to the primary before continuing. Use `rs.status()` to locate
+the primary member.» E, senza margini: «You must be connected to the primary to create users». Un
+`createUser` su un secondario risponde `NotWritablePrimary`, come qualunque altra scrittura
+([§4](#4-utenti-del-cluster-e-utenti-locali-a-un-nodo)).
+
+**2. Creare l'amministratore degli utenti dello shard** — passo 4 del tutorial, «Create the
+shard-local user administrator (optional)»:
+
+```js
+admin = db.getSiblingDB("admin")
+admin.createUser({
+  user: "fred",
+  pwd: passwordPrompt(),          // la password NON si scrive nel comando
+  roles: [ { role: "userAdminAnyDatabase", db: "admin" } ]
+})
+```
+
+`passwordPrompt()` è la parte che non si può automatizzare, e non è un dettaglio di comodità: è ciò
+che tiene la password fuori dalla cronologia della shell, fuori dai log e fuori dai file. La stessa
+pagina aggiunge il criterio: «Passwords should be random, long, and complex to ensure system security
+and to prevent or delay malicious access.»
+
+**3. Creare, se serve, l'amministratore di cluster locale allo shard** — passo 5, anch'esso
+facoltativo: ci si autentica come l'utente appena creato e si crea un **secondo** utente con ruolo
+`clusterAdmin`. Due utenti, due password distinte.
+
+**4. Ripetere su ogni shard.** Gli utenti locali sono locali: «Shard-local users exist only in the
+specific shard and should only be used for shard-specific maintenance and configuration.» E il
+confine, che la pagina mette in grassetto: «**You cannot connect to the `mongos` with shard-local
+users.**» Servono per le operazioni che il router non può fare — «some maintenance operations require
+direct connections to specific shards… you must connect directly to the shard and authenticate as a
+shard-local administrative user».
+
+#### Che cosa fa questo laboratorio, e le tre differenze
+
+Lo script `docker/03-sharded/init/11-shard-initiate.js` crea l'utente subito dopo aver atteso
+l'elezione del primario e prima che `add-shard` registri gli shard: l'ordine del manuale, rispettato.
+Poi comincia a discostarsene, tre volte.
+
+| | il manuale ([S-075](../Sources.md#s-075)) | questo lab |
+|---|---|---|
+| **credenziali** | una coppia per shard, distinte fra loro e da quelle del cluster | **una sola password** per l'amministratore del cluster e per quelli dei due shard |
+| **come arriva la password** | `passwordPrompt()`, digitata da una persona | letta da `docker/03-sharded/.env` e passata come variabile d'ambiente a un container one-shot |
+| **ruolo** | `userAdminAnyDatabase`, più eventualmente un secondo utente con `clusterAdmin` | un utente solo, con **`root`** |
+
+**Perché una password sola.** Perché ce n'è una sola in tutto lo stack, ed è già in `.env`. Aggiungerne
+una seconda per gli shard darebbe l'aspetto di una separazione senza esserlo, finché tutte e due stanno
+nello stesso file e quel file lo legge chiunque abbia accesso alla macchina. In un'installazione vera le
+due chiavi vanno separate perché servono a proteggersi da cose diverse: quella del cluster è la porta
+di servizio, quelle degli shard sono le porte di manutenzione, e un incidente sull'una non deve aprire
+le altre.
+
+**Perché non `passwordPrompt()`.** Perché `make up-03` deve accendere il cluster senza nessuno alla
+tastiera, davanti al pubblico, e un prompt in mezzo alla catena di avvio la fermerebbe. È la
+semplificazione più costosa delle tre e la meno visibile: la password del cluster **e** quella di ogni
+shard esistono in chiaro in un file, e quel file è a un `cat` di distanza da chiunque legga il disco.
+Nel repository non ci finisce mai ([ADR-0014](../Decision.md#adr-0014)): `.env` è ignorato da git e
+`.env.example` porta un segnaposto vuoto.
+
+**Perché `root` e non `userAdminAnyDatabase`.** Questa è la differenza che sembra la più grave ed è la
+meno, e c'è una misura a dirlo. Un `userAdminAnyDatabase` **non** legge i dati, ma può concedere ruoli
+a chiunque, compreso a se stesso ([V-066](../Sources.md#v-066)):
+
+```
+legge lab.ordini:         Unauthorized
+grantRolesToUser(root):   riuscito
+adesso legge lab.ordini:  9860
+```
+
+Fra i due ruoli, su quel nodo, non c'è una barriera di privilegio: c'è un comando in più. Il ruolo
+minimo avrebbe avuto l'aspetto della sicurezza senza la sostanza, e in cambio avrebbe tolto alla demo
+l'unica cosa per cui [ADR-0026](../Decision.md#adr-0026) prevede questi utenti — «dove una demo debba
+ispezionare un singolo shard». Il che non rende `root` una buona idea in produzione: là la barriera
+non è il ruolo, è **chi conosce la password**, ed è il motivo per cui il manuale ne vuole una per shard.
+
+#### Che cosa è cambiato, misurato
+
+L'attacco della [§4.1](#41-sullo-sharded-cluster) — un container qualunque che condivide il network
+namespace dello shard — non passa più. Stesso comando, stesso bersaglio, stesso indirizzo visto dal
+server ([V-066](../Sources.md#v-066)):
+
+```
+keyfile in questo container: assente
+whatsmyuri: 127.0.0.1:36768
+createUser: Unauthorized: Command createUser requires authentication
+```
+
+E l'amministratore locale vede quello che deve vedere, cioè poco:
+
+```
+setName: shard1rs
+utenti su questo shard: [{"user":"admin","db":"admin"}]
+lab.ordini su questo shard: 9860        (dal router: 20 000)
+```
+
+Che sia davvero un'altra anagrafe, e non l'utente del cluster che passa di lì, si dimostra solo con un
+nome diverso — perché in questo lab i due utenti hanno lo stesso nome e la stessa password, e da fuori
+sono indistinguibili. Creato `solo-shard1` sul solo `shard1a`:
+
+```
+presentato a shard1a   lab.ordini: 9860
+presentato al mongos   MongoServerError: Authentication failed.
+```
+
+È il «you cannot connect to the `mongos` with shard-local users» del manuale, in due righe.
+
+**E una porta che prima era muta adesso risponde.** Va detto insieme al resto, perché è il costo del
+rimedio. Le porte degli shard pubblicate sull'host — 27141 e 27151 nel profilo `palco` — prima non
+accettavano nessuna credenziale, semplicemente perché su quei nodi non esisteva nessun utente. Adesso
+ne riconoscono una, ed è quella del cluster:
+
+```
+mongodb://admin:…@host.docker.internal:27141/?directConnection=true&authSource=admin
+setName: shard1rs · documenti: 9860
+```
+
+L'eccezione localhost non c'entra: quella via non l'ha mai aperta, perché a `mongod` la connessione
+arriva dal gateway di Docker ([§4.1](#41-sullo-sharded-cluster)). Ciò che è cambiato è che ora esiste
+una chiave che quella serratura riconosce. Su questo lab non sposta niente — lo stack non va esposto
+fuori dalla macchina di chi presenta — ma su una macchina raggiungibile sarebbe la prima cosa da
+guardare: chiudere l'eccezione e pubblicare le porte degli shard sono due decisioni che si
+influenzano.
 
 ---
 
@@ -449,8 +739,18 @@ La password sta in `docker/02-replicaset/.env`, che è ignorato da git e non ent
   membri.
 - **La rotazione del keyfile.** La documentazione consultata non la descrive, e questa pagina non la
   inventa.
-- **Gli utenti locali a uno shard**, e l'eccezione localhost su uno sharded cluster: `feature/03`.
-- **I ruoli e i privilegi.** Il lab crea un solo utente, con `root`, perché è un lab. Che cosa sia
+- **`enableLocalhostAuthBypass: 0`**, che è il secondo rimedio ammesso da
+  [S-074](../Sources.md#s-074) e che questo stack non prova. Applicato **prima**
+  dell'inizializzazione impedisce `rs.initiate()`; applicato **dopo** richiederebbe un riavvio dentro
+  la catena di avvio. Che funzioni è dedotto dalla fonte, non misurato.
+- **Le credenziali distinte per shard**, che il manuale prescrive e questo lab non usa: la ragione è
+  in [§4.2](#42-lamministratore-per-shard) e la decisione in [ADR-0071](../Decision.md#adr-0071).
+  Che cosa costi separarle davvero — dove si tengono, come si ruotano — questa pagina non lo copre.
+- **L'eccezione localhost sui secondari di uno shard.** Il profilo `palco` ha un membro per shard,
+  quindi sempre un primario. Il manuale prescrive il rimedio «on the shard's primary»; che cosa
+  facciano i secondari non è stato provato.
+- **I ruoli e i privilegi.** Il lab crea un utente `root` per il cluster e uno per shard, perché è
+  un lab. Che cosa sia
   ragionevole in un'installazione vera — ruoli separati per applicazione, backup e diagnostica — è
   una decisione che questo repository non prende.
 
@@ -460,8 +760,12 @@ La password sta in `docker/02-replicaset/.env`, che è ignorato da git e non ent
 [ADR-0005](../Decision.md#adr-0005) (la sicurezza graduata sui tre stack),
 [ADR-0014](../Decision.md#adr-0014) (il keyfile in un volume nominato, e fuori dal repository),
 [ADR-0026](../Decision.md#adr-0026) (la catena di inizializzazione, e il debito che il §4 salda),
-[ADR-0040](../Decision.md#adr-0040) (chi crea l'utente amministratore, e come si esce dal paradosso).
+[ADR-0040](../Decision.md#adr-0040) (chi crea l'utente amministratore, e come si esce dal paradosso),
+[ADR-0070](../Decision.md#adr-0070) (gli shard senza utenti locali, e il perimetro dell'eccezione),
+[ADR-0071](../Decision.md#adr-0071) (l'amministratore per shard, e le tre semplificazioni di laboratorio).
 
 **Fonti:** [S-002](../Sources.md#s-002), [S-005](../Sources.md#s-005), [S-006](../Sources.md#s-006),
 [S-061](../Sources.md#s-061), [S-062](../Sources.md#s-062), [S-063](../Sources.md#s-063),
-[V-038](../Sources.md#v-038), [V-039](../Sources.md#v-039), [V-040](../Sources.md#v-040)
+[S-074](../Sources.md#s-074), [S-075](../Sources.md#s-075), [V-038](../Sources.md#v-038),
+[V-039](../Sources.md#v-039), [V-040](../Sources.md#v-040), [V-064](../Sources.md#v-064),
+[V-066](../Sources.md#v-066)

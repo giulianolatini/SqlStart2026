@@ -3,6 +3,8 @@
 #
 #   ./tools/reset-demo.sh 01
 #   ./tools/reset-demo.sh 02
+#   ./tools/reset-demo.sh 03          # profilo palco
+#   PROFILO=completo ./tools/reset-demo.sh 03
 #
 # Non è `reset-01` / `reset-02`: quelli fermano lo stack e cancellano i volumi, e
 # ricostruire da zero costa mezzo minuto. Questo serve al caso opposto — la prova
@@ -10,8 +12,10 @@
 # in piedi. Il debito viene da feature/01, dove ci si era accorti che fra una prova e
 # l'altra si finiva a rifare l'intero stack per rimettere a posto due collezioni.
 #
-# Lo stack è un ARGOMENTO e non un ramo dentro il codice: feature/03 aggiunge il suo
-# caso qui sotto invece di scriversi il proprio script.
+# Lo stack è un ARGOMENTO e non un ramo dentro il codice: feature/03 ha aggiunto il suo
+# caso qui sotto invece di scriversi il proprio script, e il diff di quel commit è un
+# ramo in più — le funzioni condivise, i tempi di attesa e il verdetto finale sono gli
+# stessi per tutti e tre.
 #
 # Che cosa rimette a posto, in ordine:
 #   1. i container fermati a mano durante una demo di failover — li riavvia;
@@ -50,6 +54,7 @@ uso() {
   printf 'Uso: %s <stack>\n' "$(basename "$0")" >&2
   printf '  01  istanza singola\n' >&2
   printf '  02  replica set a tre membri\n' >&2
+  printf '  03  sharded cluster (PROFILO=palco predefinito, oppure completo)\n' >&2
   exit 2
 }
 
@@ -214,6 +219,131 @@ elif [[ "${STACK}" == "02" ]]; then
   # La stessa terna che sorvegliano i due smoke: 50000 124861860.70 150281 (V-013).
   impronta="$(sul_primario 'const a = db.ordini.aggregate([{$group:{_id:null, n:{$sum:1}, tot:{$sum:"$importo"}, righe:{$sum:"$righe"}}}]).toArray()[0]; print(a ? a.n + " " + a.tot.toFixed(2) + " " + a.righe : "collezione vuota")')"
   ok "impronta di lab.ordini: ${impronta}"
+
+# --- Stack 03 — sharded cluster -------------------------------------------------------
+#
+# Le differenze dal caso 02 sono tre, e nessuna cambia la forma. La prima: i container
+# da rialzare dipendono dal PROFILO, perché in `palco` gli altri sei non esistono e
+# chiederne lo stato darebbe sei errori veri su una situazione sana. La seconda: qui non
+# si aspetta un primario preferito. La scena del guasto (`make guasto-03`) rimette in
+# piedi da sé il nodo che ha fermato, e nel profilo del talk non c'è nessun ruolo da
+# spostare perché ogni shard ha un membro solo: si aspetta che i due shard risultino
+# registrati, che è la condizione da cui il Blocco 3 riparte. La terza: il verdetto
+# sui dati non è solo l'impronta, è anche che i documenti stiano su ENTRAMBI gli shard,
+# perché una demo che li lascia tutti su uno è esattamente il guasto che il Blocco 3
+# vuole scongiurare.
+elif [[ "${STACK}" == "03" ]]; then
+  COMPOSE="${RADICE}/docker/03-sharded/compose.yaml"
+  SEGRETI="${RADICE}/docker/03-sharded/.env"
+  PROFILO="${PROFILO:-palco}"
+
+  if [[ ! -f "${SEGRETI}" ]]; then
+    printf 'Manca %s.\n' "${SEGRETI}" >&2
+    printf 'Contiene la password dell'"'"'amministratore e sta fuori dal repository (ADR-0014).\n' >&2
+    exit 1
+  fi
+  set -a; . "${SEGRETI}"; set +a
+  UTENTE="${UTENTE_AMMINISTRATORE:-admin}"
+  PASSWORD="${PASSWORD_AMMINISTRATORE:-}"
+
+  case "${PROFILO}" in
+    palco)    MONGOD=(sh-cfg1 sh-shard1a sh-shard2a); ROUTER=(sh-mongos) ;;
+    completo) MONGOD=(sh-cfg1 sh-cfg2 sh-cfg3
+                      sh-shard1a sh-shard1b sh-shard1c
+                      sh-shard2a sh-shard2b sh-shard2c)
+              ROUTER=(sh-mongos sh-mongos2) ;;
+    *) printf 'Profilo sconosciuto: «%s». Sono «palco» e «completo».\n' "${PROFILO}" >&2; exit 2 ;;
+  esac
+
+  compose() {
+    docker compose --env-file "${AMBIENTE}" --env-file "${SEGRETI}" \
+      -f "${COMPOSE}" --profile "${PROFILO}" "$@"
+  }
+
+  # Tutto passa dal router, che è il punto in cui il client parla al cluster. Chiedere
+  # a un mongod direttamente adesso funzionerebbe — da ADR-0071 ogni shard ha un
+  # amministratore locale con le stesse credenziali — e risponderebbe male: uno shard
+  # conosce solo la propria metà dei documenti e non ha l'anagrafe del cluster
+  # (V-067). Fino a quel commit non entrava nemmeno, e l'errore faceva da chiavistello
+  # (V-058); adesso il chiavistello non c'è e la regola resta.
+  dal_router() {
+    compose exec -T mongos \
+      mongosh --quiet --host localhost \
+        --username "${UTENTE}" --password "${PASSWORD}" --authenticationDatabase admin \
+        lab --eval "$1" 2>/dev/null | tail -1 | tr -d '\r'
+  }
+
+  titolo "Container (profilo ${PROFILO})"
+  for nodo in "${MONGOD[@]}" "${ROUTER[@]}"; do
+    rialza "${nodo}"
+  done
+  for nodo in "${MONGOD[@]}" "${ROUTER[@]}"; do
+    attendi_salute "${nodo}"
+  done
+
+  titolo "Topologia"
+  registrati=""
+  for ((i = 0; i < ATTESA_PRIMARIO; i++)); do
+    registrati="$(dal_router 'print(db.getSiblingDB("config").shards.countDocuments({state: 1}))')"
+    [[ "${registrati}" == "2" ]] && break
+    sleep 1
+  done
+  if [[ "${registrati}" == "2" ]]; then
+    ok "due shard registrati e attivi"
+  else
+    errore "shard attivi: «${registrati:-nessuna risposta}» invece di 2 dopo ${ATTESA_PRIMARIO} s"
+  fi
+  # Il balancer si può spegnere per sbaglio da mongosh durante una prova, e da spento
+  # non dà nessun segnale finché non serve. Rimetterlo acceso fa parte del riportare
+  # lo stack allo stato da cui la demo comincia.
+  if [[ "$(dal_router 'print(sh.getBalancerState())')" == "true" ]]; then
+    ok "balancer attivo"
+  else
+    nota "balancer spento, lo riaccendo"
+    dal_router 'sh.startBalancer()' > /dev/null
+    if [[ "$(dal_router 'print(sh.getBalancerState())')" == "true" ]]; then
+      ok "balancer riacceso"
+    else
+      errore "il balancer non si è riacceso"
+    fi
+  fi
+
+  titolo "Collezioni lasciate in giro dalla demo"
+  tolte="$(dal_router '
+    const superstiti = ["ordini"];
+    const via = db.getCollectionNames().filter(n => !superstiti.includes(n));
+    via.forEach(n => db.getCollection(n).drop({ writeConcern: { w: "majority", wtimeout: 10000 } }));
+    print(via.length === 0 ? "nessuna" : via.join(", "));
+  ')"
+  ok "collezioni rimosse: ${tolte:-nessuna}"
+
+  titolo "Dataset"
+  # Lo STESSO servizio che semina all'avvio, con RICARICA=1: una sorgente sola, e
+  # `sh.shardCollection()` dentro lo script è idempotente, quindi la collezione resta
+  # distribuita anche se la demo l'aveva lasciata cadere.
+  if ! compose run --rm -e RICARICA=1 seed > /dev/null 2>&1; then
+    errore "il seed non è andato a buon fine — «make logs-03» per il motivo"
+  fi
+  # Ventimila, non cinquantamila: lo stack 03 usa i primi 20 000 del dataset (ADR-0064),
+  # quindi l'impronta è diversa da quella di V-013 e deve esserlo.
+  impronta="$(dal_router 'const a = db.ordini.aggregate([{$group:{_id:null, n:{$sum:1}, tot:{$sum:"$importo"}, righe:{$sum:"$righe"}}}]).toArray()[0]; print(a ? a.n + " " + a.tot.toFixed(2) + " " + a.righe : "collezione vuota")')"
+  ok "impronta di lab.ordini: ${impronta}"
+
+  # L'unico controllo che distingue uno sharded cluster da un replica set travestito.
+  distribuzione="$(dal_router '
+    const per = {};
+    db.getSiblingDB("admin").aggregate([{$shardedDataDistribution: {}}])
+      .toArray()
+      .filter(d => d.ns === "lab.ordini")
+      .forEach(d => d.shards.forEach(s => { per[s.shardName] = s.numOwnedDocuments; }));
+    const nomi = Object.keys(per).sort();
+    print(nomi.length === 0 ? "nessun dato" : nomi.map(n => n + "=" + per[n]).join(" "));
+  ')"
+  if [[ "${distribuzione}" == *" "* ]]; then
+    ok "documenti su entrambi gli shard: ${distribuzione}"
+  else
+    errore "i documenti non risultano distribuiti: ${distribuzione:-nessuna risposta}"
+  fi
 
 else
   printf 'Stack sconosciuto: «%s».\n' "${STACK}" >&2

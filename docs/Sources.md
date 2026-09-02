@@ -206,7 +206,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   all'assunzione di progetto: l'eccezione decade anche con `createRole`, e non si attiva
   affatto se esiste già un ruolo — perimetro più stretto di quello che avevamo scritto. I
   config server non sono menzionati.
-- **Usata da:** ADR-0005, ADR-0040, ADR-0048
+- **Usata da:** ADR-0005, ADR-0040, ADR-0048, ADR-0070
 
 <a id="s-007"></a>
 ### S-007 — MongoDB Manual: Connection String Options
@@ -335,7 +335,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   in time» e «does not guarantee» non compaiono: il paradosso dello standalone — senza oplog
   `--oplog` non è utilizzabile, quindi il dump non può essere coerente a un istante — è vero
   ma **non è scritto**.
-- **Usata da:** ADR-0022, ADR-0047
+- **Usata da:** ADR-0022, ADR-0047, ADR-0070
 
 <a id="s-012"></a>
 ### S-012 — Docker Docs: `depends_on`
@@ -601,7 +601,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   `--keyFile`. **`rs.initiate()` non viene mai eseguito dall'immagine: resta a nostro
   carico.** Trattandosi di sorgente, l'API non ha garanzie di stabilità fra versioni: la
   citazione deve indicare commit e riga.
-- **Usata da:** ADR-0005, ADR-0026, ADR-0040, ADR-0042, ADR-0043
+- **Usata da:** ADR-0005, ADR-0026, ADR-0040, ADR-0042, ADR-0043, ADR-0067
 
 <a id="s-023"></a>
 ### S-023 — `docker-library/mongo`: `8.0/Dockerfile`
@@ -2092,6 +2092,449 @@ web:
   volesse cambiare le priorità sullo stack acceso durante la demo provocherebbe un'elezione e la
   chiusura di tutte le connessioni.
 - **Usata da:** ADR-0051
+
+<a id="s-066"></a>
+### S-066 — MongoDB Manual 7.0: Hashed Sharding
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/hashed-sharding/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — a che cosa serve una chiave hashed.** «Hashed keys are ideal for
+  shard keys with fields that change [monotonically] like [ObjectId] values or timestamps.» Il
+  meccanismo è che si partiziona sull'hash del valore e non sul valore: la pagina lo riassume nel
+  confronto con la partizione per intervalli.
+- **Cosa afferma, secondo punto — che cosa succede senza, e con parole sue.** «Since the value of
+  `X` is always increasing, the chunk with an upper bound of [`MaxKey`] receives the majority
+  incoming writes. This restricts insert operations to the single shard containing this chunk,
+  which reduces or removes the advantage of distributed writes in a sharded cluster.» È la frase
+  che giustifica l'intera scelta della demo, e va letta insieme a [S-067](#s-067), che sulla stessa
+  cosa è più esplicita.
+- **Cosa afferma, terzo punto — il prezzo, dichiarato.** «Post-hash, documents with "close" shard
+  key values are unlikely to be on the same chunk or shard - the `mongos` is more likely to perform
+  [Broadcast Operations] to fulfill a given ranged query. `mongos` can target queries with equality
+  matches to a single shard.» Distribuire le scritture e tenere vicine le letture contigue sono
+  due cose che non si ottengono insieme, e la pagina non finge il contrario.
+- **Cosa afferma, quarto punto — e qui c'è il numero che lo spike aveva misurato senza saperlo.**
+  Distribuendo una collezione **vuota**: «The sharding operation creates empty chunks to cover the
+  entire range of the shard key values and performs an initial chunk distribution. By default, the
+  operation creates 2 chunks per shard and migrates across the cluster. You can use
+  `numInitialChunks` option to specify a different number of initial chunks. This initial creation
+  and distribution of chunks allows for faster setup of sharding.» Due chunk per shard: con i due
+  shard del lab fanno **quattro**, che è esattamente il numero misurato dallo spike §5 e poi da
+  [V-058](#v-058). Non è un numero emergente, è un valore predefinito documentato.
+- **Cosa afferma, quinto punto — l'ordine inverso non è equivalente.** Distribuendo una collezione
+  **già piena**: «The sharding operation creates an initial chunk to cover all of the shard key
+  values», e «after the initial chunk creation, the balancer moves ranges of the initial chunk when
+  it needs to balance data». Un chunk solo, e poi si aspetta il balancer. È la ragione per cui nel
+  lab `sh.shardCollection()` viene prima dell'inserimento e non dopo.
+- **Cosa non afferma:** quanto uniforme sia la distribuzione risultante. La pagina descrive la
+  creazione dei chunk, non la ripartizione dei documenti fra di essi: il 49,3 % / 50,7 % del lab è
+  misurato ([V-058](#v-058)), non letto qui. E non dice niente sui tempi — quanto duri la
+  distribuzione iniziale, quanto costi la migrazione.
+- **Riserve:** due, tutte e due sui bordi del caso del lab. La prima è un avviso della pagina che
+  qui non morde ma altrove sì: «MongoDB `hashed` indexes truncate floating point numbers to 64-bit
+  integers before hashing. For example, a `hashed` index would store the same value for a field
+  that held a value of `2.3`, `2.2`, and `2.9`.» Gli `_id` del dataset sono interi, quindi il
+  problema non si presenta; su un campo `importo` si presenterebbe, e in silenzio. La seconda è che
+  l'indice `_id_hashed` che `shardCollection()` crea da sé si può togliere solo «starting in
+  MongoDB 7.0.3 (and 6.0.12 and 5.0.22)» — il lab è sulla 7.0.40 e quindi ci rientra, ma è un
+  dettaglio legato alla versione pinnata da [ADR-0028](Decision.md#adr-0028).
+- **Usata da:** ADR-0064, ADR-0068
+
+<a id="s-067"></a>
+### S-067 — MongoDB Manual 7.0: Choose a Shard Key
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/sharding-choose-a-shard-key/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — perché una chiave che cresce sempre concentra le scritture.** «A
+  shard key on a value that increases or decreases monotonically is more likely to distribute
+  inserts to a single chunk within the cluster.» E il perché, che è geometrico e non statistico:
+  «This occurs because every cluster has a chunk that captures a range with an upper bound of
+  `MaxKey`. `maxKey` always compares as higher than all other values.» Quindi: «If the shard key
+  value is always increasing, all new inserts are routed to the chunk with `maxKey` as the upper
+  bound. If the shard key value is always decreasing, all new inserts are routed to the chunk with
+  `minKey` as the lower bound. The shard containing that chunk becomes the bottleneck for write
+  operations.»
+- **Cosa afferma, secondo punto — la mitigazione, che è la parte che quasi tutte le spiegazioni in
+  giro omettono.** «To optimize data distribution, the chunks that contain the global `maxKey` (or
+  `minKey`) do not stay on the same shard. When a chunk is split, the new chunk with the `maxKey`
+  (or `minKey`) chunk is located on a different shard.» Il collo di bottiglia **cambia nodo** man
+  mano che i chunk si dividono; non sparisce, perché in ogni istante gli inserimenti vanno tutti in
+  un posto solo, e in più il cluster paga le migrazioni che servono a spostare quel posto. Senza
+  questa riga il difetto raccontato dal palco sarebbe una caricatura.
+- **Cosa afferma, terzo punto — la cardinalità è un tetto, non una preferenza.** «The cardinality
+  of a shard key determines the maximum number of chunks the balancer can create.» E l'esempio, che
+  è il conto da rifare su qualunque campo candidato: con un campo `continent` da sette valori, «a
+  cardinality of `7` means there can be no more than `7` chunks within the sharded cluster, each
+  storing one unique shard key value», e «this constrains the number of effective shards in the
+  cluster to `7` as well - adding more than seven shards would not provide any benefit».
+- **Cosa afferma, quarto punto — l'hash non è una garanzia.** «A shard key that does not change
+  monotonically does not, on its own, guarantee even distribution of data across the sharded
+  cluster. The cardinality and frequency of the shard key also contribute to the distribution of
+  the data.» Nel lab distribuisce perché gli `_id` sono ventimila valori distinti, uno per
+  documento: cardinalità massima e frequenza uniforme, cioè le due condizioni che la frase mette
+  accanto. Su un campo da dieci valori l'hash non salverebbe niente.
+- **Cosa afferma, quinto punto — il rimando esplicito.** «If your data model requires sharding on a
+  key that changes monotonically, consider using Hashed Sharding.» Le due pagine si mandano l'una
+  all'altra, ed è la ragione per cui qui sono due fonti e non una.
+- **Cosa non afferma:** che una chiave hashed sia la scelta giusta in generale. La pagina insiste
+  sul verso opposto — la chiave si sceglie sul modo in cui si interroga la collezione — e il lab
+  usa `_id` per un motivo che il manuale non avalla e che va detto per quello che è: tenere il
+  dataset identico agli altri due stack.
+- **Riserve:** la pagina descrive anche l'analizzatore di shard key introdotto nella 7.0
+  (`analyzeShardKey`), che il lab non usa e che sarebbe lo strumento giusto in un caso vero. Non è
+  entrato nel materiale perché richiede un campione di query reali, che una demo con dati generati
+  non ha.
+- **Usata da:** ADR-0064, ADR-0068
+
+<a id="s-068"></a>
+### S-068 — Docker Docs: Use profiles with Compose
+
+- **URL:** https://docs.docker.com/compose/how-tos/profiles/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** pagina senza numero di versione; nessun requisito minimo di Compose
+  dichiarato per le forme usate qui
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — un servizio senza `profiles` è sempre acceso.** «Services without
+  a `profiles` attribute are always enabled.» È la riga che rende sensato il disegno dello stack
+  03, dove `keyfile-init` non dichiara nessun profilo: il keyfile serve a tutti e due gli scenari,
+  e non doverlo elencare in entrambi è un posto in meno dove sbagliare.
+- **Cosa afferma, secondo punto — il jolly.** La pagina documenta `--profile "*"` come modo per
+  abilitare **tutti** i profili in un colpo solo, insieme alla variabile d'ambiente
+  `COMPOSE_PROFILES`. È la forma che [ADR-0066](Decision.md#adr-0066) adotta per `down`, `logs` e
+  `reset`, e la si è scelta perché è documentata: la stessa cosa si otterrebbe elencando i profili
+  a mano, cioè costruendo una lista che invecchia in silenzio al primo profilo nuovo.
+- **Cosa afferma, terzo punto — i comandi agiscono sui profili attivi.** La pagina è esplicita sul
+  fatto che l'attivazione di un profilo governa quali servizi i comandi considerano, e mostra
+  `docker compose --profile <nome> down` come il modo di fermare i servizi di quel profilo. Non
+  dice — e questo è il punto che è costato la misura di [V-059](#v-059) — che cosa succede a chi
+  spegne con un profilo diverso da quello con cui ha acceso.
+- **Riserve:** la pagina non dichiara da quale versione di Compose `--profile "*"` sia
+  disponibile. Qui è provata su v5.5.0 ([V-059](#v-059)); su una versione più vecchia il
+  comportamento va riverificato prima di fidarsene.
+- **Usata da:** ADR-0066
+
+<a id="s-069"></a>
+### S-069 — MongoDB Manual 7.0: Sharding (la pagina d'ingresso)
+
+- **URL:** https://www.mongodb.com/docs/v7.0/sharding/ (citazioni dalla variante `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — il problema, che è di capacità e non di disponibilità.** «Database
+  systems with large data sets or high throughput applications can challenge the capacity of a
+  single server. For example, high query rates can exhaust the CPU capacity of the server. Working
+  set sizes larger than the system's RAM stress the I/O capacity of disk drives.» Le due risposte
+  possibili sono nominate e messe una contro l'altra: «*Vertical Scaling* increases the capacity of
+  a single server by using a more powerful CPU, adding more RAM, or expanding storage. Available
+  technology and cloud provider hardware configurations impose a practical maximum for vertical
+  scaling.» contro «*Horizontal Scaling* involves dividing the system dataset and load over
+  multiple servers, adding more servers to increase capacity as required. Each machine handles a
+  subset of the overall workload, which can cost less than high-end hardware for a single machine.
+  **The trade-off is increased complexity in infrastructure and maintenance.**» L'ultima frase è
+  quella che il laboratorio mette in pratica: undici container contro uno.
+- **Cosa afferma, secondo punto — i tre componenti, e i loro vincoli.** «Each shard contains a
+  subset of the sharded data. Each shard must be deployed as a replica set.» · «The `mongos` acts
+  as a query router, providing an interface between client applications and the sharded cluster.» ·
+  «Config servers store metadata and configuration settings for the cluster. Config servers must be
+  deployed as a replica set (CSRS).» E la granularità: «MongoDB shards data at the collection
+  level, distributing the collection data across the shards in the cluster.»
+- **Cosa afferma, terzo punto — l'irreversibilità, che è la frase che apre la pagina del lab.**
+  Sotto il titolo «Considerations Before Sharding»: «Sharded cluster infrastructure requirements
+  and complexity require careful planning, execution, and maintenance.» e subito dopo, in una riga
+  sola: «**Once a collection has been sharded, MongoDB provides no method to unshard a sharded
+  collection.**» Con il temperamento che va riportato insieme: «While you can reshard your
+  collection later, carefully consider your shard key choice to avoid scalability and performance
+  issues.»
+- **Cosa afferma, quarto punto — le collezioni che non sono distribuite non spariscono.** «A
+  database can have a mixture of sharded and unsharded collections. Sharded collections are
+  partitioned and distributed across the shards in the cluster. **Unsharded collections are stored
+  on a primary shard. Each database has its own primary shard.**» È la spiegazione del settimo
+  esito di [V-058](#v-058), dove una collezione creata al volo attraverso il router risultava non
+  distribuita e viveva tutta su `shard2rs`.
+- **Cosa afferma, quinto punto — da dove si entra, e da dove non si entra.** «You must connect to a
+  mongos router to interact with any collection in the sharded cluster. This includes sharded *and*
+  unsharded collections. **Clients should *never* connect to a single shard to perform read or
+  write operations.**» Letta insieme al quarto esito di [V-058](#v-058) — le stesse credenziali che
+  entrano dal router falliscono su uno shard — questa riga cambia di segno: quello che sembrava un
+  limite scomodo del lab è la configurazione che rende difficile fare la cosa che il manuale
+  vieta.
+- **Cosa afferma, sesto punto — che cosa si guadagna, in tre voci.** Letture e scritture: «MongoDB
+  distributes the read and write workload across the shards in the sharded cluster, allowing each
+  shard to process a subset of cluster operations.» Capacità: «As the data set grows, additional
+  shards increase the storage capacity of the cluster.» E la disponibilità, che è **parziale** e va
+  detta così: «Even if one or more shard replica sets become completely unavailable, the sharded
+  cluster can continue to perform partial reads and writes. That is, while data on the unavailable
+  shard(s) cannot be accessed, reads or writes directed at the available shards can still succeed.»
+- **Cosa non afferma:** **quando lo sharding non serve.** La pagina non contiene una soglia, una
+  dimensione minima, un numero di documenti, né una frase del tipo «non distribuire se…». La
+  sezione che sembra promettere quel contenuto — «Considerations Before Sharding» — avverte sulla
+  complessità, sull'irreversibilità e sulla scelta della chiave, ma non sconsiglia mai lo sharding
+  in nessuna circostanza. Chi scrive «il manuale dice di non fare sharding sotto i N documenti» sta
+  citando qualcos'altro. Nella pagina del laboratorio quel giudizio è dichiarato per quello che è:
+  una conclusione tratta dai numeri dei tre stack, non una citazione.
+- **Riserve:** due. La prima riguarda una condizione che il lab non incontra mai e che quindi non è
+  stata indagata: «Starting in MongoDB 5.1, when starting, restarting or adding a shard server with
+  `sh.addShard()` the Cluster Wide Write Concern (CWWC) must be set», e «if the `CWWC` is not set
+  and the shard is configured such that the default write concern is `{ w : 1 }` the shard server
+  will fail to start or be added and returns an error». Lo stack 03 non imposta mai il CWWC e
+  `sh.addShard()` riesce ([V-055](#v-055)): la condizione descritta non si presenta con un replica
+  set da uno o tre membri, ma il perché non è stato verificato. La seconda: la pagina descrive
+  anche zone, resharding, change stream e transazioni distribuite, che il laboratorio non usa e su
+  cui questa fonte non è stata letta con attenzione.
+- **Usata da:** ADR-0068
+
+<a id="s-070"></a>
+### S-070 — MongoDB Manual 7.0: Sharded Cluster Balancer
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/sharding-balancer-administration/ (citazioni dalla
+  variante `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — che cos'è e, soprattutto, dove gira.** «The MongoDB balancer is a
+  background process that monitors the amount of data on each shard for each sharded collection.»
+  E la riga che smentisce l'idea più diffusa: «**The balancer runs on the primary of the config
+  server replica set (CSRS).**» Non su `mongos`. Il router instrada; a spostare i dati è il
+  primario dei config server, che nel lab è un container che sembra non fare niente.
+- **Cosa afferma, secondo punto — è acceso da solo.** «By default, the balancer process is always
+  enabled.» Coerente con quanto `sh.status()` mostrava già a cluster vuoto in
+  [V-055](#v-055): `Currently enabled: yes` con zero shard registrati.
+- **Cosa afferma, terzo punto — la soglia, che è la ragione per cui nel lab non si muove mai.** «To
+  minimize the impact of balancing on the cluster, the balancer only begins balancing after the
+  distribution of data for a sharded collection has reached certain thresholds.» E il numero:
+  «**A collection is considered balanced if the difference in data between shards (for that
+  collection) is less than three times the configured range size for the collection. For the
+  default range size of `128MB`, two shards must have a data size difference for a given collection
+  of at least `384MB` for a migration to occur.**» La stessa regola detta in termini di chunk:
+  «When the collection data shared between two shards differs by three or more times the configured
+  `chunkSize` setting, the balancer migrates chunks between the shards.»
+- **Cosa afferma, quarto punto — non è gratis, e la pagina lo dice due volte.** «The balancing
+  procedure for sharded clusters is entirely transparent to the user and application layer, though
+  there may be some performance impact while the procedure takes place.» · «Range migrations carry
+  some overhead in terms of bandwidth and workload, both of which can impact database performance.»
+  Il momento più caro è nominato con precisione: «MongoDB briefly pauses all application reads and
+  writes to the collection being migrated to on the source shard before updating the config servers
+  with the range location. MongoDB resumes application reads and writes after the update.»
+- **Cosa afferma, quinto punto — quanto può fare in parallelo.** «Restricting a shard to at most
+  one migration at any given time.» e «For a sharded cluster with *n* shards, MongoDB can perform
+  at most *n/2* (rounded down) simultaneous migrations». Con i due shard del lab: **una** migrazione
+  alla volta, se mai ce ne fosse una.
+- **Cosa non afferma:** ogni quanto il balancer guardi. Non c'è una frequenza di sondaggio, non c'è
+  la durata tipica di una migrazione, e non c'è alcun modo di dedurre dalla pagina quanto tempo
+  passi fra il superamento della soglia e il primo spostamento. La pagina descrive **se** il
+  balancer si muove, non **quando**.
+- **Riserve:** i 128 MB sono il valore predefinito di `chunkSize`, non una costante: è
+  configurabile per collezione con `configureCollectionBalancing`. Nel lab il predefinito è quello
+  in vigore, letto e non supposto ([V-061](#v-061) riporta `chunkSize: 128` da
+  `sh.balancerCollectionStatus()`). E la soglia dei 384 MB **non è mai stata superata** in nessuna
+  misura di questo repository: quello che è provato è che sotto la soglia il balancer sta fermo,
+  non che sopra si muova.
+- **Usata da:** ADR-0068, ADR-0069
+
+<a id="s-071"></a>
+### S-071 — MongoDB Manual 7.0: Bulk Write Operations (l'ordine, e il collo di bottiglia monotono)
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/bulk-write-operations/ (citazioni dalla variante
+  `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — ordinato e non ordinato non sono la stessa operazione.** «Bulk
+  write operations execute either serially (*ordered*) or in any order (*unordered*). **By default,
+  operations are ordered and stop on the first error.** Unordered operations continue despite
+  errors and may execute in parallel, **making them typically faster for sharded collections.**»
+  Il predefinito è quello caro, ed è il predefinito.
+- **Cosa afferma, secondo punto — e per uno sharded cluster lo dice esplicitamente.** Sotto
+  «Strategies for Bulk Inserts to a Sharded Collection», la sezione «Unordered Writes to `mongos`»:
+  «To improve write performance to sharded clusters, perform an unordered bulk write by setting
+  `ordered` to `false` when you perform a bulk write. **`mongos` attempts to send the writes to
+  multiple shards simultaneously.**» Il meccanismo è tutto in quel *simultaneously*: con un lotto
+  ordinato non può, perché mantenere l'ordine fra shard diversi vuol dire aspettare.
+- **Cosa afferma, terzo punto — il collo di bottiglia monotono, detto più brutalmente che in
+  [S-067](#s-067).** «Avoid Monotonic Throttling»: «**If your shard key increases monotonically
+  during an insert, then all inserted data goes to the last chunk in the collection, which will
+  always end up on a single shard. Therefore, the insert capacity of the cluster will never exceed
+  the insert capacity of that single shard.**» È la terza fonte indipendente sullo stesso difetto,
+  e l'unica che lo formula come un tetto invece che come uno squilibrio.
+- **Cosa afferma, quarto punto — e spiega perché nel lab si distribuisce prima e si riempie poi.**
+  «If your sharded collection is empty and you are not using hashed sharding for the first key of
+  your shard key, then your collection has only one initial chunk, which resides on a single shard.
+  MongoDB must then take time to receive data and distribute chunks to the available shards.» Il
+  «one initial chunk» è esattamente quello che [V-061](#v-061) ha contato distribuendo una
+  collezione vuota con `{_id: 1}`.
+- **Cosa non afferma:** **quanto** costi l'ordine. «Typically faster» non è un numero, e la pagina
+  non ne dà nessuno: né un fattore, né un ordine di grandezza, né una dipendenza dal numero di
+  shard. Il rapporto di circa venticinque a uno misurato nel lab è in [V-061](#v-061) e non qui.
+  E non dice che cosa succeda con una chiave **hashed** in particolare: parla di sharded
+  collection in generale, mentre il caso peggiore è quello in cui lo shard di destinazione cambia
+  quasi a ogni documento.
+- **Riserve:** l'esempio di codice della sezione «Avoid Monotonic Throttling» è in C++ e lavora
+  sugli `ObjectId`, invertendo o scambiando parole di sedici bit per rompere la monotonia. Non è
+  applicabile al laboratorio, dove gli `_id` sono interi generati apposta, e non è stato provato.
+  La pagina è quella del ramo v7.0, cioè della versione pinnata; sul ramo 8.x la stessa materia è
+  riorganizzata sotto `bulkWrite`.
+- **Usata da:** ADR-0068
+
+<a id="s-072"></a>
+### S-072 — MongoDB Manual 7.0: The AutoMerger
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/automerger-concept/ (citazioni dalla variante
+  `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Perché è stata cercata.** Non per scrupolo: per spiegare una misura che non tornava. I quattro
+  chunk contati da [V-061](#v-061) erano diventati **due** dopo uno spegnimento e una riaccensione,
+  senza che nessuno avesse toccato niente ([V-062](#v-062)). La pagina del balancer
+  ([S-070](#s-070)) non nomina la fusione automatica; questa sì, ed è il pezzo di manuale che
+  mancava.
+- **Cosa afferma, primo punto — esiste, ed è nuova nella versione pinnata del lab.** «Starting in
+  MongoDB 7.0, the balancer can automatically merge chunks that meet the mergeability
+  requirements.» Il laboratorio gira su 7.0 ([ADR-0009](Decision.md#adr-0009)): è una funzione che
+  su una 6.x non ci sarebbe.
+- **Cosa afferma, secondo punto — che cosa fa quando gira.** «The AutoMerger runs in the background
+  as part of balancing operations.» E, senza mezzi termini: «When the AutoMerger runs, it squashes
+  together all sequences of mergeable chunks for each shard of each collection.» *Squashes
+  together*: non sposta dati fra shard, riduce il numero di intervalli in cui sono divisi quelli che
+  uno shard ha già.
+- **Cosa afferma, terzo punto — quando parte, che è la riga che spiega la misura.** «Unless
+  explicitly disabled, **the AutoMerger starts the first time the balancer is enabled** and pauses
+  for the next `autoMergerIntervalSecs` after the routine drains. When AutoMerger is enabled,
+  automerging happens every `autoMergerIntervalSecs` seconds.» La prima volta è all'accensione del
+  cluster, non dopo un'attesa: è il motivo per cui la fusione nel lab si vede pochi secondi dopo un
+  riavvio e **non** durante la sessione in cui la collezione è stata distribuita
+  ([V-062](#v-062)).
+- **Cosa afferma, quarto punto — che cosa è «fondibile».** «`mergeAllChunksOnShard` finds and merges
+  all mergeable chunks for a collection on the same shard. Two or more contiguous chunks in the same
+  collection are **mergeable** when they meet all of these conditions: They are owned by the same
+  shard. They are not jumbo chunks. […] Their history can be purged safely, without breaking
+  transactions and snapshot reads: The last migration involving the chunk happened at least as many
+  seconds ago as the value of `minSnapshotHistoryWindowInSeconds`. The last migration involving the
+  chunk happened at least as many seconds ago as the value of `transactionLifetimeLimitSeconds`.»
+  Contigui **e** dello stesso shard: la fusione non tocca il confine fra i due shard, e infatti nel
+  lab i due chunk che restano sono uno per shard.
+- **Cosa afferma, quinto punto — l'esempio, che è la forma esatta di ciò che è successo nel lab.**
+  Nove chunk su due shard diventano quattro: «This command merges the contiguous sequences of
+  chunks: A-B-C-D […] G-H», e su Shard1 «the contiguous sequences of chunks E-F». Con quattro chunk
+  e due shard, due sequenze contigue di due: due fusioni, due chunk finali. Che è esattamente il
+  conto di [V-062](#v-062).
+- **Cosa non afferma:** il **valore predefinito** di `autoMergerIntervalSecs`, che rimanda alla
+  pagina dei parametri e non riporta. La pagina non dice nemmeno se la fusione abbia un costo
+  misurabile per le operazioni in corso — dice solo che «runs in the background» — né che cosa
+  succeda se il cluster viene riavviato prima che l'intervallo scada.
+- **Riserve:** l'esempio del manuale usa una shard key per intervalli (`x`), non hashed; la forma
+  del ragionamento è la stessa ma i confini no. La precedenza fra impostazioni globali, per
+  collezione, del balancer e dell'AutoMerger è dichiarata in quattro punti e nel lab **non è mai
+  stata toccata**: tutto è predefinito, quindi nessuno dei quattro livelli è stato provato.
+- **Usata da:** ADR-0069
+
+<a id="s-073"></a>
+### S-073 — MongoDB Manual 7.0: Manage Sharded Cluster Balancer
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/manage-sharded-cluster-balancer/ (citazioni
+  dalla variante `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — il balancer si è spostato, e il manuale lo dice al passato.** «The
+  balancer process has moved from the `mongos` instances to the primary member of the config server
+  replica set.» È la stessa cosa di [S-070](#s-070) detta in forma di storia, e spiega perché
+  l'idea sbagliata — «il balancer gira sul router» — sia così diffusa: **è stata vera**, in una
+  versione precedente.
+- **Cosa afferma, secondo punto — spegnere il balancer spegne anche la fusione.** «Starting in
+  MongoDB 7.0, stopping the balancer also disables the AutoMerger for the sharded cluster.» E
+  simmetricamente: «Starting in MongoDB 7.0, starting the balancer also enables the AutoMerger for
+  the sharded cluster.» I due interruttori sono uno solo, ed è la riga che rende `sh.stopBalancer()`
+  più potente di quanto il nome prometta.
+- **Cosa afferma, terzo punto — `getBalancerState()` e `isBalancerRunning()` non rispondono alla
+  stessa domanda.** «`sh.getBalancerState()` checks if the balancer is enabled (i.e. that the
+  balancer is permitted to run). `sh.getBalancerState()` does **not** check if the balancer is
+  actively migrating data.» Il primo dice *può*, il secondo dice *sta*. Nel lab i due valgono
+  rispettivamente `true` e `"full"` ([V-063](#v-063)).
+- **Cosa afferma, quarto punto — come si verifica che sia davvero fermo.** «Before starting a backup
+  operation, confirm that the balancer is not active. You can use the following command to determine
+  if the balancer is active: `!sh.getBalancerState() && !sh.isBalancerRunning()`» Servono
+  **entrambi**, e il manuale lo scrive come una sola espressione perché è così che va usata.
+- **Cosa afferma, quinto punto — e il balancer va spento per i backup fatti a mano.** «Disabling the
+  balancer is only necessary when **manually** taking backups, either by calling `mongodump` or
+  scheduling a task that calls `mongodump` at a specific time.» E: «If MongoDB migrates a chunk
+  during a backup, you can end with an inconsistent snapshot of your sharded cluster. Never run a
+  backup while the balancer is active.» È la riga che governa il `--oplog` mancato di
+  [`backup-restore.md`](03-amministrazione/backup-restore.md).
+- **Cosa non afferma:** quanto tempo passi fra `sh.stopBalancer()` e l'effettiva quiete. Dice che
+  «if a migration is in progress, the system will complete the in-progress migration before
+  stopping», ma non dà una durata massima, e per questo propone l'attesa a polling invece di un
+  numero.
+- **Riserve:** la finestra di bilanciamento (`activeWindow`), la soglia per i chunk jumbo
+  (`attemptToBalanceJumboChunks`) e il `_secondaryThrottle` sono documentati qui e **non** sono
+  stati provati nel lab: la demo lascia tutto predefinito. Il consiglio sui backup è stato applicato
+  in [`backup-restore.md`](03-amministrazione/backup-restore.md) ma la sua **necessità** — cioè un
+  backup incoerente causato da una migrazione — non è dimostrabile su questo stack, dove nessuna
+  migrazione è mai avvenuta ([V-061](#v-061), [V-062](#v-062)).
+- **Usata da:** ADR-0069
+
+<a id="s-074"></a>
+### S-074 — MongoDB Manual 7.0: Localhost Exception in Self-Managed Deployments
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/localhost-exception/ (citazioni dalla variante
+  `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Perché è stata cercata.** [S-006](#s-006) è la stessa pagina, ma nella variante 8.3, ed è stata
+  letta quando il laboratorio non aveva shard. Il Task 9 doveva provare l'eccezione localhost su uno
+  sharded cluster **7.0**, che è la versione pinnata ([ADR-0009](Decision.md#adr-0009)): la fonte va
+  riletta nella versione che si sta misurando, non in quella corrente.
+- **Cosa afferma, primo punto — il testo sugli shard è identico a quello della 8.3.** «On a
+  `mongos`, the localhost exception only applies when there are no sharded cluster users or roles
+  created.» E: «In a sharded cluster, the localhost exception applies to each shard individually as
+  well as to the cluster as a whole.» Nessuna differenza fra le due versioni sui punti che
+  interessano qui.
+- **Cosa afferma, secondo punto — è un obbligo, e la pagina lo scrive in grassetto.** «Once you
+  create a sharded cluster and add a user administrator through the `mongos` instance, you **must**
+  still prevent unauthorized access to the individual shards.» I rimedi ammessi sono due, e sono
+  elencati come alternativa: «Create a user administrator on the shard's primary», oppure «Disable
+  the localhost exception at startup. To disable the localhost exception, set the
+  `enableLocalhostAuthBypass` parameter to `0`.»
+- **Cosa afferma, terzo punto — l'eccezione si spende una volta sola.** «Connections using the
+  localhost exception have access to create *only* the **first user OR role**.» E, nell'elenco dei
+  permessi: eseguire `createUser` «ends the localhost exception», eseguire `createRole` «ends the
+  localhost exception».
+- **Cosa afferma, quarto punto — che cosa dovrebbe essere il primo utente.** «After you enable
+  access control, connect to the localhost interface and create the first user in the `admin`
+  database. The first user must have privileges to create other users. The `userAdmin` or
+  `userAdminAnyDatabase` role both confer the privilege to create other users.»
+- **Cosa afferma, quinto punto — l'eccezione serve anche a formare un replica set.** «You can use
+  the localhost exception to initiate a replica set»; fra i permessi ci sono `replSetInitiate`,
+  `replSetGetStatus` e `replSetReconfig`. È la riga che spiega perché nel lab l'eccezione **non si
+  può** semplicemente disattivare: `11-shard-initiate.js` ci si appoggia per fare `rs.initiate()` su
+  un nodo che pretende autenticazione e non ha ancora nessun utente.
+- **Cosa non afferma:** che il primo utente venga **rifiutato** se chiede ruoli su un database
+  diverso da `admin` — la pagina raccomanda `userAdmin`, non dice che altri ruoli siano vietati, e
+  [V-064](#v-064) misura un rifiuto che la pagina non prevede. Non dice nemmeno che cosa succeda
+  **dopo** che gli utenti sono stati cancellati: la formulazione «only applies when there are no
+  users or roles created» si legge come una condizione di stato, e [V-064](#v-064) misura che è una
+  condizione del **processo**. E non dice che il primo utente possa essere creato senza alcun
+  ruolo, spendendo l'eccezione senza guadagnarci niente.
+- **Riserve:** resta aperta, esattamente come in [S-006](#s-006), la riserva bibliografica sul
+  loopback: la pagina 7.0 nomina «the localhost interface» e non enuncia da quale indirizzo la
+  connessione debba arrivare. Il comportamento è adesso misurato ([V-064](#v-064)), ma la fonte
+  continua a non dirlo. `enableLocalhostAuthBypass` è citato e non è stato provato: il lab non può
+  metterlo a `0` senza rompere `rs.initiate()`.
+- **Usata da:** ADR-0070, ADR-0071
 
 ## Verifiche empiriche
 
@@ -5183,7 +5626,7 @@ file                                   durata   eventi   byte   il numero che po
   scena: i numeri sopra sono singoli, non mediane, e vanno letti accanto a [V-029](#v-029) e
   [V-031](#v-031) che le mediane le hanno.
 - **Data:** 2026-09-01
-- **Usata da:** ADR-0050
+- **Usata da:** ADR-0050, ADR-0073
 
 ---
 
@@ -5478,3 +5921,2240 @@ codice riportato su Linux dopo la correzione: 7  (atteso 7)
   ed è per costruzione, non un difetto.
 - **Data:** 2026-09-01
 - **Usata da:** ADR-0055
+
+
+<a id="v-050"></a>
+### V-050 — `git worktree remove` difende i file non tracciati e cancella gli ignorati senza dire niente
+
+- **Comandi:** `git worktree add --detach`, `git status --porcelain [-uall] [--ignored]`,
+  `git worktree remove`
+- **Ambiente:** macOS 26.6.2 arm64, git 2.50.1 (Apple Git-155)
+- **Che cosa si voleva sapere:** chiusa e unita la PR #3, il worktree che aveva ospitato
+  `feature/02` andava rimosso. La domanda non era se il lavoro fosse al sicuro — quello lo dice
+  `git merge-base --is-ancestor` — ma **che cosa si perde** che git non conta: i file ignorati, che
+  in questo repository non sono solo cache, perché `docker/02-replicaset/.env` è ignorato per
+  decisione ([ADR-0014](Decision.md#adr-0014)) e contiene la password dell'amministratore del lab.
+
+- **Esito, primo punto — con un file ignorato dentro, la rimozione riesce in silenzio.** Un
+  worktree di prova, un `.env` scritto al suo interno, e la domanda posta a git:
+
+```
+$ git -C w1 status --porcelain
+[uscita 0]
+
+$ git worktree remove w1
+[uscita 0]
+```
+
+  Nessuna riga in uscita né dal primo comando né dal secondo. `status` dice «pulito» perché il file
+  è ignorato, e `remove` non obietta: la directory non esiste più, e il `.env` con lei.
+
+- **Esito, secondo punto — con un file non tracciato dentro, la rimozione si rifiuta.** Stesso
+  worktree di prova, un `appunto.txt` qualunque al posto del `.env`:
+
+```
+$ git -C w2 status --porcelain
+?? appunto.txt
+[uscita 0]
+
+$ git worktree remove w2
+fatal: 'w2' contains modified or untracked files, use --force to delete it
+[uscita 128]
+```
+
+  La directory sopravvive. La rete di sicurezza esiste, ed è buona: copre i file **non tracciati**.
+  Non copre gli **ignorati**, che sono una categoria diversa e nel primo caso è passata liscia.
+
+- **Esito, terzo punto — dall'esterno il controllo non è possibile, e non per la regola di
+  ignore.** Elencare i file ignorati dal checkout che contiene il worktree restituisce una riga
+  sola, `!! .claude/worktrees/…/`, con la barra finale: la directory, non il suo contenuto. Il
+  motivo non è il `.gitignore`, è il **confine di repository**. Messi fianco a fianco un worktree
+  annidato e una directory normale, e chiesto a git di scendere con `-uall`, che è l'opzione
+  apposita:
+
+```
+$ git status --porcelain -uall
+?? dirnormale/dentro.txt
+?? w3/
+```
+
+  Nella directory normale git entra e nomina il file; nel worktree si ferma sulla soglia e nomina
+  la directory. Nessuno dei due è ignorato: la differenza è solo che il secondo contiene un `.git`.
+
+- **Conseguenza:** [ADR-0056](Decision.md#adr-0056). Nel caso concreto il controllo, eseguito
+  dall'interno, ha trovato quattro voci non rigenerabili a colpo d'occhio — tre di configurazione
+  di uno strumento di indicizzazione e `docker/02-replicaset/.env` — e ha stabilito che quella era
+  l'**unica** copia del file: nel checkout principale non compariva. È stato messo in salvo prima
+  della rimozione.
+- **Riserve:** misura su una sola piattaforma e una sola versione di git; il comportamento è
+  documentato come intenzionale, ma qui non è citata la pagina di manuale che lo dichiara — è
+  osservato. Non è stato provato `--force`, che per definizione cancella tutto, né il caso di un
+  file insieme modificato e ignorato. Il confine di repository è stato provato con un worktree; un
+  submodule dovrebbe comportarsi allo stesso modo per la stessa ragione, e non è stato provato.
+  Resta fuori dalla misura `git clean`, che è l'altro modo di arrivare alla stessa lista.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0056
+
+
+<a id="v-051"></a>
+### V-051 — La 8.0.30 non è pubblicata: il traguardo di ADR-0028 al 2026-09-01
+
+- **Comandi:** `curl` sull'API dei tag di Docker Hub (`/v2/repositories/library/mongo/tags`) e sul
+  feed ufficiale dei download (`https://downloads.mongodb.org/current.json`)
+- **Ambiente:** macOS 26.6.2 arm64, curl 8.7.1, interrogazione del 2026-09-01 alle 20:15 CEST
+- **Che cosa si voleva sapere:** [ADR-0028](Decision.md#adr-0028) adotta MongoDB 7.0.40 «con la
+  8.0.30 come traguardo», e ha la scadenza scritta dentro: si ripinna appena i binari escono. Il
+  punto di ripresa di `feature/03` mette questa verifica come primo passo, prima di montare il
+  terzo stack. La domanda è secca: la 8.0.30 esiste?
+
+- **Esito, primo punto — su Docker Hub non c'è.** Interrogando l'API filtrando per nome:
+
+```
+GET /v2/repositories/library/mongo/tags?page_size=100&name=8.0.30
+-> {"count": 0, "results": []}
+```
+
+  L'ultima patch pubblicata della linea 8.0 resta la **8.0.29**, la stessa nominata da ADR-0028
+  ventisette giorni fa. L'immagine ufficiale non è ferma: i tag mobili (`latest`, `8`, `noble`)
+  risultano aggiornati il **2026-08-31**, cioè ieri. Non è un repository abbandonato che non
+  pubblica: è un repository vivo in cui quella patch non è uscita.
+
+- **Esito, secondo punto — nel feed ufficiale nemmeno.** Il feed dei download elenca, per ogni
+  linea, la versione corrente:
+
+```
+8.3.8, 8.2.12, 8.0.29, 7.0.40, 6.0.29, 5.0.34, 4.4.31
+```
+
+  Sono i due dei tre canali che ADR-0028 aveva nominato, e concordano.
+
+- **Esito, terzo punto — la versione del lab è ancora la corrente della sua linea.** Filtrando per
+  `name=7.0.4` si ottengono `7.0.4`, `7.0.40` e le loro varianti, e nessuna `7.0.41`. La 7.0.40 non
+  è una versione che invecchia mentre il lab la usa: è la punta della 7.0.
+
+- **Una trappola metodologica, incontrata e schivata.** La prima interrogazione chiedeva i tag con
+  `name=8.0` e leggeva la risposta: l'elenco finiva su `8.0.29`, e sembrava una conferma. Non lo
+  era. La risposta è paginata a 100 risultati su **435**, e l'ultimo elemento della pagina era
+  `8.0.29-windowsservercore-ltsc2025`: in ordine lessicografico la `8.0.30` sarebbe stata la prima
+  della pagina successiva. Una risposta corretta a una domanda mal posta, con la forma di una
+  risposta alla domanda giusta. La verifica vale perché la seconda interrogazione ha filtrato per
+  nome esatto, dove il conteggio è `0` e non dipende da dove cade il taglio.
+
+- **Conseguenza:** [ADR-0058](Decision.md#adr-0058). Il lab resta su 7.0.40 e il controllo si
+  ripete a data fissa invece che a sensazione.
+- **Riserve:** il feed `current.json` elenca la versione corrente per linea, non l'elenco completo
+  delle patch pubblicate; l'assenza da lì e da Docker Hub non è una prova formale che la 8.0.30 non
+  esista in nessun canale, ma è esattamente il criterio che ADR-0028 si era dato. Non è stato
+  riletto il changelog per verificare che la correzione sia **ancora** attribuita alla 8.0.30 e non
+  spostata a una patch successiva: se fosse spostata cambierebbe il numero da attendere, non
+  l'esito di oggi. Non è stata interrogata l'immagine `mongodb/mongodb-community-server`, che è il
+  terzo canale nominato da ADR-0028.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0058
+
+<a id="v-052"></a>
+### V-052 — Lo scheletro dello stack 03: i profili contati, e un config server sano per un termine solo
+
+- **Comandi:** `docker compose … config --services` con i tre profili possibili;
+  `docker compose … --profile palco up -d --wait`; `docker logs`; `docker inspect --format`;
+  `mongosh --eval` dentro il container; `tools/check_stack.py`
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, 11,66 GiB assegnati alla VM,
+  immagine `mongo` 7.0.40 pinnata per digest da `tools/images.env`, 2026-09-01
+- **Che cosa si voleva sapere:** se lo scheletro dello stack 03 — `keyfile-init` senza profilo
+  più il replica set dei config server — regge le tre affermazioni su cui è costruito: che i
+  profili selezionino esattamente i servizi previsti, che la catena dichiari «pronto» quando lo
+  è, e che l'healthcheck ereditato dallo stack 02 funzioni anche su un `mongod` con
+  `--configsvr`.
+
+- **Esito, primo punto — i profili selezionano quello che devono.** Contando i servizi:
+
+```
+--profile palco     -> keyfile-init, cfg1                    (2)
+--profile completo  -> keyfile-init, cfg1, cfg2, cfg3        (4)
+nessun profilo      -> keyfile-init                          (1)
+```
+
+  La terza riga è la conferma che conta: `keyfile-init` è **senza** `profiles`, quindi resta
+  selezionato sempre, e la relazione `depends_on` va da un servizio con profilo verso uno senza.
+  È la direzione documentata da [S-015](#s-015), l'unica delle due; la riserva dichiarata da
+  [ADR-0010](Decision.md#adr-0010) sull'altra direzione resta aggirata per costruzione.
+
+- **Esito, secondo punto — la catena a due anelli funziona.** `up -d --wait` con il profilo
+  `palco` esce **0** dopo aver percorso l'ordine per intero: `sh-keyfile-init` `Started` →
+  `Exited` → `sh-cfg1` `Started` → `Healthy`. Il keyfile risulta:
+
+```
+-r-------- 1 999 999 1024 /keyfile/mongo-keyfile
+```
+
+  cioè 400 e proprietà `999:999`, che è l'utente `mongodb` dell'immagine ufficiale
+  ([S-023](#s-023)). I 1024 byte sono i 756 di entropia in base64.
+
+- **Esito, terzo punto — e questo è quello che vale.** Su un config server avviato con
+  `--replSet` e mai inizializzato, `db.hello()` risponde:
+
+```json
+{"isWritablePrimary": false, "secondary": false, "isreplicaset": true}
+```
+
+  I primi due termini sono **falsi**. L'unico vero è il terzo. Un healthcheck scritto come
+  `isWritablePrimary || secondary` — la forma che il design §5.4 suggerisce — resterebbe rosso
+  per sempre, e la catena non arriverebbe mai a `rs.initiate()`. La disgiunzione a tre termini
+  dello stack 02 vale quindi anche su un `--configsvr`, e non era scontato: è un ruolo diverso,
+  con una porta predefinita diversa e vincoli propri.
+
+  Il ruolo è confermato dal server stesso, non dedotto dal file: il log di avvio riporta
+  `"clusterRole":"configsvr"`, e il comando del container è
+  `mongod --configsvr --replSet cfgrs --keyFile … --bind_ip_all --port 27017
+  --wiredTigerCacheSizeGB 0.25`.
+
+- **Esito, quarto punto — l'eccezione localhost è più stretta di come si racconta.** Dallo stesso
+  container, `db.adminCommand({getCmdLineOpts: 1})` **fallisce**:
+
+```
+MongoServerError: not authorized on admin to execute command { getCmdLineOpts: 1, … }
+```
+
+  mentre `db.hello()` passa. Su un nodo con `--keyFile` e nessun utente creato, l'eccezione non
+  apre il server: apre la creazione del primo utente. È un'informazione utile alla pagina della
+  sicurezza, che oggi la descrive in termini più larghi.
+
+- **Esito, quinto punto — lo scheletro è già conforme.** `tools/check_stack.py` sul solo file
+  dello stack 03 riporta `Stack conformi: 1.` senza che sia stata aggiunta nessuna regola nuova.
+
+- **Conseguenza:** [ADR-0059](Decision.md#adr-0059).
+- **Riserve:** il profilo `completo` è stato verificato solo con `config --services`, non avviato:
+  la misura non dice niente su undici container in piedi insieme, che è la domanda del §6 dello
+  spike e va rifatta nel repository. Il CSRS **non** è stato inizializzato, quindi `hello()`
+  misura lo stato che precede `rs.initiate()` e non quello che segue. Non esiste ancora nessun
+  `mongos`, quindi niente di ciò che riguarda il routing è coperto. Tutto su arm64: la
+  disponibilità dei tag e il comportamento dei limiti di memoria su amd64 non sono stati
+  riverificati qui.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0059
+
+<a id="v-053"></a>
+### V-053 — Profili e `depends_on`: la riserva di ADR-0010, misurata su quattro casi
+
+- **Comandi:** `docker compose config --services` su due file di prova con `busybox`,
+  con `--profile palco`, con `--profile completo` e senza profili; `docker compose create`
+  nominando il servizio sulla riga di comando
+- **Ambiente:** macOS 26.6.2 arm64, Docker Compose v5.4.0, Docker Engine 29.7.2, 2026-09-01
+- **Che cosa si voleva sapere:** che cosa succede quando un servizio **selezionato** dichiara
+  `depends_on` verso un servizio **non selezionato** perché il suo profilo non è attivo.
+  [S-015](#s-015) documenta una sola direzione — servizio con profilo verso le sue dipendenze —
+  e la sua riserva dice che l'altra va misurata invece che dedotta. [ADR-0010](Decision.md#adr-0010)
+  aveva ereditato quella riserva e la teneva aperta dal 24 agosto. Lo stack 03 non poteva più
+  aggirarla: i suoi servizi di inizializzazione devono dipendere da membri che nel profilo
+  `palco` non esistono, oppure rinunciare a dipenderne.
+
+- **Esito, primo caso — servizio CON profilo verso una dipendenza non selezionata.** Un file con
+  `a` in entrambi i profili, `b` solo in `completo`, e `init-con-profilo` (entrambi i profili)
+  che dipende da tutti e due:
+
+```
+--profile palco     service "init-con-profilo" depends on undefined service "b":
+                    invalid compose project                              (uscita 1)
+--profile completo  a, b, init-con-profilo                               (uscita 0)
+```
+
+- **Esito, secondo caso — servizio SENZA profilo verso una dipendenza non selezionata.** È il caso
+  che la documentazione non tratta, ed è quello che ADR-0010 aveva lasciato aperto. Con
+  `init-senza-profilo` (nessun `profiles`) che dipende da `b`:
+
+```
+nessun profilo      service "init-senza-profilo" depends on undefined service "b":
+                    invalid compose project                              (uscita 1)
+--profile palco     stesso errore                                        (uscita 1)
+```
+
+  **La regola è simmetrica.** Non conta chi ha il profilo e chi no: conta che entrambi i servizi
+  siano selezionati. Un servizio selezionato non può dipendere da uno non selezionato, in nessuna
+  delle due direzioni.
+
+- **Esito, terzo caso — la validazione riguarda solo i servizi selezionati.** Sul file del primo
+  caso, senza nessun profilo attivo, `config --services` esce **0** e non stampa niente:
+  `init-con-profilo` non è selezionato, quindi il suo `depends_on` non viene nemmeno guardato. Un
+  `depends_on` rotto può quindi restare invisibile finché non si attiva il profilo che lo
+  seleziona.
+
+- **Esito, quarto caso — nominare il servizio è diverso dall'attivare il profilo.** `docker compose
+  create init-con-profilo`, senza nessun profilo attivo, esce **0** e crea **tre** container:
+
+```
+prova-profili-caso1-init-con-profilo-1  Created
+prova-profili-caso1-b-1                 Created
+prova-profili-caso1-a-1                 Created
+```
+
+  `b` viene tirato dentro nonostante il suo profilo non sia attivo. È la frase di [S-015](#s-015)
+  — «Only the targeted service (and any of its declared dependencies via `depends_on`) is
+  started» — e vale **solo** per il servizio nominato sulla riga di comando. Attivare un profilo e
+  nominare un servizio sono due modi di selezionare che si comportano in modo opposto davanti alla
+  stessa dipendenza: il primo è un errore, il secondo un'inclusione automatica.
+
+- **Il fallimento è rumoroso**, ed è la parte buona: Compose rifiuta l'intero progetto prima di
+  avviare qualsiasi cosa, con il nome del servizio e il nome della dipendenza nel messaggio.
+  Nessuno stack parte a metà.
+
+- **Conseguenza:** [ADR-0060](Decision.md#adr-0060). La riserva di [ADR-0010](Decision.md#adr-0010)
+  e quella di [S-015](#s-015) sono chiuse: la risposta è che il caso non trattato **fallisce**, e
+  fallisce dicendolo.
+- **Riserve:** misurato su Compose v5.4.0. Non è documentato, quindi è comportamento osservato e
+  non garantito: una versione futura potrebbe scegliere di tirare dentro la dipendenza come fa con
+  i servizi nominati. Chi aggiorna Compose rifaccia i quattro casi — il file di prova sta in
+  quattordici righe. Non è stato provato `--profile "*"`, né `COMPOSE_PROFILES`.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0060
+
+<a id="v-054"></a>
+### V-054 — I tre replica set dello stack 03, e una guardia provata rompendola due volte
+
+- **Comandi:** `docker compose --profile … up -d --wait`; `docker inspect --format`;
+  `docker wait`; `docker compose wait`; `mongosh --eval` dentro i container
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, immagine `mongo` pinnata per digest da
+  `tools/images.env`, 2026-09-01
+- **Che cosa si voleva sapere:** se i tre componenti dello stack 03 che tengono dati — il replica
+  set dei config server e i due shard — si formano da soli in tutti e due i profili, e se la
+  guardia bilaterale dei due script di inizializzazione ([ADR-0060](Decision.md#adr-0060)) becca
+  davvero i disallineamenti fra l'elenco dei membri e il profilo attivo.
+
+- **Esito, primo punto — i profili selezionano 7 e 13 servizi.** Con il Task 2 completo:
+  `palco` sette (`keyfile-init`, `cfg1`, `cfg-init`, `shard1a`, `shard1-init`, `shard2a`,
+  `shard2-init`), `completo` tredici. I sei servizi in più sono i due terzi di membri che il
+  profilo del talk non avvia.
+
+- **Esito, secondo punto — i tre set si formano, in tutti e due i profili.** Con `palco`, i tre
+  one-shot escono **0** e dicono:
+
+```
+membri da configurare: cfg1:27017
+inizializzo il replica set dei config server «cfgrs»
+primario del config server eletto: cfg1:27017
+utente amministratore «admin» creato
+config server pronto
+shard «shard1rs» pronto, primario: shard1a:27017
+shard «shard2rs» pronto, primario: shard2a:27017
+```
+
+  Con `completo`, `rs.status()` su ciascuno dei tre set:
+
+```
+cfgrs    ok=1 membri=3 -> cfg1:PRIMARY   cfg2:SECONDARY   cfg3:SECONDARY
+shard1rs ok=1 membri=3 -> shard1a:PRIMARY shard1b:SECONDARY shard1c:SECONDARY
+shard2rs ok=1 membri=3 -> shard2a:PRIMARY shard2b:SECONDARY shard2c:SECONDARY
+```
+
+  Il primario è il membro «a» in tutti e tre: `priority: 2` sul primo membro
+  ([ADR-0051](Decision.md#adr-0051)) funziona anche qui, e per una demo cronometrata vuol dire
+  sapere in anticipo quale container fermare.
+
+- **Esito, terzo punto — la guardia becca il caso pericoloso.** `--profile completo` con gli
+  elenchi lasciati al valore del `palco`: nove `mongod` in piedi, tre set da inizializzare a un
+  membro solo. Tutti e tre gli one-shot escono **5** (`USCITA_MEMBRO_DI_TROPPO`) senza toccare
+  niente. Senza guardia lo stack sarebbe partito, sarebbe sembrato sano, e la scena del failover
+  non avrebbe avuto niente da mostrare: è il guasto che di suo non fallisce.
+
+- **Esito, quarto punto — e becca anche l'altro.** `--profile palco` con gli elenchi del
+  `completo`: tutti e tre escono **4** (`USCITA_MEMBRO_ASSENTE`) dopo i trenta secondi di attesa,
+  dicendo quale membro manca e perché:
+
+```
+ERRORE: il membro «cfg2:27017» non risponde dopo 30 secondi.
+Di solito significa che MEMBRI_CFG elenca più membri di quanti il
+profilo attivo ne avvii. Con «--profile palco» il config server è uno solo.
+```
+
+- **Esito, quinto punto — `up --wait` esce 0 in tutti e quattro i casi, anche quando gli init
+  falliscono.** È la riconferma di [V-025](#v-025) su uno stack diverso, e la ragione per cui
+  [ADR-0041](Decision.md#adr-0041) vuole due comandi e non uno. Peggio: nel caso del disallineamento
+  Compose stampa
+
+```
+Container sh-cfg-init  Healthy
+```
+
+  per un container che `docker inspect` descrive come `stato=exited uscita=5 salute=nessun
+  healthcheck definito`. La parola «Healthy» sulla riga di un container morto non è un capriccio:
+  per `--wait` un servizio senza healthcheck è a posto appena parte. Nella prima misura del profilo
+  `completo` `up --wait` è uscito 0 mentre i tre one-shot erano ancora **in corsa**.
+
+  Una precisazione che lo stack 02 non poteva mostrare: `docker compose wait cfg-init` **senza**
+  `--profile` risponde `no containers for project "sqlstart-03-sharded"` e esce **1**. Il verdetto
+  di ADR-0041 va quindi dato con il profilo addosso, ed è un vincolo per il Task 4 del piano.
+
+- **Esito, sesto punto — l'eccezione localhost, misurata al confine su un nodo senza utenti.**
+  Uno shard resta senza utenti finché il Task 9 non decide diversamente, quindi la sua eccezione
+  localhost è aperta. Da dentro `sh-shard1a`, senza credenziali:
+
+```
+hello              AMMESSO
+replSetGetStatus   AMMESSO   (risposta piena: set, membri, stateStr)
+listDatabases      AMMESSO   (ok=1, ma l'elenco è VUOTO)
+getCmdLineOpts     NEGATO    Unauthorized
+serverStatus       NEGATO    Unauthorized
+find su una raccolta   NEGATO    Unauthorized
+insert su una raccolta NEGATO    Unauthorized
+```
+
+  Il confronto di controllo è su `sh-cfg1`, dove l'utente amministratore esiste e l'eccezione è
+  quindi chiusa: lì `replSetGetStatus` e `listDatabases` rispondono **Unauthorized**, e passa solo
+  `hello()`. La differenza fra le due colonne è l'eccezione localhost e nient'altro.
+
+  Ne segue che l'eccezione **non** è «solo la creazione del primo utente», come [V-052](#v-052)
+  aveva concluso da una misura sola: concede anche di leggere lo stato del replica set per intero.
+  Non concede di leggere dati, di scriverne, né di sapere come è stato avviato il server. È un
+  confine con una forma, non una porta aperta o chiusa, e la pagina della sicurezza del Task 9 lo
+  deve disegnare così.
+
+- **Conseguenza:** [ADR-0060](Decision.md#adr-0060).
+- **Riserve:** non c'è ancora nessun `mongos`, quindi i tre set esistono e **non si conoscono**:
+  niente di ciò che riguarda il routing, `sh.addShard()` o la distribuzione dei documenti è coperto
+  qui. La password usata nella prova è di scarto e i volumi sono stati cancellati con `down -v`
+  alla fine di ogni caso. Tutto su arm64. Il sesto punto è misurato su un `mongod --shardsvr`: non
+  è stato riverificato su un `--configsvr` senza utenti.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0060
+
+<a id="v-055"></a>
+### V-055 — `mongos` senza shard: sano, interrogabile, e muto quando dovrebbe gridare
+
+- **Comandi:** `docker compose --profile … up -d --wait`; `docker compose wait add-shard`;
+  `docker inspect --format`; `docker logs`; `mongosh --eval` dentro i container; `docker stop` /
+  `docker start`
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.4.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-01
+- **Che cosa si voleva sapere:** che cosa risponde un `mongos` a cui non è stato ancora registrato
+  nessuno shard. La domanda non è oziosa: decide che cosa può chiedere il suo healthcheck. Se la
+  sonda pretendesse un cluster completo, il servizio one-shot che registra gli shard — che gira
+  **dentro** `mongos` e quindi lo aspetta sano — non partirebbe mai, e lo stack si bloccherebbe
+  su se stesso. Serviva sapere se la sonda può essere onesta e restare una sonda di vita.
+
+- **Esito, primo punto — con zero shard `mongos` è sano e risponde a quasi tutto.** Autenticati come
+  amministratore, su un router appena avviato e nessuno shard nel cluster:
+
+```
+hello()                OK      ok=1 msg=isdbgrid
+ping                   OK      ok=1
+config.shards count    OK      0
+listDatabases          OK      ["admin","config"]
+lettura su demo        OK      []
+SCRITTURA su demo      ERRORE  ShardNotFound — Database demo could not be created :: caused by :: No shards found
+enableSharding demo    ERRORE  ShardNotFound — Database demo could not be created :: caused by :: No shards found
+```
+
+  Il container è `Up (healthy)` per Docker, `sh.status()` stampa `shards []` con il balancer
+  `Currently enabled: yes`, e `hello()` risponde `ok=1 msg=isdbgrid` **anche senza credenziali** —
+  che è la ragione per cui la sonda dell'healthcheck può restare una riga sola senza password
+  dentro il file Compose.
+
+- **Esito, secondo punto — la lettura tace, la scrittura no.** È il punto didattico della misura, e
+  non era scontato: `find()` su una collezione di un database inesistente risponde `[]` **senza
+  nessun errore**, esattamente come risponderebbe un cluster sano con la collezione vuota. Le due
+  situazioni sono indistinguibili dal lato del client. Solo la scrittura distingue, e lo fa con un
+  messaggio che nomina la causa vera: `No shards found`. Un cluster senza shard non è rotto in
+  modo visibile: è rotto in modo che si nota alla prima scrittura, e a una demo dal vivo la prima
+  scrittura arriva dopo che si è già detto al pubblico che il cluster è pronto.
+
+- **Esito, terzo punto — `sh.addShard()` chiude la catena, e i due shard entrano.** Il one-shot
+  esce **0**, `docker compose wait add-shard` risponde 0, e il registro dice:
+
+```
+shard già registrati: nessuno
+registro lo shard «shard1rs» -> shard1rs/shard1a:27017
+registro lo shard «shard2rs» -> shard2rs/shard2a:27017
+shard nel cluster: shard1rs -> shard1rs/shard1a:27017
+shard nel cluster: shard2rs -> shard2rs/shard2a:27017
+cluster pronto: 2 shard registrati
+```
+
+  Subito dopo, la stessa scrittura che un minuto prima falliva viene accettata e riletta:
+  `insertOne` risponde `acknowledged: true`, `find` restituisce `[{"x":1}]`. È la differenza fra
+  tre replica set e uno sharded cluster, ed è **una riga scritta in `config.shards`**: sui nove
+  `mongod` non è cambiato niente, stessi processi e stessi dati.
+
+- **Esito, quarto punto — `sh.status()` dopo la registrazione.** Due shard con `state: 1`,
+  `active mongoses [ { '7.0.40': 1 } ]`, autosplit `Currently enabled: yes`, balancer
+  `Currently enabled: yes` e `Failed balancer rounds in last 5 attempts: 0`;
+  `sh.getBalancerState()` risponde `true`. È la misura chiesta dal piano del Task 3, rifatta qui
+  dentro il repository e non nella directory di prova dello spike.
+
+- **Esito, quinto punto — la riesecuzione non rompe niente.** Ricreato il one-shot con
+  `up -d --force-recreate add-shard`, esce **0** e scrive
+  `shard «shard1rs» già registrato: non lo riaggiungo` per tutti e due. Serviva perché un
+  `make up-03` dato due volte davanti al pubblico non deve fallire la seconda.
+
+- **Esito, sesto punto — il profilo `completo`, e il router che non ha niente da perdere.** Sedici
+  container, tutti `healthy` o `Exited (0)`. Con gli elenchi a tre membri, `sh.addShard()` registra
+  la composizione per intero — `shard1rs/shard1a:27017,shard1b:27017,shard1c:27017` — e
+  `config.mongos` elenca tutti e due i router: `["mongos2:27017","mongos:27017"]`. Fermato
+  `sh-mongos` con `docker stop`, la scrittura data a `mongos2` passa (`acknowledged: true`) e
+  `mongos2` vede i due shard. Nessun dato è andato perso perché **su un `mongos` non ce n'è**: è
+  l'unico servizio dello stack senza volume, e la sua morte è un dettaglio operativo, non un
+  incidente.
+
+- **Conseguenza:** [ADR-0061](Decision.md#adr-0061).
+- **Riserve:** nessuna collezione è stata distribuita — `shardCollection`, la shard key e la
+  distribuzione dei chunk restano fuori (Task 6). La misura del secondo punto vale per un database
+  che non esiste; non è stato provato che cosa risponde una lettura su un database **esistente**
+  ma con gli shard tolti a posteriori, che è un caso che questo stack non sa produrre. Il quinto
+  punto ricrea il container, non riesegue lo script dentro lo stesso container. Le password usate
+  nelle prove sono di scarto e ogni caso si è chiuso con `down -v`, senza container né volumi
+  residui. Tutto su arm64.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0061
+
+<a id="v-056"></a>
+### V-056 — La sentinella: `up --wait` diventa onesto, e un ramo d'errore che era codice morto
+
+- **Comandi:** `docker compose up -d --wait` con e senza il servizio sentinella;
+  `docker compose wait`; `docker inspect --format`; `docker logs`; un banco di prova in
+  `busybox` con un one-shot a durata e codice di uscita governati da fuori
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.4.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-01
+- **Che cosa si voleva sapere:** il Passo 4 del Task 4 chiede di verificare che
+  `docker compose --profile palco up --wait` esca 0 **soltanto** quando `sh.status()` è già utile.
+  Non è verificabile così com'è — [V-025](#v-025) e [ADR-0041](Decision.md#adr-0041) hanno già
+  stabilito che `up --wait` non aspetta i one-shot — quindi la domanda vera è se si possa
+  **costruire** quella proprietà, e a che prezzo.
+
+- **Esito, primo punto — il banco di prova isola il meccanismo.** Tre container `busybox`: un
+  one-shot che dorme sei secondi e poi esce con il codice che gli si passa, una sentinella che
+  dipende da lui con `service_completed_successfully` e resta viva, un servizio di controllo che
+  non dipende da niente. Senza la sentinella:
+
+```
+progetto intero, one-shot che uscirà 0  ->  up --wait esce 0 dopo 1 secondo, one-shot «running»
+progetto intero, one-shot che uscirà 7  ->  up --wait esce 0 dopo 0 secondi
+                                            e Compose stampa «Container lavoro Healthy»
+```
+
+  Con la sentinella, gli stessi due casi:
+
+```
+one-shot che esce 0  ->  up --wait esce 0 dopo 7 secondi
+one-shot che esce 7  ->  up --wait esce 1, «service "lavoro" didn't complete
+                         successfully: exit 7», sentinella ferma in «Created»
+```
+
+- **Esito, secondo punto — lo stesso, sullo stack vero.** Con `--profile palco` e `add-shard`
+  rallentata di 40 secondi per rendere deterministica una corsa che altrimenti si vince per caso:
+
+| | `up --wait` | dopo | shard registrati | add-shard |
+|---|---|---|---|---|
+| senza sentinella | **0** | 18 s | **0** | `running` |
+| senza sentinella, catena rotta | **0** | 18 s | 0 | `running` |
+| con sentinella | 0 | 60 s | **2** | `exited 0` |
+| con sentinella, catena rotta | **1** | 35 s | 0 | `exited 6` |
+
+  Nel quarto caso il messaggio è `service "add-shard" didn't complete successfully: exit 6` e la
+  sentinella resta in `Created`. Nel terzo, nell'istante in cui `up --wait` torna, `sh.status()`
+  mostra i due shard con `state: 1`, il balancer attivo e una scrittura che viene accettata: è
+  esattamente la proprietà che il Passo 4 chiedeva di verificare, ottenuta costruendola.
+
+- **Esito, terzo punto — quello che la sentinella non dà.** `up --wait` esce **1**, non 6. Il
+  verdetto è giusto e il colpevole è nominato, ma il codice specifico dello script — 6 per
+  `addShard` fallita, 7 per cluster incompleto — sopravvive solo nel testo del messaggio.
+
+- **Esito, quarto punto — e il secondo comando qui farebbe danno.** `docker compose wait
+  add-shard` dopo un `up --wait` riuscito risponde `no containers for project
+  "sqlstart-03-sharded"` ed esce **1**, con il flag di profilo acceso: il container ha già finito, e
+  `wait` vuole qualcosa di vivo a cui attaccarsi. Il controllo è sul banco `busybox`, dove lo
+  stesso comando su un one-shot **ancora in corsa** esce 0 e stampa `exited with status code 0`.
+  La forma prescritta da ADR-0041 per lo stack 02 è quindi la forma sbagliata per lo stack 03, e
+  non per una questione di stile: fallirebbe.
+
+- **Esito, quinto punto — un ramo d'errore che era codice morto.** Rompendo la stringa di uno
+  shard (`SHARD_1: nonesiste/shard1a:27017`) è venuto fuori che `sh.addShard()` **solleva** invece
+  di rispondere `ok: 0`: `MongoServerError: Could not find host matching read preference
+  { mode: "primary" } for set nonesiste`. mongosh usciva **1** per eccezione non gestita, quindi
+  il controllo `if (!esito.ok)` di `20-add-shard.js` non veniva valutato mai, l'uscita 6 era
+  irraggiungibile e il messaggio che nomina le due cause frequenti non si stampava. Con il
+  `try/catch` aggiunto, lo stesso caso dà uscita **6** e stampa:
+
+```
+ERRORE: sh.addShard(«nonesiste/shard1a:27017») ha risposto ok=0
+Messaggio: Could not find host matching read preference { mode: "primary" } for set nonesiste
+Le due cause frequenti: il mongod non è stato avviato con --shardsvr,
+oppure il replica set nominato non ha un primario eletto.
+```
+
+- **Esito, sesto punto — un file di override ACCODA le liste, non le sostituisce.** Il primo
+  tentativo di controllo metteva `profiles: ["mai"]` su `up-03` in un file passato con un secondo
+  `-f`, aspettandosi di spegnerlo. `config --services` continuava a elencarlo: la lista risultante
+  è `["palco","completo","mai"]`, e `--profile palco` lo seleziona lo stesso. Due misure fatte
+  così erano prive di valore e sono state rifatte su una copia del file senza il servizio. Vale
+  per ogni campo a sequenza, non solo per `profiles`.
+
+- **Conseguenza:** [ADR-0062](Decision.md#adr-0062).
+- **Riserve:** il quarto punto non è stato riverificato sullo stack 02, dove `up-02` esegue
+  proprio i due comandi: lì `up --wait` torna **prima** che `rs-init` finisca ([V-025](#v-025)),
+  quindi `wait` trova il container vivo e il bersaglio funziona — ma la distanza fra le due cose
+  è di secondi, e nessuna misura dice quanto sia stabile su una macchina diversa. È un controllo
+  da fare al Task 7. Le prove sono tutte sul profilo `palco`; il rallentamento di 40 secondi è un
+  artificio da banco di prova e non descrive un tempo reale. Password di scarto, ogni caso chiuso
+  con `down -v`, nessun residuo. Tutto su arm64.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0062
+
+<a id="v-057"></a>
+### V-057 — I tre ruoli dello sharded: sei modi di sbagliarli, cinque che lo dicono e uno che no
+
+- **Comandi:** `docker run --rm` con `mongod` e `mongos` e le opzioni rotte una alla volta;
+  copie di `docker/03-sharded/compose.yaml` con un difetto ciascuna avviate con
+  `docker compose --profile palco up -d --wait`; `docker inspect --format`; `docker logs`;
+  `tools/check_stack.py` su sette copie dello stesso file
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.4.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-01
+- **Che cosa si voleva sapere:** il Task 5 chiede di insegnare a `check_stack.py` le regole dello
+  stack sharded. Prima di scrivere una regola serve sapere **che cosa succede davvero senza**, per
+  due motivi distinti. Il primo è di forma: i messaggi di `check_stack.py` citano il sintomo, e un
+  sintomo si cita solo dopo averlo visto. Il secondo è di merito: una regola che previene un errore
+  già rumoroso vale meno di una che previene un errore muto, e prima di misurare non si sa quale
+  delle due si sta scrivendo.
+
+- **Esito, primo punto — quattro rifiuti sulla riga di comando, tutti immediati e tutti espliciti.**
+  Quattro `docker run` da pochi secondi, nessun cluster acceso:
+
+```
+mongod --configsvr --shardsvr --replSet x
+  -> BadValue: shardsvr is not allowed when configsvr is specified   (uscita 1)
+mongos --configdb x/a:27017 --wiredTigerCacheSizeGB 0.25
+  -> Error parsing command line: unrecognised option '--wiredTigerCacheSizeGB'
+mongos --configdb a:27017,b:27017
+  -> FailedToParse: invalid url [a:27017,b:27017]
+mongos --port 27017
+  -> BadValue: error: no args for --configdb
+```
+
+  Nessuno dei quattro processi parte, e ognuno nomina l'opzione che ha in mano. Il terzo dice
+  anche una cosa sulla storia: dalla 3.4 `--configdb` accetta soltanto la forma
+  `nomeSet/host:porta`, e l'elenco nudo di host — la scrittura di prima, quella che si trova
+  copiando una guida vecchia — oggi non è un'incompatibilità silenziosa ma un rifiuto.
+
+- **Esito, secondo punto — uno shard senza `--shardsvr`: lo dice l'ultimo anello, e lo dice bene.**
+  Copia dello stack con le sei righe `--shardsvr` tolte, profilo `palco`. `up --wait` esce **1**,
+  `add-shard` esce **6**, e il log è questo:
+
+```
+registro lo shard «shard1rs» -> shard1rs/shard1a:27017
+ERRORE: sh.addShard(«shard1rs/shard1a:27017») ha risposto ok=0
+Messaggio: Cannot run addShard on a node started without --shardsvr
+Le due cause frequenti: il mongod non è stato avviato con --shardsvr,
+oppure il replica set nominato non ha un primario eletto.
+```
+
+  Due cose vanno annotate. La prima: `sh.addShard()` qui **restituisce** `ok: 0`, non solleva —
+  al contrario del caso di [V-056](#v-056), dove con un replica set irraggiungibile sollevava. I
+  due comportamenti convivono, e il `try/catch` aggiunto al Task 4 li copre entrambi; senza di
+  quello, metà dei casi sarebbe rimasta muta. La seconda: il commento di `shard1a` nel file
+  Compose diceva che «il messaggio parla d'altro». Non è vero, il messaggio nomina esattamente
+  l'opzione che manca, e il commento è stato corretto.
+
+- **Esito, terzo punto — un config server senza `--configsvr`: lo dice il primo anello.**
+  Copia con le tre righe `--configsvr` tolte. `up --wait` esce **1**, `cfg-init` esce **1** —
+  che non è nessuno dei codici che [ADR-0036](Decision.md#adr-0036) assegna, perché è
+  un'eccezione non gestita — e stampa:
+
+```
+inizializzo il replica set dei config server «cfgrs»
+MongoServerError: Nodes being used for config servers must be started with the --configsvr flag
+```
+
+- **Esito, quarto punto — il refuso nel nome del set: novantaquattro secondi, e la causa non
+  compare da nessuna parte.** Copia con `cfgsr` al posto di `cfgrs` dentro `--configdb`: due
+  lettere scambiate, tutto il resto intatto. È il caso peggiore dei sei, e per tre ragioni che si
+  sommano.
+
+  Primo, il tempo. `up --wait` esce **1 dopo 94 secondi**, contro i 20-60 degli altri casi: il
+  `mongos` non fallisce, ritenta, e la catena si ferma solo quando la sonda esaurisce i dodici
+  tentativi. `add-shard` e `up-03` restano in `Created`, cfg1 e i due shard risultano `healthy`.
+
+  Secondo, il posto. Tutti i processi partono; il solo malato è il router, che resta
+  `unhealthy` senza mai aprire la porta — `mongosh` da dentro il container risponde
+  `MongoNetworkError: connect ECONNREFUSED 127.0.0.1:27017`.
+
+  Terzo, e decisivo: **la stringa `cfgrs` non compare mai nel log di `mongos`.** Contata:
+  zero occorrenze. Il nome giusto non viene mai messo accanto a quello sbagliato, e quello che
+  si legge invece è questo:
+
+```
+"msg":"RSM host was removed from the topology","attr":{"replicaSet":"cfgsr","addr":"cfg1:27017"}
+"msg":"Host failed in replica set","attr":{"replicaSet":"cfgsr","host":"cfg2:27017", …
+   "error":"HostUnreachable: …"
+"s":"W", "c":"SHARDING", "msg":"Error loading global settings from config server.
+   Sleeping for 2 seconds and retrying","attr":{"error":{"code":133,
+   "codeName":"FailedToSatisfyReadPreference", …
+```
+
+  Chi legge trova «host irraggiungibile» su `cfg2` e `cfg3` — che nel profilo `palco` sono
+  irraggiungibili **per costruzione**, sono semi e basta, come lo spike ha già documentato — e
+  `FailedToSatisfyReadPreference` sul solo host che invece risponde benissimo. La diagnosi punta
+  alla rete. La causa sono due lettere.
+
+- **Esito, quinto punto — le sette copie del file vero.** Le regole nuove non sono state provate
+  solo sui campioni dei test, come già per [V-026](#v-026): sette copie di
+  `docker/03-sharded/compose.yaml`, un difetto ciascuna, passate a `check_stack.py`. La copia
+  intatta esce **0**; le altre sei escono **1 con esattamente un problema ciascuna**, e sei
+  messaggi diversi. Un problema solo per copia, non una cascata: la regola che scatta è quella
+  del difetto introdotto.
+
+- **Esito, sesto punto — la notizia, che è l'opposto di quella attesa.** Cinque dei sei sintomi
+  nominano l'opzione che manca, e lo fanno con una frase che si può cercare in rete così com'è.
+  Non sono errori muti. Il guadagno delle regole nuove non è quindi tradurre un messaggio oscuro:
+  è **incontrarlo in due secondi con `make stack-check` invece che al minuto e ventuno di un
+  avvio**, davanti al pubblico, con dieci container accesi da spegnere. Il sesto sintomo, il
+  refuso, è l'unico veramente muto, ed è quello per cui la terza regola esiste da sola.
+
+- **Conseguenza:** [ADR-0063](Decision.md#adr-0063).
+- **Riserve:** tutte le prove sul profilo `palco`; il profilo `completo` non è stato rotto, e non
+  c'è motivo di aspettarsi sintomi diversi, ma non è misurato. I quattro rifiuti del primo punto
+  sono su `docker run` nudo, senza keyfile né rete Compose: dicono che la riga di comando è
+  rifiutata, non che nel cluster il sintomo si presenti identico. Le novantaquattro secondi del
+  quarto punto dipendono dai parametri della sonda di `mongos` — dodici tentativi ogni cinque
+  secondi con venti di grazia — e cambierebbero cambiando quelli. Password di scarto, ogni caso
+  chiuso con `down -v`, nessun container né volume residuo. Tutto su arm64.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0063
+
+<a id="v-058"></a>
+### V-058 — Ventimila documenti distribuiti: quattro chunk, 49,3 % / 50,7 %, e sei cose che il cluster non lascia fare
+
+- **Comandi:** `docker compose --profile palco up -d --wait` e `--profile completo up -d --wait`
+  su `docker/03-sharded/compose.yaml`; `mongosh` attraverso `mongos` con
+  `$shardedDataDistribution`, `config.shards`, `config.chunks`, `explain()`;
+  `mongosh` in diretta su `shard1a` e su `cfg1`; `docker inspect --format`; `docker logs`;
+  `tools/smoke-sharded.sh` nei due profili
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.4.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-01
+- **Che cosa si voleva sapere:** il Task 6 aggiunge i dati di demo e la prova end-to-end. Servivano
+  tre cose distinte: che la shard key scelta distribuisca davvero e non solo sulla carta; quali
+  costanti lo smoke può permettersi di asserire senza diventare fragile; e da dove si leggono le
+  misure interne dei nodi, dato che uno sharded cluster non si lascia interrogare come un replica
+  set.
+
+- **Esito, primo punto — la distribuzione, che è la misura per cui esiste tutto il resto.** Con
+  shard key `{_id: "hashed"}` su collezione vuota e poi 20 000 documenti inseriti a lotti di 5 000
+  con `w: "majority"`:
+
+```
+shard key: {"_id":"hashed"} · chunk: 4
+  shard1rs:  9860 documenti (49,3 %)
+  shard2rs: 10140 documenti (50,7 %)
+indici: _id_, _id_hashed
+```
+
+  I quattro chunk non sono un caso: [S-066](#s-066) documenta due chunk per shard come valore
+  predefinito quando si distribuisce una collezione vuota, e due shard fanno quattro. Lo spike §5
+  aveva misurato lo stesso numero senza sapere che fosse un predefinito. Gli orfani sono zero su
+  tutti e due gli shard.
+
+- **Esito, secondo punto — la distribuzione non dipende dal profilo.** Stessi identici numeri —
+  9860 e 10140 — su `palco` (un membro per insieme) e su `completo` (tre). Non è ovvio a chi guarda
+  ma lo è ripensandoci: la ripartizione dipende dall'hash delle chiavi e dai confini dei chunk, e i
+  membri in più sono copie dello stesso shard. Il tempo di caricamento è lo stesso a meno del
+  rumore, 1202 ms contro 1217 ms, perché `w: "majority"` su un set a tre membri con tutti i nodi
+  sani costa quanto su uno a un membro.
+
+- **Esito, terzo punto — il baratto della shard key, misurato invece che raccontato.** Tre
+  `explain()` attraverso il router, contando gli shard interrogati:
+
+```
+db.ordini.find({_id: 42})                       -> shard2rs                (1 shard)
+db.ordini.find({_id: {$gte: 100, $lt: 200}})    -> shard1rs, shard2rs      (2 shard)
+db.ordini.find({citta: "Ancona"})               -> shard1rs, shard2rs      (2 shard)
+```
+
+  È la conferma sperimentale di [S-066](#s-066): mirata l'uguaglianza sulla chiave, in broadcast
+  l'intervallo sulla **stessa** chiave. La terza riga è il caso normale di un campo qualsiasi e
+  serve da controprova, perché senza si potrebbe credere che il broadcast dipenda dall'intervallo e
+  non dall'hash.
+
+- **Esito, quarto punto — gli utenti di uno sharded cluster non stanno sugli shard, e la cosa si
+  scopre provando.** Le stesse credenziali che funzionano sul router, usate in diretta su
+  `shard1a`, danno `MongoServerError: Authentication failed`. Senza credenziali si ottiene
+  `not authorized on admin to execute command`. Su `cfg1` invece la stessa coppia entra e risponde
+  (`mem=512`, `cache=268435456`). Gli utenti vivono nel database `admin` dei config server, e uno
+  shard interrogato direttamente autentica contro i propri, che non esistono. Conseguenza pratica
+  per lo smoke: le misure interne dei nodi non si possono leggere con `hostInfo()` su tutti, e si
+  leggono da `docker inspect` e dalla riga `cache_size=…` del log di avvio.
+
+  **Seguito, 2026-09-02.** Questo punto vale fino a [ADR-0071](Decision.md#adr-0071). Da quando
+  ogni shard ha un amministratore locale, le credenziali del cluster su `shard1a` **entrano** e
+  rispondono, e senza credenziali la risposta non è più `not authorized on admin to execute
+  command` ma `Command find requires authentication` ([V-067](#v-067)). Resta vero ciò che il
+  punto spiega — gli utenti del cluster vivono nel database `admin` dei config server, e uno
+  shard autentica contro i propri: adesso i propri esistono, e sono un altro elenco.
+
+- **Esito, quinto punto — che cosa distingue davvero un router da un nodo, e che cosa no.** Su
+  `mongos` la sezione `wiredTiger` di `serverStatus()` **non esiste** — non è vuota, manca — e la
+  stringa `cache_size` compare **zero volte** nel log, contro le nove dei nove `mongod`. Ma il
+  controllo che sembrava ovvio è sbagliato: `docker inspect` mostra `/data/db` montato **anche su
+  `mongos`**, perché l'immagine di MongoDB dichiara `VOLUME /data/db` nel proprio Dockerfile e
+  Docker crea un volume anonimo su ogni container che ne nasce. Il discriminante vero è il volume
+  **nominato**: `sqlstart-03-sharded_dati-cfg1` su un nodo, nessun `dati-…` sul router. La prima
+  stesura dello smoke ha fallito proprio qui, ed è l'unico rosso dell'intera prova.
+
+- **Esito, sesto punto — i tempi e le costanti che lo smoke può asserire.** `up -d --wait` chiude
+  a **uscita 0 in 23 secondi** sul profilo `palco` e in **36** su `completo`, catena completa
+  compresa il seed. Il secondo `up` di seguito esce 0 e il seed stampa «lab.ordini ha già 20000
+  documenti: non ricarico»: idempotente. Impronta del dataset `20000 50083417.93 60278` (documenti,
+  somma degli importi a due decimali, somma delle righe), identica nei due profili — sono i primi
+  20 000 dei 50 000 degli stack 01 e 02, stesso generatore e stesso seme. Limiti di memoria letti
+  dai container: 536 870 912 sui config server, 671 088 640 sugli shard, 268 435 456 sui router.
+  Cache di WiredTiger `cache_size=256M` su tutti e nove i `mongod`. Porte pubblicate 27117 e 27118,
+  rotazione `10m`/`3` su tutti, keyfile identico e a `400` sugli undici container.
+
+- **Esito, settimo punto — la prova completa, nei due profili.** `tools/smoke-sharded.sh` chiude a
+  **62 controlli superati e 0 errori** su `palco` e **99 e 0** su `completo`. La differenza di
+  conteggio è tutta nel numero di nodi: i controlli per nodo si moltiplicano, quelli sul cluster no.
+  Una scrittura con `w: "majority"` attraverso il router viene accettata e riletta; la collezione
+  che la riceve **non** risulta distribuita e vive sullo shard primario del database (`shard2rs`),
+  che è la prova del concetto di shard primario.
+
+- **Riserve:** la distribuzione 49,3 % / 50,7 % è una proprietà di **questo** dataset con **questo**
+  seme, non una garanzia: la soglia dello smoke è fissata al 40 % per shard proprio per non
+  confondere una fluttuazione con un guasto. I quattro chunk valgono finché gli shard sono due e
+  nessuno passa `numInitialChunks`; lo smoke tratta un numero maggiore come informazione e non come
+  errore. Il conteggio dei controlli dipende dal numero di nodi del profilo e cambierà al primo
+  controllo aggiunto. Password di scarto, `.env` cancellato in coda, ogni giro chiuso con `down -v`
+  e residui verificati a zero: nessun container, nessun volume, nessuna rete. Tutto su arm64.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0064, ADR-0065, ADR-0068, ADR-0071, ADR-0072
+
+<a id="v-059"></a>
+### V-059 — Il profilo con cui si spegne non è quello con cui si è acceso, e Compose non lo dice
+
+- **Comandi:** `docker compose --profile palco|completo|"*" up -d --wait`, `… down`, `… ps`,
+  `docker network ls`, `docker volume ls` su `docker/03-sharded/compose.yaml`
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.5.0, VM Docker con
+  11,67 GiB e 8 CPU, immagine `mongo` pinnata per digest da `tools/images.env`, 2026-09-02
+- **Che cosa si voleva sapere:** il Task 7 sceglie di passare il profilo come **variabile** del
+  `Makefile` invece di generare due famiglie di bersagli. Prima di scriverlo andava verificato che
+  la variabile bastasse davvero — cioè che `PROFILO=palco make down-03` dopo un avvio in
+  `completo` lasciasse la macchina pulita, che è la sequenza che capita a chi fa una prova
+  generale e poi spegne.
+
+- **Esito, primo punto — non basta, e il modo in cui non basta è il peggiore.** Acceso in
+  `completo` (18 servizi) e spento con `--profile palco`:
+
+```
+container rimossi:   11  (quelli del profilo palco)
+container rimasti:    7  (sh-cfg2, sh-cfg3, sh-shard1b, sh-shard1c, sh-shard2b, sh-shard2c, sh-mongos2)
+rete:                 «Network sqlstart-03-sharded_rete Resource is still in use»
+codice di uscita:     0
+```
+
+  Uscita **zero**. Compose stampa il messaggio sulla rete e considera il comando riuscito: chi
+  legge solo l'esito crede di aver spento, e si ritrova sette mongod accesi che continuano a
+  tenere la RAM e le porte. Al `up` successivo la rete esiste già, quindi nemmeno lì si accorge di
+  niente.
+
+- **Esito, secondo punto — `down` senza `--profile` si comporta come `--profile palco`.** Stesso
+  identico risultato: 11 rimossi, 7 rimasti, rete viva. La forma «neutra» non è neutra, perché i
+  servizi senza profilo esplicito sono l'unico insieme sempre attivo ([S-068](#s-068)) e gli altri
+  vanno nominati.
+
+- **Esito, terzo punto — due forme funzionano, e una sola non va tenuta aggiornata a mano.**
+  `--profile completo down` toglie tutto (18 container, rete rimossa) perché `completo` è un
+  soprainsieme di `palco`; `--profile "*" down` toglie tutto senza sapere quali profili esistano.
+  Controprova a stack acceso in `palco` con un servizio del `completo` aggiunto a mano:
+  `make down-03` con il jolly ha rimosso tutti i container e la rete, e ha lasciato in piedi i
+  **5** volumi, che è esattamente ciò che `down` deve fare e `reset` no.
+
+- **Perché conta oltre lo stack 03.** La forma sbagliata non produce nessun segnale: nessun codice
+  di errore, nessuna riga rossa, e `docker compose ps` interrogato con lo stesso profilo sbagliato
+  mostra zero container, cioè **conferma** l'idea sbagliata. L'unico modo di accorgersene è
+  guardare `docker ps` senza filtri, che è quello che nessuno fa quando ha appena letto «done».
+
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0066
+
+<a id="v-060"></a>
+### V-060 — Il config server scriveva in un volume anonimo: zero file contro ottantatré
+
+- **Comandi:** `make up-03`, `make down-03`, `make reset-03`, `docker logs sh-add-shard`,
+  `docker inspect --format '{{range .Mounts}}…'`, `docker image inspect --format
+  '{{json .Config.Volumes}}'`, `docker run --rm --entrypoint cat … /usr/local/bin/docker-entrypoint.sh`,
+  `docker run --rm -v <volume>:/v alpine sh -c 'ls -1 /v | wc -l'`
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.5.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-02
+- **Che cosa si voleva sapere:** perché `make up-03` fallisse su volumi già esistenti. Il Task 7
+  provava i bersagli nuovi, e la sequenza più ordinaria di tutte — accendere, spegnere,
+  riaccendere — non funzionava.
+
+- **Esito, primo punto — il sintomo, che accusava la persona sbagliata.**
+
+```
+shard già registrati: nessuno
+registro lo shard «shard1rs» -> shard1rs/shard1a:27017
+registro lo shard «shard2rs» -> shard2rs/shard2a:27017
+ERRORE: sh.addShard(«shard2rs/shard2a:27017») ha risposto ok=0
+Messaggio: can't add shard 'shard2rs/shard2a:27017' because a local database 'lab' exists in
+another shard1rs
+```
+
+  Il messaggio dice che il secondo shard ha già il database `lab`, e in effetti ce l'ha: è il
+  dataset del giro precedente. Ma la riga che spiega tutto è la prima — **«shard già registrati:
+  nessuno»** — su un cluster che al giro prima ne aveva due. Gli shard ricordavano i loro dati, i
+  config server avevano dimenticato i propri.
+
+- **Esito, secondo punto — dove finivano i metadati, contato.** Con il cluster acceso e sano:
+
+```
+dati-cfg1       0 file
+dati-cfg2       0 file
+dati-shard1a   83 file
+dati-shard2a   76 file
+```
+
+  I volumi nominati dei config server erano **vuoti**. `docker inspect sh-cfg1` mostrava tre
+  montaggi: `keyfile -> /keyfile`, `dati-cfg1 -> /data/db` e un terzo con un nome di 64 cifre
+  esadecimali su `/data/configdb`, cioè un volume **anonimo**. I metadati stavano lì.
+
+- **Esito, terzo punto — la causa, che è una riga dell'entrypoint dell'immagine.** Letta dentro
+  l'immagine pinnata con `docker run --rm --entrypoint cat`, righe 236-238:
+
+```
+# if running as config server, then the default dbpath is /data/configdb
+dbPath=/data/configdb
+```
+
+  La citazione va attribuita con precisione, che è il seguito della nota di metodo 108.
+  [S-022](#s-022) documenta lo **stesso script nel ramo 8.0**, dove la regola c'è ma il commento
+  è scritto con altre parole — «if "--configsvr" is specified, then the default dbPath is
+  "/data/configdb"» — e il codice interroga anche `sharding.clusterRole` per il caso in cui il
+  ruolo arrivi da un file di configurazione invece che da un argomento. Le righe qui sopra sono
+  quelle dell'immagine **7.0.40** che il lab usa davvero, e sono la fonte primaria di questa
+  misura; S-022 conferma che la regola non è un'idiosincrasia della versione pinnata.
+
+  E l'immagine dichiara **due** `VOLUME`, non uno: `docker image inspect --format
+  '{{json .Config.Volumes}}'` risponde `{"/data/configdb":{},"/data/db":{}}`. Le due cose insieme
+  fanno il guasto: un `mongod --configsvr` scrive in /data/configdb, e se lì non c'è un montaggio
+  Compose ne crea uno anonimo, che `down` abbandona penzolante e che il `up` successivo rifà
+  vuoto. Il volume nominato che il file Compose chiedeva per nome esisteva, era montato, ed era
+  inutile.
+
+- **Esito, quarto punto — perché nessuno se n'era accorto in quattro giorni.** Tutte le prove dei
+  Task 3-6 finivano con `down -v`, che cancella tutto e riparte da zero: la perdita dei metadati
+  è invisibile a chi non riaccende **conservando** i dati. Lo smoke, dal canto suo, verificava che
+  ogni mongod avesse il proprio volume nominato — e ce l'aveva. Il controllo era giusto per metà,
+  che è la metà che non serve: non chiedeva se il processo ci scrivesse dentro.
+
+- **Esito, quinto punto — la riparazione, misurata.** Dichiarando `--dbpath /data/db` sui tre
+  config server ([ADR-0067](Decision.md#adr-0067)):
+
+```
+make reset-03   uscita 0 in  4 s
+make up-03      uscita 0 in 25 s      dati-cfg1: 99 file
+make down-03    uscita 0 in  7 s
+make up-03      uscita 0 in 22 s      <- il giro che prima falliva
+
+shard già registrati: shard1rs, shard2rs
+shard «shard1rs» già registrato: non lo riaggiungo
+shard «shard2rs» già registrato: non lo riaggiungo
+cluster pronto: 2 shard registrati
+```
+
+  Il ramo idempotente di `add-shard` — scritto al Task 4 e fino a oggi mai eseguito su un vero
+  riavvio, perché i metadati non arrivavano mai al secondo giro — ha funzionato al primo colpo.
+  `make smoke-03` chiude a **62 controlli e 0 errori** come prima della correzione.
+
+- **Esito, sesto punto — le due guardie, provate rompendole.** La regola statica di
+  `check_stack.py` sul file corretto: «Stack conformi: 3». Sullo stesso file con `--dbpath` tolto
+  al solo `cfg1`:
+
+```
+✗ cfg1: monta «dati-cfg1» su «/data/db» ma scriverà in «/data/configdb». Là l'immagine dichiara
+  un VOLUME, che Compose soddisfa con un volume ANONIMO: «down» lo abbandona e i dati spariscono
+  a ogni spegnimento, senza un errore (ADR-0067)
+```
+
+  Il controllo a runtime dello smoke confronta due valori distinti e non due copie della stessa
+  cosa: `cfg1` volume su `/data/db`, mongod scrive in `/data/db`; togliendo `--dbpath` dal comando
+  del container la funzione risponde `/data/configdb`, cioè il disaccordo che deve segnalare. Sei
+  test nuovi in `tools/tests/test_check_stack.py`, suite a **131 passed**.
+
+- **Riserve:** i conteggi dei file dentro i volumi sono stati presi con `docker run --rm -v
+  <volume>:/v alpine sh -c 'ls -1 /v | wc -l'`, e `alpine` **non è fra le immagini pinnate del
+  lab**: chi rifacesse questa misura su una macchina scollegata non troverebbe l'immagine
+  ([ADR-0009](Decision.md#adr-0009)). Non serve pinnarla — la stessa misura viene con la sola
+  immagine già pinnata, scavalcando l'entrypoint, verificato lo stesso giorno:
+  `docker run --rm --entrypoint sh -v <volume>:/v "$MONGO_IMAGE" -c 'ls -1 /v | wc -l'`. Il numero
+  non dipende da quale immagine lo conta: dipende dal volume, che è montato allo stesso modo nei
+  due casi. Le sei misure qui sopra restano quelle prese davvero, con `alpine`.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0067
+
+<a id="v-061"></a>
+### V-061 — Il balancer non si muove mai, e la chiave sbagliata passa per «bilanciata»
+
+- **Comandi:** `make up-03`; da `mongos`, `db.collection.stats()`, `$shardedDataDistribution`,
+  `config.chunks`, `config.changelog`, `sh.balancerCollectionStatus()`, `sh.shardCollection()` con
+  le due strategie, `insertMany` con `ordered` vero e falso; `make smoke-03`
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.5.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), profilo `palco`, 2026-09-02
+- **Che cosa si voleva sapere:** il Task 8 scrive la pagina dello sharded cluster, e due sezioni
+  non si potevano scrivere con quello che c'era. La prima è il balancer: dire «bilancia» è un
+  aggettivo, e serviva sapere se in questa demo lavori davvero. La seconda è la shard key
+  sbagliata, che fino a oggi il repository citava ([S-067](#s-067)) senza averla mai vista fallire —
+  e una trappola scritta senza il sintomo è una previsione ([ADR-0052](Decision.md#adr-0052)).
+
+- **Esito, primo punto — quanto pesa davvero la collezione della demo.** Da `mongos`, su
+  `lab.ordini` a cluster sano:
+
+```
+documenti      : 20000
+dataSize       : 2 437 499 byte   (avgObjSize 121)
+shard1rs       : 1 201 545 byte
+shard2rs       : 1 235 954 byte
+differenza     :    34 409 byte
+```
+
+  La soglia oltre la quale il balancer si muove è **tre volte** la dimensione di range configurata,
+  cioè 384 MB con i 128 MB predefiniti ([S-070](#s-070)). `sh.balancerCollectionStatus("lab.ordini")`
+  conferma il predefinito in vigore — `chunkSize: 128` — e risponde `balancerCompliant: true`. La
+  differenza misurata sta **quattro ordini di grandezza** sotto la soglia: 34 KB contro 384 MB, un
+  rapporto di circa **1 a 11 700**.
+
+- **Esito, secondo punto — e infatti il balancer non ha mai spostato niente.** Il registro del
+  cluster, dalla nascita:
+
+```
+config.changelog: 6 eventi in tutto
+   addShard: 2
+   shardCollection.start: 1      shardCollection.end: 1
+   setClusterParameter.start: 1  setClusterParameter.end: 1
+migrazioni (moveChunk | moveRange): 0
+balancer abilitato: true     ·     in corso: false
+```
+
+  I quattro chunk della demo **non sono opera del balancer**: sono la distribuzione iniziale che
+  `shardCollection()` fa su una collezione vuota, due per shard ([S-066](#s-066)). Il balancer è
+  acceso, guarda, e non ha mai avuto niente da fare. Detto per la pagina: in questa demo il balancer
+  **non entra in scena**, e raccontarlo come se stesse lavorando sarebbe falso.
+
+- **Esito, terzo punto — i confini dei quattro chunk, che non sono casuali.** Letti da
+  `config.chunks`, con i due estremi a 64 bit riportati in decimale:
+
+```
+shard2rs   MinKey            ->  -4 611 686 018 427 387 902     (-2^62 + 2)
+shard2rs   -4 611 686 …902   ->                            0
+shard1rs                 0   ->   4 611 686 018 427 387 902     (+2^62 - 2)
+shard1rs    4 611 686 …902   ->  MaxKey
+```
+
+  È lo spazio dei valori hash — un intero con segno a 64 bit — tagliato in **quattro parti uguali**,
+  due per shard. Non è una distribuzione che emerge dai dati: è geometria decisa prima che il primo
+  documento esista.
+
+- **Esito, quarto punto — la chiave sbagliata, provata.** Database di scarto, stessa forma di
+  documento, stessi `_id` interi 0…19 999, chiave `{_id: 1}` invece di `{_id: "hashed"}`. Alla
+  distribuzione, su collezione **vuota**:
+
+```
+chunk alla creazione: 1
+   shard1rs   MinKey -> MaxKey
+```
+
+  Un chunk solo, su un solo shard, come [S-071](#s-071) dichiara. Poi i ventimila documenti:
+
+```
+shard1rs: 20000 documenti, 1 200 000 byte
+shard2rs: —  (non compare nella distribuzione)
+chunk dopo l'inserimento: 1
+migrazioni nel changelog: 0
+balancerCompliant: TRUE
+```
+
+  **Il cento per cento dei documenti su uno dei due shard, e il cluster la considera una collezione
+  bilanciata.** Non è un guasto del balancer: 1,2 MB di differenza sono sotto la soglia di 384 MB,
+  quindi la risposta è formalmente corretta. È il punto didattico dell'intera misura — l'errore non
+  ha nessun sintomo, e lo strumento che dovrebbe accorgersene risponde «tutto a posto».
+
+- **Esito, quinto punto — la controprova, con la sola chiave cambiata.** Stessa collezione, stessa
+  forma, stessi `_id`, chiave `{_id: "hashed"}`:
+
+```
+shard1rs:  9860 documenti
+shard2rs: 10140 documenti
+```
+
+  Sono **le stesse due cifre** della demo ([V-058](#v-058)), su un database diverso e con documenti
+  diversi: la ripartizione dipende dall'hash degli `_id` e dai confini dei chunk, non dal contenuto.
+
+- **Esito, sesto punto — il tempo, dove c'era una contraddizione da sciogliere.** Le prime misure
+  davano la chiave hashed a circa 9 800 ms contro i 530 della ranged, mentre [V-058](#v-058) aveva
+  cronometrato il seed della demo — stessa chiave hashed, stessi ventimila documenti — a **1202 ms**.
+  Uno dei due numeri doveva essere sbagliato. Alternando l'ordine su tre giri il divario è rimasto
+  al suo posto (hashed 9910 / 8180 / 10027 ms, ranged 704 / 192 / 432), quindi non era rumore. La
+  differenza era nel codice: il seed del lab scrive `insertMany(lotto, { ordered: false, … })`
+  (`docker/03-sharded/init/30-dati-demo.js`, riga 296), le prove no. Quattro casi, due giri:
+
+```
+                          giro 1      giro 2
+hashed  ordered: true     11 328 ms    9 393 ms
+hashed  ordered: false       336 ms      408 ms
+ranged  ordered: true        340 ms      192 ms
+ranged  ordered: false       248 ms    1 947 ms
+```
+
+  Il costo **non è la chiave hashed**: è la chiave hashed *insieme* al lotto ordinato. Con
+  `ordered: false` le due chiavi costano uguale. Con `ordered: true` — che è il **predefinito** —
+  la hashed paga un fattore fra venti e trenta, perché mantenere l'ordine fra shard diversi
+  impedisce al router di spedire in parallelo, e con una chiave hashed lo shard di destinazione
+  cambia quasi a ogni documento ([S-071](#s-071)).
+
+- **Esito, settimo punto — il laboratorio è rimasto intatto.** Ogni prova è stata fatta in un
+  database `prova` cancellato in coda; `lab.ordini` è rimasta a 20 000 documenti in ogni
+  controllo, e `make smoke-03` chiude a **62 controlli superati e 0 errori** dopo tutto.
+
+- **Riserve:** cinque. *(a)* Il valore `1 947 ms` di «ranged, `ordered: false`» è fuori scala
+  rispetto agli altri tre valori ranged, tutti fra 192 e 340 ms: è rumore della macchina, e viene
+  riportato invece che tolto perché toglierlo sarebbe scegliere i dati. Tutti i tempi sono
+  esecuzioni singole su un portatile con Docker Desktop, non medie. *(b)* La soglia dei 384 MB
+  **non è stata superata**: è provato che sotto la soglia il balancer sta fermo, non che sopra si
+  muova. *(c)* Lo shard che riceve tutto con la chiave monotona è lo **shard primario del
+  database**, e non è sempre lo stesso: nei primi giri era `shard1rs`, nell'ultimo `shard2rs`.
+  Quello che è costante è che sia **uno solo**. *(d)* Il fattore venticinque vale per due shard e
+  per documenti di 121 byte medi; con più shard il divario può solo peggiorare, ma non è stato
+  provato. *(e)* Tutto sul profilo `palco`, cioè con un membro per insieme, e su arm64.
+- **Riserva aggiunta il 2026-09-02, a poche ore di distanza:** i **quattro** chunk del terzo punto
+  sono quattro **in quella finestra**. Spento e riacceso lo stack sugli stessi volumi, l'AutoMerger
+  di MongoDB 7.0 ha fuso le due coppie contigue e ne restano **due**, uno per shard, senza che
+  nessun documento si sia mosso ([V-062](#v-062), [S-072](#s-072)). I numeri qui sopra restano
+  quelli misurati; quello che non regge è la frase «il balancer non entra mai in scena», e la
+  correzione è in [ADR-0069](Decision.md#adr-0069).
+- **Conseguenza:** [ADR-0068](Decision.md#adr-0068), e le sezioni 4 e 3.2 di
+  `docs/02-architetture/sharded-cluster.md`.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0068, ADR-0069
+
+<a id="v-062"></a>
+### V-062 — I quattro chunk erano diventati due: il balancer entra in scena, e non è una migrazione
+
+- **Che cosa è stato verificato:** perché lo stesso cluster, riacceso sugli stessi volumi, mostri
+  **due** chunk dove [V-061](#v-061) ne aveva contati **quattro**, senza che nessuno abbia inserito,
+  cancellato o spostato niente. E se questo smentisca la frase «il balancer non entra mai in scena»
+  scritta lo stesso giorno in [`sharded-cluster.md`](02-architetture/sharded-cluster.md).
+- **Ambiente:** stack `docker/03-sharded`, profilo `palco`, MongoDB 7.0.40. Spento con `make down-03`
+  (che conserva i volumi) e riacceso con `make up-03`. Nessun dato toccato: `lab.ordini` a 20 000
+  documenti prima e dopo.
+- **Comandi:** `config.changelog` interrogato per `what` e per esteso sugli eventi `merge`;
+  `config.chunks` per i confini e per `history`; `docker inspect --format '{{.State.StartedAt}}'`
+  per l'istante di avvio dei container; `db.collection.getShardDistribution()` per la
+  distribuzione.
+
+- **Esito, primo punto — la fusione è successa, ed è registrata.** Il registro del cluster contiene
+  **due** eventi `merge`, che in [V-061](#v-061) non c'erano:
+
+  ```
+  12:34:16.530Z   merge   lab.ordini   server cfg1:27017   owningShard shard1rs   numChunks 2
+                          min {_id: 0}          ->  max {_id: MaxKey}
+  12:34:31.450Z   merge   lab.ordini   server cfg1:27017   owningShard shard2rs   numChunks 2
+                          min {_id: MinKey}     ->  max {_id: 0}
+  ```
+
+  Due fusioni, due chunk consumati ciascuna: dai quattro di [V-061](#v-061) ai due di adesso, uno
+  per shard, con i confini `MinKey → 0` su `shard2rs` e `0 → MaxKey` su `shard1rs`. I due confini
+  interni — −2⁶²+2 e +2⁶²−2 — sono spariti; **quello fra i due shard, lo zero, no.**
+
+- **Esito, secondo punto — il campo `server` dice dove gira il balancer, e conferma la fonte.** Tutti
+  e due gli eventi portano `server: cfg1:27017`. [S-070](#s-070) afferma «the balancer runs on the
+  primary of the config server replica set (CSRS)» e [S-073](#s-073) aggiunge che il processo «has
+  moved from the `mongos` instances to the primary member of the config server replica set»: qui
+  non è una citazione, è un campo di un documento scritto dal cluster. Il container che sembra non
+  fare niente è l'unico che ha fatto qualcosa.
+
+- **Esito, terzo punto — è successo all'accensione, non dopo un'attesa.** I container dei dati sono
+  partiti alle `12:34:12.735Z`, il router alle `12:34:22.418Z`. La prima fusione è delle
+  `12:34:16.530Z`: **3,8 secondi** dopo l'avvio del config server, e sei secondi *prima* che il
+  router esistesse. La seconda arriva 15 secondi dopo la prima. [S-072](#s-072) lo dice: «Unless
+  explicitly disabled, the AutoMerger **starts the first time the balancer is enabled**».
+
+- **Esito, quarto punto — e questo spiega perché [V-061](#v-061) vedeva quattro chunk.** Non era un
+  errore di misura: era la stessa cosa guardata prima. La collezione è stata distribuita alle
+  `10:41:09Z`, e la fusione richiede che la storia del chunk sia purgabile — [S-072](#s-072) elenca
+  `minSnapshotHistoryWindowInSeconds` e `transactionLifetimeLimitSeconds` — quindi al primo giro,
+  fatto subito dopo l'accensione, i chunk erano troppo freschi. Poi l'AutoMerger «pauses for the
+  next `autoMergerIntervalSecs`», e in quella sessione lo stack è stato spento **prima** che
+  l'intervallo scadesse. Al riavvio delle `12:34` la prima condizione è tornata vera — il balancer
+  veniva abilitato per la prima volta — e la seconda pure, perché di tempo ne era passato quasi due
+  ore. Le due misure sono tutte e due giuste; è il fenomeno che ha due fasi.
+
+- **Esito, quinto punto — nessun documento si è mosso.** La distribuzione è identica a prima della
+  fusione e identica a [V-058](#v-058): `shard1rs` 9860 documenti e 1.14 MiB, `shard2rs` 10 140 e
+  1.17 MiB, 49,3 % / 50,7 %, `avgObjSize` 121 byte. Il conteggio degli eventi resta a **zero**
+  `moveChunk` e **zero** `moveRange`. E la `history` dei chunk superstiti riporta un solo elemento,
+  con `validAfter` all'istante della distribuzione iniziale: nessuna migrazione, mai. La fusione
+  cambia **la mappa**, non i dati.
+
+- **Esito, sesto punto — che cosa era falso, e in che misura.** La frase «il balancer non entra mai
+  in scena» di [`sharded-cluster.md`](02-architetture/sharded-cluster.md) e di
+  [ADR-0068](Decision.md#adr-0068) è **falsa**: il balancer entra in scena, alle 12:34:16, e fa una
+  cosa visibile. Restano vere le due affermazioni che le stavano accanto — non **migra** mai, e non
+  lo fa perché la differenza di 34 409 byte è mille volte sotto la soglia dei 384 MB. Sbagliata era
+  l'identificazione fra «il balancer» e «le migrazioni»: il balancer di una 7.0 fa due mestieri, e
+  nel lab ne esercita esattamente uno.
+
+- **Riserve:**
+  - **a.** Il valore predefinito di `autoMergerIntervalSecs` non è stato letto dal cluster:
+    `getClusterParameter` interrogato per `*` non restituisce nessun parametro con «merge» nel nome
+    su questo deployment, e `getParameter` risponde `InvalidOptions`. Che l'intervallo fra due giri
+    esista è del manuale ([S-072](#s-072)); **quanto** duri non è misurato qui, e la finestra fra le
+    `10:41` e le `12:34` dice solo che è più lungo di zero e che in mezzo lo stack era spento.
+  - **b.** Non è provato che senza il riavvio la fusione sarebbe comunque avvenuta. Lo spegnimento e
+    la riaccensione sono l'occasione in cui è stata osservata, non necessariamente la causa: il
+    manuale dice che l'AutoMerger riparte al primo avvio del balancer, il che rende il riavvio
+    *sufficiente* ma non dimostra che fosse *necessario*.
+  - **c.** Durante la stessa sessione è stato eseguito `sh.stopBalancer()` seguito da
+    `sh.startBalancer()` ([V-063](#v-063)), che secondo [S-073](#s-073) spegne e riaccende anche
+    l'AutoMerger. Non ha prodotto nuove fusioni, ma con due soli chunk non contigui sullo stesso
+    shard non c'era più niente da fondere: la prova non distingue «non è ripartito» da «è ripartito
+    e non ha trovato lavoro».
+  - **d.** Vale per due shard e per una collezione con chiave hashed distribuita da vuota. Con più
+    shard le sequenze contigue sarebbero più d'una per shard, e il conto finale sarebbe diverso.
+- **Conseguenza:** ADR-0069
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0069
+
+<a id="v-063"></a>
+### V-063 — La §3.3 della guida a `mongosh`, eseguita: sette risposte che la marcatura nascondeva
+
+- **Che cosa è stato verificato:** tutti i comandi della tabella di
+  [`guida-mongosh.md` §3.3](04-mongosh/guida-mongosh.md#33-sharded-cluster), marcata «non eseguito
+  su questo branch» dalla `feature/00`. La regola è [ADR-0049](Decision.md#adr-0049) — un debito si
+  chiude eseguendo — e [ADR-0036](Decision.md#adr-0036): in automazione il codice di uscita di
+  `mongosh` non è una prova, l'esito si legge dall'output.
+- **Ambiente:** stack `docker/03-sharded`, profilo `palco`, MongoDB 7.0.40, 2026-09-02.
+- **Comandi:** dal router `sh-mongos` autenticato; in diretta su `sh-shard1a` e `sh-cfg1` per i casi
+  d'errore.
+
+- **Esito, primo punto — `sh.status()` a un `mongod` di un cluster vero dà un errore diverso da
+  quello scritto in pagina.** Il blocco che stava in §3.3, preso su un'istanza singola, mostra
+  `MongoshInvalidInputError: This db does not have sharding enabled`. Su uno shard di questo
+  cluster la risposta è un'altra:
+
+  ```console
+  $ docker exec sh-shard1a mongosh --quiet --eval 'sh.status()'
+  Warning: MongoshWarning: [SHAPI-10003] You are not connected to a mongos.
+  MongoServerError: not authorized on config to execute command { find: "version", … }
+  ```
+
+  L'avviso `SHAPI-10003` è lo stesso; l'errore no. Un `mongod` che *fa parte* di un cluster il
+  database `config` ce l'ha davvero, quindi non può dire «sharding non abilitato»: dice che chi
+  chiede non è autorizzato a leggerlo. Sono due sintomi dello stesso sbaglio, e riconoscerne uno
+  solo porta fuori strada.
+
+- **Esito, secondo punto — `db.hello().msg` distingue i tre ruoli, ma solo uno dà una risposta.**
+  Sul router `isdbgrid`; su `shard1a` **stringa vuota** (il campo non c'è); su `cfg1` `undefined` con
+  `setName: cfgrs`. La regola di [§2.4](04-mongosh/guida-mongosh.md#24-sapere-con-chi-si-sta-parlando)
+  regge, ma è una regola a senso unico: `isdbgrid` prova che si è sul router, la sua assenza non dice
+  su quale dei due altri ruoli si sia.
+
+- **Esito, terzo punto — `sh.enableSharding()` e `sh.shardCollection()` rieseguiti non protestano.**
+  `sh.enableSharding("lab")` su un database già abilitato risponde `ok: 1`. E
+  `sh.shardCollection("lab.ordini", {_id: "hashed"})` su una collezione già distribuita **con la
+  stessa chiave** risponde `collectionsharded: 'lab.ordini', ok: 1`. Sono idempotenti, ed è la
+  ragione per cui lo script di avvio del lab può girare due volte senza rompere niente
+  ([ADR-0065](Decision.md#adr-0065)).
+
+- **Esito, quarto punto — e l'irreversibilità si manifesta come un errore solo se si cambia la
+  chiave.** `sh.shardCollection("lab.ordini", {_id: 1})` sulla stessa collezione:
+
+  ```
+  AlreadyInitialized: sharding already enabled for collection lab.ordini
+  ```
+
+  Il cluster non offre di ridistribuire e non chiede conferma: dice che la cosa è già stata fatta.
+  È la faccia operativa del «MongoDB provides no method to unshard a sharded collection» di
+  [S-069](#s-069) — la porta non è chiusa a chiave, non c'è proprio.
+
+- **Esito, quinto punto — i due errori di `sh.addShard()`, che accusano cose diverse.** Rieseguito
+  su uno shard già registrato: `IllegalOperation: A shard named shard1rs containing the replica set
+  'shard1rs' already exists`. Su un insieme che non esiste:
+  `FailedToSatisfyReadPreference: Could not find host matching read preference { mode: "primary" }
+  for set shard9rs`. Il secondo è quello che si prende chi sbaglia un nome host in un file Compose,
+  e **non nomina** né Docker né la rete: parla di read preference, e manda a cercare nel posto
+  sbagliato.
+
+- **Esito, sesto punto — il bilanciatore, i tre comandi in sequenza.**
+
+  ```
+  sh.getBalancerState()   true
+  sh.isBalancerRunning()  "full"
+  sh.stopBalancer()       { ok: 1 }
+  sh.getBalancerState()   false
+  sh.startBalancer()      { ok: 1 }
+  sh.getBalancerState()   true
+  ```
+
+  I due interrogativi non chiedono la stessa cosa: [S-073](#s-073) — «`sh.getBalancerState()` checks
+  if the balancer is enabled […] does **not** check if the balancer is actively migrating data».
+  Il primo dice *può*, il secondo dice *sta*. E `stopBalancer()` fa più di quel che dice: dalla 7.0
+  spegne anche l'AutoMerger ([S-073](#s-073)), cioè la cosa che in questo lab il balancer fa davvero
+  ([V-062](#v-062)).
+
+- **Esito, settimo punto — `getShardDistribution()` su una collezione non distribuita non è un
+  errore normale.** Su `lab.ordini` stampa le due righe per shard e i totali. Su una collezione
+  qualunque creata al volo:
+
+  ```
+  undefined: [SHAPI-10001] Collection nondistribuita is not sharded
+  ```
+
+  Il `codeName` è `undefined`: è un errore di `mongosh`, non del server, e chi filtra per
+  `e.codeName` in uno script non lo intercetta.
+
+- **Esito, ottavo punto — il codice di uscita conferma [ADR-0036](Decision.md#adr-0036), e lo fa nel
+  modo peggiore.** Lo stesso comando che fallisce con `AlreadyInitialized`:
+
+  ```console
+  $ mongosh … --eval 'try { sh.shardCollection("lab.ordini", {_id: 1}) } catch (e) { … }'   → 0
+  $ mongosh … --eval 'sh.shardCollection("lab.ordini", {_id: 1})'                           → 1
+  ```
+
+  Il codice di uscita segue l'eccezione **non catturata**, non l'esito dell'operazione. Uno script
+  scritto bene — che cattura gli errori per stamparli — esce sempre `0`, cioè proprio lo script
+  prudente è quello di cui l'uscita non dice niente.
+
+- **Esito, nono punto — i comandi del router dati a uno shard.**
+  `sh.enableSharding()` risponde `CommandNotFound: no such command: 'enableSharding'. Are you
+  connected to mongos?` — un errore che si diagnostica da solo. `sh.getBalancerState()` invece
+  risponde `Unauthorized: not authorized on config to execute command …`, che non nomina il
+  problema vero.
+
+- **Riserve:**
+  - **a.** Le tre righe eseguite su `sh-shard1a` e la prima su `sh-cfg1` lo sono state **senza
+    autenticarsi**, perché le credenziali del cluster su uno shard non funzionano
+    ([V-058](#v-058)). Gli errori `Unauthorized` e `not authorized on config` sono quindi il
+    sintomo di **due** cose insieme — comando sbagliato e nessuna autenticazione — e la prova non le
+    separa.
+  - **b.** `sh.startBalancer()` e `sh.stopBalancer()` sono stati eseguiti a cluster fermo, senza
+    nessuna migrazione in corso: l'avvertenza del manuale secondo cui «if a migration is in
+    progress, the system will complete the in-progress migration before stopping»
+    ([S-073](#s-073)) non è stata provata, e su questo stack non è provabile.
+  - **c.** `sh.status()` è stato letto, non riprodotto per intero: la pagina ne riporta le sezioni
+    `shards`, `balancer` e `chunks`, non l'output completo.
+- **Conseguenza:** ADR-0069 (la fusione dei chunk) e ADR-0070 (la marcatura tolta)
+- **Seguito, 2026-09-02.** La riserva **a** — «gli errori `Unauthorized` e `not authorized on
+  config` sono il sintomo di **due** cose insieme … e la prova non le separa» — è stata sciolta
+  lo stesso giorno da [ADR-0071](Decision.md#adr-0071), che ha dato agli shard un
+  amministratore e quindi ha reso possibile autenticarsi. Il primo e il nono punto di questa
+  verifica non descrivono più lo stack: le risposte di oggi, e che cosa nascondevano quelle di
+  ieri, stanno in [V-067](#v-067).
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0069, ADR-0070, ADR-0072
+
+<a id="v-064"></a>
+### V-064 — Gli utenti locali a uno shard: l'eccezione localhost è aperta su ogni shard, e chiude una riserva vecchia di una settimana
+
+- **Che cosa è stato provato:** lo stack `03-sharded`, profilo `palco`, MongoDB 7.0.40. Il debito
+  marcato in [`sicurezza-keyfile-x509.md`](03-amministrazione/sicurezza-keyfile-x509.md) §4 diceva
+  che sullo sharded cluster gli utenti locali a uno shard «esistono davvero» e che l'eccezione
+  localhost «applies to each shard individually» ([S-006](#s-006), [S-074](#s-074)), e che niente di
+  questo era stato provato. Provato.
+- **Esito 1 — il cluster ha un utente solo, e non sta sugli shard.** Su `cfg1`, autenticati come
+  amministratore: `[{"user":"admin","db":"admin"}]`. Su `shard1a` e su `shard2a`, letti con
+  l'identità interna: **zero utenti** su entrambi. Gli utenti del cluster vivono sul config server,
+  come dichiara il file Compose, e gli shard non ne ricevono copia.
+- **Esito 2 — le credenziali del cluster non aprono uno shard.** `admin` con la sua password, dato
+  direttamente a `shard1a` e a `shard2a`: `MongoServerError: Authentication failed.`, uscita **1**.
+  Non è un problema di permessi: quell'utente su quel nodo non esiste.
+- **Esito 3 — sul cluster l'eccezione è chiusa, e su ogni shard è aperta.** Da dentro `sh-mongos`,
+  senza credenziali: `createUser` → `Unauthorized: Command createUser requires authentication`. Da
+  dentro `sh-shard2a`, sul suo loopback, senza credenziali:
+  `db.getSiblingDB("admin").createUser({user: "radice-locale", pwd: …, roles: [{role: "root", db: "admin"}]})`
+  → **creato**. Ripetuto in modo indipendente su `shard1a`: creato anche lì. Un `root` sullo shard,
+  senza presentare niente.
+- **Esito 4 — serve il loopback, e la prova è nello stesso istante.** Riavviato `shard2a` per
+  riaprire l'eccezione, due tentativi identici a pochi secondi l'uno dall'altro:
+
+  ```
+  da host.docker.internal:27151 (porta pubblicata)   whatsmyuri  192.168.65.1:44239
+                                                     createUser  Unauthorized: Command createUser
+                                                                 requires authentication
+  da localhost:27017 (dentro il container)           whatsmyuri  127.0.0.1:48626
+                                                     createUser  CREATO
+  ```
+
+  Stesso nodo, stesso stato, stesso comando: cambia solo l'indirizzo da cui la connessione arriva.
+  **Le porte pubblicate sull'host non aprono l'eccezione**, perché a `mongod` la connessione arriva
+  dal gateway di Docker.
+- **Esito 5 — e in Docker «da localhost» è più largo di quanto sembri.** Un container qualunque,
+  avviato con `--network container:sh-shard2a`, condivide il **network namespace** dello shard: il
+  suo `localhost` è il loopback dello shard. Riavviato `shard2a` per riaprire l'eccezione, da quel
+  container:
+
+  ```
+  il keyfile qui: non c'è
+  whatsmyuri      "127.0.0.1:46146"
+  createUser root su admin   →  CREATO
+  ```
+
+  Il container non ha il volume del keyfile e non potrebbe leggerlo, e ciononostante si è fatto un
+  `root` sullo shard. Non è un caso di laboratorio: è esattamente il meccanismo con cui i servizi
+  `shard1-init` e `shard2-init` del file Compose eseguono `rs.initiate()`
+  ([S-074](#s-074)). La stessa porta che serve ad avviare lo stack resta aperta dopo.
+- **Esito 6 — il primo utente non può avere ruoli su un altro database.** Quattro tentativi, tutti
+  come primo utente, tutti da loopback:
+
+  ```
+  roles: [ {userAdminAnyDatabase, admin}, {read, lab} ]  →  Unauthorized: not authorized on admin
+                                                            to execute command { createUser: … }
+  roles: [ {read, lab} ]                                 →  Unauthorized: … stessa forma
+  roles: [ {root, admin} ]                               →  creato
+  roles: [ ]                                             →  creato
+  ```
+
+  Il manuale dice che il primo utente «must have privileges to create other users»
+  ([S-074](#s-074)): **non è imposto** — un utente senza alcun ruolo viene accettato e spende
+  l'eccezione. Quello che è imposto, e che il manuale non dice, è che i ruoli stiano su `admin`.
+- **Esito 7 — l'eccezione non si riapre cancellando l'ultimo utente.** Su `shard1a`, dopo aver
+  creato e poi cancellato l'utente di prova, con **zero utenti** in `admin.system.users`:
+  `createUser` da loopback → `Unauthorized: Command createUser requires authentication`. Dopo
+  `docker restart sh-shard1a`, stesso comando, stessi zero utenti → **creato**. La condizione «there
+  are no users or roles created» è una condizione del **processo**, non del database: una volta che
+  un utente è esistito, l'eccezione resta chiusa fino al riavvio.
+- **Esito 8 — chi ha il keyfile è amministratore del nodo, ed è la via di rientro.** Con
+  `-u __system -p "$(tr -d '\n\r ' < /keyfile/mongo-keyfile)" --authenticationDatabase local` si
+  legge `admin.system.users` e si cancellano utenti su qualunque nodo. È servito davvero: l'utente
+  senza ruoli dell'esito 5 non poteva cancellarsi da solo e aveva chiuso l'eccezione dietro di sé.
+- **Esito 9 — un amministratore locale vede il suo shard e basta.** Autenticato su `shard2a`:
+  `lab.ordini` **10 140** documenti, `db.hello().setName` `shard2rs`. Dal router la stessa
+  collezione ne ha 20 000. La stessa credenziale presentata al `mongos`:
+  `MongoServerError: Authentication failed.`
+- **Esito 10 — un amministratore locale può cancellare se stesso, e la connessione muore con lui.**
+  `dropUser` sul proprio utente riesce; il comando **successivo sulla stessa connessione** fallisce
+  con `MongoServerError: Authentication failed.`, perché l'identità è appena stata rimossa. Da uno
+  script sembra un errore di autenticazione, ed è invece la conseguenza dell'operazione precedente
+  riuscita.
+- **Esito 11 — `whatsmyuri` risponde sempre.** `db.adminCommand({whatsmyuri: 1})` ha risposto senza
+  credenziali anche con l'eccezione chiusa (`"127.0.0.1:44086"`). È il modo di sapere quale
+  indirizzo il server attribuisce al client, cioè di rispondere alla domanda «sono davvero su
+  localhost, per lui?» prima di chiedersi perché l'eccezione non si applichi.
+- **Riserve:**
+  - **a.** il profilo `palco` ha **un solo membro per shard**, che è quindi sempre il primario. Che
+    l'eccezione si comporti allo stesso modo sui secondari di uno shard a tre membri non è stato
+    provato; il manuale parla di «the shard's primary» quando prescrive il rimedio.
+  - **b.** `enableLocalhostAuthBypass: 0` non è stato provato: metterlo a `0` sugli shard
+    impedirebbe a `11-shard-initiate.js` di eseguire `rs.initiate()`, e lo stack non partirebbe.
+    Che sia questa la ragione è dedotto dalla fonte ([S-074](#s-074), quinto punto), non misurato
+    disattivandolo.
+  - **c.** l'esito 4 è misurato su Docker Desktop per macOS, dove il gateway è `192.168.65.1`.
+    L'indirizzo cambia altrove; quello che si generalizza è che **non** è il loopback, non il numero.
+  - **c-bis.** l'esito 5 dice che il network namespace condiviso basta; non dice che sia l'unica
+    via. Chi può parlare al demone Docker può anche leggere il volume del keyfile con un altro
+    container, e a quel punto l'eccezione non gli serve.
+  - **d.** l'esito 6 descrive che cosa il server accetta, non perché. La lettura plausibile — che
+    l'eccezione conceda `createUser` su `admin` e non `grantRole` su altri database — non è
+    confermata da nessuna fonte trovata.
+  - **e.** ogni utente creato durante la misura è stato cancellato; lo stato finale, letto con
+    l'identità interna, è **zero utenti su entrambi gli shard**. Due shard sono stati riavviati
+    durante la prova, e `make smoke-03` dopo è verde.
+- **Conseguenza:** [ADR-0070](Decision.md#adr-0070), e la sezione 4 di
+  `docs/03-amministrazione/sicurezza-keyfile-x509.md`.
+- **Seguito, 2026-09-02:** questa verifica descrive lo stack **prima** di
+  [ADR-0071](Decision.md#adr-0071), che ha creato un amministratore locale su ogni shard. Gli esiti
+  restano veri di quello stato e sono riproducibili su uno shard riavviato senza il suo init; sullo
+  stack di oggi l'esito 5 non passa più, ed è [V-066](#v-066) a misurarlo.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0070, ADR-0071
+
+---
+
+<a id="v-065"></a>
+### V-065 — `--oplog` sullo sharded cluster: il divieto ha due facce, e il restore riporta i dati senza la distribuzione
+
+- **Che cosa è stato provato:** lo stack `03-sharded`, profilo `palco`, MongoDB 7.0.40, database
+  `lab` con 20 000 documenti distribuiti. Il debito marcato in
+  [`backup-restore.md`](03-amministrazione/backup-restore.md) citava
+  [S-011](#s-011) — «You can't run `mongodump` with `--oplog` on a sharded cluster» — e rinviava la
+  prova a `feature/03`. Provato: `mongodump` e `mongorestore` attraverso il `mongos`, e `mongodump`
+  dato direttamente a uno shard.
+- **Esito 1 — il divieto, quando il comando è per il resto corretto.** `mongodump --oplog --out …`
+  contro `sh-mongos`: `Failed: can't use --oplog option when dumping from a mongos`, uscita **1**.
+  Nessun file scritto.
+- **Esito 2 — la stessa proibizione, con un'accusa diversa e fuorviante.**
+  `mongodump --oplog --db lab --out …`, sullo stesso router nello stesso istante:
+  `Failed: bad option: --oplog mode only supported on full dumps`, uscita **1**. Il messaggio non
+  nomina più `mongos`, e manda a togliere `--db`. Le due regole sono verificate in quest'ordine, e
+  la prima nasconde la seconda: chi sbaglia due cose ne vede riferita una sola, e non è quella che
+  conta.
+- **Esito 3 — uno shard singolo, invece, `--oplog` lo accetta.** Lo stesso comando dato dentro
+  `sh-shard1a` con l'identità interna: uscita **0**, e nella cartella `admin/  lab/  oplog.bson
+  (103 byte)  prelude.json`. Uno shard è un replica set, e ha il suo oplog. Che tanti dump coerenti
+  per singolo shard non facciano un dump coerente del cluster è ragionamento, non misura: vedi
+  riserva **b**.
+- **Esito 4 — il dump attraverso il router funziona.** `mongodump --db lab --out …` su `sh-mongos`:
+  uscita **0**, `lab/ordini.bson` di **2 437 499 byte**, 20 000 documenti. Un dump completo (senza
+  `--db`) porta via anche `config/` per intero e `admin/system.users.bson` (524 byte): le credenziali
+  del cluster finiscono nel backup, e vale [ADR-0014](Decision.md#adr-0014) su dove si posa.
+- **Esito 5 — l'avviso che non si può togliere.** Ogni dump attraverso il router emette, una volta:
+
+  ```
+  Warning: using a non-primary readPreference with a connection to mongos may produce
+  inconsistent duplicates or miss some documents.
+  ```
+
+  Ripetuto **passando esplicitamente `--readPreference=primary`**: l'avviso compare identico, una
+  volta, e il dump riesce lo stesso. Non è un'opzione mancante da aggiungere: è un avvertimento su
+  cui dalla riga di comando non si può agire.
+- **Esito 6 — il restore riesce, e la collezione non è distribuita.**
+  `mongorestore --nsFrom 'lab.ordini' --nsTo 'lab.ordini_ripristinata'` attraverso il router: uscita
+  **0**, `finished restoring lab.ordini_ripristinata (20000 documents, 0 failures)`, e l'indice
+  `_id_hashed` **ricreato**. Ma:
+
+  ```
+  documenti                20000
+  indici                   _id_, _id_hashed
+  in config.collections    assente  →  non distribuita
+  getShardDistribution()   [SHAPI-10001] Collection ordini_ripristinata is not sharded
+  ```
+
+  La collezione di partenza sta `shard1rs=9860  shard2rs=10140`; la ripristinata sta tutta sul
+  primary shard di `lab`, che è `shard2rs`. `mongorestore` ricrea gli indici e non chiama
+  `shardCollection()`: c'è la chiave, non c'è la distribuzione, e nessun errore lo dice.
+- **Esito 7 — il balancer era acceso per tutta la prova.**
+  `!sh.getBalancerState() && !sh.isBalancerRunning()` → `fermo: false`. [S-073](#s-073) prescrive di
+  fermarlo prima di un backup manuale; qui non è stato fermato di proposito, per misurare il caso
+  peggiore, e nessuno degli esiti sopra dipende da quella scelta.
+- **Riserve:**
+  - **a.** nessun esito misura una **incoerenza** effettiva: l'avviso dell'esito 5 dice che può
+    accadere, e per farla accadere servirebbe una migrazione in corso durante il dump. Non provocata.
+  - **b.** che il restore preceduto da `sh.shardCollection()` sulla collezione vuota produca una
+    collezione distribuita è dedotto dall'ordine con cui lo stack si costruisce, **non** misurato.
+  - **c.** i «extra steps» che [S-060](#s-060) attribuisce al backup di uno sharded cluster restano
+    non identificati: la fonte li nomina in una casella di tabella e non li elenca.
+  - **d.** che il `config/` presente nel dump basti a ricostruire un cluster non è stato provato, e
+    nessuna fonte letta lo afferma.
+  - **e.** `lab.ordini_ripristinata` è stata cancellata, tutte le cartelle di dump rimosse dai
+    container, e `make smoke-03` dopo la prova è verde.
+- **Conseguenza:** [ADR-0070](Decision.md#adr-0070), e la sezione 6 di
+  `docs/03-amministrazione/backup-restore.md`.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0070
+
+<a id="s-075"></a>
+### S-075 — MongoDB Manual 7.0: Keyfile Authentication for Self-Managed Sharded Clusters
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/deploy-sharded-cluster-with-keyfile-access-control/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma, e sposta una premessa
+- **Perché è stata cercata.** [S-074](#s-074) prescrive un obbligo — «you **must** still prevent
+  unauthorized access to the individual shards» — e nomina il rimedio in tre parole: «Create a user
+  administrator on the shard's primary». Prima di scriverlo in uno script di avvio serviva la
+  procedura per esteso, nella versione pinnata, dalla pagina che la possiede: il tutorial completo di
+  autenticazione a keyfile su sharded cluster.
+- **Cosa afferma, primo punto — la procedura c'è, ed è un passo numerato.** Dentro «Create the Shard
+  Replica Sets», il passo 4 è «Create the shard-local user administrator (optional).» Preceduto da
+  «Connect to the primary before continuing. Use `rs.status()` to locate the primary member.» e da
+  «You must be connected to the primary to create users.» L'esempio è questo:
+
+  ```js
+  admin = db.getSiblingDB("admin")
+  admin.createUser({
+    user: "fred",
+    pwd: passwordPrompt(),
+    roles: [ { role: "userAdminAnyDatabase", db: "admin" } ]
+  })
+  ```
+
+- **Cosa afferma, secondo punto — e lo fa sotto eccezione localhost.** «The localhost interface is
+  only available since no users have been created for the deployment. The localhost interface closes
+  after the creation of the first user.» Non è una scorciatoia da laboratorio: è il modo in cui il
+  manuale stesso crea il primo utente di uno shard, collegandosi al primario. Chi lo scrive in uno
+  script di avvio non sta deviando dalla procedura, la sta eseguendo.
+- **Cosa afferma, terzo punto — l'ordine non è indifferente.** L'intestazione della sezione lo
+  motiva: «These steps include optional procedures for adding shard-local users. Executing them now
+  ensures that there are users available for each shard to perform shard-level maintenance.» «Now»
+  vuol dire **prima** di `sh.addShard()`, che nel tutorial viene dopo, insieme al `mongos` e
+  all'amministratore del cluster.
+- **Cosa afferma, quarto punto — a che cosa servono, e a che cosa non servono.** Nelle
+  considerazioni: «some maintenance operations require direct connections to specific shards… you
+  must connect directly to the shard and authenticate as a shard-local administrative user». E il
+  confine: «Shard-local users exist only in the specific shard and should only be used for
+  shard-specific maintenance and configuration. **You cannot connect to the `mongos` with
+  shard-local users.**»
+- **Cosa afferma, quinto punto — un secondo utente, sempre facoltativo.** Dopo l'amministratore degli
+  utenti la pagina prevede uno «shard-local cluster administrator» con ruolo `clusterAdmin`, creato
+  autenticandosi come il primo. Sono due utenti distinti con due password distinte, ciascuna
+  digitata a `passwordPrompt()`.
+- **Cosa afferma, sesto punto — sulle password e sul keyfile.** «Passwords should be random, long,
+  and complex to ensure system security and to prevent or delay malicious access.» E, sulla
+  tecnologia scelta: «Keyfiles are bare-minimum forms of security and are best suited for testing or
+  development environments. For production environments we recommend using X.509 certificates.»
+- **Riserve:**
+  - **a.** la pagina **non** contiene, per i config server, nessun passo di creazione utenti: il
+    replica set dei config server si inizializza e basta, e l'amministratore del cluster nasce più
+    avanti attraverso il `mongos`. Che l'utente del cluster si crei sul config server — come fa
+    questo laboratorio — è una via equivalente nei risultati e diversa nella forma, e la differenza
+    non è discussa da questa fonte.
+  - **b.** la pagina non dice che cosa accada agli shard che restano **senza** utenti locali, se non
+    per il rimando dell'obbligo di [S-074](#s-074). Non c'è, in tutta la pagina, una frase che
+    avverta che uno shard senza utenti ha l'eccezione localhost aperta: la si deduce mettendo
+    insieme le due fonti.
+  - **c.** `passwordPrompt()` presuppone qualcuno alla tastiera. La pagina non descrive nessuna forma
+    non presidiata della stessa procedura, e quindi non copre — né benedice — quello che fa uno
+    script di avvio automatico.
+- **Usata da:** ADR-0071
+
+---
+
+<a id="v-066"></a>
+### V-066 — L'amministratore locale a uno shard: la porta di V-064 si chiude, e se ne apre una con la chiave
+
+- **Che cosa è stato provato:** lo stack `03-sharded`, profilo `palco`, MongoDB 7.0.40, dopo la
+  modifica di [ADR-0071](Decision.md#adr-0071) a `docker/03-sharded/init/11-shard-initiate.js`. La
+  domanda: il rimedio che [S-074](#s-074) prescrive e che [S-075](#s-075) descrive chiude davvero
+  quello che [V-064](#v-064) aveva misurato, e che cos'altro cambia.
+- **Esito 1 — l'utente nasce anche su volumi già inizializzati.** Lo stack è stato riacceso sui
+  volumi esistenti, dove i due replica set di shard erano già formati. Gli init hanno saltato
+  `rs.initiate()` e creato l'utente lo stesso:
+
+  ```
+  replica set «shard1rs» già formato: non lo reinizializzo
+  primario dello shard «shard1rs» eletto: shard1a:27017
+  amministratore locale «admin» creato su «shard1rs»
+  shard «shard1rs» pronto, eccezione localhost chiusa
+  ```
+
+  È la conferma pratica dell'esito 7 di [V-064](#v-064): l'eccezione è una condizione del
+  **processo**, non del disco. Un container nuovo su un volume vecchio la trova aperta.
+- **Esito 2 — l'attacco di V-064 non passa più.** Ripetuto identico, stesso comando, stesso
+  bersaglio:
+
+  ```
+  keyfile in questo container: assente
+  whatsmyuri: 127.0.0.1:36768
+  createUser: Unauthorized: Command createUser requires authentication
+  ```
+
+  Il container condivide ancora il network namespace dello shard e il server lo vede ancora arrivare
+  da `127.0.0.1`. Cambia solo che adesso un utente c'è. Lo stesso vale per `docker exec` sullo shard
+  senza credenziali.
+- **Esito 3 — l'amministratore locale funziona, ed è locale.** Autenticato su `shard1a`:
+
+  ```
+  setName: shard1rs
+  utenti su questo shard: [{"user":"admin","db":"admin"}]
+  ruoli: [{"role":"root","db":"admin"}]
+  lab.ordini su questo shard: 9860        (dal router: 20 000)
+  rs.status().set: shard1rs, membri 1
+  ```
+
+  Un utente solo per shard, con `root` su `admin`, che vede il proprio pezzo di collezione.
+- **Esito 4 — «you cannot connect to the mongos with shard-local users», misurato.** La
+  dimostrazione richiede un nome diverso, perché in questo laboratorio l'utente dello shard e quello
+  del cluster hanno **lo stesso nome e la stessa password** e dall'esterno sono indistinguibili.
+  Creato `solo-shard1` sul solo `shard1a`:
+
+  ```
+  presentato a shard1a   lab.ordini: 9860
+  presentato al mongos   MongoServerError: Authentication failed.
+  ```
+
+  Conferma [S-075](#s-075) e spiega perché l'esito 3 non basta da solo a provare che le due
+  anagrafiche siano due.
+- **Esito 5 — `userAdminAnyDatabase` si fa `root` da solo, in un comando.** È il ruolo che
+  [S-075](#s-075) prescrive per l'amministratore locale, ed è stato provato per capire quanto costi
+  scostarsene:
+
+  ```
+  legge lab.ordini:         Unauthorized
+  grantRolesToUser(root):   riuscito
+  adesso legge lab.ordini:  9860
+  ```
+
+  Un amministratore degli utenti **è** un amministratore, per definizione: può concedere a se stesso
+  qualunque ruolo. Fra `userAdminAnyDatabase` e `root`, su questo nodo, non c'è una barriera di
+  privilegio: c'è un comando in più.
+- **Esito 6 — la porta pubblicata dello shard adesso accetta credenziali.** È il cambiamento con il
+  segno opposto, e va scritto. Prima nessuno poteva autenticarsi su `shard1a` perché non c'erano
+  utenti; adesso, da fuori Docker:
+
+  ```
+  mongodb://admin:…@host.docker.internal:27141/?directConnection=true&authSource=admin
+  setName: shard1rs · documenti: 9860
+  ```
+
+  L'eccezione localhost non c'entra — quella via non l'ha mai aperta ([V-064](#v-064) esito 4). Ciò
+  che è cambiato è che ora esiste una credenziale che quella porta riconosce, ed è la stessa del
+  cluster.
+- **Esito 7 — idempotente al secondo avvio.** Rieseguito `make up-03` a stack acceso, i due init
+  hanno risposto «amministratore locale già presente … non lo ricreo» e sono usciti `0`. Il ramo
+  percorso è quello di `Unauthorized`, non quello di «already exists»: a eccezione chiusa il nodo
+  non arriva nemmeno a valutare se l'utente esista.
+- **Esito 8 — lo smoke test.** Sostituito il controllo che verificava l'invariante vecchia — le
+  credenziali del cluster rifiutate dallo shard ([V-058](#v-058)) — con tre controlli nuovi:
+  l'amministratore locale esiste ed è locale (1 utente, 9 860 documenti su 20 000), e l'eccezione
+  localhost è chiusa **su entrambi** gli shard. `make smoke-03`: **64 controlli, 0 errori**.
+  `make stack-check`: «Stack conformi: 3».
+- **Riserve:**
+  - **a.** vale per il profilo `palco`, un membro per shard. Sui **secondari** di uno shard a tre
+    membri non è stato provato: `createUser` su un secondario fallisce comunque con
+    `NotWritablePrimary`, ma che l'eccezione si comporti allo stesso modo resta la riserva **a** di
+    [V-064](#v-064), non chiusa qui.
+  - **b.** l'esito 5 prova che `userAdminAnyDatabase` può concedersi `root` **su quel nodo**. Non
+    dice niente su che cosa accada in un'installazione con ruoli personalizzati o con
+    `authorization` delegata altrove.
+  - **c.** l'esito 6 è misurato su Docker Desktop per macOS con le porte pubblicate dal profilo
+    `palco`. Uno stack che non pubblichi le porte degli shard non ha quella via, e la modifica di
+    ADR-0071 non gliene aggiunge.
+  - **d.** non è stato provato che cosa succeda se uno **solo** dei due init fallisce: lo stack si
+    fermerebbe prima, perché `add-shard` dipende da entrambi, ma lo stato intermedio — uno shard con
+    l'utente e uno senza — non è stato osservato.
+  - **e.** gli utenti di prova (`solo-shard1`, `solo-utenti`) sono stati cancellati; lo stato finale,
+    letto autenticati, è **un solo utente `admin` per shard**.
+- **Conseguenza:** [ADR-0071](Decision.md#adr-0071), la nuova §4.2 di
+  `docs/03-amministrazione/sicurezza-keyfile-x509.md` e i tre controlli nuovi di
+  `tools/smoke-sharded.sh`.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0071
+
+---
+
+<a id="v-067"></a>
+### V-067 — L'errore che indicava l'indirizzo sbagliato è sparito: adesso lo shard risponde, e risponde il vuoto
+
+- **Che cosa è stato provato:** rimisurare, dopo [ADR-0071](Decision.md#adr-0071), le risposte che
+  [V-058](#v-058) e [V-063](#v-063) avevano registrato interrogando uno shard come se fosse un
+  router. La riserva **a** di [V-063](#v-063) diceva che quegli errori erano il sintomo di **due**
+  cose insieme — comando dato all'indirizzo sbagliato e nessuna autenticazione — e che la prova non
+  le separava. L'amministratore per shard le separa, perché adesso su uno shard ci si può
+  autenticare.
+- **Ambiente:** stack `docker/03-sharded`, profilo `palco`, MongoDB 7.0.40, 2026-09-02, volumi
+  ricreati da zero. Comandi via `docker exec` sui container `sh-shard1a`, `sh-cfg1` e `sh-mongos`.
+- **Esito 1 — senza credenziali non si arriva più all'autorizzazione.** `sh.status()` in diretta su
+  uno shard:
+
+  ```console
+  $ docker exec sh-shard1a mongosh --quiet --eval 'sh.status()'
+  Warning: MongoshWarning: [SHAPI-10003] You are not connected to a mongos. This command may not
+  work as expected.
+  MongoServerError: Command find requires authentication
+  ```
+
+  Prima diceva `not authorized on config to execute command { find: "version", … }`
+  ([V-063](#v-063)). I due messaggi sembrano parenti e descrivono stati opposti: il primo è di un
+  nodo che **ti ha lasciato entrare** e ti nega quella lettura — è l'eccezione localhost, che
+  autorizza soltanto la creazione del primo utente; il secondo è di un nodo che non ti conosce. Il
+  messaggio cambiato è la prova, dal di fuori, che sullo shard l'eccezione è chiusa. Sul config
+  server, dove utenti ce n'erano già, la risposta è la stessa: `Command find requires
+  authentication`.
+- **Esito 2 — con le credenziali del cluster, lo shard risponde.**
+
+  ```
+  setName: shard1rs · lab.ordini: 9860
+  ```
+
+  [V-058](#v-058), quarto punto, aveva misurato `MongoServerError: Authentication failed` sulla
+  stessa coppia. È lo stesso cambiamento dell'esito 6 di [V-066](#v-066), qui per via di
+  `docker exec` invece che dalla porta pubblicata.
+- **Esito 3 — l'errore che la guida attribuiva alle istanze singole compare su uno shard.**
+  Autenticati:
+
+  ```console
+  $ docker exec sh-shard1a mongosh --quiet -u admin -p … --authenticationDatabase admin \
+      --eval 'sh.status()'
+  Warning: MongoshWarning: [SHAPI-10003] You are not connected to a mongos. This command may not
+  work as expected.
+  MongoshInvalidInputError: [SHAPI-10003] This db does not have sharding enabled. Be sure you are
+  connecting to a mongos from the shell and not to a mongod.
+  ```
+
+  È parola per parola l'errore che [V-063](#v-063) diceva appartenere a **un'altra situazione**,
+  quella dell'istanza singola. Non era falso allora e non lo è adesso: il primo errore ne nascondeva
+  un secondo. Finché la lettura veniva rifiutata, `mongosh` non arrivava a scoprire che cosa ci
+  fosse da leggere.
+- **Esito 4 — che cosa manca davvero, adesso che si può guardare.** Il documento che `mongosh` cerca
+  per decidere se lo sharding c'è:
+
+  ```
+  config.version su shard1a                 -> null
+  config.version attraverso il mongos       -> { "_id": 1, "clusterId": "6a9832ea14d252dc5b3ddef2" }
+  config.shards.countDocuments() su shard1a -> 0
+  ```
+
+  Il database `config` sullo shard **esiste** e ha venti collezioni — `cache.chunks.lab.ordini`,
+  `cache.collections`, `cache.databases`, `rangeDeletions`, `transactions`, `system.sessions` e le
+  altre — ma non `version`, non `shards`, non `chunks`. La frase «uno shard il database `config` ce
+  l'ha davvero» resta vera, e non basta: ce l'ha, e dentro non c'è l'anagrafe del cluster, che vive
+  sui config server.
+- **Esito 5 — il vuoto sembra una risposta.** `sh.getBalancerState()`, autenticati:
+
+  ```
+  in diretta su shard1a       -> true
+  attraverso il mongos        -> true
+  config.settings su shard1a  -> []
+  config.settings dal mongos  -> []
+  ```
+
+  La stessa risposta per due ragioni diverse. Dal router è lo stato vero: in `config.settings` non
+  c'è nessun documento che fermi il bilanciatore, e in sua assenza il bilanciatore è acceso. Dallo
+  shard è il valore che si ottiene leggendo a vuoto una collezione che lì non esiste.
+  [V-063](#v-063), nono punto, aveva misurato `Unauthorized: not authorized on config to execute
+  command …` e l'aveva chiamato un errore «che non nomina il problema vero». Adesso il problema non
+  lo nomina nessuno: chi chiede riceve `true`.
+- **Esito 6 — i comandi, invece, falliscono ancora forte.** Sulla stessa shell autenticata:
+
+  ```
+  sh.enableSharding("prova") -> MongoServerError: no such command: 'enableSharding'.
+                                Are you connected to mongos?
+  sh.isBalancerRunning()     -> MongoServerError: no such command: 'balancerStatus'
+  ```
+
+  La riga che divide i due comportamenti non è «al router sì, allo shard no»: è come `mongosh`
+  realizza la funzione. Quelle che si risolvono in una **lettura** di `config` adesso riescono e
+  tornano vuote; quelle che spediscono un **comando** trovano un `mongod` che quel comando non ce
+  l'ha, e lo dicono. `no such command` arriva anche **senza** credenziali, misurato: il nome
+  sbagliato viene rifiutato prima che l'autenticazione entri in gioco.
+- **Riserve:**
+  - **a.** `sh.enableSharding()` oggi risponde `MongoServerError: no such command`;
+    [V-063](#v-063) aveva registrato lo stesso testo con l'etichetta `CommandNotFound:`. Ciò che
+    segue i due punti è identico, l'etichetta no, e la differenza non è stata spiegata: qui vale la
+    misura di oggi.
+  - **b.** l'esito 5 dice che `true` è la risposta con `config.settings` vuoto in tutti e due i
+    posti. Non è stato provato che cosa risponda lo shard con il bilanciatore **fermo** dal router:
+    servirebbe `sh.stopBalancer()`, un secondo giro e una ripulitura dello stato.
+  - **c.** tutto è misurato sul profilo `palco`, un membro per shard, su arm64. La password è stata
+    letta da `.env` e non compare in nessun output riportato.
+- **Conseguenza:** [ADR-0072](Decision.md#adr-0072); la riscrittura di §3.3 di
+  `docs/04-mongosh/guida-mongosh.md`, dei due passaggi di `docs/02-architetture/sharded-cluster.md`,
+  del commento di `tools/reset-demo.sh` e di quello di
+  `docker/03-sharded/init/10-cfg-initiate.js`.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0072
+
+---
+
+<a id="v-068"></a>
+### V-068 — Le cinque scene dello sharded: diciotto kilobyte, quarantaquattro volte meno con `plain`, e cinque riproduzioni identiche all'originale
+
+- **Comandi:** `python3 tools/registra-terminale.py <file>.cast --titolo "…" -- make <bersaglio>`
+  con `up-03`, `stato-03`, `distribuzione-03`, `guasto-03` e `guasto-03 PROFILO=completo`; poi
+  `python3 tools/registra-terminale.py --riproduci <file>.cast` su ciascuna delle cinque
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, stack `docker/03-sharded`,
+  MongoDB 7.0.40. Terminale registrato a 100×30. Profilo `palco` per le prime quattro scene,
+  `completo` per la quinta.
+- **Che cosa si voleva sapere:** se il Blocco 3 abbia una riserva utilizzabile in sala, quanto pesi,
+  e se ciò che è stato registrato sia davvero ciò che si rivede.
+
+- **Esito, le cinque scene:**
+
+```
+file                             durata  eventi   byte   il numero che porta
+05-avvio-sharded.cast             22,9 s     53   5407   la catena finisce con sh-up-03 Healthy
+06-stato-sharded.cast              6,5 s     14   4422   2 shard · 4 chunk (2+2) · 1 router
+07-distribuzione-sharded.cast      4,0 s     12   2809   9860 + 10140 = 20000
+08-guasto-shard-palco.cast        40,1 s     18   3167   1 s sullo shard vivo, 15 s e 16 s di attesa
+09-failover-membro-shard.cast     12,3 s     15   2552   20000 in 0 s, primario shard1a → shard1b
+```
+
+  Diciotto kilobyte per cinque scene, che portano a trentun kilobyte il totale della cartella
+  insieme alle quattro di [V-045](#v-045).
+
+- **Esito — `COMPOSE_PROGRESS=plain` vale quarantaquattro volte, e non è una questione di peso.**
+  Lo **stesso** `up` sullo **stesso** stack già acceso, registrato due volte a nove secondi di
+  distanza: **134 861 byte in 205 eventi** con il renderer predefinito, **3 050 byte in 28 eventi**
+  con `COMPOSE_PROGRESS=plain`. Durata praticamente identica — 8,6 s contro 8,5 s — perché il
+  comando è lo stesso: a cambiare è solo quanto terminale viene consumato per mostrarlo. Il
+  renderer predefinito ridisegna una tabella animata e riscrive ogni riga a ogni aggiornamento;
+  riprodotto, è illeggibile. In `plain` ogni container scrive la propria riga una volta sola e
+  l'ordine della catena — keyfile, config server, shard, router, `addShard`, dati — si vede
+  scorrere. La prima registrazione dell'avvio **a freddo**, fatta prima di scoprirlo, pesava
+  **588 KB**.
+
+- **Esito — le cinque riproduzioni coincidono byte per byte con l'originale.** Ogni `.cast` è stato
+  riaperto con `--riproduci` dentro uno pseudo-terminale, il testo raccolto e confrontato con quello
+  della registrazione di partenza:
+
+```
+05-avvio-sharded.cast          22,9 s · uscita 0 · riproduzione identica · 3905 byte di testo
+06-stato-sharded.cast           6,5 s · uscita 0 · riproduzione identica · 3575 byte di testo
+07-distribuzione-sharded.cast   4,0 s · uscita 0 · riproduzione identica · 2053 byte di testo
+08-guasto-shard-palco.cast     40,1 s · uscita 0 · riproduzione identica · 2165 byte di testo
+09-failover-membro-shard.cast  12,3 s · uscita 0 · riproduzione identica · 1669 byte di testo
+```
+
+  Con una avvertenza che il primo confronto ha fatto fallire per niente: lo pseudo-terminale
+  traduce ogni `\n` in `\r\n`, quindi un `\r\n` registrato torna indietro come `\r\r\n`. Normalizzata
+  quella traduzione, le cinque coincidono senza eccezioni.
+
+- **Esito — lo stesso comando racconta due storie diverse, e sono vere tutt'e due.**
+  `make guasto-03` nel profilo `palco`: fermato l'unico membro di `shard1rs`, la lettura mirata
+  sullo shard vivo risponde in **1 s**, quella sullo shard fermo e il conteggio totale falliscono
+  dopo **15 s** e **16 s** con `FailedToSatisfyReadPreference: Could not find host matching read
+  preference { mode: "primary" } for set shard1rs`; il nodo riavviato restituisce i 20000 in
+  **3 s**. Lo stesso comando nel profilo `completo`: le tre risposte arrivano tutte — `1 s`, `1 s`,
+  **`0 s`** — e il primario di `shard1rs`, letto da un membro superstite, è passato da
+  `shard1a:27017` a `shard1b:27017` senza che nessuno intervenisse. La differenza fra le due scene
+  non è il prodotto: è il numero di membri per shard.
+
+- **Esito — la password non compare in nessuna delle cinque.** Cercata alla lettera dentro i cinque
+  `.cast`: zero occorrenze. La riga di comando del `docker` dell'host non entra nella registrazione
+  perché non viene battuta — `tools/demo-sharded.sh` legge il valore dal `.env` e lo passa a
+  `mongosh` dentro il container ([ADR-0054](Decision.md#adr-0054)).
+
+- **Riserve:**
+  - **a.** Una sola esecuzione per scena. I numeri qui sopra sono singoli, non mediane, e vale per
+    loro la lezione di [V-045](#v-045): il singolo numero balla, il rapporto fra due scene no.
+  - **b.** I **15 s** e **16 s** della scena 8 non sono un parametro documentato che sia stato
+    letto: sono il tempo che il router ha impiegato prima di rinunciare, misurato con il
+    cronometro della shell attorno alla chiamata. Il valore dipende dai timeout di scoperta del
+    router e da quando il nodo è caduto rispetto al giro di sonde; non è stato ripetuto.
+  - **c.** I **588 KB** dell'avvio a freddo con il renderer predefinito sono un'osservazione
+    singola, fatta prima del confronto controllato e non ripetuta. Il confronto che regge è quello
+    a stack acceso: 134 861 contro 3 050 byte.
+  - **d.** Una sola macchina, arm64, con Docker Desktop. Le durate dell'avvio dipendono dalla
+    cache delle immagini e dal disco.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0073
+
+---
+
+<a id="v-069"></a>
+### V-069 — I tre debiti di strumentazione, misurati: quindici porte su quindici, un profilo inesistente che accusa il keyfile, e ventuno secondi di margine
+
+- **Comandi:** per le porte, un lettore YAML dei tre `docker/*/compose.yaml` confrontato con la
+  riga `PORTE=(...)` di `tools/preflight.sh`; per il profilo,
+  `make up-03 PROFILO=inesistente`, `docker compose … --profile inesistente config --services` e
+  `docker compose … config --profiles`; per il margine, tre giri a freddo e tre a caldo di
+  `docker compose … up -d --wait` seguito da `docker compose … wait rs-init`, cronometrati, con un
+  osservatore che interroga `docker inspect -f '{{.State.Status}}' rs-init` ogni 50 ms.
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.5.0, MongoDB 7.0.40. Stack 03 acceso
+  nel profilo `palco` durante la prova del profilo inesistente; stack 02 avviato e smontato apposta
+  per la terza misura, con i tre volumi dei dati rimossi prima di ogni giro a freddo.
+- **Che cosa si voleva sapere:** se i tre debiti segnati da [ADR-0049](Decision.md#adr-0049) e
+  [ADR-0062](Decision.md#adr-0062) fossero difetti reali oggi, e in che modo si manifesterebbero.
+
+- **Esito — le quindici porte coincidono, e nessuno le teneva insieme.** I tre file Compose
+  pubblicano **15** porte dell'host; `tools/preflight.sh` ne elenca **15**. Pubblicate e non
+  controllate: nessuna. Controllate e non pubblicate: nessuna. Ripetute: nessuna. L'elenco è in
+  ordine crescente.
+
+```
+27017  01-standalone/mongo-standalone
+27021  02-replicaset/mongo-rs-1      27022  …/mongo-rs-2       27023  …/mongo-rs-3
+27117  03-sharded/mongos             27118  …/mongos2 [completo]
+27131  03-sharded/cfg1               27132  …/cfg2 [completo]   27133  …/cfg3 [completo]
+27141  03-sharded/shard1a            27142  …/shard1b [completo] 27143 …/shard1c [completo]
+27151  03-sharded/shard2a            27152  …/shard2b [completo] 27153 …/shard2c [completo]
+```
+
+  Il debito non era un errore: era che i due elenchi coincidevano **per attenzione**. Sette delle
+  quindici porte esistono solo nel profilo `completo`, e sono proprio quelle che si dimenticano.
+
+- **Esito — un profilo che non esiste non è un errore per Compose, ed è la misura che sorprende.**
+  `docker compose … --profile inesistente config --services` risponde con **un solo servizio**,
+  `keyfile-init`: l'unico del file che non dichiara `profiles:`. Un profilo sconosciuto non seleziona
+  niente, quindi restano i servizi che non appartengono a nessun profilo. `make up-03
+  PROFILO=inesistente` stampa esattamente questo, e esce **2**:
+
+```
+ Container sh-keyfile-init  Starting
+ Container sh-keyfile-init  Started
+ Container sh-keyfile-init  Waiting
+container sh-keyfile-init exited (0)
+make: *** [up-03] Error 1
+```
+
+  Cinque righe che accusano il one-shot del keyfile di essere uscito 0, cioè di aver fatto il suo
+  mestiere. La parola «profilo» non compare in nessuna. Il cluster acceso in `palco` non è stato
+  toccato: i cinque container erano ancora in piedi e sani dopo il tentativo. La domanda giusta ha
+  invece una risposta pulita: `docker compose --env-file tools/images.env --env-file
+  docker/03-sharded/.env -f docker/03-sharded/compose.yaml config --profiles` stampa `completo` e
+  `palco`, e esce 0. Senza i due `--env-file` fallisce su `MONGO_IMAGE`, quindi il comando che
+  interroga i profili deve portarseli dietro.
+
+- **Esito — il margine di `up-02` è ventuno secondi a freddo e quattro a caldo, e non è fortuna.**
+  Tre giri a freddo, volumi dei dati rimossi ogni volta:
+
+```
+giro   up -d --wait torna   rs-init esce   margine   wait rs-init
+  1              7,92 s        29,51 s     21,59 s   uscita 0 in 21,55 s
+  2              7,31 s        29,46 s     22,16 s   uscita 0 in 22,06 s
+  3              7,28 s        29,18 s     21,90 s   uscita 0 in 21,83 s
+```
+
+  Tre giri a caldo, sullo stack già acceso: `up -d --wait` torna in **1,98 / 1,84 / 1,84 s** e
+  `wait rs-init` blocca ancora **3,97 / 3,87 / 3,94 s** prima di uscire 0. Il margine non è un caso
+  fortunato: `rs-init` è l'ultimo anello della catena e non ha healthcheck, quindi la soglia che
+  `--wait` gli applica è `running` ([S-057](#s-057)) ed è soddisfatta nell'istante in cui parte.
+  La finestra a disposizione del secondo comando **coincide con l'intera durata del lavoro di
+  `rs-init`**, e si chiuderebbe solo se `rs-init` smettesse di lavorare.
+
+- **Esito — il fallimento temuto esiste, si riproduce, e mente sul motivo.** Dato `wait rs-init`
+  una seconda volta, quando `rs-init` ha già finito, la risposta è `no containers for project
+  "sqlstart-02-replicaset"` con uscita **1**, in **0,08 s**. Nello stesso istante il progetto ha
+  **cinque** container — `mongo-rs-1`, `mongo-rs-2`, `mongo-rs-3` in esecuzione, `rs-init` e
+  `rs-keyfile-init` usciti — e `docker compose ps -a` li elenca tutti. `compose wait` guarda solo i
+  container **vivi**: il messaggio nomina l'intero progetto per dire che non ne trova uno solo.
+  Nell'uso reale non capita perché `up -d --wait` riavvia `rs-init` a ogni giro, verificato: al
+  secondo `make up-02` di fila la sequenza è `rs-init Starting`, `Started`, `Waiting`, `Healthy`, e
+  il `wait` che segue trova di nuovo qualcosa da attendere.
+
+- **Riserve:**
+  - **a.** L'osservatore che cronometra l'uscita di `rs-init` è stato scritto per il caso a freddo,
+    dove il container non esiste ancora. A caldo legge lo stato `exited` **residuo** del giro
+    precedente e risponde subito: i suoi timestamp a caldo sono privi di significato e non sono
+    riportati. Il margine a caldo qui sopra è la durata del blocco di `wait rs-init`, che è la
+    stessa grandezza misurata in un altro modo, ma è una misura indiretta.
+  - **b.** Tre giri per condizione su una sola macchina, arm64, con Docker Desktop. Le durate a
+    freddo dipendono dal disco e dalla cache delle immagini; il rapporto fra le due condizioni no.
+  - **c.** Che un profilo sconosciuto selezioni i soli servizi senza `profiles:` è misurato su
+    Compose **v5.5.0** e non è stato cercato nella documentazione: potrebbe cambiare. Il verso in
+    cui sbaglierebbe è innocuo — il guardiano rifiuterebbe un profilo che Compose accetta, non il
+    contrario.
+  - **d.** La coincidenza delle quindici porte è una fotografia del 2 settembre 2026. Il valore
+    della misura non è il numero: è che da oggi la coincidenza è controllata da
+    `tools/tests/test_coerenza_repo.py` e non più dall'attenzione di chi modifica.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0074, ADR-0075
+
+---
+
+<a id="v-070"></a>
+### V-070 — I due messaggi di un `--configdb` malformato, e il nome di set vuoto che passava per refuso
+
+- **Comandi:** `docker run --rm --entrypoint mongos <digest> --configdb <forma>` su tre forme
+  malformate; `check_stack.nome_del_set` chiamata direttamente su quattro stringhe; e
+  `check_stack.verifica` su un documento sharded sintetico con `--configdb /cfg1:27017`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, immagine `mongo` pinnata per digest da
+  `tools/images.env` (MongoDB 7.0.40), 2026-09-02. Nessuno stack acceso: i tre rifiuti sono
+  dell'analizzatore degli argomenti e arrivano in meno di un secondo.
+- **Che cosa si voleva sapere:** se il rilievo lasciato da Copilot sulla PR #4 —
+  «`nome_del_set()` può restituire una stringa vuota se `--configdb` inizia con `/`, e a quel
+  punto il chiamante la tratta come un nome di replica set valido» — descriva un difetto reale.
+
+- **Esito, primo punto — l'osservazione è esatta.** La funzione, prima della correzione:
+
+```
+nome_del_set('/cfg1:27017')      -> ''
+nome_del_set('   /cfg1:27017')   -> '   '
+nome_del_set('cfgrs/cfg1:27017') -> 'cfgrs'
+nome_del_set('cfg1:27017')       -> None
+```
+
+- **Esito, secondo punto — la diagnosi no: nessun file passava.** Dato a `verifica` un `mongos`
+  con `--configdb /cfg1:27017`, i problemi restituiti sono **due**, non zero: il file veniva
+  bocciato e `check_stack.py` usciva diverso da zero. La stringa vuota non veniva accettata come
+  nome valido — cadeva nel controllo successivo, «nessun mongod dichiara questo `--replSet`».
+  **Non c'era nessun falso negativo**, e non c'è mai stato uno stack approvato per sbaglio.
+
+- **Esito, terzo punto — il difetto vero è la diagnosi, ed è peggiore di quanto suggerito.** Il
+  messaggio che usciva era questo:
+
+```
+mongos: «--configdb» nomina il replica set «», che nessun mongod di questo
+file dichiara con «--replSet». È il caso del refuso, ed è l'unico in cui
+nessuno protesta: i processi partono tutti, e mongos resta a cercare un
+set che non esiste (ADR-0063)
+```
+
+  Due affermazioni false in tre righe. «Nomina il replica set «»»: non nomina niente. «Nessuno
+  protesta: i processi partono tutti»: `mongos` con quell'argomento **non parte**, esce **2** e lo
+  dice. Il messaggio mandava a cercare un refuso di due lettere dentro i `--replSet` del file,
+  mentre il difetto era una barra di troppo sotto gli occhi di chi legge.
+
+- **Esito, quarto punto — `mongos` ha due messaggi per il `--configdb` malformato, non uno.** È la
+  virgola a decidere quale:
+
+```
+mongos --configdb a:27017,b:27017
+  -> FailedToParse: invalid url [a:27017,b:27017]                          (uscita 2)
+mongos --configdb cfg1:27017
+  -> BadValue: configdb supports only replica set connection string        (uscita 2)
+mongos --configdb /cfg1:27017
+  -> BadValue: configdb supports only replica set connection string        (uscita 2)
+```
+
+  [V-057](#v-057) aveva misurato la sola forma con la virgola, ed è accurata. Il messaggio di
+  `check_stack.py` però citava quella stringa come se fosse **l'unica**, e la prova che lo copriva
+  usava un host solo: uno scarto fra ciò che la prova esercitava e ciò che il messaggio prometteva,
+  nato dentro lo stesso commit. Adesso il messaggio porta entrambe le stringhe.
+
+- **Riserve:**
+  - **a.** Le tre forme sono state provate con `docker run` sulla riga di comando, fuori dallo
+    stack. È il posto giusto — il rifiuto è dell'analizzatore degli argomenti e precede qualunque
+    rete — ma non dice nulla su che cosa farebbe un `mongos` già avviato.
+  - **b.** I testi dei due messaggi sono di **MongoDB 7.0.40**, l'immagine pinnata del repository.
+    Sono stringhe di prodotto e possono cambiare di versione: quello che non cambia è che il
+    processo esce 2 senza partire.
+  - **c.** Non è stata cercata una classificazione esaustiva delle forme malformate. Due messaggi
+    sono quelli incontrati su tre tentativi, non l'elenco completo di ciò che `mongos` sa dire.
+  - **d.** La correzione riguarda **la qualità della diagnosi, non la copertura**: prima e dopo, un
+    `--configdb` con il nome di set vuoto fa fallire `make stack-check`. Chi misurasse il valore di
+    questa modifica contando gli stack bocciati non troverebbe differenza.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0076
+
+---
+
+<a id="v-071"></a>
+### V-071 — Un `mongos` senza `--keyFile`: approvato dal controllo, e un log che accusa la password
+
+- **Comandi:** una copia di `docker/03-sharded/compose.yaml` con cancellate le sole due righe
+  `--keyFile` / `/keyfile/mongo-keyfile` del `mongos`, passata a `tools/check_stack.py`; poi
+  `docker compose -f <copia> -p prova-keyfile --profile palco up -d --wait` e
+  `docker logs sh-mongos`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.5.0, immagine `mongo` pinnata per
+  digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-02
+- **Che cosa si voleva sapere:** se il rilievo lasciato dal secondo revisore sulla PR #4 — «la
+  regola che pretende `--keyFile` vive dentro il ramo di `avvia_mongod`, e un `mongos` non è un
+  `mongod`» — descriva un falso negativo reale, su un file vero e non su un documento sintetico.
+
+- **Esito, primo punto — il controllo approvava.** Prima della correzione, su quella copia:
+
+```
+Stack conformi: 1
+```
+
+  con uscita **0**. Uno sharded cluster il cui router non possiede il segreto con cui il resto del
+  cluster si autentica, dichiarato conforme.
+
+- **Esito, secondo punto — lo stack non parte.** `up -d --wait` esce **1**:
+
+```
+dependency failed to start: container sh-mongos is unhealthy
+```
+
+- **Esito, terzo punto — il log accusa l'autenticazione, non il keyfile.** Il router entra in un
+  ciclo che si ripete ogni due secondi:
+
+```
+"msg":"Failed to refresh key cache"
+"msg":"Error loading global settings from config server. Sleeping for 2 seconds and retrying"
+  error: {"code": 13, "codeName": "Unauthorized",
+          "errmsg": "Error loading clusterID :: caused by :: Command find requires authentication"}
+```
+
+  `Command find requires authentication` è la frase che si legge quando una password è sbagliata, e
+  manda a controllare `.env`. Qui la password è giusta: manca la riga che dà al router il keyfile,
+  e senza quella il router non ha nessuna identità da presentare al config server. Il messaggio è
+  vero alla lettera e indica il posto sbagliato — la stessa forma d'errore della **nota 129**.
+
+- **Esito, quarto punto — dopo la correzione il file è bocciato.** Sulla stessa copia:
+
+```
+✗ …/compose.SENZA-KEYFILE-MONGOS.yaml: mongos: avvia un mongos senza «--keyFile». Il router non
+  ha il segreto con cui il resto del cluster si autentica: parte, resta unhealthy e ripete «Error
+  loading clusterID :: caused by :: Command find requires authentication», che sembra una
+  credenziale sbagliata e invece è una riga mancante (ADR-0014, V-071)
+```
+
+- **Riserve:**
+  - **a.** Provato sul solo profilo `palco`. La copia difettosa toglieva il keyfile al **primo**
+    `mongos`; `mongos2`, che esiste solo in `completo`, non è stato provato. La regola però
+    interroga ogni servizio del file, non il primo.
+  - **b.** Le stringhe di log sono di **MongoDB 7.0.40**, l'immagine pinnata del repository, e
+    possono cambiare di versione. Quello che non cambia è che il container resta `unhealthy` e che
+    `up --wait` esce diverso da zero.
+  - **c.** La regola nuova guarda che l'opzione **ci sia**, non che il file puntato esista o sia
+    montato: quella è una verifica separata e già presente (`problemi_keyfile`).
+  - **d.** Non è stato provato che cosa succeda al contrario — un `mongos` con `--keyFile` e un
+    `mongod` senza. Quel caso era già coperto dalla regola precedente.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0077
+
+---
+
+<a id="v-072"></a>
+### V-072 — Il cambio di profilo su uno stack già inizializzato, e ventimila documenti non distribuiti dichiarati pronti
+
+- **Comandi:** `make up-03` (profilo `palco`), poi
+  `docker compose --profile completo up -d --wait cfg2 cfg3` e
+  `MEMBRI_CFG="cfg1:27017,cfg2:27017,cfg3:27017" docker compose … up --force-recreate
+  --exit-code-from cfg-init cfg-init`, con `rs.status()` subito dopo; e, separatamente,
+  `lab.ordini.drop()` seguito da un `insertMany` di 20 000 documenti senza distribuirli, poi il
+  riavvio del solo servizio `seed`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.5.0, immagine `mongo` pinnata per
+  digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-02
+- **Che cosa si voleva sapere:** se gli altri due rilievi del secondo revisore sulla PR #4
+  descrivano casi raggiungibili in cui la catena esce **0** su uno stack che non fa quello che
+  promette.
+
+- **Esito, primo punto — il cambio di profilo passa in silenzio.** L'anello dei config server
+  riceve tre membri, ne trova uno, e dichiara pronto:
+
+```
+sh-cfg-init  | membri da configurare: cfg1:27017, cfg2:27017, cfg3:27017
+sh-cfg-init  | replica set «cfgrs» già formato: non lo reinizializzo
+sh-cfg-init  | primario del config server eletto: cfg1:27017
+sh-cfg-init  | utente amministratore già presente: non lo ricreo
+sh-cfg-init  | config server pronto
+sh-cfg-init exited with code 0
+```
+
+  e subito dopo, sullo stesso set:
+
+```
+membri nel set: 1
+  - cfg1:27017 [PRIMARY]
+```
+
+  Due config server sani girano fuori dalla replica. Le due guardie di
+  [ADR-0060](Decision.md#adr-0060) non lo vedono, e non è un difetto delle guardie: cfg2 e cfg3
+  **rispondono**, quindi la prima è soddisfatta; nessun candidato è **fuori elenco**, quindi la
+  seconda pure. Il disallineamento è una terza direzione, che nasce dal disco e non dall'ambiente.
+
+- **Esito, secondo punto — la guardia esistente funziona, nella sua direzione.** Rilanciando lo
+  stesso anello con `MEMBRI_CFG` lasciato al valore del `palco` mentre cfg2 e cfg3 giravano, la
+  catena si è fermata da sé con uscita **5** (`USCITA_MEMBRO_DI_TROPPO`). Non era la misura
+  cercata — è capitata durante un'altra prova — e vale la pena scriverla: ADR-0060 regge, il buco
+  è accanto e non dentro.
+
+- **Esito, terzo punto — il seed accetta ventimila documenti non distribuiti.** Con `lab.ordini`
+  rifatta a mano, piena e senza riga in `config.collections`:
+
+```
+sh-seed  | lab.ordini ha già 20000 documenti: non ricarico.
+sh-seed  | Per ricaricare comunque: «make seed-03», che passa RICARICA=1.
+sh-seed  | ATTENZIONE: lab.ordini non risulta distribuita.
+sh-seed exited with code 0
+```
+
+  L'avviso c'era già, ed è esatto. A mancare era il codice d'uscita: un laboratorio sullo sharding
+  la cui collezione non è partizionata veniva consegnato verde.
+
+- **Esito, quarto punto — dopo le correzioni i due casi sono rumorosi.** Stessa sequenza, stack
+  ricostruito:
+
+```
+sh-cfg-init  | ERRORE: il replica set «cfgrs» esiste già con altri membri.
+sh-cfg-init  |   configurati adesso: cfg1:27017
+sh-cfg-init  |   chiesti da MEMBRI_CFG: cfg1:27017, cfg2:27017, cfg3:27017
+sh-cfg-init exited with code 6
+
+sh-seed  | ERRORE: lab.ordini ha già 20000 documenti ma NON è distribuita.
+sh-seed exited with code 9
+```
+
+- **Esito, quinto punto — i giri leciti restano verdi.** `make up-03` da zero e poi ripetuto: **0**
+  entrambe le volte. `make up-03 PROFILO=completo` da zero e poi ripetuto: **0** entrambe le volte.
+  `make seed-03`, che è la via d'uscita indicata dal messaggio di uscita 9, ricostruisce la
+  collezione distribuita (`shard1rs: 9860 · shard2rs: 10140`). `make smoke-03 PROFILO=completo`:
+  **Superati: 101 · Errori: 0**.
+
+- **Riserve:**
+  - **a.** Il cambio di profilo è stato **simulato** accendendo cfg2 e cfg3 e rilanciando il solo
+    `cfg-init` con `MEMBRI_CFG` sovrascritto. È la stessa sequenza che `make up-03
+    PROFILO=completo` esegue su uno stack `palco` acceso, ma quel bersaglio non è stato invocato in
+    quella forma: la misura riguarda l'anello, non il bersaglio.
+  - **b.** Riprodotto sui **config server**. I due anelli degli shard hanno lo stesso identico ramo
+    e hanno ricevuto la stessa correzione, ma il guasto non è stato riprodotto su di loro.
+  - **c.** La collezione non distribuita è stata prodotta a mano. Il caso è **raggiungibile**; non
+    è dimostrato che una sequenza di comandi del laboratorio lo produca, né quanto sia frequente.
+  - **d.** La distribuzione su **un solo shard** resta un avviso e non un errore. È una scelta e
+    non una dimenticanza — unire i chunk su uno shard è una scena della demo
+    ([ADR-0069](Decision.md#adr-0069)) — quindi il seed non boccia ogni stato diverso da quello che
+    avrebbe prodotto lui, solo l'assenza dal catalogo.
+  - **e.** Il confronto fra membri usa `hello()`, che risponde senza credenziali. Somma `hosts`,
+    `passives` e `arbiters` per difendersi da un membro a `priority: 0`, ma quel caso non esiste in
+    questo laboratorio e non è stato provato.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0077
+
+---

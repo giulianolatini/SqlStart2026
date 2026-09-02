@@ -3226,3 +3226,1753 @@ invece di toglierla); respingere il rilievo perché il caso di prova proposto no
 per non ripetere).
 
 **Fonti:** [V-049](Sources.md#v-049)
+
+
+---
+
+<a id="adr-0056"></a>
+## ADR-0056 — Prima di rimuovere un worktree si guarda dentro, e il file che conta vive nel checkout principale
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto:** il lavoro su questo repository si svolge in worktree separati, uno per branch, che
+alla chiusura della PR vengono rimossi. La domanda «posso rimuoverlo?» ha una risposta ovvia e una
+nascosta. Quella ovvia riguarda il lavoro versionato, e si verifica in due comandi: nessuna
+modifica in sospeso, e la punta del ramo già dentro `develop`. Quella nascosta riguarda i file che
+git ha ricevuto istruzione di non guardare.
+
+In questo repository quella categoria non contiene solo cache. `docker/02-replicaset/.env` è
+ignorato **per decisione** ([ADR-0014](#adr-0014) e la riga di `.gitignore` che ne discende):
+contiene la password dell'amministratore del laboratorio, e non deve entrare nella cronologia. Il
+prezzo di quella scelta, che fino a oggi non era stato scritto, è che quel file esiste in una copia
+sola, dove è stato creato.
+
+La misura ([V-050](Sources.md#v-050)) dice due cose. La prima: `git worktree remove` si rifiuta di
+cancellare un worktree che contiene file non tracciati — `fatal: … contains modified or untracked
+files` — ma cancella senza obiettare uno che contiene solo file ignorati, uscita `0` e nessun
+messaggio. La rete di sicurezza c'è, e non copre questa categoria. La seconda: il controllo non si
+può fare da fuori. Git non attraversa il confine di un altro repository, nemmeno con l'opzione che
+esiste apposta per scendere nelle directory; da fuori il worktree è una riga sola.
+
+**Decisione:** prima di ogni `git worktree remove`, si elencano i file ignorati **dall'interno del
+worktree**, e si mette in salvo ciò che non si rigenera:
+
+```
+git -C <worktree> status --porcelain --ignored -uall \
+  | grep -v -e '/\.venv/' -e '__pycache__' -e '\.pytest_cache'
+```
+
+Il filtro toglie ciò che si ricostruisce da solo e lascia in vista il resto. Quello che resta si
+guarda a una a una: se una riga non si rigenera con un comando, si copia prima di rimuovere.
+
+E, come conseguenza diretta: **la sede dei file `.env` del laboratorio è il checkout principale**,
+non un worktree. Un worktree è per costruzione temporaneo; un file che vive solo lì è un file che
+si perde a fine branch, e il momento in cui te ne accorgi è quello in cui uno stack non parte più.
+
+**Conseguenze:** un comando in più nella chiusura di ogni branch, e l'abitudine di leggerne
+l'uscita invece di scorrerla. In cambio, i worktree tornano a essere quello che devono essere —
+usa e getta — perché la condizione che li rende tali è ora esplicita invece che sperata.
+
+Alla chiusura di `feature/02` questa regola ha avuto la sua prima applicazione e ha trovato subito
+il caso per cui esiste: il `.env` del replica set era nel worktree e **non** nel checkout
+principale. Copiato prima della rimozione, lo stack 02 riparte senza reinizializzare
+l'amministratore nei volumi; perso, si sarebbe fermato sull'errore esplicito di
+`${PASSWORD_AMMINISTRATORE:?…}` — che è il comportamento voluto, ma a quel punto la password
+andava scelta di nuovo e i volumi ricreati.
+
+**Alternative scartate:** fidarsi di `git worktree remove`, che per i file non tracciati basta e
+avanza (misurato: sugli ignorati non dice niente, ed è esattamente la categoria in cui cade il
+`.env`); eseguire il controllo dal checkout principale, che è il posto naturale da cui si rimuove
+un worktree (misurato: git si ferma al confine di repository e riporta la sola directory, quindi il
+controllo non è impreciso, è cieco); togliere `.env` dal `.gitignore` così che git lo protegga come
+file tracciato (metterebbe la password nella cronologia, che è precisamente ciò che
+[ADR-0014](#adr-0014) vieta); usare `git clean -ndX` per l'elenco (funziona ed è più corto, ma
+elenca solo gli ignorati e non i non tracciati, e vive a un solo carattere di distanza da
+`-fdX`, che cancella — un comando di verifica non dovrebbe avere quella forma).
+
+**Fonti:** [V-050](Sources.md#v-050)
+
+
+---
+
+<a id="adr-0057"></a>
+## ADR-0057 — Lo sharded cluster comincia adesso, con i due giorni che `feature/02` ha restituito
+
+**Data:** 2026-09-01 · **Stato:** Accettata — modifica il calendario del
+[design](00-progetto/2026-08-24-design.md)
+
+**Contesto:** il calendario del design assegna a `feature/02-stack-replicaset` il periodo dal 31
+agosto al 3 settembre, poi `feature/04-app-python` dal 4 all'11 con la PR #4, e
+`feature/03-stack-sharded` il 14 e il 15 con la PR #5. L'ordine non è casuale e il design lo
+motiva: «`feature/04` precede `feature/03` perché è il pezzo più grande e meno comprimibile».
+
+`feature/02` è stata unita il **1º settembre**, due giorni prima della sua scadenza. Il calendario
+non prevede che cosa farne: prevede un ordine, non un modo di spendere l'anticipo. Il Product
+Owner ha deciso di spenderlo aprendo `feature/03`.
+
+La scelta ha due ragioni che il calendario non contraddice. La prima è di dimensione: allo sharded
+sono assegnati due giorni, ed è quindi l'unico branch che entra per intero nella finestra
+guadagnata. La seconda è di preparazione: lo spike del 25 agosto ha già montato la topologia
+completa e l'ha misurata, e il file Compose che ha funzionato è dentro il verbale — è il branch che
+parte più vicino all'arrivo, non quello che parte da zero.
+
+**Decisione:** `feature/03-stack-sharded` si apre il 1º settembre e occupa il 2 e il 3, cioè i
+giorni restituiti da `feature/02`. **`feature/04-app-python` conserva la sua data di inizio, il 4
+settembre.** Se al 3 settembre lo sharded non è chiuso, non si sfora: si sospende scrivendo il
+punto di ripresa, e il lavoro riprende nella sua finestra originale del 14–15 settembre. Il 14 e il
+15 restano assegnati allo sharded finché non è chiuso; se si chiude prima, diventano margine prima
+della `release/1.0` del 16.
+
+**Conseguenze:** il ragionamento del design è preservato, perché ciò che protegge non è l'ordine in
+sé ma la data di inizio di `feature/04` — il pezzo grande e incomprimibile mantiene la sua finestra
+intera. Cambia soltanto che cosa succede nei due giorni che prima erano coda di `feature/02`.
+
+Il calendario del design **non viene riscritto**: questo ADR lo modifica, come ogni altra decisione
+di questo repository, per aggiunta e per rimando. Chi legge il design trova l'ordine originale e
+la sua motivazione, che restano validi; chi legge qui trova che cosa è successo dopo e perché.
+
+C'è un rischio, e conviene scriverlo invece di scoprirlo: aprire un branch «perché c'è tempo» è il
+modo classico di trasformare due giorni di margine in due giorni di debito, se il branch non si
+chiude. La clausola di sospensione sopra è la difesa, ed è vincolante: al 3 settembre si guarda
+l'orologio, non lo stato d'animo.
+
+**Alternative scartate:** rispettare l'ordine e restare fermi due giorni, che sarebbe stato
+difendibile ma butta via il margine invece di investirlo; anticipare `feature/04` al 2 settembre,
+che avrebbe usato l'anticipo sul pezzo grande — scartata perché l'applicazione ha bisogno di
+giorni consecutivi e pieni, e due giorni intestati a un branch di due settimane non lo accorciano,
+lo frammentano; iniziare lo sharded senza scrivere niente, lasciando che il ramo aperto raccontasse
+da solo la deviazione dal calendario, che è la forma peggiore perché lascia in piedi due verità in
+conflitto — un documento che dice una cosa e un repository che ne fa un'altra.
+
+**Fonti:** nessuna (decisione organizzativa)
+
+
+---
+
+<a id="adr-0058"></a>
+## ADR-0058 — La 8.0.30 non c'è: il lab resta su 7.0.40 e il controllo si ripete a data fissa
+
+**Data:** 2026-09-01 · **Stato:** Accettata — attua [ADR-0028](#adr-0028)
+
+**Contesto:** [ADR-0028](#adr-0028) adotta MongoDB 7.0.40 «con la 8.0.30 come traguardo», e la sua
+clausola è condizionale: si ripinna **appena i binari escono**. Una clausola così non ha un
+esecutore: «appena» non è una data, e nessuno è incaricato di guardare. Il punto di ripresa di
+`feature/03` l'aveva quindi messa come primo passo del branch, prima di montare il terzo stack —
+perché montarlo su una versione e ripinnarlo subito dopo significherebbe rigirare le
+registrazioni.
+
+La verifica è stata fatta ([V-051](Sources.md#v-051)): al 1º settembre 2026 la **8.0.30 non
+esiste** in nessuno dei canali che ADR-0028 aveva nominato. Su Docker Hub il filtro per nome esatto
+restituisce zero risultati e l'ultima patch della linea 8.0 resta la 8.0.29; nel feed ufficiale dei
+download le versioni correnti sono 8.3.8, 8.2.12, 8.0.29, 7.0.40, 6.0.29, 5.0.34 e 4.4.31. Nel
+frattempo la 7.0.40 è ancora la punta della propria linea: la versione del lab non sta invecchiando
+mentre la si usa.
+
+**Decisione:** il lab resta su **7.0.40** e `feature/03` monta lo sharded cluster su quella
+versione, senza aspettare e senza deviare. La clausola condizionale di ADR-0028 resta in piedi, ma
+smette di essere condizionale e basta: il controllo si ripete **a due date fisse** — il 3
+settembre, alla chiusura di `feature/03`, e il **16 settembre**, il giorno della `release/1.0`, che
+è l'ultimo momento utile per ripinnare e rigirare le registrazioni prima del talk. Il comando è
+scritto e sta in [V-051](Sources.md#v-051): due `curl`, meno di un minuto.
+
+**Conseguenze:** il terzo stack si scrive con `${MONGO_IMAGE}` come gli altri due, quindi un
+eventuale ripinnamento resta il cambio di una variabile e la rigenerazione di `tools/images.env`
+con `make images-pull` — è la ragione per cui [ADR-0008](#adr-0008) teneva la versione fuori dai
+file Compose, e continua a pagare.
+
+Va detto dal palco, e adesso c'è il numero per dirlo: il muro della 8.x su Docker Desktop non è una
+stranezza di agosto che nel frattempo è stata chiusa. A ventisette giorni dalla scoperta, e con
+l'immagine ufficiale aggiornata il giorno prima della verifica, la patch che lo risolve non è
+uscita. Chiunque in sala provi oggi MongoDB 8 su Docker Desktop incontra lo stesso errore, e non ha
+una versione a cui aggiornarsi.
+
+**Alternative scartate:** montare lo sharded sulla 8.2.12 per avere un «8» sulle slide, già
+scartata da ADR-0028 per due ragioni che non sono cambiate — non riceve più patch e si avvia solo
+perché precede il controllo; aspettare la 8.0.30 spostando `feature/03` più avanti, che
+subordinerebbe il calendario a una data che non esiste; lasciare la clausola come stava, cioè
+«appena escono», che in ventisette giorni non ha prodotto una sola verifica e non ne avrebbe
+prodotta nessuna nemmeno adesso senza un punto di ripresa che la nominasse.
+
+**Fonti:** [V-051](Sources.md#v-051)
+
+---
+
+<a id="adr-0059"></a>
+## ADR-0059 — Lo stack 03 si scrive per esteso, e il file dello spike si traduce invece di essere copiato
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto:** lo spike del 25 agosto ha lasciato un file Compose che funziona, e il verbale dice
+di riportarlo in `docker/03-sharded/` quando la feature parte. Quel file usa gli ancoraggi YAML:
+`x-mongo: &mongo`, `x-sonda: &sonda`, e undici `<<: *mongo`. È una scelta ragionevole per un file
+di prova — undici servizi quasi identici, duecento righe risparmiate.
+
+Gli altri due stack del repository non li usano. Lo stack 02 scrive i suoi tre membri per esteso e
+lo dichiara nel commento: «la ripetizione è deliberata». La motivazione viene da
+[ADR-0003](#adr-0003), che ha scartato `include` e i frammenti condivisi perché la
+fattorizzazione è «comoda per chi mantiene, ostile a chi legge una volta sola». Ma ADR-0003 parla
+di file diversi, non di ancoraggi dentro un file, e lo stack 03 non è lo stack 02: sono nove
+`mongod` e due `mongos`, non tre membri. Copiare il criterio senza verificarlo sarebbe stato
+comodo in un verso e nell'altro.
+
+Il punto che decide non è il conteggio delle righe, è **cosa insegna il file sul proiettore**. Lo
+stack 03 esiste per mostrare che tre ruoli sono distinti: `--configsvr`, `--shardsvr`, e un
+`mongos` che non è un `mongod`. Un file in cui gli undici servizi ereditano dallo stesso ancoraggio
+mette in evidenza ciò che hanno in comune e nasconde in una riga di override ciò che li distingue —
+cioè esattamente il contenuto del Blocco 3.
+
+**Decisione.**
+
+1. **Nessun ancoraggio YAML e nessun `extends` in `docker/03-sharded/compose.yaml`.** Ogni
+   servizio è scritto per esteso, come nei due stack precedenti.
+2. **Si ripete il codice, non i commenti.** Il primo servizio di ogni ruolo — `cfg1`, poi
+   `shard1a`, poi `mongos` — porta la spiegazione completa; gli altri della stessa famiglia
+   aprono con una riga che rimanda a lui e commentano solo ciò che cambia. È già la forma dello
+   stack 02, dove i membri 2 e 3 dicono «identico a quello del membro 1: vedi lì il perché».
+3. **Il file dello spike si traduce, non si copia.** Oltre agli ancoraggi cambia la sonda: lo
+   spike usava `db.adminCommand('ping').ok`, che risponde anche a un `mongod` che non è entrato in
+   nessun replica set. Lo stack 03 adotta la disgiunzione a tre termini dello stack 02, e
+   [V-052](Sources.md#v-052) ha misurato perché serve il terzo — su un config server non ancora
+   inizializzato `isWritablePrimary` e `secondary` sono entrambi falsi, e una sonda a due termini
+   resterebbe rossa per sempre.
+4. **Il file dichiara in testa ciò che non contiene ancora.** Finché shard e `mongos` non ci sono,
+   l'intestazione lo dice: chi apre il file a metà branch non deve scoprirlo avviandolo
+   ([ADR-0037](#adr-0037)).
+
+**Conseguenze:** il file sarà lungo — dell'ordine delle novecento righe a stack completo — ed è il
+prezzo consapevole di un artefatto che è anche una slide. In cambio, ogni servizio si legge senza
+risalire a un ancoraggio in cima, e le tre differenze di ruolo sono visibili nel punto in cui
+capitano. La manutenzione peggiora: un cambiamento comune va ripetuto undici volte, e non c'è
+niente che lo imponga automaticamente. È `tools/check_stack.py` a dover fare da rete — le regole
+del Task 5 del piano esistono anche per questo.
+
+**Alternative scartate:** copiare il file dello spike così com'è (veloce, e avrebbe portato dentro
+la sonda debole insieme agli ancoraggi: due decisioni prese senza accorgersene); usare gli
+ancoraggi solo per i blocchi davvero identici come `logging` (difendibile, ma introduce la domanda
+«perché questo sì e quello no» in un file che deve rispondere a domande sullo sharding); generare
+il file Compose da un modello (toglie di mezzo la ripetizione e mette al suo posto uno strumento in
+più da spiegare, oltre a rendere il file non leggibile in un repository clonato senza eseguire
+niente).
+
+**Fonti:** [V-052](Sources.md#v-052)
+---
+
+<a id="adr-0060"></a>
+## ADR-0060 — Quanti membri ha un set lo dice l'ambiente, e una guardia bilaterale controlla che sia vero
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto:** lo stack 03 ha tre componenti che sono replica set, e due profili che ne cambiano il
+numero di membri: uno con `palco`, tre con `completo`. Qualcuno deve dire a `rs.initiate()` chi
+sono i membri, e la via ovvia è che ogni componente abbia il suo servizio di inizializzazione con
+un `depends_on` verso tutti i membri, `condition: service_healthy`. Così l'ordine di avvio lo
+gestisce Compose e lo script non aspetta niente.
+
+Quella via è chiusa. [V-053](Sources.md#v-053) l'ha misurata: un servizio **selezionato** non può
+dichiarare `depends_on` verso un servizio **non selezionato**, e Compose rifiuta l'intero progetto
+con `service "X" depends on undefined service "Y": invalid compose project`, uscita 1. La regola è
+simmetrica — non conta chi ha il profilo — quindi non c'è nessuna combinazione di profili che salvi
+un `cfg-init` che dipende da `cfg2`, perché nel profilo `palco` `cfg2` non esiste. La misura chiude
+anche la riserva che [ADR-0010](#adr-0010) teneva aperta dal 24 agosto e quella di
+[S-015](Sources.md#s-015) da cui era nata: il caso non documentato non è ambiguo, fallisce.
+
+Restano tre strade. Sei servizi di inizializzazione invece di tre, uno per profilo, con i
+`depends_on` giusti in ciascuno: raddoppia i servizi e mette due copie della stessa logica a
+divergere. Nessun `depends_on` e nessuna attesa, lasciando che `rs.initiate()` fallisca e Compose
+riprovi: rende l'avvio un'attesa cieca e i log illeggibili. Oppure il numero di membri arriva da
+fuori, e lo script aspetta da sé.
+
+**Decisione:**
+
+1. **L'elenco dei membri arriva da una variabile d'ambiente**, per esteso e non come conteggio:
+   `MEMBRI_CFG`, `MEMBRI_SHARD1`, `MEMBRI_SHARD2`, ciascuna un elenco di `nome-servizio:27017`
+   separati da virgola. Per esteso perché è la stessa forma che finisce dentro `rs.initiate()`:
+   un numero andrebbe tradotto in nomi da qualche parte, e quella traduzione sarebbe un secondo
+   posto in cui la topologia è scritta.
+2. **Ogni servizio di inizializzazione dipende da un solo membro**, quello presente in entrambi i
+   profili — `cfg1`, `shard1a`, `shard2a` — con `condition: service_healthy`. Gli altri membri li
+   aspetta lo script, interrogandoli per nome con `hello()` fino a trenta secondi. È più lavoro di
+   un `depends_on`, ed è l'unico modo di ordinare l'avvio senza legare il servizio a un profilo.
+3. **Una guardia bilaterale**, perché il numero di membri e il numero di container ora arrivano da
+   due sorgenti diverse per lo stesso fatto, e possono divergere. Accanto a ogni elenco di membri
+   viaggia un elenco di **candidati** — tutti i membri possibili di quel componente, fisso nel file
+   Compose. Lo script rifiuta di procedere in tutte e due le direzioni:
+   - un membro elencato che non risponde entro trenta secondi → uscita **4**;
+   - un candidato **non** elencato che risponde → uscita **5**.
+
+   La seconda è la ragione per cui la guardia esiste. Elencare un membro di troppo appende
+   l'avvio, e un avvio appeso si nota; elencarne uno di meno non fallisce affatto: lo stack parte,
+   sembra sano, e i due terzi dei container girano fuori dal set. In sala si scoprirebbe nel
+   momento in cui la scena del failover non ha niente da mostrare. Vale qui la regola del
+   repository per cui una condizione che non può fallire non è un controllo.
+4. **Il verdetto di pronto si dà con il profilo addosso.** [ADR-0041](#adr-0041) già impone due
+   comandi e non uno, perché `up --wait` considera a posto un one-shot appena parte;
+   [V-054](Sources.md#v-054) lo riconferma sullo stack 03 in una forma peggiore — Compose stampa
+   `Healthy` accanto a un container uscito **5**. La novità di questo stack è che
+   `docker compose wait cfg-init` **senza** `--profile` risponde `no containers for project` e
+   esce 1. I bersagli del Makefile devono quindi passare il profilo anche al comando che aspetta,
+   e aspettare tutti e tre gli one-shot.
+
+**Conseguenze:** chi lancia `docker compose` a mano deve tenere allineati `--profile` e le tre
+variabili, e `.env.example` glielo dice con le righe del `completo` già scritte e commentate. Il
+Makefile lo farà da sé nel Task 4. In cambio i servizi di inizializzazione restano tre e non sei,
+e ogni disallineamento si presenta con un messaggio che nomina il container colpevole invece che
+con uno stack silenziosamente sbagliato. Il costo vero è che `10-cfg-initiate.js` e
+`11-shard-initiate.js` contengono un ciclo di attesa scritto a mano: quaranta righe che Compose
+avrebbe fatto gratis se i profili lo avessero permesso, e che vanno mantenute.
+
+Un effetto collaterale utile: siccome lo script interroga i membri per nome, il guasto si presenta
+con il nome del membro e del componente. Un `addShard` che fallisce nel Task 3 dirà quale dei due
+shard non aveva un primario, invece di lasciarlo dedurre.
+
+**Alternative scartate:** sei servizi di inizializzazione, tre per profilo (nessuna attesa a mano,
+ma due copie della stessa logica che divergeranno, e il numero di servizi del file Compose sale a
+diciassette); un conteggio invece di un elenco, tipo `MEMBRI_CFG=3` (più corto da scrivere e
+richiede di generare i nomi nello script, cioè di scrivere la topologia una seconda volta in
+un'altra forma); nessuna guardia, affidandosi al Makefile che tiene allineate le variabili (regge
+finché nessuno lancia Compose a mano, e il repository è materiale didattico: qualcuno lo lancerà a
+mano, è anzi lo scopo); leggere il profilo attivo da dentro lo script (Compose non lo espone ai
+container, e `COMPOSE_PROFILES` non arriva nell'ambiente del processo).
+
+**Fonti:** [V-053](Sources.md#v-053), [V-054](Sources.md#v-054)
+
+---
+
+<a id="adr-0061"></a>
+## ADR-0061 — La sonda di `mongos` chiede se è vivo, non se il cluster serve
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto:** con il Task 3 lo stack acquista i due `mongos` e il servizio one-shot `add-shard`,
+che è il quinto e ultimo anello della catena di avvio. `add-shard` gira **dentro** `mongos`
+(`network_mode: "service:mongos"`, come i tre init del Task 2 girano dentro il primo membro del
+loro set) e quindi lo aspetta con `condition: service_healthy`.
+
+Qui nasce la domanda. La tentazione, guardando gli altri healthcheck dello stack, è di rendere
+onesta anche questa sonda: un `mongos` senza shard non serve a niente, quindi che `healthy`
+significhi «il cluster ha i suoi shard». È un ragionamento che si morde la coda. `add-shard` è il
+servizio che **registra** gli shard, aspetta `mongos` sano, e `mongos` non diventerebbe sano finché
+`add-shard` non ha finito. Lo stack si bloccherebbe su se stesso, e — peggio — si bloccherebbe con
+una diagnosi che punta al posto sbagliato: Compose direbbe che `mongos` non diventa sano, quando
+il colpevole è il servizio che sta aspettando.
+
+[V-055](Sources.md#v-055) ha misurato il terreno. Un `mongos` con zero shard è perfettamente vivo:
+`hello()` risponde `ok=1` con `msg=isdbgrid`, `ping` passa, `listDatabases` elenca `admin` e
+`config`, `sh.status()` stampa `shards []` con il balancer attivo. `hello()` passa **anche senza
+credenziali**. Quello che non passa è la scrittura, con `ShardNotFound — No shards found`. E una
+lettura risponde `[]` in silenzio, indistinguibile da un cluster sano con la collezione vuota.
+
+Questa è la stessa forma già decisa da [ADR-0041](#adr-0041) per lo stack 02, dove `up --wait`
+risponde 0 mentre gli init sono ancora in corsa e il verdetto vero è l'uscita del one-shot. Non è
+un'invenzione nuova: è la regola vecchia applicata a un servizio nuovo.
+
+**Decisione:**
+
+1. **L'healthcheck di `mongos` è una sonda di vita, non di prontezza:**
+   `quit(db.hello().ok === 1 ? 0 : 1)`. Non guarda `config.shards`, non conta gli shard, non prova
+   a scrivere. Dice una cosa sola e la dice vera: il processo di routing risponde. Gira senza
+   credenziali perché `hello()` non ne chiede, il che tiene la password fuori dal file Compose in
+   un punto in più.
+
+2. **Il verdetto «il cluster serve» è l'uscita di `add-shard`**, non lo stato di un container.
+   Lo script controlla il risultato — `config.shards` alla fine ha almeno due righe — e non gli
+   esiti dei singoli comandi, ed esce **7** se il cluster è incompleto. Chi vuole sapere se il
+   cluster è pronto guarda quel codice, esattamente come nello stack 02 si guarda l'uscita di
+   `rs-init`.
+
+3. **Perciò l'avvio dello stack 03 resta in due comandi**, `up -d --wait` e poi
+   `compose wait` sui one-shot, come ADR-0041 impone allo stack 02 e come
+   [ADR-0060](#adr-0060) ha già stabilito debba avvenire **con il flag di profilo acceso**, che
+   senza risponde `no containers for project` ed esce 1.
+
+4. **`add-shard` dichiara tutte e tre le attese che gli servono**: `mongos` sano, e i due
+   `shard{N}-init` completati con successo. La seconda parte non è ridondante: un `mongos` sano
+   non implica che gli shard esistano, e `sh.addShard()` su un replica set senza primario eletto
+   fallisce. Restano fuori i config server, che sono già coperti in transitiva — `mongos` non
+   diventa sano senza `cfg-init`.
+
+**Conseguenze:** fra `up --wait` che torna e `add-shard` che finisce esiste una finestra di qualche
+secondo in cui lo stack è verde e le scritture falliscono con `ShardNotFound`. È esattamente la
+finestra che ADR-0041 aveva già descritto per lo stack 02, ed è la ragione per cui il secondo
+comando non è una raffinatezza. La pagina delle trappole del Task 9 deve raccoglierla insieme al
+suo sintomo peggiore, che è la lettura muta: chi in quella finestra fa una `find` invece di una
+`insert` riceve `[]` e conclude che il database è vuoto.
+
+Il costo didattico è che l'healthcheck di `mongos` è il meno informativo dello stack, e uno
+studente che lo legga da solo potrebbe crederlo pigro. Il commento accanto al servizio spiega
+perché non può essere altro, e il ragionamento del deadlock è materiale per il Blocco 3.
+
+**Alternative scartate:** una sonda che conta gli shard (il deadlock descritto sopra); una sonda
+che prova una scrittura (stesso deadlock, più un documento scritto a ogni giro di healthcheck);
+`add-shard` senza `depends_on` verso `mongos`, lasciandolo riprovare a collegarsi (rende l'avvio
+un'attesa cieca, e i tre init del Task 2 avevano già scelto il contrario); un healthcheck di
+prontezza su `mongos2` soltanto, dove il deadlock non ci sarebbe perché `add-shard` gira nel primo
+(due sonde diverse per lo stesso ruolo, e `mongos2` non esiste nel profilo `palco`).
+
+**Fonti:** [V-055](Sources.md#v-055)
+
+---
+
+<a id="adr-0062"></a>
+## ADR-0062 — Lo stack 03 si avvia con un comando, e a farlo è un servizio che non fa niente
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto:** [ADR-0041](#adr-0041) ha deciso per lo stack 02 che l'avvio è di **due comandi**,
+perché `docker compose up -d --wait` esce con successo prima che il replica set esista. Il
+ragionamento è ancora valido e la misura pure: `--wait` è documentato come «Wait services be
+running|healthy» ([S-057](Sources.md#s-057)), un one-shot che deve morire non ha healthcheck,
+quindi la soglia che gli si applica è `running` ed è soddisfatta nell'istante in cui parte.
+
+Il Passo 4 del Task 4 di `feature/03` chiedeva di verificare che su questo stack `up --wait`
+esca 0 soltanto quando il cluster serve. Così com'è non è verificabile: è falso, e
+[V-056](Sources.md#v-056) lo ha rimisurato qui — senza sentinella `up --wait` esce **0 dopo 18
+secondi** con `add-shard` ancora in corsa e **zero shard registrati**, e esce **0** anche quando
+la catena è rotta e non ci sarà mai nessuno shard. La domanda utile non è se la proprietà valga,
+ma se si possa costruirla.
+
+Si può. Un servizio che dipende da `add-shard` con `service_completed_successfully` non diventa
+`running` finché `add-shard` non è uscito 0, e `--wait` aspetta che diventi `running`. Misurato
+nei due versi: con la sentinella `up --wait` esce 0 a cluster fatto — nell'istante in cui torna,
+`sh.status()` mostra due shard `state: 1` e una scrittura passa — oppure esce **1** con
+`service "add-shard" didn't complete successfully: exit 6`.
+
+Va detto che cosa questo **non** è. Non è dare un healthcheck a `add-shard`: ADR-0041 l'aveva
+scartato con l'argomento giusto — un healthcheck descrive un container che resta vivo, un one-shot
+deve morire — e quell'argomento regge. `add-shard` resta senza healthcheck e il suo verdetto resta
+un codice di uscita. La sentinella usa `service_completed_successfully` per quello per cui è
+documentato, cioè un vincolo di **ordine di avvio**, e sposta l'attesa su un servizio che vive
+davvero.
+
+**Decisione:**
+
+1. **Lo stack 03 ha un servizio `up-03`** che dipende da `add-shard` con
+   `service_completed_successfully`, non ha healthcheck, stampa una riga e dorme. Non ha healthcheck
+   apposta: senza, la soglia di `--wait` per lui è `running`, che è esattamente la domanda giusta.
+
+2. **L'avvio dello stack 03 è di UN comando**, `up -d --wait`, e il suo codice di uscita è il
+   verdetto. È l'opposto della regola che ADR-0041 detta per lo stack 02, e i due stack restano
+   diversi: quella regola non viene toccata.
+
+3. **Il secondo comando qui non va dato**, e non è una preferenza. `docker compose wait add-shard`
+   dopo un `up --wait` riuscito risponde `no containers for project` ed esce **1**, perché il
+   container ha già finito e `wait` vuole qualcosa di vivo a cui attaccarsi. Un bersaglio del
+   Makefile scritto per analogia con `up-02` fallirebbe sempre. Il Task 7 scrive **una** riga.
+
+4. **`docker compose wait add-shard` resta lo strumento per la diagnosi**, non per il verdetto:
+   `up --wait` esce 1 e non 6, quindi i codici distinti di `20-add-shard.js` sopravvivono solo nel
+   testo del messaggio. Chi automatizza e vuole distinguere «addShard fallita» da «cluster
+   incompleto» lancia `add-shard` da solo e ne legge l'uscita.
+
+5. **La sonda severa si mette solo su un servizio da cui non dipende nessuno.** È la regola
+   generale che tiene insieme questa decisione e [ADR-0061](#adr-0061): lì una sonda di prontezza
+   su `mongos` era un cappio perché `add-shard` aspetta la salute di `mongos`; qui la sentinella
+   può essere severa quanto si vuole perché nessuno la aspetta. Vale per gli stack che verranno.
+
+**Conseguenze.** Lo stack acquista un container che non è MongoDB e che comparirà in `docker ps`
+durante il talk. È un costo didattico reale, e si paga volentieri perché è anche una slide: il
+container esiste perché `up --wait` mente, e spiegarlo insegna più di quanto costi. `up-03` è
+scritto sull'immagine di `mongo` e non su `busybox` benché sia due ordini di grandezza più pesante:
+il lab deve funzionare senza rete, e tutto lo stack gira su una immagine sola — la sentinella non è
+un buon motivo per pinnarne una seconda. Il processo acceso è `sleep`.
+
+Un debito verso lo stack 02, aperto qui perché è qui che si è visto: `up-02` esegue proprio i due
+comandi, e funziona perché `up --wait` torna **prima** che `rs-init` finisca. La distanza fra le
+due cose è di secondi e nessuna misura dice quanto sia stabile altrove; se un giorno `rs-init`
+finisse per primo, `wait rs-init` risponderebbe `no containers` e il bersaglio fallirebbe senza che
+niente sia rotto. Va verificato al Task 7, che è il task che tocca il Makefile.
+
+**Alternative scartate:** lasciare due comandi anche qui (il secondo fallisce, misurato — non è
+un'alternativa, è un guasto); dare un healthcheck a `add-shard` (piega la salute a descrivere una
+cosa morta, e ADR-0041 l'ha già scartato); un healthcheck sulla sentinella che riverifichi il
+cluster (non aggiunge niente, perché `add-shard` ha già verificato il risultato uscendo 7 se
+incompleto, e ritarderebbe l'uscita di `up` del suo primo intervallo); `busybox` invece
+dell'immagine di mongo (una seconda immagine da pinnare e scaricare, contro il vincolo del lab
+offline); nessuna sentinella e la verifica affidata allo smoke del Task 7 (sposta il problema più
+in là e lascia `up --wait` a mentire a chi lo lancia a mano, che è il caso d'uso del materiale
+didattico).
+
+**Fonti:** [V-056](Sources.md#v-056)
+
+---
+
+<a id="adr-0063"></a>
+## ADR-0063 — Che cosa `check_stack.py` deve saper bocciare quando lo stack è sharded
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto.** [ADR-0042](#adr-0042) ha insegnato a `tools/check_stack.py` il mondo dello stack 02:
+un replica set, un keyfile condiviso, una catena di dipendenze. Lo stack 03 aggiunge una cosa che i
+primi due non avevano — **i ruoli**. Fino a qui ogni `mongod` era intercambiabile con ogni altro; da
+qui un `mongod` è un config server oppure un membro di shard, e la differenza è una riga sola nel
+comando. Accanto compare un terzo programma, `mongos`, che non è un `mongod` e che quasi tutte le
+regole scritte finora devono avere il buon senso di non toccare.
+
+Il piano elencava sei regole candidate. Tre erano **già in vigore e sono state verificate senza
+scrivere codice**: nessun servizio usa un IP letterale, ogni servizio dichiara `mem_limit`, `cpus` e
+`pull_policy: never`, ogni `mongod` dichiara una cache non superiore al proprio `mem_limit`. Valgono
+sui ruoli nuovi perché non guardano il ruolo, e la prova che il caso del router fosse già previsto
+esisteva da prima: un test dello stack 01 usa un comando `mongos` proprio per dire che a lui la
+cache non si chiede.
+
+Prima di scrivere le altre tre sono stati misurati i sintomi che dovrebbero prevenire, e la misura
+ha dato la notizia contraria a quella attesa ([V-057](Sources.md#v-057)): **cinque sintomi su sei
+non sono muti affatto**. Il server nomina l'opzione che manca, in inglese, con una frase cercabile —
+«Cannot run addShard on a node started without --shardsvr», «Nodes being used for config servers
+must be started with the --configsvr flag», «shardsvr is not allowed when configsvr is specified».
+La giustificazione «senza questa regola l'errore è illeggibile» sarebbe stata comoda e falsa, e due
+commenti del file Compose che la sostenevano sono stati corretti.
+
+Il sesto sintomo però è muto sul serio, ed è quello del refuso: `cfgsr` per `cfgrs` dentro
+`--configdb`. Tutti i processi partono, il router resta `unhealthy` per novantaquattro secondi
+senza mai aprire la porta, e nel suo log **il nome giusto del replica set non compare nemmeno una
+volta**. Quello che si legge è `HostUnreachable` su due host che nel profilo `palco` sono
+irraggiungibili per costruzione, e `FailedToSatisfyReadPreference` sull'unico host che risponde. La
+diagnosi indica la rete; la causa sono due lettere scambiate.
+
+**Decisione.** Cinque regole nuove, e un criterio per decidere a chi si applicano.
+
+*Il criterio, che è la parte che conta.* Lo strumento deve **dedurre il ruolo di un servizio
+leggendo il file**, e la catena è tutta lì dentro: il `mongos` dichiara in `--configdb` il nome del
+replica set dei config server; ogni `mongod` dichiara in `--replSet` a quale set appartiene; chi
+appartiene a quel set è un config server, chiunque altro è uno shard. Nessuno dei tre passaggi
+guarda il nome del servizio — rinominare `cfg1` in `secondo` non sposta un verdetto, e c'è un test
+che lo esercita. È lo stesso criterio di ADR-0042 e per lo stesso motivo: un elenco di nomi da
+tenere aggiornato a mano invecchia in silenzio, una guardia che legge il file no. Ed è per questo
+che le regole tacciono sugli stack 01 e 02: quei file non hanno un `mongos`, non compaiono in
+nessuna lista di eccezioni.
+
+*Le cinque regole*, descritte dai messaggi che stampano, che restano la loro documentazione vera:
+
+1. un `mongod` che sta nel replica set nominato da `--configdb` dichiara **`--configsvr`**;
+2. un `mongod` che sta in un altro replica set è uno shard e dichiara **`--shardsvr`**;
+3. nessun `mongod` dichiara tutti e due — non è un ruolo ambiguo, è un ruolo impossibile, e mongod
+   non parte affatto;
+4. un `mongos` dichiara `--configdb`, nella forma `nomeSet/host:porta`, e il set nominato deve
+   essere dichiarato da qualche `mongod` di questo file;
+5. un `mongos` non dichiara `--wiredTigerCacheSizeGB`, perché non ha uno storage engine.
+
+Le regole 3 e 5 non erano nell'elenco del piano. La 3 è venuta dietro alla stessa domanda delle
+prime due — per applicarle lo strumento deve decidere il ruolo, e «tutti e due» è la risposta che va
+gestita prima delle altre — e la 5 protegge il ruolo nuovo dall'errore che il file didattico rende
+più probabile di ogni altro: copiare il blocco di un `mongod` e cambiare solo la prima riga. La
+regola 4 è la traduzione onesta di quella che il piano scriveva come «`--configdb` nomina il set
+`cfgrs`»: scrivere `cfgrs` dentro lo strumento avrebbe legato un controllo generico al nome di un
+solo stack, contro il principio che lo stack è un argomento, e avrebbe perso il caso che conta —
+non il nome sbagliato in assoluto, ma il nome **incoerente con il resto del file**.
+
+*La giustificazione, detta come la misura la sostiene.* Il guadagno di queste regole non è tradurre
+un messaggio oscuro. È **spostare l'incontro con l'errore**: due secondi di `make stack-check` su un
+file fermo, invece di un minuto e ventuno di avvio con dieci container accesi, e il pubblico che
+guarda. La sola eccezione è la regola 4 nel caso del refuso, dove non c'è nessun messaggio da
+anticipare e la regola è l'unica cosa che parla.
+
+**Conseguenze.** `make stack-check` verifica ora **tre** file Compose, e `STACK_03` entra nel
+`Makefile` con un Task di anticipo rispetto al piano, che lo collocava al Task 7. La suite degli
+strumenti passa da 114 a 125 test. Le regole sono state provate sul file vero e non solo sui
+campioni, come ADR-0042 aveva stabilito: sette copie dello stack 03, un difetto ciascuna, la copia
+intatta verde e sei messaggi distinti, uno per copia.
+
+Restano due limiti da non nascondere. Il primo è quello di sempre e vale integralmente: sei difetti
+non sono tutti i difetti, e la conformità statica non ha mai sostituito l'avvio dello stack. Il
+secondo è più stretto e riguarda la regola 4: lo strumento legge un file solo per volta, quindi «il
+set è dichiarato da qualche `mongod` di questo file» è una verità che vale finché i tre stack del
+lab restano in un file ciascuno. Il giorno in cui un `mongos` vivesse in un Compose separato dai suoi
+config server, la regola darebbe un falso allarme — rumoroso e visibile, che è il verso giusto in
+cui sbagliare, ma sarebbe da rivedere.
+
+**Fonti:** [V-057](Sources.md#v-057)
+
+---
+
+<a id="adr-0064"></a>
+## ADR-0064 — La shard key della demo è `{_id: "hashed"}`, e i ventimila documenti sono gli stessi nei due profili
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto.** La shard key è **il** contenuto del Blocco 3 del talk. Tutto il resto dello stack 03 —
+i tre ruoli, la catena di avvio, il router davanti — è impalcatura per arrivare qui: è la sola
+decisione di questa architettura che un partecipante porterà a casa e applicherà, e l'unica che, se
+sbagliata, non si corregge senza rifare la collezione.
+
+Il dataset da distribuire esiste già e non è in discussione: gli `ordini` generati dal seme
+`20260918` che gli stack 01 e 02 usano da `feature/01`. Sono documenti con `_id` interi consecutivi
+`0 … n-1`, cioè — non per caso, ma è una fortuna — **il caso peggiore possibile** per una chiave per
+intervalli, e quindi l'esempio migliore possibile per spiegare perché serve l'hash.
+
+Restavano da decidere tre cose: quale campo, con quale forma, e quanti documenti per profilo.
+
+**Decisione.** Shard key `{_id: "hashed"}`; 20 000 documenti sia in `palco` sia in `completo`.
+
+*Il campo.* `_id`, per tre ragioni in ordine di forza. È l'unico campo garantito presente e unico
+in ogni documento, il che elimina in partenza la classe di problemi che il manuale chiama frequenza
+e cardinalità. Tiene il dataset **identico** a quello degli altri due stack: questi 20 000 documenti
+sono i primi 20 000 dei 50 000 di `feature/01`, campo per campo, e la demo può quindi mostrare la
+stessa query su tre architetture senza che nessuno debba chiedersi se sono gli stessi dati. E, per
+onestà, è la scelta che il manuale **non** avalla in generale: [S-067](Sources.md#s-067) insiste sul
+verso opposto — la chiave si sceglie sul modo in cui si interroga la collezione — e nel materiale
+questa è detta per quello che è, una comodità didattica.
+
+L'alternativa scartata è `citta`, che sarebbe stata leggibile e sarebbe stata la peggiore
+disponibile: dieci valori distinti, e «the cardinality of a shard key determines the maximum number
+of chunks the balancer can create» (S-067). Dieci chunk al massimo per l'intero cluster, con la
+conseguenza che il manuale mette per iscritto sul suo esempio a sette valori — «this constrains the
+number of effective shards in the cluster to `7` as well».
+
+*La forma: hashed e non per intervalli.* Con `{_id: 1}` la partizione sarebbe per intervalli, e in
+ogni cluster esiste il chunk con estremo superiore `MaxKey`. Un `_id` che cresce sempre è sempre
+maggiore di tutti quelli già scritti, quindi ogni inserimento cade lì: «the shard containing that
+chunk becomes the bottleneck for write operations» (S-067). Con l'hash i valori contigui finiscono
+sparsi, e la misura lo conferma — 49,3 % / 50,7 % ([V-058](Sources.md#v-058)).
+
+Due precisazioni entrano nel materiale perché senza il racconto diventa una caricatura, e una
+caricatura dal palco si smonta alla prima domanda. La prima: il chunk caldo **non resta fermo**.
+«To optimize data distribution, the chunks that contain the global `maxKey` (or `minKey`) do not
+stay on the same shard» (S-067) — il collo di bottiglia cambia nodo man mano che i chunk si
+dividono. Non sparisce, perché in ogni istante le scritture vanno tutte in un posto solo e in più il
+cluster paga le migrazioni; ma non è il nodo unico e immobile che le spiegazioni brevi descrivono.
+La seconda: l'hash **non è una garanzia**. «A shard key that does not change monotonically does
+not, on its own, guarantee even distribution of data across the sharded cluster» (S-067) — qui
+funziona perché `_id` ha cardinalità massima e frequenza uniforme, non perché sia hashed.
+
+*Il prezzo, che si dice invece di nasconderlo.* Si perde la località. Il manuale: «post-hash,
+documents with "close" shard key values are unlikely to be on the same chunk or shard - the `mongos`
+is more likely to perform Broadcast Operations to fulfill a given ranged query. `mongos` can target
+queries with equality matches to a single shard» ([S-066](Sources.md#s-066)). Misurato sul lab: un
+`{_id: 42}` interroga **uno** shard, un `{_id: {$gte: 100, $lt: 200}}` li interroga **tutti e due**
+(V-058). Le due righe sono nello smoke apposta, perché è il baratto in forma eseguibile: si sceglie
+fra distribuire le scritture e tenere vicine le letture contigue, e non si ottengono tutte e due.
+
+*L'ordine: prima si distribuisce, poi si riempie.* Non è indifferente e non è una preferenza.
+Distribuendo una collezione **vuota**, «the sharding operation creates empty chunks to cover the
+entire range of the shard key values and performs an initial chunk distribution. By default, the
+operation creates 2 chunks per shard and migrates across the cluster» (S-066): due per shard, due
+shard, **quattro chunk** — il numero che lo spike §5 aveva misurato senza sapere che fosse un
+valore predefinito documentato. Sull'ordine inverso il manuale è altrettanto chiaro: su una
+collezione piena «the sharding operation creates an initial chunk to cover all of the shard key
+values», uno solo, e poi tocca al balancer. Funzionerebbe, ma l'avvio del lab diventerebbe una gara
+col balancer e la distribuzione al primo `sh.status()` sarebbe 100 % / 0 %.
+
+*Ventimila in tutti e due i profili.* Il piano fissa 20 000 per `palco` e lo spike aveva usato
+50 000 per `completo`. La scelta è di tenerne 20 000 anche lì: **i due profili differiscono nella
+topologia, non nei dati**. Un dataset che cambia col profilo renderebbe i numeri mostrati dal palco
+dipendenti da quale profilo sta girando, e la prima domanda del pubblico sarebbe sul numero
+sbagliato. La misura conferma che non si perde niente: la distribuzione è identica nei due profili —
+9860 e 10140 — perché dipende dall'hash delle chiavi e dai confini dei chunk, e i membri in più sono
+copie dello stesso shard (V-058).
+
+**Conseguenze.** `docker/03-sharded/init/30-dati-demo.js` porta il ragionamento accanto al comando
+che lo applica: è il file più commentato dello stack, e deliberatamente — è la pagina del Blocco 3.
+`lab.ordini` sullo stack 03 ha **due** indici e non uno, perché `shardCollection()` crea
+`_id_hashed` senza che nessuno lo chieda; è l'unica differenza rispetto agli altri due stack, dove
+la collezione ha il solo `_id_` per far vedere una query con e senza indice, e lo smoke la asserisce
+per iscritto perché non passi per un residuo.
+
+Restano due limiti dichiarati. Il primo: il 49,3 % / 50,7 % è una proprietà di questo dataset con
+questo seme, non una legge — lo smoke fissa la soglia al 40 % per shard proprio per non confondere
+una fluttuazione statistica con un guasto. Il secondo riguarda la versione: `_id_hashed` si può
+togliere solo dalla 7.0.3 in poi (S-066), e il lab ci rientra per la 7.0.40 pinnata da
+[ADR-0028](#adr-0028) — un vincolo che il giorno di un downgrade tornerebbe a mordere.
+
+**Fonti:** [S-066](Sources.md#s-066) · [S-067](Sources.md#s-067) · [V-058](Sources.md#v-058)
+
+---
+
+<a id="adr-0065"></a>
+## ADR-0065 — I dati entrano come sesto anello della catena, e la prova sa distinguere due shard da uno
+
+**Data:** 2026-09-01 · **Stato:** Accettata
+
+**Contesto.** Il Task 6 nominava due file: lo script che carica i dati e lo smoke. Scrivendoli è
+emerso che i due si tengono per un vincolo che nessuno dei due nomina.
+
+Il vincolo è questo: la sola asserzione che distingue uno sharded cluster funzionante da uno rotto è
+la **distribuzione dei documenti**, e per misurarla i documenti devono esserci. Se il dataset
+arrivasse da un comando separato, `make smoke-03` dopo `make up-03` fallirebbe — o peggio, andrebbe
+verde saltando l'unico controllo che conta.
+
+C'è poi una ragione che viene da fuori: negli stack 01 e 02 i dati ci sono appena l'avvio è finito.
+Un terzo stack che pretende un comando in più è un comando in più da ricordare davanti al pubblico,
+e [ADR-0062](#adr-0062) ha appena stabilito che lo stack 03 si avvia con **un** comando.
+
+**Decisione.** Due decisioni legate.
+
+*Il seed è il sesto anello della catena.* Il servizio one-shot `seed` entra nel file Compose dopo
+`add-shard`, con `service_completed_successfully`, e la sentinella `up-03` sposta la propria
+dipendenza da `add-shard` a `seed`. La catena diventa: `keyfile-init` → (`cfg-init`, `shard1-init`,
+`shard2-init`) → `mongos` → `add-shard` → `seed` → `up-03`. Quello che cambia è **che cosa promette
+`up --wait`**: prima «i due shard sono registrati», adesso «c'è anche il dataset» — che è la
+promessa che gli altri due stack fanno già. Dopo `add-shard` e non prima, perché distribuire una
+collezione vuota crea i chunk e li spalma sugli shard registrati **in quel momento**: fatto prima,
+`shardCollection()` fallirebbe per mancanza di shard; fatto con uno solo, darebbe due chunk su un
+nodo e un balancer da rincorrere. Il servizio è idempotente come tutti gli altri anelli — al secondo
+`up` trova i documenti e non fa niente — e `make seed-03` resterà per **ricaricare**, con
+`run --rm -e RICARICA=1`, non per caricare la prima volta.
+
+Questo è uno scostamento dall'elenco dei file del Task 6, che nominava solo lo script e lo smoke, ed
+è registrato come tale: il piano approvato non si tocca.
+
+*Lo smoke asserisce la distribuzione, e la asserisce in due modi.* `tools/smoke-sharded.sh` segue
+`smoke-replicaset.sh` nella forma — niente `set -e`, tutti i problemi in un giro solo, la password
+letta da `.env` e mai passata con `-e` al client `docker` ([ADR-0054](#adr-0054)) — e il profilo si
+sceglie con `PROFILO=palco|completo`, perché i controlli che contano i nodi hanno risposte diverse e
+uno smoke che ne sapesse una sola mentirebbe sull'altro profilo.
+
+Il criterio con cui i controlli sono stati scelti: **tutto quello che non riguarda la distribuzione
+passerebbe identico su un cluster che ha messo i ventimila documenti su un solo shard.** Un cluster
+così risponde, scrive, legge, e `sh.status()` gli mostra due shard. Quindi lo smoke verifica che
+ciascuno dei due shard contenga documenti e che nessuno stia sotto il 40 %, e in più mette alla
+prova il baratto della chiave: uguaglianza su `_id` → **uno** shard, intervallo sulla stessa chiave
+→ **tutti**. Se un giorno la seconda tornasse `1`, vorrebbe dire che la chiave non è più hashed, e
+sarebbe un guasto che nessun altro controllo vedrebbe.
+
+**Conseguenze.** Lo stack 03 nel profilo `palco` sale a **11** servizi e in `completo` a **18**.
+`up -d --wait` chiude a 0 in **23 secondi** su `palco` e in **36** su `completo`, dataset compreso
+([V-058](Sources.md#v-058)). Lo smoke chiude a **62 controlli e 0 errori** su `palco`, **99 e 0** su
+`completo`.
+
+Due cose sono state imparate scrivendolo e sono finite nei commenti del file, perché sono
+esattamente il genere di cosa che si riscopre a caro prezzo. La prima: **gli utenti di uno sharded
+cluster vivono sui config server**, e la stessa coppia utente/password che funziona sul router dà
+`Authentication failed` su uno shard interrogato in diretta. Non è un guasto, è la regola, e lo
+smoke la asserisce come tale — se un giorno passasse, vorrebbe dire che qualcuno ha creato utenti
+sugli shard e che da lì in poi ci sono due anagrafiche da tenere allineate. La conseguenza pratica è
+che le misure interne dei nodi si leggono da `docker inspect` e dalla riga `cache_size=…` del log,
+non da `hostInfo()`. La seconda: **`/data/db` risulta montato anche su `mongos`**, perché
+l'immagine di MongoDB dichiara `VOLUME /data/db` e Docker crea un volume anonimo su ogni container.
+Il controllo ovvio — «il router non monta `/data/db`» — è quindi falso su un cluster sano, ed è
+stato l'unico rosso dell'intera prova. Il discriminante vero è il volume **nominato**.
+
+Il limite da dichiarare: le costanti dello smoke sono numeri misurati su questo dataset e su questa
+versione, e il conteggio dei controlli dipende dal profilo. Il giorno in cui cambia il seme del
+generatore, l'impronta `20000 50083417.93 60278` va rimisurata — e lo smoke fallirà rumorosamente,
+che è il verso giusto in cui sbagliare.
+
+**Fonti:** [V-058](Sources.md#v-058)
+
+---
+
+<a id="adr-0066"></a>
+## ADR-0066 — Lo stack 03 si spegne con tutti i profili, non con quello con cui è stato acceso
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** Il Task 7 dà allo stack 03 i suoi bersagli nel `Makefile`. La prima decisione è stata
+come far entrare il profilo: `up-03-palco` e `up-03-completo`, cioè **due famiglie** di sei bersagli
+l'una, oppure `PROFILO` come variabile e una famiglia sola. La variabile ha vinto per un motivo
+semplice — con due famiglie basta sbagliare un suffisso una volta, `make up-03-completo` seguito da
+`make down-03-palco`, per fermare metà cluster — e per un motivo che vale sul proiettore, cioè che
+`make up-03 PROFILO=completo` mostra che il profilo è un parametro dello stesso stack e non un altro
+stack.
+
+Poi la scelta è stata provata, e la variabile da sola non bastava. [V-059](Sources.md#v-059) ha
+misurato che `down` agisce **solo sui servizi dei profili attivi**: spegnere in `palco` uno stack
+acceso in `completo` toglie undici container, ne lascia sette accesi, non riesce a rimuovere la rete
+— «Resource is still in use» — ed esce **zero**. Nessun errore, nessun segnale. E `down` senza
+`--profile` fa esattamente la stessa cosa, perché i servizi sempre attivi sono soltanto quelli che
+non dichiarano nessun profilo ([S-068](Sources.md#s-068)).
+
+Il difetto è dell'operazione, non della variabile: al momento di spegnere non si sa — e non si deve
+dover ricordare — con quale profilo qualcun altro ha acceso.
+
+**Decisione.** Il `Makefile` dello stack 03 usa **due** forme del comando Compose, e la seconda non è
+una comodità.
+
+`COMPOSE_03` porta `--profile $(PROFILO)` e serve ai comandi che **scelgono** che cosa esiste:
+`up-03`, `seed-03`, e lo smoke, a cui il profilo arriva per ambiente. `COMPOSE_03_OGNI` porta
+`--profile "*"` e serve ai comandi che agiscono su **tutto quello che c'è**: `down-03`, `reset-03`,
+`logs-03`. Il jolly è la forma documentata per dire «tutti i profili» ([S-068](Sources.md#s-068)),
+ed è preferito all'elenco `--profile palco --profile completo` per la stessa ragione per cui
+[ADR-0042](#adr-0042) rifiuta le liste di eccezioni: un elenco scritto a mano invecchia in silenzio
+al primo profilo nuovo, il jolly no.
+
+`reset-03` cancella i nove volumi dei dati costruendoli con `addprefix` e **non** tocca `keyfile`,
+per la stessa ragione dello stack 02: rigenerarlo significa un segreto nuovo.
+
+**Conseguenze.** `make down-03` e `make reset-03` fanno la cosa giusta qualunque sia il profilo con
+cui si è acceso, e `PROFILO` su quei tre bersagli diventa ininfluente — il che è il punto: non c'è
+una combinazione sbagliata da indovinare. Misurato: `down-03` dopo un `palco` con un servizio del
+`completo` aggiunto a mano rimuove tutti i container e la rete e lascia in piedi i cinque volumi
+([V-059](Sources.md#v-059)).
+
+Il prezzo è una riserva dichiarata. La pagina di Docker non dice da quale versione di Compose
+`--profile "*"` esista, e qui è provato su **v5.5.0**: su una versione più vecchia va riverificato.
+Il costo di sbagliarsi è basso e visibile — il jolly non riconosciuto darebbe un errore di
+argomento, non uno spegnimento silenzioso a metà — che è il verso giusto in cui sbagliare.
+
+Resta un debito, e vale per tutti e tre gli stack: **niente lega il `Makefile` ai profili dichiarati
+nel file Compose.** Se domani nascesse un terzo profilo, il jolly lo prenderebbe da sé nello
+spegnimento, ma nessun controllo direbbe che `up-03` non lo sa accendere. Il Task 9 lo valuta
+insieme agli altri debiti segnati.
+
+**Fonti:** [S-068](Sources.md#s-068) · [V-059](Sources.md#v-059)
+
+---
+
+<a id="adr-0067"></a>
+## ADR-0067 — I config server dichiarano dove scrivono, e una guardia lega il volume al dbpath
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** Il Task 7 ha scoperto, provando i bersagli nuovi, che la sequenza più ordinaria dello
+stack 03 non funzionava: `make up-03`, `make down-03`, `make up-03` falliva al secondo avvio con
+`can't add shard 'shard2rs/shard2a:27017' because a local database 'lab' exists in another
+shard1rs`.
+
+La causa non è quella che il messaggio suggerisce. I config server **perdevano tutto a ogni
+spegnimento** mentre gli shard conservavano i loro dati, quindi al riavvio il cluster non
+riconosceva più i propri shard e provava a registrarli da capo su nodi che avevano già `lab`.
+[V-060](Sources.md#v-060) l'ha contato: `dati-cfg1` e `dati-cfg2` contenevano **zero file**,
+`dati-shard1a` ottantatré.
+
+Il meccanismo sta in due fatti che si sommano, e nessuno dei due è un errore di per sé. Il primo:
+l'entrypoint dell'immagine ufficiale, quando fra gli argomenti trova `--configsvr`, porta il dbpath
+predefinito a `/data/configdb` invece che a `/data/db` — letto dentro l'immagine pinnata
+([V-060](Sources.md#v-060)), e presente con altre parole anche nel ramo 8.0 dello stesso script
+([S-022](Sources.md#s-022)). Il secondo:
+l'immagine dichiara `VOLUME` su **entrambe** le cartelle, quindi Compose soddisfa quella non montata
+con un volume **anonimo**, che `down` abbandona penzolante e che il `up` successivo rifà vuoto.
+Insieme: i tre config server montavano `dati-cfgN` su `/data/db` — il posto giusto per ogni altro
+mongod — e scrivevano altrove, in un contenitore che nessuno aveva chiesto e che nessuno conservava.
+
+Il difetto è sopravvissuto quattro giorni perché era muto in tre modi. Il file Compose sembrava a
+posto: la riga del volume c'era, con il nome giusto. Lo smoke era d'accordo, perché verificava che
+ogni mongod **avesse** il proprio volume nominato e non che ci scrivesse dentro. E tutte le prove
+dei Task 3-6 finivano con `down -v`, che cancella tutto: la perdita dei metadati è invisibile a chi
+riparte sempre da zero.
+
+**Decisione.** Tre cose, e la prima da sola non basterebbe.
+
+*I tre config server dichiarano `--dbpath /data/db`.* Sono due righe per servizio nel file Compose,
+accanto a `--port 27017`, che è là per la ragione gemella: `--configsvr` cambia più di un
+predefinito, e nessuno di quei cambiamenti si vede leggendo il file. Fra le due riparazioni
+possibili — dire a mongod dove scrivere, oppure montare il volume dove scriverebbe — si è scelta la
+prima perché tiene i nove mongod dello stack uniformi: **il volume dei dati sta su `/data/db`**, una
+regola sola per chi legge. L'altra resta legittima e la guardia la accetta.
+
+*`check_stack.py` guadagna una regola statica.* Per ogni servizio che avvia un `mongod`, calcola il
+dbpath che userà davvero — `--dbpath` se c'è, altrimenti `/data/configdb` se c'è `--configsvr`,
+altrimenti `/data/db` — e boccia il file se un volume è montato su una cartella dei dati **diversa**
+da quella. Le due cartelle sono scritte nel codice, e non è la lista di eccezioni che
+[ADR-0042](#adr-0042) proibisce: quella elencava nomi di servizio, che cambiano a ogni stack nuovo;
+queste due sono i `VOLUME` che l'immagine dichiara, leggibili con `docker image inspect`, e cambiano
+solo se cambia l'immagine. La regola giudica un montaggio **sbagliato**, non uno mancante: un mongod
+senza volumi dati non produce niente, perché lo stack 01 gira così per scelta
+([ADR-0005](#adr-0005)).
+
+*Lo smoke smette di accontentarsi.* Il controllo che aveva approvato lo stack rotto confronta adesso
+la destinazione del volume nominato con il dbpath ricavato dal comando del container. Le due guardie
+sono apposta ridondanti: quella statica giudica il file del repository, questa il processo che sta
+girando, e solo la seconda vedrebbe un container avviato con un file diverso.
+
+**Conseguenze.** Il ciclo che falliva adesso regge: `reset-03` 4 s, `up-03` 25 s con `dati-cfg1` a
+**99 file**, `down-03` 7 s, `up-03` di nuovo **22 s** e a posto. Il ramo idempotente di `add-shard`,
+scritto al Task 4, è stato **eseguito per la prima volta oggi** — prima di questa correzione non
+poteva esserlo, perché i metadati non arrivavano mai al secondo giro: un pezzo di codice provato
+solo dai test unitari lo era anche in produzione, senza che niente lo dicesse. `make smoke-03`
+resta a 62 controlli e 0 errori, `make stack-check` a «Stack conformi: 3», la suite degli strumenti
+a **131 passed** con sei test nuovi. Entrambe le guardie sono state provate rompendole
+([V-060](Sources.md#v-060)).
+
+Lo scostamento dal piano è dichiarato: il Task 7 nominava `Makefile`, `reset-demo.sh` e
+`preflight.sh`, e questa correzione tocca `compose.yaml`, `check_stack.py` e `smoke-sharded.sh`, che
+appartengono ai Task 3, 5 e 6. Non è stato rinviato al Task 9 perché non è un debito ma un guasto, e
+perché il guasto colpisce la sequenza che al talk capita per prima: spegnere fra una parte e l'altra
+e riaccendere.
+
+Resta scoperto un caso, e va detto: chi ha già dei volumi `dati-cfgN` creati **prima** di questa
+correzione se li ritrova vuoti e inutilizzabili, perché i metadati stavano nell'anonimo che intanto
+è stato buttato. La via d'uscita è `make reset-03`, che è anche l'unica cosa sensata da fare con
+metadati che non ci sono più. Nessuna migrazione: questo è un laboratorio, e i dati si rifanno in
+venticinque secondi.
+
+**Fonti:** [S-022](Sources.md#s-022) · [V-060](Sources.md#v-060)
+
+---
+
+<a id="adr-0068"></a>
+## ADR-0068 — La pagina dello sharded cluster mostra la chiave sbagliata invece di descriverla
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** L'[indice](README.md) promette per nome
+`docs/02-architetture/sharded-cluster.md` da `feature/00`, e il design le assegna il Blocco 3 del
+talk: otto minuti, una slide, `sh.status()` già a schermo e il rimando al repository. Il materiale
+esiste ed è sparso: il blocco `LA SHARD KEY` dentro `docker/03-sharded/init/30-dati-demo.js`, sette
+ADR fra la [0058](#adr-0058) e la [0067](#adr-0067), sei verifiche empiriche dalla
+[V-052](Sources.md#v-052) alla [V-060](Sources.md#v-060). La pagina lo raccoglie; non lo riscopre.
+
+Ma due sezioni non si potevano scrivere con quello che c'era. Il **balancer** era un verbo senza
+misure: il repository non sapeva se in questa demo lavorasse. E la **shard key sbagliata** era una
+citazione — ottima, tripla, ma una citazione: il difetto che il Blocco 3 esiste per raccontare non
+era mai stato visto accadere in questo laboratorio, e [ADR-0052](#adr-0052) ha stabilito che una
+trappola scritta senza il sintomo è una previsione. [V-061](Sources.md#v-061) ha colmato tutti e
+due i buchi, e ha trovato per strada una terza cosa che nessuno cercava.
+
+**Decisione.**
+
+*La pagina apre con l'irreversibilità, non con la topologia.* Il primo fatto non è che i componenti
+sono tre: è che «once a collection has been sharded, MongoDB provides no method to unshard a sharded
+collection» ([S-069](Sources.md#s-069)). Le altre due pagine di `02-architetture` descrivono scelte
+che si disfano spegnendo un container; questa no. Chi legge deve saperlo prima di trovare la parte
+interessante, perché è l'unica informazione che cambia il momento in cui si decide.
+
+*«Quando non serve» si scrive, e si dichiara che il manuale non lo dice.* La sezione è necessaria —
+è la domanda vera del pubblico — ma la fonte non la copre: la pagina d'ingresso del manuale non
+contiene nessuna soglia, nessuna dimensione minima, nessuna sconsiglio circostanziato
+([S-069](Sources.md#s-069), «cosa non afferma»). Quello che il manuale offre è il prezzo dichiarato,
+«the trade-off is increased complexity in infrastructure and maintenance», e il resto è un giudizio
+di chi scrive, tratto dai numeri dei tre stack di questo repository. Va detto in quei termini, non
+attribuito a MongoDB.
+
+*La chiave sbagliata si mostra con i numeri di una prova, non con un avvertimento.* Ventimila
+documenti, chiave `{_id: 1}`, e **ventimila su uno dei due shard**; poi la stessa collezione con la
+sola chiave cambiata, e 9860 contro 10140 ([V-061](Sources.md#v-061)). Il pezzo che vale la slide
+non è però lo squilibrio: è che `sh.balancerCollectionStatus()` su quella collezione risponde
+`balancerCompliant: true`. **Il cluster considera bilanciata una distribuzione cento a zero**, e ha
+ragione, perché la differenza è sotto la soglia. L'errore non ha sintomo, e lo strumento che
+dovrebbe accorgersene conferma che va tutto bene.
+
+*Il balancer si racconta con la sua soglia, e con il fatto che qui non entra mai in scena.* Gira sul
+primario dei config server e non su `mongos` ([S-070](Sources.md#s-070)), è acceso da solo, e si
+muove solo quando la differenza fra due shard supera tre volte la dimensione di range configurata —
+384 MB con i 128 predefiniti. Nella demo la differenza è di **34 KB**, e il registro del cluster
+riporta **zero** migrazioni su sei eventi totali ([V-061](Sources.md#v-061)). I quattro chunk sono
+opera di `shardCollection()` su collezione vuota, non del balancer. Dire «il balancer bilancia» a
+proposito di questa demo sarebbe una didascalia falsa su una fotografia vera.
+
+*La trappola dell'`insertMany` ordinato entra nella pagina, perché è quella che capita davvero.*
+Con chiave hashed un lotto `ordered: true` — che è il **predefinito** — costa fra venti e trenta
+volte un lotto `ordered: false`, mentre con chiave monotona le due forme costano uguale
+([V-061](Sources.md#v-061), [S-071](Sources.md#s-071)). È il difetto più insidioso dei tre, perché
+colpisce chi ha fatto la scelta **giusta**: distribuisci bene, non tocchi il codice di caricamento
+che funzionava, e le scritture rallentano di un ordine di grandezza senza un errore. Il seed del lab
+scrive `ordered: false` dal primo giorno, per allineamento con gli altri due stack; oggi si sa
+perché era la riga giusta.
+
+*Ogni numero porta la sua riserva addosso, sulla stessa riga.* Come in [ADR-0046](#adr-0046) per il
+replica set: il 49,3 / 50,7 è questo dataset con questo seme; il fattore venticinque è due shard e
+documenti da 121 byte; la soglia dei 384 MB non è mai stata superata, quindi è provato che sotto il
+balancer sta fermo e non che sopra si muova. Le riserve stanno accanto ai numeri, non in fondo,
+perché in fondo non arrivano sulle slide.
+
+*Il file Compose non si ripete riga per riga.* La pagina del replica set lo fa e fa bene, perché lì
+il file è il soggetto. Qui il file è commentato per esteso, i suoi sei anelli sono già raccontati in
+[ADR-0062](#adr-0062) e [ADR-0065](#adr-0065), e ripeterli raddoppierebbe la pagina spostando
+l'attenzione dalla decisione che conta. Restano nella pagina i due punti che si capiscono solo
+guardando il file: la catena che rende onesto `up --wait`, e il difetto del dbpath dei config server
+([ADR-0067](#adr-0067)), che è la storia migliore che questo branch abbia prodotto.
+
+**Conseguenze.** Nasce `docs/02-architetture/sharded-cluster.md`. In `docs/README.md` la riga passa
+da promessa a collegamento, e con essa si chiude l'ultima delle tre pagine di architettura previste
+dal design. Entrano tre fonti nuove — [S-069](Sources.md#s-069), [S-070](Sources.md#s-070),
+[S-071](Sources.md#s-071) — e una verifica, [V-061](Sources.md#v-061). Due frasi vanno in
+`docs/citazioni-riportare-slide.md`, e sono le due che il Blocco 3 può reggere da solo se il tempo
+stringe.
+
+Resta dichiarato nella sezione «cosa questa pagina non dice» tutto ciò che non è stato misurato:
+zone, resharding, chunk jumbo, il comportamento **oltre** la soglia del balancer, il confronto di
+prestazioni fra le tre architetture — che ha senso solo sotto carico controllato, cioè con
+l'applicazione di `feature/04` — e `analyzeShardKey`, che sarebbe lo strumento giusto in un caso
+vero e che richiede query reali.
+
+**Alternative scartate:** descrivere la chiave sbagliata citando le fonti e basta — ci sarebbero
+volute due ore in meno e la pagina avrebbe detto «attenzione alle chiavi monotone», che è
+esattamente il genere di frase che si dimentica uscendo dalla sala; mostrare lo squilibrio senza
+`balancerCompliant: true` — sarebbe il difetto senza la parte che lo rende pericoloso, cioè il
+silenzio; raccontare il balancer come se lavorasse, perché è quello che il pubblico si aspetta — è
+una bugia comoda e questa è la pagina sbagliata dove dirla; rimandare la trappola dell'`ordered` a
+`feature/04`, dove ci sarà un'applicazione che scrive — il numero c'è adesso, e un difetto che
+colpisce chi ha scelto bene non si tiene in un cassetto per due settimane.
+
+**Fonti:** [S-066](Sources.md#s-066) · [S-067](Sources.md#s-067) · [S-069](Sources.md#s-069) · [S-070](Sources.md#s-070) · [S-071](Sources.md#s-071) · [V-058](Sources.md#v-058) · [V-061](Sources.md#v-061)
+
+---
+
+<a id="adr-0069"></a>
+## ADR-0069 — Il balancer entra in scena, e la pagina di ieri va corretta: la fusione non è una migrazione
+
+**Data:** 2026-09-02 · **Stato:** Accettata · **Corregge:** [ADR-0068](#adr-0068)
+
+**Contesto.** Il Task 9 chiude i debiti marcati eseguendoli, e [ADR-0049](#adr-0049) avverte che
+l'esecuzione trova righe sbagliate: la prima volta che è stata applicata ne ha trovate due. Questa
+volta la prima riga sbagliata è saltata fuori **prima** di arrivare al debito, riaccendendo lo stack.
+
+`sh.status()` mostrava **due** chunk su `lab.ordini`. [V-061](Sources.md#v-061), poche ore prima, ne
+aveva contati **quattro**, e su quel numero è costruita la sezione 4 di
+`docs/02-architetture/sharded-cluster.md`. Nessuno aveva inserito, cancellato o spostato niente: fra
+le due misure c'era solo un `make down-03` e un `make up-03`, che conservano i volumi.
+
+[V-062](Sources.md#v-062) ha trovato la ragione nel registro del cluster: due eventi `merge`, alle
+`12:34:16.530Z` e alle `12:34:31.450Z`, **3,8 secondi dopo l'avvio del config server** e sei secondi
+prima che il router esistesse. Il campo `server` di tutti e due dice `cfg1:27017`. La spiegazione è
+l'**AutoMerger**, che [S-070](Sources.md#s-070) non nomina e che [S-072](Sources.md#s-072) descrive:
+«Starting in MongoDB 7.0, the balancer can automatically merge chunks that meet the mergeability
+requirements», e «unless explicitly disabled, the AutoMerger **starts the first time the balancer is
+enabled**».
+
+**Decisione.**
+
+*La frase «il balancer non entra mai in scena» è falsa e si corregge, non si sfuma.* Stava nella
+pagina, in [ADR-0068](#adr-0068) e nella riga dell'indice, ed è smentita da un evento registrato con
+data, ora e nodo. La pagina la sostituisce con quella vera, che è più interessante: **il balancer di
+una 7.0 fa due mestieri, e nel lab ne esercita esattamente uno.** Non migra mai — la differenza fra i
+due shard è 34 409 byte contro una soglia di 384 MB — e intanto fonde, perché la fusione non ha
+soglia di squilibrio: ha condizioni di età.
+
+*L'errore da nominare è l'identificazione, non il numero.* Quattro chunk erano quattro davvero, e due
+sono due davvero: [V-062](Sources.md#v-062) mostra che il fenomeno ha due fasi e che le due misure
+guardano fasi diverse. Lo sbaglio non è stato contare male, è stato **assumere che «balancer» e
+«migrazione» fossero la stessa parola** — un'assunzione che il manuale non autorizza e che la pagina
+del balancer, parlando quasi solo di migrazioni, incoraggia. È il tipo di errore che nessuna rilettura
+avrebbe preso, perché il testo era coerente con sé stesso.
+
+*La sezione 4 della pagina si riscrive attorno alla nuova sequenza, e ci guadagna.* Prima diceva: i
+quattro chunk sono geometria di `shardCollection()`, e poi non succede più niente. Adesso dice che i
+quattro chunk sono geometria, che restano quattro finché il cluster non viene riavviato, e che al
+primo giro del balancer diventano due — perché due coppie contigue sullo stesso shard sono
+«mergeable» e il confine fra i due shard non lo è. È una storia con un prima e un dopo, ed è più
+facile da mostrare dal vivo di una fotografia ferma: **basta un `make down-03 && make up-03`.**
+
+*Il numero dei chunk esce dalle frasi in cui era un dato di fatto.* Dove serviva «quattro», adesso
+serve «quattro appena distribuita, due dopo il primo riavvio», e dove la cifra non aggiungeva niente
+sparisce. Lo stesso vale per la riga dell'indice, che vendeva la pagina con «il balancer che non entra
+mai in scena»: è la prima cosa che un lettore legge, e prometteva il falso.
+
+*`sh.stopBalancer()` va raccontato per quello che fa davvero.* Dalla 7.0 spegne **anche**
+l'AutoMerger ([S-073](Sources.md#s-073)), cioè in questo laboratorio spegne l'unica cosa che il
+balancer stia facendo. Un comando il cui nome descrive metà del proprio effetto merita una riga sia
+nella pagina dell'architettura sia nella guida a `mongosh`.
+
+*[ADR-0068](#adr-0068) non si riscrive.* Resta com'è, con la sua data, e questa decisione lo corregge
+per intero sul punto del balancer: la regola del repository è che una decisione si supera, non si
+emenda ([ADR-0002](#adr-0002)). Lo stesso vale per [V-061](Sources.md#v-061), che registra ciò che è
+stato misurato in quella finestra: ha ricevuto una **riserva aggiunta**, non una modifica dei numeri.
+
+**Conseguenze.** Cambiano `docs/02-architetture/sharded-cluster.md` (sezione 4, l'apertura della 4.3,
+la voce di «cosa questa pagina non dice» sul balancer), la riga 70 di `docs/README.md` e
+`tools/smoke-sharded.sh`, che verificava un'uguaglianza a quattro e adesso verifica un pavimento —
+almeno un chunk per shard, con quattro e due riconosciuti per nome. Entrano due
+fonti — [S-072](Sources.md#s-072) e [S-073](Sources.md#s-073) — e due verifiche,
+[V-062](Sources.md#v-062) e [V-063](Sources.md#v-063). [V-061](Sources.md#v-061) prende una riserva
+in coda.
+
+Il talk ci guadagna una scena che prima non c'era, e che costa un comando: distribuire, contare
+quattro, spegnere, riaccendere, contare due. Se il tempo del Blocco 3 non la regge, è la prima da
+tagliare — ma sta scritta ([feedback dal vivo a parte](00-progetto/2026-08-24-design.md)).
+
+**Alternative scartate:** lasciare la frase e aggiungere una nota a piè di pagina — sarebbe stato un
+modo di avere ragione senza correggersi, e la frase sbagliata è nel titolo di una sezione e nella
+riga dell'indice, cioè nei due punti che si leggono per primi; dire «il balancer non migra mai» e
+tacere la fusione — vero e reticente insieme, e taciuto proprio il pezzo che si può mostrare dal
+vivo; rifare la misura sperando che i quattro chunk tornassero — sarebbe stato aspettare che il
+laboratorio confermasse la pagina invece del contrario; attribuire la fusione al riavvio senza
+provarlo — è la [riserva **b**](Sources.md#v-062) di V-062, e resta una riserva.
+
+**Fonti:** [S-070](Sources.md#s-070) · [S-072](Sources.md#s-072) · [S-073](Sources.md#s-073) · [V-061](Sources.md#v-061) · [V-062](Sources.md#v-062) · [V-063](Sources.md#v-063)
+
+---
+
+<a id="adr-0070"></a>
+## ADR-0070 — I debiti dello sharded, saldati eseguendo: quattro marcature tolte, e quello che togliendole si è visto
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+> **Nota di allineamento, 2026-09-02.** Il resto di questo ADR regge intatto. Il solo punto superato
+> è quello che lasciava l'eccezione localhost aperta sugli shard: il Product Owner ha scelto di
+> creare l'amministratore per shard, e come lo si è fatto è in [ADR-0071](#adr-0071). Il corpo non
+> viene toccato: si legge com'era, con questo rimando davanti.
+
+**Contesto.** Il Task 9 del piano di `feature/03` non aggiunge funzioni: chiude i debiti che le
+pagine si portano scritti addosso. La regola è [ADR-0049](#adr-0049) — un debito si chiude
+**eseguendo** — e la prima volta che è stata applicata l'esecuzione ha rivelato due righe sbagliate.
+È successo di nuovo, e prima ancora di arrivare ai debiti: la fusione dei chunk, che è
+[ADR-0069](#adr-0069).
+
+Le marcature da togliere erano quattro, ciascuna con un indirizzo: la §3.3 di
+[`guida-mongosh.md`](04-mongosh/guida-mongosh.md), dichiarata **non eseguita** per intero; gli
+utenti locali a uno shard in [`sicurezza-keyfile-x509.md`](03-amministrazione/sicurezza-keyfile-x509.md),
+marcati «mai provato»; `--oplog` sullo sharded cluster in
+[`backup-restore.md`](03-amministrazione/backup-restore.md), che [S-011](Sources.md#s-011) vieta e
+che nessuno aveva visto vietare; le trappole dei config server e del bilanciamento, che
+[ADR-0033](#adr-0033) intesta per nome a questo branch. Più la riga 55 del `README` alla radice, che
+diceva `docker/03-sharded` «in lavorazione».
+
+L'esecuzione ha trovato quattro cose che nessuna rilettura avrebbe trovato. La guida documentava
+l'errore **sbagliato**: `sh.status()` su un nodo di shard non risponde
+`MongoshInvalidInputError: This db does not have sharding enabled` — quello è lo standalone — ma un
+avviso `[SHAPI-10003]` seguito da `MongoServerError: not authorized on config to execute command`
+([V-063](Sources.md#v-063)). L'eccezione localhost si è rivelata aperta **su ogni shard**, e
+raggiungibile da un container che ne condivida la rete senza mai leggere il keyfile
+([V-064](Sources.md#v-064)). `mongodump --oplog` ha **due** messaggi di rifiuto, e quello che si
+incontra per primo non nomina `mongos` ([V-065](Sources.md#v-065)). E il `mongorestore` che riporta
+ventimila documenti senza un errore lascia la collezione **non distribuita**.
+
+**Decisione.**
+
+*Una marcatura si toglie mostrando la misura, mai perché il debito è invecchiato.* Ogni riga
+«non eseguito» cancellata in questo task ha dietro una verifica numerata — [V-063](Sources.md#v-063),
+[V-064](Sources.md#v-064), [V-065](Sources.md#v-065) — e ciò che le pagine dicono adesso è ciò che è
+uscito dal terminale. Dove l'esecuzione ha smentito la pagina, la pagina cambia nel corpo del testo:
+la §3.3 apre dichiarando che l'errore che documentava era di un'altra architettura, invece di
+correggerlo in silenzio.
+
+*L'eccezione localhost sugli shard resta aperta in questo laboratorio, e la pagina lo dice a voce
+alta.* La documentazione prescrive un dovere — creato l'amministratore dal `mongos`, «you **must**
+still prevent unauthorized access to the individual shards» ([S-074](Sources.md#s-074)) — e questo
+stack non lo adempie. Le ragioni sono due, e sono di questo contesto, non generali: le porte
+pubblicate sull'host **non** aprono l'eccezione, perché a `mongod` la connessione arriva dal gateway
+di Docker, quindi la sola via è condividere la rete di un container, che richiede accesso al demone
+Docker — e chi ce l'ha può già leggere il volume del keyfile, cioè ha di più; e i due rimedi
+possibili costano l'inizializzazione dello stack, perché `enableLocalhostAuthBypass=0` sugli shard
+impedisce a `rs.initiate()` di partire. **Questo punto è una scelta di laboratorio, reversibile, e
+va rivista se il cluster esce di qui:** la strada corretta fuori dal lab — un amministratore sul
+primario di ogni shard, oppure il parametro a `0` applicato *dopo* l'inizializzazione — è scritta
+nella pagina e resta un debito aperto e indirizzato, non un fatto taciuto.
+
+*Il divieto di `--oplog` si racconta con tutte e due le sue facce, in quest'ordine.* La pagina
+mostra prima `can't use --oplog option when dumping from a mongos`, che è la regola, e poi
+`bad option: --oplog mode only supported on full dumps`, che è ciò che si incontra davvero se si è
+sbagliato anche `--db`. Tacere il secondo sarebbe stato più ordinato e meno utile: manda a togliere
+`--db`, che non è il problema.
+
+*Il restore che non ridistribuisce entra nelle pagine come trappola, non come nota.* Ventimila
+documenti ripristinati, zero errori, l'indice `_id_hashed` ricreato, e la collezione su un solo
+shard. È il caso peggiore per un lettore — nessun segnale — e per questo sta nel corpo della §6 di
+`backup-restore.md` con il conteggio a fianco.
+
+*Le trappole nuove si aggiungono in coda, e le diciotto esistenti non si toccano.* Numerazione
+stabile, come vuole [ADR-0033](#adr-0033). Entrano le voci **19** (il config server che scrive in un
+volume anonimo), **20** (i chunk che da quattro diventano due) e **21** (l'eccezione localhost shard
+per shard). La 19 e la 20 sono i due nomi che ADR-0033 aveva scritto in anticipo; la 21 entra per
+[ADR-0052](#adr-0052), che ammette una trappola già misurata anche quando il piano non la nominava.
+
+*Il `README` dichiara lo stack nel repository, e non promette l'applicazione.* La riga 55 passa a
+«nel repository» come le due sopra; la riga che dice l'applicazione Python «in lavorazione» resta
+intatta, perché è vera fino a `feature/04` e cancellarla qui trasformerebbe il `README` in una
+promessa.
+
+*Quello che resta non eseguito resta dichiarato tale* ([ADR-0037](#adr-0037)). Sopravvivono, marcati:
+`sh.disableBalancing()` e `sh.enableBalancing()` nella guida; i secondari degli shard, provati solo
+sui primari; il restore preceduto da `sh.shardCollection()`, che è dedotto e non misurato; gli
+«extra steps» che [S-060](Sources.md#s-060) attribuisce al backup di un cluster e non elenca; il
+backup dei config server. Un debito saldato che ne lascia scoperti cinque nuovi non è un fallimento
+del task: è il task che ha guardato più da vicino.
+
+**Conseguenze.** Cambiano quattro pagine e il `README` alla radice:
+`docs/04-mongosh/guida-mongosh.md` (§3.3 riscritta, l'apertura della §3),
+`docs/03-amministrazione/sicurezza-keyfile-x509.md` (la nuova §4.1, e il debito diviso in due righe
+più precise), `docs/03-amministrazione/backup-restore.md` (la nuova §6, con la vecchia §6
+rinumerata a §7, e tre righe nuove fra ciò che non copre),
+`docs/02-architetture/trappole-mongodb-in-docker.md` (voci 19-21, indice e chiusa),
+`README.md` riga 55. Entrano una fonte — [S-074](Sources.md#s-074) — e tre verifiche,
+[V-063](Sources.md#v-063), [V-064](Sources.md#v-064) e [V-065](Sources.md#v-065).
+[S-006](Sources.md#s-006) chiude per misura la riserva aperta il 2026-08-25 sull'eccezione
+localhost, e ne tiene aperta una bibliografica: che l'eccezione richieda il loopback è misurato qui,
+e continua a non essere scritto in nessuna fonte primaria trovata.
+
+Nessuna configurazione dello stack cambia: il Task 9 tocca documentazione, e l'unica riga di codice
+che ha spostato è in [ADR-0069](#adr-0069). Il talk ci guadagna una scena — un container che diventa
+amministratore di uno shard senza credenziali — e un avvertimento da dire a voce se il tempo lo
+regge: il restore che sembra riuscito.
+
+**Alternative scartate:** togliere le marcature dichiarando i debiti «superati dal branch» — è
+esattamente il modo in cui un debito diventa una bugia, e [ADR-0049](#adr-0049) esiste per
+impedirlo; creare l'amministratore per shard subito, senza discuterlo — sarebbe stata una modifica
+alla sicurezza dello stack decisa da chi stava saldando un debito di documentazione, e la scelta
+appartiene a chi risponde del laboratorio; scrivere solo il messaggio d'errore «giusto» di
+`mongodump` — più pulito, e avrebbe lasciato il lettore a togliere `--db` per scoprire da solo il
+resto; rimandare le trappole a un branch successivo perché lo sharded «ne prometterebbe di più» —
+si sarebbe perso il momento in cui erano state misurate, che è la sola cosa che le rende scrivibili
+([ADR-0052](#adr-0052)); rinumerare le trappole per raggrupparle per argomento — la numerazione è
+un riferimento stabile citato da altre pagine, e riordinarla vale meno di quanto costa.
+
+**Fonti:** [S-006](Sources.md#s-006) · [S-011](Sources.md#s-011) · [S-074](Sources.md#s-074) · [V-063](Sources.md#v-063) · [V-064](Sources.md#v-064) · [V-065](Sources.md#v-065)
+
+---
+
+<a id="adr-0071"></a>
+## ADR-0071 — L'amministratore locale a ogni shard: l'obbligo del manuale, adempiuto, e le tre semplificazioni che restano di laboratorio
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** [ADR-0070](#adr-0070) ha lasciato una porta aperta e l'ha scritto: gli shard di questo
+stack non hanno utenti, quindi l'eccezione localhost è aperta su ciascuno di essi per tutta la vita
+del processo, e chiunque possa avviare un container nel loro *network namespace* diventa `root` di
+uno shard senza presentare niente ([V-064](Sources.md#v-064)). La documentazione non lascia margini
+su che cosa vada fatto — «you **must** still prevent unauthorized access to the individual shards»
+([S-074](Sources.md#s-074)) — e ADR-0070 ha deciso di non decidere: la misura si pubblica, il rimedio
+si propone, la scelta appartiene a chi risponde del laboratorio (nota di metodo 117). Il Product
+Owner ha scelto, il 2026-09-02: si crea l'amministratore per shard, con l'eccezione localhost, per
+questo laboratorio, e la documentazione deve dire ad alta voce che la forma automatica **non** va
+riprodotta in produzione.
+
+Prima di scrivere una riga è stata cercata la procedura canonica, ed è stata trovata: il tutorial di
+autenticazione a keyfile su sharded cluster ([S-075](Sources.md#s-075)), passo 4 della creazione dei
+replica set di shard, «Create the shard-local user administrator». La lettura ha spostato una
+premessa che sembrava acquisita, e va detta subito perché cambia dove punta l'avvertenza.
+
+**L'eccezione localhost non è la scorciatoia.** Il manuale crea quell'utente **usando proprio
+l'eccezione localhost**, collegato al primario dello shard: «The localhost interface is only
+available since no users have been created for the deployment. The localhost interface closes after
+the creation of the first user.» È il solo modo di creare il primo utente su un nodo che pretende
+autenticazione e non ha ancora nessuno da autenticare. Chi lo fa non devia dalla procedura: la
+esegue. Le deviazioni di questo laboratorio sono altre tre, e sono quelle da segnalare.
+
+**Decisione.**
+
+*I due servizi `shard1-init` e `shard2-init` creano un amministratore locale sul primario del proprio
+shard, subito dopo l'attesa dell'elezione e prima che `sh.addShard()` registri gli shard nel
+cluster.* L'ordine è quello del manuale, e la ragione è scritta lì: «Executing them now ensures that
+there are users available for each shard to perform shard-level maintenance»
+([S-075](Sources.md#s-075)). Farlo dopo lascerebbe una finestra in cui lo shard è in piedi e non ha
+utenti, che è esattamente la condizione che apre l'eccezione. L'attesa del primario, che c'era già
+per `sh.addShard()`, adempie ora anche a «You must be connected to the primary to create users».
+
+*Le tre semplificazioni sono dichiarate una per una, e nessuna delle tre va in produzione.* Sono
+scritte in `docs/03-amministrazione/sicurezza-keyfile-x509.md` §4.2 accanto alla forma canonica, con
+i comandi del manuale riportati per esteso. In breve: **una sola password** per l'amministratore del
+cluster e per quelli dei due shard, dove il manuale vuole credenziali distinte; **letta da un file**
+`.env` da uno script non presidiato, dove il manuale vuole `passwordPrompt()` e «random, long, and
+complex»; **il ruolo `root`** invece del `userAdminAnyDatabase` del passo 4, e senza il secondo
+utente `clusterAdmin` del passo 5.
+
+*Il ruolo è `root`, e la ragione è misurata, non comoda.* [V-066](Sources.md#v-066) esito 5:
+`userAdminAnyDatabase` non legge `lab.ordini`, ma si concede `root` da solo in un comando e subito
+dopo la legge. Fra i due ruoli, su quel nodo, non c'è una barriera di privilegio — c'è un comando in
+più. Con una password condivisa, scegliere il ruolo minimo avrebbe avuto l'aspetto della sicurezza
+senza esserlo, e in cambio avrebbe reso impossibile la sola cosa per cui
+[ADR-0026](#adr-0026) prevede questi utenti: «dove una demo debba ispezionare un singolo shard». La
+scelta di `root` è dichiarata come deviazione, non presentata come buona pratica.
+
+*Lo smoke test cambia invariante, e ne sorveglia una in più.* Il controllo che verificava che le
+credenziali del cluster **non** aprissero uno shard ([V-058](Sources.md#v-058)) era vero e adesso è
+falso per costruzione: al suo posto tre controlli. Che l'amministratore locale esista e sia locale —
+un utente solo, e una fetta della collezione, non i ventimila documenti del cluster — e che
+l'eccezione localhost sia chiusa **su tutti e due** gli shard, perché è una condizione di processo e
+un nodo riavviato senza il suo init la riaprirebbe da solo. `make smoke-03` passa da 62 a 64
+controlli.
+
+*Quello che si guadagna e quello che si perde si scrivono insieme.* Si guadagna che l'attacco di
+[V-064](Sources.md#v-064) non passa più: stesso container, stesso `127.0.0.1`, stesso comando, e la
+risposta è `Unauthorized`. Si perde che le porte pubblicate degli shard — 27141 e 27151 nel profilo
+`palco` — adesso **riconoscono una credenziale**, che è quella del cluster. Prima non c'era niente
+da presentare loro. L'eccezione localhost non c'entra, quella via non l'ha mai aperta: cambia che
+esiste un utente. Sul lab non sposta nulla, perché lo stack non va esposto fuori dalla macchina di
+chi presenta ([ADR-0005](#adr-0005)); su una macchina esposta sarebbe la cosa da guardare per prima.
+
+**Conseguenze.** Cambiano quattro file dello stack e quattro pagine.
+`docker/03-sharded/init/11-shard-initiate.js` crea l'utente e porta in testa l'avvertenza;
+`docker/03-sharded/compose.yaml` passa `UTENTE_AMMINISTRATORE` e `PASSWORD_AMMINISTRATORE` ai due
+init, e il commento che diceva «Nessun `createUser` qui» dice adesso il contrario e perché;
+`docker/03-sharded/.env.example` dichiara che la stessa password serve a quattro utenti;
+`tools/smoke-sharded.sh` sostituisce un controllo con tre. In documentazione: la nuova §4.2 di
+`sicurezza-keyfile-x509.md` con la procedura canonica per esteso, la trappola **21** di
+`trappole-mongodb-in-docker.md` che cambia esito, e una fonte nuova
+([S-075](Sources.md#s-075)) con la verifica che l'accompagna ([V-066](Sources.md#v-066)).
+
+L'avvio non rallenta in modo percepibile: è un `createUser` per shard, in parallelo fra i due init.
+Al secondo `up` i due init rispondono «già presente» e escono `0`, per il ramo `Unauthorized` — a
+eccezione chiusa il nodo non arriva nemmeno a valutare se l'utente esista.
+
+Resta aperto, e dichiarato: l'eccezione sui **secondari** di uno shard a tre membri, che il profilo
+`palco` non ha; `enableLocalhostAuthBypass: 0` applicato **dopo** l'inizializzazione, che sarebbe il
+secondo rimedio ammesso da [S-074](Sources.md#s-074) e che questo stack non prova; e lo stato
+intermedio in cui uno solo dei due init fallisse.
+
+**Alternative scartate:** lasciare l'eccezione aperta come decideva ADR-0070 — la scelta era del
+Product Owner e il Product Owner ha scelto diversamente; `enableLocalhostAuthBypass: 0` sugli shard —
+applicato prima dell'inizializzazione impedisce `rs.initiate()` e lo stack non parte
+([V-064](Sources.md#v-064) riserva b), applicato dopo servirebbe un riavvio dentro la catena di
+avvio, cioè un anello in più per ottenere quello che un `createUser` ottiene senza; usare
+`userAdminAnyDatabase` come prescrive il passo 4 — è misurato che si concede `root` da solo, quindi
+avrebbe l'aspetto della sicurezza e non la sostanza, e toglierebbe alla demo l'unica cosa che questi
+utenti servono a fare; creare due utenti distinti come i passi 4 e 5 del manuale — con una sola
+password nel `.env` sarebbero due nomi per la stessa chiave, cioè cerimonia; usare una password
+diversa per gli shard — sarebbe più fedele al manuale e chiederebbe una seconda riga in `.env`, che
+è il file che ADR-0056 racconta essere già stato perso una volta: il guadagno è simbolico finché la
+prima password sta nello stesso file; creare l'utente **dopo** `sh.addShard()`, dove sarebbe stato
+più comodo metterlo — lascia aperta la finestra che tutto questo ADR esiste per chiudere.
+
+**Fonti:** [S-074](Sources.md#s-074) · [S-075](Sources.md#s-075) · [V-058](Sources.md#v-058) · [V-064](Sources.md#v-064) · [V-066](Sources.md#v-066)
+
+---
+
+<a id="adr-0072"></a>
+## ADR-0072 — Le misure che una nostra decisione ha invalidato si riscrivono subito, e si dice quando la risposta nuova è più comoda e meno sincera
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** [ADR-0071](#adr-0071) ha dato un amministratore a ogni shard. Nello stesso giorno,
+quattro punti di questo repository hanno cominciato a dire il falso: un commento in
+`tools/reset-demo.sh`, uno in `docker/03-sharded/init/10-cfg-initiate.js`, due passaggi di
+`docs/02-architetture/sharded-cluster.md` e un blocco `console` nella §3.3 di
+`docs/04-mongosh/guida-mongosh.md`. Riportavano tutti una misura che era vera quando è stata presa,
+e nessuno è stato invalidato da un aggiornamento di MongoDB: li ha invalidati una modifica nostra.
+
+Rimisurarli ha portato a galla qualcosa che nessuno stava cercando ([V-067](Sources.md#v-067)). Il
+cambiamento non ha scambiato un messaggio d'errore con un altro: ne ha tolto uno.
+`sh.getBalancerState()` dato a uno shard rispondeva `Unauthorized: not authorized on config to
+execute command …` — un errore che [V-063](Sources.md#v-063) aveva già giudicato reticente, «che non
+nomina il problema vero», ma che almeno era un errore. Adesso risponde **`true`**. Le letture del
+database `config` su uno shard riescono, tornano vuote, e il vuoto ha l'aspetto di una risposta.
+Nello stesso movimento `sh.status()`, autenticato su uno shard, ha smesso di dire «non sei
+autorizzato» e ha cominciato a dire `This db does not have sharding enabled`: cioè esattamente la
+frase che la guida additava come sintomo di **un'altra** situazione. Il primo errore ne nascondeva un
+secondo.
+
+**Decisione.**
+
+*Le pagine e i commenti che riportano una misura invalidata da una nostra decisione si riscrivono
+sulla misura di oggi, dentro il lavoro che ha cambiato il comportamento.* Chi apre la guida alle
+dieci di sera prima di una demo non deve datare quello che legge.
+
+*La misura vecchia non si cancella: si data.* Va dove stanno le misure — nelle voci di `Sources.md`
+che l'avevano registrata, con un «Seguito» che rimanda alla verifica nuova. [V-058](Sources.md#v-058)
+e [V-063](Sources.md#v-063) restano leggibili come erano: è la regola di [ADR-0002](#adr-0002)
+applicata alle verifiche invece che alle decisioni.
+
+*Dove la risposta nuova è più pericolosa della vecchia, la pagina lo dice.* Un `true` al posto di un
+errore non è un miglioramento raccontato male: è un segnale perso, e a perderlo siamo stati noi
+chiudendo l'eccezione localhost. Una pagina che si limitasse ad aggiornare l'output sarebbe esatta e
+lascerebbe il lettore peggio di prima.
+
+**Conseguenze.** I quattro punti sono riscritti. La §3.3 della guida guadagna la regola che li tiene
+insieme — le funzioni di `sh` che si risolvono in una lettura di `config` adesso rispondono il vuoto,
+quelle che spediscono un comando falliscono ancora — perché è quella, e non l'elenco dei messaggi,
+che sopravvive al prossimo cambiamento. Resta un obbligo pratico per le decisioni future: quando una
+decisione cambia un comportamento misurato, il testo dei messaggi vecchi si cerca nel repository
+prima di chiudere il commit. Qui la ricerca è stata fatta dopo, ed è per questo che i quattro punti
+sono vissuti falsi per un commit.
+
+Due categorie di documenti **non** rientrano in questa regola, e non per pigrizia. I verbali datati
+di `docs/00-progetto/` — lo spike del 2026-08-25, il piano, il registro operativo — dicono che cosa
+è stato misurato in un giorno, e riscriverli cancellerebbe proprio l'informazione che portano. Le
+sezioni di pagina già marcate con la loro data lo stesso: la §4.1 di
+`docs/03-amministrazione/sicurezza-keyfile-x509.md` apre con un riquadro che la dichiara anteriore
+al 2026-09-02 e rimanda alla §4.2, ed è la forma corretta quando la misura vecchia **serve** a
+spiegare perché la nuova esiste.
+
+**Alternative scartate:** tenere le due letture affiancate nella pagina, «prima di ADR-0071» e
+«dopo» — la guida diventerebbe un registro delle modifiche, e §3.3 è già una sezione che il lettore
+percorre in cerca di un comando, non di una cronologia; annotare i punti con una nota senza toccare
+il testo — chi legge in diagonale legge il testo, non la nota; aprire una trappola nuova in
+`trappole-mongodb-in-docker.md` per il `true` del bilanciatore — la trappola 21 racconta già
+l'eccezione localhost, e §3.3 è il posto dove quel comando si impara; lasciare i quattro punti come
+erano e correggerli a fine feature, con il resto della documentazione — sono quattro affermazioni
+false in un repository didattico, e il costo di rimandarle è che qualcuno le legga nel frattempo.
+
+**Fonti:** [V-058](Sources.md#v-058) · [V-063](Sources.md#v-063) · [V-067](Sources.md#v-067)
+
+---
+
+<a id="adr-0073"></a>
+## ADR-0073 — Una scena di riserva è l'uscita di un comando del repository, e misura invece di raccontare
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** Il Blocco 3 doveva avere la sua riserva registrata: l'avvio, `sh.status()`, la
+distribuzione dei documenti e il guasto di un membro di shard. Per il Blocco 2 la cosa era già
+risolta senza che nessuno l'avesse decisa: le scene erano `make failover-02` e le sue varianti,
+cioè comandi che esistevano per la sala e che registrare è costato una riga. Per lo sharded no.
+`sh.status()`, il conteggio shard per shard e la sequenza del guasto non erano comandi: erano
+gesti, da battere dentro `docker exec` uno dopo l'altro.
+
+Registrare una sequenza battuta a mano produce un artefatto che nessuno saprà rifare uguale. Il
+`.cast` resta nel repository, il gesto no: chi lo rivede fra tre mesi non ha modo di sapere quali
+`--eval` erano stati dati né in che ordine, e quando lo stack cambia niente segnala che la
+registrazione è invecchiata. È lo stesso motivo per cui i controlli di questo repository eseguono
+invece di dichiarare ([ADR-0038](#adr-0038)).
+
+**Decisione.**
+
+*Ogni scena di riserva è l'uscita di un comando che sta nel repository.* Nasce
+`tools/demo-sharded.sh` con tre scene — `stato`, `distribuzione`, `guasto` — e tre bersagli nel
+`Makefile`: `stato-03`, `distribuzione-03`, `guasto-03`. Il comando è per la sala **prima** che per
+la registrazione: se in sala il cluster parte lo si esegue, se non parte si riproduce il `.cast`, e
+le due strade mostrano le stesse parole. Una riserva che dice cose diverse dalla demo è una seconda
+demo da mantenere.
+
+*Una scena misura, non racconta.* Nessun numero è scritto nel copione: quanti membri ha ogni shard
+lo chiede allo shard, i due `_id` da cercare li chiede ai due shard invece di indovinarli, i secondi
+di ogni risposta li cronometra, e il nuovo primario dopo il guasto lo legge da un membro superstite
+invece di affermare che c'è stata un'elezione. Il costo è qualche riga in più; il ritorno è che la
+scena resta vera quando cambiano la chiave di sharding, il numero di membri o i tempi della
+macchina — e che quando smette di essere vera lo dice da sola.
+
+*Il bersaglio si chiama `guasto-03`, non `failover-03`.* Nel profilo `palco` ogni shard ha un
+membro solo: un failover lì non può avvenire, e chiamarlo così prometterebbe al pubblico una scena
+che non arriva. Il nome dice il gesto — si ferma un nodo — e lascia all'esito il compito di dire
+che cosa succede, che nei due profili è il contrario.
+
+*Una scena che rompe qualcosa lo rimette a posto, anche se la interrompono.* `guasto-03` riavvia il
+nodo che ha fermato e installa una trappola su `INT` e `TERM` per riavviarlo anche se chi guarda
+preme `Ctrl-C` a metà. Una demo che lascia il cluster peggio di come l'ha trovato non si può
+provare due volte di seguito, che è esattamente quello che si fa prima di un talk.
+
+**Conseguenze.** Il Task 10 esce dal perimetro che il piano gli aveva dato — `docs/05-talk/registrazioni/`
+— e tocca `tools/` e il `Makefile`; la deviazione è scritta nel registro operativo, il piano
+approvato non si modifica. Le cinque scene stanno in
+[`docs/05-talk/registrazioni/`](05-talk/registrazioni/README.md) con le loro misure
+([V-068](Sources.md#v-068)), e ognuna è stata riprodotta per intero prima di entrare nell'indice
+([ADR-0055](#adr-0055)); per le cinque dello sharded il confronto è stato anche byte per byte.
+
+Il debito «il `Makefile` non sa niente dei profili», aperto da [ADR-0049](#adr-0049) e ancora da
+saldare, adesso riguarda tre bersagli in più: `stato-03`, `distribuzione-03` e `guasto-03` accettano
+`PROFILO` e nessun controllo verifica che i valori ammessi siano quelli dei file Compose. Si chiude
+nel task di chiusura del branch, eseguendo.
+
+Resta un passaggio che nessun controllo può sorvegliare: la scena 9 richiede che in
+`docker/03-sharded/.env` siano attive le righe `MEMBRI_*` a tre membri. Quel file non sta nel
+repository ([ADR-0014](#adr-0014)), quindi chi rifà le registrazioni deve scambiarle a mano e
+rimetterle a posto dopo — e se non lo fa, il profilo `palco` non riparte. Sta scritto nell'indice
+delle registrazioni, che è il posto dove lo si legge nel momento in cui serve.
+
+**Alternative scartate.** Battere le scene a mano dentro `docker exec` e registrarle — è quello che
+questa decisione rifiuta, e sarebbe costato meno oggi e molto di più a ogni modifica dello stack.
+Un unico bersaglio `demo-03` che esegue le tre scene di fila — in sala non si interrompe una scena
+da settanta secondi per rispondere a una domanda, e le tre servono in momenti diversi del blocco.
+Chiamare `failover-03` la scena del guasto perché nel profilo `completo` è davvero un failover — il
+nome di un comando non può essere vero solo in una delle due configurazioni che il repository
+dichiara di supportare.
+
+**Fonti:** [V-045](Sources.md#v-045) · [V-068](Sources.md#v-068)
+
+---
+
+<a id="adr-0074"></a>
+## ADR-0074 — Due file che devono dire la stessa cosa si legano con un test, e l'elenco valido lo tiene chi lo dichiara
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** Due debiti aperti da [ADR-0049](#adr-0049) e rinviati fin qui hanno la stessa forma, e
+si è capito solo misurandoli.
+
+Il primo: l'elenco `PORTE=(...)` di `tools/preflight.sh` è scritto a mano, e i file Compose
+pubblicano le loro porte per conto proprio. Il secondo: `PROFILO` è una variabile del `Makefile` e i
+profili sono dichiarati nel file Compose, e niente lega le due cose — segnato una prima volta da
+[ADR-0066](#adr-0066), aggravato dal Task 10 che ha aggiunto tre bersagli con `PROFILO`
+([ADR-0073](#adr-0073)).
+
+Misurati oggi, **nessuno dei due era in errore** ([V-069](Sources.md#v-069)): quindici porte
+pubblicate e quindici controllate, senza mancanti, senza eccedenti, in ordine. Il debito non era uno
+sbaglio: era che la coincidenza reggeva **per attenzione**, e sette delle quindici porte esistono
+solo nel profilo `completo`, cioè sono esattamente quelle che si dimenticano.
+
+Il secondo debito ha invece una manifestazione precisa, e brutta. Compose accetta qualunque stringa
+dopo `--profile` senza protestare: un profilo che non esiste non seleziona niente, quindi restano i
+soli servizi che non dichiarano `profiles:` — qui uno, `keyfile-init`. `make up-03
+PROFILO=inesistente` stampa cinque righe, muore con `container sh-keyfile-init exited (0)` e esce 2.
+Accusa il one-shot del keyfile di essere uscito 0, cioè di aver fatto il suo mestiere, e la parola
+«profilo» non compare da nessuna parte. Un refuso in `PROFILO=complteo` manda a leggere i log del
+keyfile.
+
+**Decisione.**
+
+1. **Un guardiano `profilo-03` che chiede l'elenco al file Compose.** `docker compose … config
+   --profiles` è la domanda giusta e ha una risposta pulita — `completo`, `palco`, uscita 0 — purché
+   le si passino i due `--env-file`, senza i quali fallisce sull'interpolazione di `MONGO_IMAGE`. Il
+   guardiano è un bersaglio `.PHONY` che rifiuta un profilo sconosciuto con una frase che lo nomina,
+   elenca quelli veri e dice che cosa succederebbe senza il controllo.
+
+2. **L'elenco dei profili validi non si scrive nel `Makefile`.** Scrivere `palco|completo` nella
+   ricetta sarebbe stato il debito di prima con un nome nuovo: un terzo profilo nel file Compose
+   resterebbe rifiutato, e il messaggio d'errore direbbe con sicurezza una cosa falsa. È la stessa
+   ragione per cui `DATI_03` si costruisce con `addprefix` invece che con nove nomi a mano, e una
+   prova la difende esplicitamente.
+
+3. **Ogni bersaglio che usa `$(PROFILO)` dichiara il guardiano fra i prerequisiti** — oggi sono
+   sette: `up-03`, `seed-03`, `smoke-03`, `reset-demo-03`, `stato-03`, `distribuzione-03`,
+   `guasto-03`. I tre che non avevano nemmeno `$(AMBIENTE_03)` lo acquisiscono per transitività, ed
+   è giusto: leggono comunque quel file.
+
+4. **Le coerenze fra due file diventano una prova che legge i file veri.** Nasce
+   `tools/tests/test_coerenza_repo.py`, che è il primo modulo della suite a non usare campioni
+   costruiti: apre i tre `docker/*/compose.yaml`, `tools/preflight.sh` e il `Makefile` così come
+   sono nel repository. Controlla i due versi delle porte, l'ordine e i doppioni, che nessun
+   bersaglio con `$(PROFILO)` scordi il guardiano, e che il guardiano non nomini un profilo a mano.
+
+5. **Le porte si leggono con un lettore YAML e non con `docker compose config`.** Quel comando
+   pretende i `.env` che stanno fuori dal repository per scelta ([ADR-0014](#adr-0014)): un
+   controllo che non gira su un clone appena fatto è un controllo che non gira. Il lettore risolve
+   `${NOME:-valore}` con il valore predefinito, che è la porta della mappa del design.
+
+**Conseguenze.** La suite passa da 131 a **139** prove. Le tre mutazioni provate a mano — togliere
+27017 dall'elenco, togliere il guardiano a `guasto-03`, sostituire `$(PROFILO)` con `palco` nella
+ricetta del guardiano — falliscono tutte e tre con il messaggio che dice quale file correggere:
+una prova che non può fallire non vale niente, e queste sono state viste fallire.
+
+Il costo è che `profilo-03` esegue un `docker compose config` prima di ogni `up-03`, `smoke-03`,
+`stato-03` e degli altri quattro. Sono decimi di secondo su comandi che ne durano decine, e in
+cambio un refuso si ferma **prima** di toccare il cluster: nella prova, i cinque container accesi in
+`palco` non sono stati sfiorati dal tentativo con il profilo sbagliato.
+
+Resta scoperto quello che nessuna prova statica può vedere: che le porte *dichiarate* siano quelle
+che il design §5.2 voleva. La prova lega due file fra loro, non li lega alla specifica. Se qualcuno
+spostasse una porta in un file Compose e aggiornasse `preflight.sh`, i controlli tacerebbero — ed è
+il comportamento giusto, perché quella è una modifica legittima che va discussa altrove.
+
+**Alternative scartate.** Generare `PORTE` dai file Compose a ogni esecuzione di `preflight.sh` —
+`preflight` deve girare la mattina del talk sulla macchina più scarna possibile, e farlo dipendere
+da un lettore YAML e da Python per sapere quali porte guardare è aggiungere modi di fallire proprio
+lì. Una prova che confronta `preflight.sh` con la specifica invece che con i Compose — la specifica
+è prosa, e un controllo che la interpreta è un controllo che discute. Un bersaglio `up-03-palco` e
+uno `up-03-completo` invece della variabile — è la strada che [ADR-0066](#adr-0066) ha già scartata,
+e rinunciarvi adesso significherebbe due famiglie di sette bersagli. Lasciare che sia lo smoke a
+scoprire il profilo sbagliato — lo smoke gira dopo l'avvio, e l'avvio è la cosa che era fallita.
+
+**Fonti:** [V-069](Sources.md#v-069)
+
+---
+
+<a id="adr-0075"></a>
+## ADR-0075 — Il secondo comando di `up-02` resta, e la ragione per cui regge entra nel file
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** [ADR-0062](#adr-0062) ha chiuso lo stack 03 con **un** comando di avvio e ha aperto,
+nello stesso paragrafo, un debito verso lo stack 02: «`up-02` esegue proprio i due comandi, e
+funziona perché `up --wait` torna **prima** che `rs-init` finisca. La distanza fra le due cose è di
+secondi e nessuna misura dice quanto sia stabile altrove; se un giorno `rs-init` finisse per primo,
+`wait rs-init` risponderebbe `no containers` e il bersaglio fallirebbe senza che niente sia rotto.»
+
+Il debito era indirizzato al Task 7 e non è stato saldato lì. Lo si salda qui, e la misura
+([V-069](Sources.md#v-069)) risponde più di quanto fosse stato chiesto.
+
+Il margine c'è: **21,59 / 22,16 / 21,90 s** su tre avvii a freddo, e a caldo `wait rs-init` blocca
+ancora **3,97 / 3,87 / 3,94 s**. Ma il dato che cambia la decisione non è la sua ampiezza: è che il
+margine **non è un caso fortunato**. `rs-init` è l'ultimo anello della catena e non ha healthcheck,
+quindi la soglia che `--wait` gli applica è `running` ([S-057](Sources.md#s-057)) ed è soddisfatta
+nell'istante in cui parte. `up --wait` torna dunque quando `rs-init` **comincia**, e la finestra a
+disposizione del secondo comando coincide con l'intera durata del suo lavoro. Non si restringe con
+una macchina più veloce: si restringe solo se `rs-init` smette di fare qualcosa.
+
+Il fallimento temuto esiste e si riproduce — dato `wait rs-init` a cose finite, la risposta è `no
+containers for project "sqlstart-02-replicaset"` con uscita 1, mentre il progetto ha cinque
+container e `ps -a` li elenca tutti — ma per raggiungerlo bisogna dare il comando fuori dal
+bersaglio. Dentro il bersaglio non capita, perché `up -d --wait` riavvia `rs-init` a ogni giro:
+verificato lanciando `make up-02` due volte di fila.
+
+**Decisione.**
+
+1. **`up-02` resta di due comandi**, e la regola di [ADR-0041](#adr-0041) non viene toccata. Il
+   debito si chiude come *verificato*, non come *corretto*: non c'era niente da correggere.
+
+2. **Il motivo per cui regge entra nel `Makefile`, accanto alla riga.** Il pericolo vero non era il
+   tempo: era che qualcuno leggesse due comandi dove ne bastava uno e ne togliesse uno per pulizia.
+   Il commento adesso dice che la finestra è la durata del lavoro di `rs-init` e che chi svuota
+   `rs-init` deve togliere anche quella riga — cioè lega la fragilità alla modifica che la
+   scatenerebbe, invece di lasciarla a una data futura.
+
+3. **Non si dà a `rs-init` una sentinella come quella dello stack 03.** Sarebbe la soluzione
+   simmetrica e strutturalmente più solida, ed è stata considerata sul serio: un anello finale senza
+   healthcheck da cui non dipende nessuno renderebbe `up-02` di un comando come `up-03`. Ma
+   modificherebbe un file Compose di uno stack chiuso, verificato e già registrato, dentro il task
+   di chiusura di un branch che riguarda un altro stack. Il guadagno è togliere una riga che
+   funziona; il costo è rifare le verifiche dello stack 02.
+
+4. **I due stack restano diversi, e la differenza si spiega.** Non è un'incoerenza da sanare: è che
+   lo stack 02 ha un one-shot finale che *lavora* e lo stack 03 una sentinella che *non fa niente*
+   apposta ([ADR-0062](#adr-0062)). Chi legge i due `Makefile` accanto trova adesso scritto, in
+   entrambi, perché il numero di comandi è quello.
+
+**Conseguenze.** Il debito di [ADR-0062](#adr-0062) è saldato. Resta scritto che una modifica a
+`rs-init` che lo rendesse istantaneo romperebbe `up-02` con un messaggio che nomina l'intero
+progetto per dire che non trova un container: il messaggio più fuorviante incontrato in questo
+branch, insieme a quello del keyfile accusato di uscire 0 ([ADR-0074](#adr-0074)). Sono lo stesso
+difetto visto da due parti — uno strumento che risponde alla domanda che gli è stata fatta invece
+che a quella che gli si voleva fare.
+
+La misura ha richiesto di avviare lo stack 02 in un worktree dove il suo `.env` non esiste, perché
+è fuori dal repository ([ADR-0014](#adr-0014)). Il file è stato copiato dal checkout principale per
+la durata della prova e rimosso subito dopo, con lo stack smontato e i volumi dei dati cancellati:
+una misura su un altro stack non deve lasciare tracce nel branch che la prende.
+
+**Alternative scartate.** Togliere `wait rs-init` e affidarsi al solo `up --wait` — è precisamente
+ciò che [ADR-0041](#adr-0041) ha scartato misurando, e il replica set non esisterebbe ancora al
+ritorno del comando. Sostituirlo con una lettura del codice di uscita via `docker inspect` — toglie
+la dipendenza dal container vivo, ma introduce il nome `rs-init` scritto a mano in un secondo posto
+e sostituisce un comando di Compose con uno del client Docker, contro la direzione presa dal resto
+del `Makefile`. Ingoiare l'errore con `|| true` — trasformerebbe un `rs-init` fallito in un avvio
+riuscito, che è il verso sbagliato in cui sbagliare. Rimandare ancora il debito a `feature/04` — il
+calendario di [ADR-0057](#adr-0057) non lo consente, e un debito rinviato due volte è un debito che
+nessuno salderà.
+
+**Fonti:** [V-069](Sources.md#v-069)
+
+---
+
+<a id="adr-0076"></a>
+## ADR-0076 — Un nome di replica set vuoto è un nome assente, e un messaggio che dice «nessuno protesta» deve averlo verificato
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** La PR #4 è stata data in lettura a un recensore esterno, come le tre precedenti.
+Dei due rilievi, uno riguarda `tools/check_stack.py`: «`nome_del_set()` può restituire una stringa
+vuota se `--configdb` inizia con `/`, e a quel punto il chiamante la tratta come un nome di
+replica set valido».
+
+Arbitrato eseguendo ([V-070](Sources.md#v-070)), il rilievo si spacca in due. **L'osservazione è
+esatta**: `nome_del_set('/cfg1:27017')` restituiva `''`, e con uno spazio davanti restituiva lo
+spazio. **La diagnosi è sbagliata**: il chiamante non la trattava affatto come valida — il file
+veniva bocciato lo stesso, con due problemi, e `check_stack.py` usciva diverso da zero. Non
+esisteva il falso negativo che il rilievo lascia immaginare.
+
+Il difetto però c'era, ed era peggiore di quello segnalato. Il messaggio che usciva diceva «nomina
+il replica set «»» — non nomina niente — e soprattutto «è l'unico caso in cui nessuno protesta: i
+processi partono tutti». Misurato: `mongos --configdb /cfg1:27017` **non parte**, esce 2 e
+risponde `BadValue: configdb supports only replica set connection string`. Lo strumento mandava a
+cercare un refuso di due lettere dentro i `--replSet` del file, mentre il difetto era una barra di
+troppo in bella vista. È esattamente la forma d'errore già registrata dalla **nota di metodo 129**
+e da [ADR-0072](#adr-0072): un messaggio vero alla lettera che risponde alla domanda sbagliata.
+
+La misura ha trovato un secondo scostamento che nessuno aveva cercato. Il messaggio del
+`--configdb` senza nome di set cita `FailedToParse: invalid url`, che [V-057](Sources.md#v-057)
+aveva misurato — sulla forma con la **virgola**. Su un host solo, che è precisamente ciò che la
+prova del repository esercitava, `mongos` risponde `BadValue: configdb supports only replica set
+connection string`. La fonte era accurata; il messaggio la generalizzava.
+
+**Decisione.**
+
+1. **`nome_del_set` normalizza, e un nome vuoto è un nome assente.** Restituisce `None` per
+   `/cfg1:27017` come per `cfg1:27017`, e lo spazio conta come vuoto. Le due scritture sono lo
+   stesso errore — «`--configdb` non nomina un replica set» — e devono ricevere lo stesso
+   messaggio.
+
+2. **Il messaggio porta entrambe le stringhe misurate**, con la condizione che le distingue: la
+   virgola. Un messaggio di `check_stack.py` cita il sintomo che l'utente vedrà, e citarne uno solo
+   quando ce ne sono due è una promessa che l'utente scopre falsa nel momento peggiore.
+
+3. **Un rilievo esterno si accoglie per l'osservazione, non per la diagnosi.** Qui accogliere il
+   verdetto («è trattata come valida») avrebbe portato a cercare un falso negativo inesistente;
+   respingere il rilievo perché il verdetto è falso avrebbe lasciato in piedi un messaggio che
+   afferma il contrario di ciò che accade. Le due parti si separano eseguendo, e solo eseguendo.
+
+4. **Le due prove nuove sono state viste fallire prima di essere accettate** (nota di metodo 131).
+   Con il difetto rimesso al suo posto, la prima riporta per intero il messaggio del refuso e la
+   seconda `assert '' is None`: la suite passa da 139 a **141**.
+
+**Conseguenze.** `make stack-check` boccia esattamente gli stessi file di prima — la copertura non
+cambia, e chi misurasse questa modifica contando gli stack respinti non troverebbe differenza. A
+cambiare è che il file bocciato adesso dice dov'è il difetto. Resta scritto che [V-057](Sources.md#v-057)
+è accurata e che a essere troppo larga era la sua citazione: una fonte misurata su un caso non
+autorizza a parlare di tutti i casi della stessa famiglia.
+
+**Alternative scartate.** Lasciare com'era, visto che nessun file passava per sbaglio — sarebbe
+coerente solo se il valore di `check_stack.py` fosse il codice d'uscita, mentre è il messaggio:
+un controllo che boccia senza saper dire perché costringe a rifare a mano il lavoro che dovrebbe
+risparmiare. Far restituire a `nome_del_set` la stringa vuota e distinguere nel chiamante — sposta
+la normalizzazione nel punto in cui il valore si usa invece che in quello in cui si produce, e
+obbliga ogni futuro chiamante a ricordarsene. Aggiungere un terzo messaggio dedicato al nome vuoto
+— tre messaggi per un errore che l'utente vede sempre nello stesso modo, e la prova avrebbe dovuto
+distinguere due casi che `mongos` non distingue.
+
+**Fonti:** [V-070](Sources.md#v-070)
+
+
+---
+
+<a id="adr-0077"></a>
+## ADR-0077 — Il verdetto è il codice d'uscita: tre punti in cui la catena diceva «pronto» e non lo era
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** Dopo il recensore della [ADR-0076](#adr-0076), la PR #4 è stata data a un secondo,
+con un incarico esplicito: uno sguardo indipendente, non una conferma del primo. Ha lasciato tre
+rilievi. Arbitrati eseguendo, **tutti e tre descrivono un caso raggiungibile**, e nessuno dei tre
+era stato immaginato scrivendo il codice.
+
+Hanno in comune più di quanto sembri leggendoli separati. La PR promette in testata che «`make
+up-03` è **un** comando e il suo codice d'uscita è il verdetto». Ciascuno dei tre è un punto in cui
+quel verdetto è verde su uno stack che non fa quello che la pagina accanto promette — e in due casi
+su tre l'avviso in italiano c'era già, stampato, letto da nessuno, perché `up --wait` legge i codici
+e non le frasi.
+
+**Primo rilievo — il router senza keyfile.** La regola che pretende `--keyFile` in
+`tools/check_stack.py` vive dentro `if stack_con_replica and avvia_mongod(...)`, e un `mongos` non è
+un `mongod`. Verificato su un file vero — una copia di `docker/03-sharded/compose.yaml` con
+cancellate le sole due righe del keyfile del router — `check_stack.py` rispondeva «Stack conformi:
+1» e usciva **0** ([V-071](Sources.md#v-071)). Avviato, quello stack esce **1** con «container
+sh-mongos is unhealthy», e il log del router ripete `Command find requires authentication`: la frase
+che si legge quando la password è sbagliata, mentre la password è giusta e manca una riga.
+
+**Secondo rilievo — il cambio di profilo su uno stack già acceso.** Gli anelli di inizializzazione
+saltano il lavoro se trovano il replica set già formato, e non guardano **con quali membri**.
+[ADR-0060](#adr-0060) aveva previsto due direzioni di disallineamento fra `MEMBRI_*` e `--profile`,
+e le sorveglia entrambe. Questa è una terza, che non viene dall'ambiente ma dal disco: su uno stack
+inizializzato in `palco`, con `MEMBRI_CFG` portato a tre nomi, tutti e tre i container rispondono
+(la prima guardia è contenta), nessun candidato è fuori elenco (la seconda pure), e il ramo che
+salta fa il resto. Misurato: la catena stampa «config server pronto», esce **0**, e
+`rs.status().members.length` vale **1** mentre due config server sani girano fuori dalla replica
+([V-072](Sources.md#v-072)). È il guasto che ADR-0060 chiamava «il pericoloso, perché non
+fallisce», entrato da una porta che quella guardia non sorvegliava.
+
+**Terzo rilievo — il seed accetta qualunque ventimila.** Il caricamento dei dati si salta se
+`lab.ordini` ha già `DOCUMENTI` documenti. Il conteggio però non dice se sono **distribuiti**.
+Misurato su una collezione rifatta a mano, piena e senza riga in `config.collections`: il seed
+stampa «ATTENZIONE: lab.ordini non risulta distribuita» ed esce **0** lo stesso. Un laboratorio
+sullo sharding la cui collezione non è partizionata, consegnato verde.
+
+**Decisione.**
+
+1. **Anche il router dichiara `--keyFile`, e la regola sta accanto a quella del `mongod`, non
+   dentro.** `check_stack.py` guadagna un `if stack_con_replica and avvia_mongos(...)` parallelo al
+   precedente. Non è un `elif` e non è una condizione allargata: sono due anelli diversi della
+   stessa catena, con due messaggi diversi, perché chi legge il rilievo deve sapere quale dei due
+   sta guardando. Il messaggio porta per intero la stringa che il router stamperebbe, così chi la
+   trova nei log per un'altra strada ci arriva cercandola.
+
+2. **Un anello che trova il set già formato confronta i membri, e se differiscono si ferma.** Nuovo
+   codice d'uscita **6** (`USCITA_MEMBRI_DIVERSI`) in `10-cfg-initiate.js` e in
+   `11-shard-initiate.js`, con il messaggio che elenca i membri configurati, quelli chiesti, e il
+   modo di passare di profilo: `make reset-03`, poi `make up-03`. **Fermarsi e non riconfigurare**:
+   `rs.reconfig()` su un set che ha già dati non è un'operazione da script di avvio, e un anello
+   che la tentasse trasformerebbe un errore leggibile in un guasto a metà.
+
+3. **Il seed non salta il caricamento se la collezione non è nel catalogo.** Nuovo codice **9**
+   (`USCITA_NON_DISTRIBUITA`), con il messaggio che indica `make seed-03`. Non svuota da sé: una
+   collezione piena è dati, e cancellarli non è una decisione che uno script di avvio possa
+   prendere per conto di chi guarda.
+
+4. **I documenti su un solo shard restano un avviso, e questa è una scelta.** Unire i chunk su uno
+   shard è una **scena della demo** ([ADR-0069](#adr-0069)): un `make up-03` dato dopo quella scena
+   non deve diventare rosso per averla eseguita. Si boccia l'assenza dal catalogo, che nessuna scena
+   produce; non ogni stato diverso da quello che il seed avrebbe prodotto.
+
+5. **Il cheat sheet dice la precondizione che la pagina delle registrazioni diceva già.**
+   `docs/02-architetture/sharded-cluster.md` chiedeva di scommentare le tre righe `MEMBRI_*` e
+   basta; `docs/05-talk/registrazioni/README.md` diceva anche `make reset-03`. Due pagine che
+   descrivono la stessa manovra e ne dicono metà a testa: adesso il cheat sheet — che è dove va a
+   guardare chi cambia profilo — le dice tutte e due.
+
+6. **Le correzioni sono state viste in opera nei due versi** (nota di metodo 131). Le due prove
+   nuove di `check_stack.py` sono state fatte fallire neutralizzando la regola; le tre correzioni
+   agli script di init sono state provate riproducendo il guasto — uscite **6** e **9** con i
+   membri e i conteggi nominati — e poi rifacendo i giri leciti: `up-03` in `palco` e in `completo`,
+   da zero e ripetuto, **0** tutte e quattro le volte, e `smoke-03 PROFILO=completo` con «Superati:
+   101 · Errori: 0».
+
+**Conseguenze.** Tre stati che uscivano **0** adesso escono **1**, **6** e **9**, e nessuno di loro
+è raggiungibile da un uso corretto: le prove sui giri leciti servono a dirlo, non a decorare. Il
+prezzo è che chi cambia profilo su uno stack acceso adesso trova un errore dove prima trovava un
+avvio riuscito e uno stack sbagliato — che è il baratto per cui la guardia esiste. Le cinque
+registrazioni asciinema non sono toccate: mostrano giri leciti, e nei giri leciti niente cambia.
+
+Resta scritto che [ADR-0060](#adr-0060) **regge**: le sue due guardie funzionano, e una di loro si è
+fatta viva da sé durante una prova d'altro, fermando la catena con uscita 5. Il buco era accanto,
+non dentro. Una guardia bilaterale su due sorgenti non copre una terza sorgente che nessuno aveva
+contato — e la terza, qui, era lo stato sul disco.
+
+**Alternative scartate.** **Riconfigurare invece di fermarsi** — l'anello potrebbe chiamare
+`rs.reconfig()` e aggiungere i membri mancanti. Sarebbe comodo e sbagliato: la riconfigurazione di
+un config server con dati dentro è un'operazione che si fa guardandola, non dentro un `depends_on`,
+e il fallimento a metà lascerebbe un cluster in uno stato che nessun messaggio saprebbe descrivere.
+**Fare del seed un errore anche per il singolo shard** — renderebbe rosso il `make up-03` che segue
+la scena della fusione, cioè punirebbe l'uso previsto. **Allargare la condizione del `mongod`
+invece di scrivere una regola nuova** — un `avvia_mongod(...) or avvia_mongos(...)` costa una riga
+in meno e produce un solo messaggio per due guasti che si diagnosticano in modo diverso; il valore
+di `check_stack.py` è il messaggio, non il codice d'uscita ([ADR-0076](#adr-0076)). **Lasciare i tre
+rilievi alla revisione umana e fondere così com'è** — sono tre falsi verdi provati, e la promessa
+in testata alla PR è proprio che il verde significhi qualcosa.
+
+**Fonti:** [V-071](Sources.md#v-071), [V-072](Sources.md#v-072)

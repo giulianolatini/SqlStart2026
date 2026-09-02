@@ -460,6 +460,12 @@ letto benché sia lì accanto ([S-056](../Sources.md#s-056)).
 
 ## 6. Provarlo in due minuti
 
+Una premessa sola, e solo la prima volta: `docker/02-replicaset/.env` non è nel repository, perché
+contiene la password dell'amministratore ([ADR-0040](../Decision.md#adr-0040)). Si crea con
+`cp docker/02-replicaset/.env.example docker/02-replicaset/.env` e si riempie la riga
+`PASSWORD_AMMINISTRATORE=`; è l'unica riga senza un valore predefinito. Saltandola, `make up-02` si
+ferma dicendo esattamente questo, prima di toccare Docker.
+
 ```console
 # Accendere: due comandi in uno, e il secondo è il verdetto vero
 $ make up-02

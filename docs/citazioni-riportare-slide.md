@@ -585,6 +585,22 @@ No, ed è scritto.
 
 ---
 
+### Il volume c'era, aveva il nome giusto, ed era vuoto
+
+> Il config server aveva il suo volume `dati-cfg1`, montato su `/data/db` come tutti gli altri
+> nodi. Dentro: zero file. Scriveva in `/data/configdb`, perché con `--configsvr` l'immagine
+> cambia il dbpath predefinito, e là Docker gli aveva messo un volume anonimo — che `down`
+> butta via. Gli shard ricordavano i loro dati, i config server dimenticavano i propri, e al
+> riavvio il cluster non riconosceva più i propri shard.
+
+Fonte: [V-060](Sources.md#v-060), [ADR-0067](Decision.md#adr-0067).
+
+**Perché una slide:** perché il messaggio d'errore accusava la persona sbagliata — parlava di un
+database `lab` di troppo su uno shard — mentre la riga che spiegava tutto era «shard già
+registrati: nessuno». È l'esempio migliore che ho di un guasto in cui la diagnosi sta due righe
+sopra l'errore, e di uno stato che sopravvive dove non dovrebbe accanto a uno che sparisce dove
+dovrebbe restare.
+
 ## Backup e restore
 
 ### `--oplog` non funziona su uno sharded cluster
@@ -943,6 +959,21 @@ stringa vuota. Misurato: `singolo=[]  doppio=[valore-del-container]`, e con la s
 esportata nella shell che lancia, il dollaro singolo stampa il valore **dell'host**
 ([V-046](Sources.md#v-046)). `docker compose config` esce `0` e si limita a un avviso.
 
+### Con i profili, `down` spegne solo quello che il profilo dichiara
+
+> Acceso in `completo`, spento con `--profile palco`: undici container rimossi, sette rimasti
+> accesi, la rete che non si lascia togliere perché «resource is still in use». Codice di
+> uscita: **zero**. E `down` senza `--profile` fa esattamente la stessa cosa, perché i servizi
+> sempre attivi sono soltanto quelli che un profilo non ce l'hanno.
+
+Fonte: [V-059](Sources.md#v-059), [S-068](Sources.md#s-068), [ADR-0066](Decision.md#adr-0066).
+
+**Perché una slide:** è il tranello dei profili, e non ha nessun segnale — nessun errore, nessuna
+riga rossa, e `docker compose ps` interrogato con lo stesso profilo sbagliato risponde «zero
+container», cioè conferma l'idea sbagliata. La regola pratica sta in una riga: si accende con il
+profilo che si vuole, si spegne con `--profile "*"`, perché al momento di spegnere non si sa con
+quale profilo qualcun altro ha acceso.
+
 ## Installazione su una macchina vera
 
 ### MongoDB non è supportato su WSL
@@ -1044,3 +1075,585 @@ e per lo stesso motivo si può leggere con `cat`, confrontare con `diff` e ripro
 installare niente. Sono due riserve diverse, non due copie della stessa cosa: il filmato copre il
 caso «la demo non parte», la registrazione di terminale il caso «la demo parte ma il tempo è
 finito».
+
+---
+
+### Un config server sano che nessun healthcheck ragionevole vedrebbe
+
+> Su un `mongod` avviato con `--replSet` e mai inizializzato, `db.hello()` risponde:
+> `isWritablePrimary: false`, `secondary: false`, `isreplicaset: true`.
+> I primi due termini sono falsi. Il terzo è l'unico vero — ed è quello che apre la strada a
+> `rs.initiate()`.
+
+Fonte: [V-052](Sources.md#v-052) — lo scheletro dello stack 03, e prima
+[V-023](Sources.md#v-023) sullo stack 02.
+
+**Perché una slide:** è la trappola dell'healthcheck in tre righe, e si racconta come un
+indovinello. Un membro che deve ancora entrare nella replica non è primario e non è secondario:
+qualunque sonda scritta con «primario oppure secondario» — la forma che viene naturale, e che il
+design di questo progetto suggeriva — resta rossa per sempre, e la catena di avvio non arriva mai a
+inizializzare il set che renderebbe la sonda verde. Il guasto si presenta come un `up --wait` che
+non ritorna, e nessuno guarda l'healthcheck perché l'healthcheck «è giusto».
+
+---
+
+### Il codice che ha funzionato altrove non è neutro
+
+> Il file Compose dello spike si poteva riportare così com'era. Dentro c'erano due decisioni, non
+> una: gli ancoraggi YAML, visibili e discutibili, e una sonda `ping` che non aveva l'aria di una
+> scelta. La prima si vede aprendo il file. La seconda si sarebbe scoperta al primo avvio che
+> dichiara pronto un cluster senza cluster.
+
+Fonte: [ADR-0059](Decision.md#adr-0059) — la nota di metodo 92 del
+[registro](registro-operativo-sviluppo.md).
+
+**Perché una slide:** vale ben oltre MongoDB, e il pubblico di SqlStart la riconosce subito — è
+quello che succede ogni volta che si copia un `docker-compose.yml` trovato funzionante. Un
+artefatto che gira porta con sé tutte le scelte di chi l'ha scritto, comprese quelle che non ha
+saputo di prendere, e passa la frontiera tutto insieme se nessuno lo ferma. Le righe che nessuno
+commenterebbe sono quelle da guardare.
+
+---
+
+### Tre replica set che non si conoscono
+
+> Uno sharded cluster senza `mongos` non è uno sharded cluster a cui manca un pezzo. Sono tre
+> replica set separati, ognuno funzionante, nessuno dei quali sa che gli altri esistono.
+
+Fonte: l'intestazione di `docker/03-sharded/compose.yaml` a fine Task 2, e
+[V-054](Sources.md#v-054).
+
+**Perché una slide:** è la definizione di `mongos` data per sottrazione, e regge una slide intera
+del Blocco 3. Il pubblico che conosce i replica set arriva allo sharding pensando «un replica set
+più grande»: questa frase gli dice che i pezzi che ha già in testa ci sono tutti e non bastano, e
+che la cosa nuova da capire è quella che li unisce. Funziona bene subito prima di far vedere
+`sh.status()`.
+
+---
+
+### «Healthy» accanto a un container morto
+
+> `docker compose up --wait` ha stampato `Container sh-cfg-init Healthy` per un container che
+> `docker inspect` descriveva come uscito con codice 5. Per `--wait`, un servizio senza healthcheck
+> è a posto nell'istante in cui parte.
+
+Fonte: [V-054](Sources.md#v-054), che riconferma [V-025](Sources.md#v-025) su uno stack diverso;
+la decisione è [ADR-0041](Decision.md#adr-0041).
+
+**Perché una slide:** è la trappola dell'automazione che dice «fatto» quando non lo è, e qui si
+vede con gli occhi invece di doverla spiegare. Vale per ogni pipeline, non solo per Compose: un
+comando che esce 0 sta rispondendo alla domanda che gli è stata fatta, e quasi mai è la domanda
+che interessava. Nel lab la risposta è due comandi e non uno.
+
+---
+
+### Nominare un servizio non è attivare il suo profilo
+
+> Con `--profile palco`, un servizio che dipende da uno spento fa fallire l'intero progetto.
+> Nominando lo stesso servizio sulla riga di comando, quella dipendenza spenta viene accesa e tutto
+> parte. Due modi di selezionare la stessa cosa, comportamento opposto davanti alla stessa
+> dipendenza.
+
+Fonte: [V-053](Sources.md#v-053) — quattro casi, quattordici righe di `busybox`, e la riserva che
+[ADR-0010](Decision.md#adr-0010) teneva aperta dal 24 agosto.
+
+**Perché una slide:** se resta tempo. È una finezza di Compose, non di MongoDB, ma è la prova
+visibile che una riserva dichiarata si chiude in dieci minuti quando qualcuno decide di misurarla —
+e questa era aperta da otto giorni perché il progetto le girava intorno con eleganza.
+
+---
+
+### Il confine di un permesso non si trova al centro
+
+> «L'eccezione localhost permette di creare il primo utente.» Due comandi confermavano quella
+> frase. Sette dicono altro: `replSetGetStatus` risponde per intero, `listDatabases` risponde con
+> un elenco vuoto, `serverStatus` e le letture no. Il confine ha una forma. Con due misure si
+> disegna una retta, e la retta è quasi sempre la risposta sbagliata a una domanda sul perimetro.
+
+Fonte: [V-054](Sources.md#v-054), che restringe la conclusione di [V-052](Sources.md#v-052); note
+di metodo 93 e 95 del [registro](registro-operativo-sviluppo.md).
+
+**Perché una slide:** è la slide della sicurezza detta bene, e ha il pregio raro di mostrare il
+relatore che corregge se stesso a distanza di poche ore con una misura in più. Il messaggio che
+resta non è su MongoDB: un permesso descritto in prosa va provato dove smette di funzionare, non
+dove funziona.
+
+---
+
+### Un cluster senza shard non dice di essere rotto: risponde `[]`
+
+> Un `mongos` a cui non è stato registrato nessuno shard è `healthy` per Docker, risponde a
+> `hello()`, a `ping`, a `listDatabases`. E a una lettura risponde `[]` — la stessa cosa che
+> risponderebbe un cluster sano con la collezione vuota. Solo la scrittura dice la verità:
+> `No shards found`. Il guasto che risponde bene costa più di quello che risponde male.
+
+Fonte: [V-055](Sources.md#v-055); [ADR-0061](Decision.md#adr-0061) e la nota di metodo 98 del
+[registro](registro-operativo-sviluppo.md).
+
+**Perché una slide:** è la slide che giustifica perché lo smoke del lab **scrive** invece di
+leggere, e vale ben oltre MongoDB. Si può mostrare dal vivo in venti secondi: `find` prima di
+`sh.addShard()`, `insertOne` subito dopo, e la stessa riga di codice che prima taceva e adesso
+parla.
+
+---
+
+### Fra tre replica set e uno sharded cluster c'è una riga scritta da qualche parte
+
+> Prima di `sh.addShard()` ci sono `cfgrs`, `shard1rs` e `shard2rs`: tre replica set funzionanti,
+> nessuno dei quali sa che gli altri esistono. Dopo, c'è un cluster. Sui nove `mongod` non è
+> cambiato niente — stessi processi, stessi dati, stessi file. È cambiata una riga in
+> `config.shards`.
+
+Fonte: [V-055](Sources.md#v-055) e `docker/03-sharded/init/20-add-shard.js`.
+
+**Perché una slide:** è il momento del Blocco 3 in cui lo sharding smette di sembrare un'altra
+tecnologia e torna a essere MongoDB con un registro in più. Serve a smontare l'idea che passare a
+sharded significhi rifare tutto.
+
+---
+
+### La sonda più severa non è sempre la più rigorosa
+
+> «Che `healthy` voglia dire davvero pronto» sembra rigore. Se l'healthcheck di `mongos` avesse
+> preteso gli shard registrati, il servizio che li registra — che gira dentro `mongos` e lo
+> aspetta sano — non sarebbe mai partito. E Compose avrebbe accusato `mongos`, che era innocente.
+
+Fonte: [ADR-0061](Decision.md#adr-0061), nota di metodo 97 del
+[registro](registro-operativo-sviluppo.md).
+
+**Perché una slide:** se resta tempo, come chiusura del Blocco 3. Non parla di MongoDB ma di come
+si progettano le catene di avvio, e la regola sta in una riga: quando B aspetta la sonda di A e il
+lavoro di B è cambiare ciò che quella sonda misura, la sonda di A può solo chiedere se A è vivo.
+
+---
+
+### Il router è l'unico pezzo del cluster che si può buttare via
+
+> Nove `mongod` hanno un volume ciascuno. I due `mongos` non ne hanno nessuno: niente `--replSet`,
+> niente cache dello storage engine — passargliela lo fa proprio fallire, perché uno storage
+> engine non ce l'ha. Ho fermato il primo router in mezzo a una demo e ho scritto sul secondo.
+> Non si è perso niente, perché non c'era niente da perdere.
+
+Fonte: [V-055](Sources.md#v-055), sesto punto.
+
+**Perché una slide:** è la mezza slide del Blocco 3 sui router, e si dimostra dal vivo con un
+`docker stop`. Le tre assenze — replica set, volume, cache — sono la definizione operativa di
+«senza stato» detta con tre righe di `compose.yaml` invece che con una definizione.
+
+---
+
+### C'è un container nello stack che non fa niente, e c'è per un motivo
+
+> `docker compose up --wait` esce 0 diciotto secondi dopo l'avvio, con zero shard registrati. Ed
+> esce 0 anche quando la catena è rotta e nessuno shard esisterà mai. La proprietà «esce 0 solo
+> quando il cluster serve» non si poteva verificare: si è dovuta costruire, e per costruirla serve
+> un servizio che stampa una riga e dorme.
+
+Fonte: [V-056](Sources.md#v-056), [ADR-0062](Decision.md#adr-0062).
+
+**Perché una slide:** è la slide onesta sul lab. Il pubblico vede in `docker ps` un container che
+non è MongoDB e ha diritto di chiedere perché; la risposta insegna più di quanto costi. Si mostra
+con due `docker compose up --wait` cronometrati, uno per verso.
+
+---
+
+### La ricetta giusta per uno stack è quella sbagliata per l'altro
+
+> Sullo stack a replica set l'avvio è di due comandi, perché `up --wait` torna troppo presto. Sullo
+> stack sharded il secondo comando fallisce **sempre**: `docker compose wait` vuole un container
+> vivo, e a quel punto il one-shot ha già finito. Stessa famiglia di problema, due risposte
+> opposte, e copiare la prima nella seconda dà un bersaglio che non funziona mai.
+
+Fonte: [ADR-0062](Decision.md#adr-0062), che non tocca [ADR-0041](Decision.md#adr-0041).
+
+**Perché una slide:** se resta tempo. È il rimedio contro la generalizzazione affrettata, che nel
+lab si vede in dieci righe di Makefile.
+
+---
+
+### Un ramo d'errore che non è mai stato eseguito non è codice: è un'intenzione
+
+> Sei righe scritte bene: nominavano le due cause frequenti, uscivano con il codice giusto. Erano
+> irraggiungibili, perché `sh.addShard()` solleva invece di rispondere `ok: 0`. Ho scoperto che
+> non funzionavano solo perché una verifica mi ha costretto a rompere la catena apposta.
+
+Fonte: nota di metodo 101 del [registro](registro-operativo-sviluppo.md),
+[V-056](Sources.md#v-056) quinto punto.
+
+**Perché una slide:** è la gemella della slide sui messaggi d'errore, e chiude il cerchio: scrivere
+un buon messaggio non basta, bisogna averlo letto almeno una volta con gli occhi.
+
+---
+
+### La sonda severa si mette solo dove non aspetta nessuno
+
+> Un healthcheck che pretende un cluster completo su `mongos` è uno stallo, perché è il servizio in
+> coda a doverlo completare. Lo stesso healthcheck su un servizio da cui non dipende nessuno è
+> gratis. Non cambia la sonda: cambia chi la sta aspettando.
+
+Fonte: [ADR-0061](Decision.md#adr-0061) e [ADR-0062](Decision.md#adr-0062), note di metodo 97 e 102.
+
+**Perché una slide:** chiusura del Blocco 3 se resta tempo. È una regola di progettazione delle
+catene di avvio che vale ovunque ci siano dipendenze e sonde, non solo in Compose.
+
+---
+
+### Due lettere, novantaquattro secondi, e la parola giusta che non compare mai
+
+> `cfgsr` invece di `cfgrs` dentro `--configdb`. Tutti i container partono. Dopo novantaquattro
+> secondi il router è ancora `unhealthy` e non ha mai aperto la porta. Nel suo log il nome giusto
+> del replica set — `cfgrs` — compare **zero volte**: quello che si legge è «host irraggiungibile»
+> su due host che dovevano essere irraggiungibili, e un errore di read preference sull'unico host
+> che sta rispondendo benissimo. La diagnosi indica la rete. La causa sono due lettere.
+
+Fonte: [V-057](Sources.md#v-057) quarto punto, [ADR-0063](Decision.md#adr-0063).
+
+**Perché una slide:** è il caso più forte del Blocco 3 per giustificare un controllo statico, e non
+ha bisogno di sapere che cos'è uno sharded cluster per fare effetto. Chiunque abbia debuggato una
+rete che non era la rete la riconosce.
+
+---
+
+### Il guadagno non è capire l'errore: è quando lo incontri
+
+> Cinque errori su sei nello sharded cluster te li dice il server, per nome e in chiaro: «Cannot run
+> addShard on a node started without --shardsvr». Non sono muti. Il controllo statico non serve a
+> tradurli — serve a incontrarli in due secondi su un file fermo, invece che al minuto e ventuno
+> dell'avvio, con dieci container accesi e il pubblico che guarda.
+
+Fonte: [ADR-0063](Decision.md#adr-0063), [V-057](Sources.md#v-057) sesto punto.
+
+**Perché una slide:** è la giustificazione onesta di ogni linter, e va contro quella che si dà di
+solito. Sposta il valore dal contenuto del messaggio al momento in cui arriva.
+
+---
+
+### Misurare non serve a sapere se la regola serve: serve a sapere perché
+
+> La regola l'avrei scritta identica senza misurare niente. Quello che sarebbe cambiato è la frase
+> accanto: avrei scritto «senza questo controllo l'errore è illeggibile», che è comodo, plausibile,
+> e falso. E sarebbe rimasto scritto in un documento come il motivo di una decisione.
+
+Fonte: nota di metodo 103 del [registro](registro-operativo-sviluppo.md).
+
+**Perché una slide:** se resta tempo. Vale per ogni difesa che si costruisce senza aver mai provato
+l'attacco: il codice viene uguale, la ragione no, e la ragione è la parte che gli altri leggono.
+
+---
+
+### Un commento su un altro file è un'affermazione a termine, e nessuno le mette la scadenza
+
+> «Questa riga fa X» invecchia con la riga sotto, che è nello stesso schermo. «Questo serve perché
+> altrove succede Y» invecchia quando cambia Y, che è in un altro file, e nessun controllo
+> automatico se ne accorge. Ne ho trovati due nello stesso file, scritti da me, tutti e due giusti
+> il giorno in cui li ho scritti.
+
+Fonte: nota di metodo 104 del [registro](registro-operativo-sviluppo.md).
+
+**Perché una slide:** se resta tempo, nel blocco sulla manutenzione. La contromossa costa poco —
+citare la misura accanto all'affermazione, così chi rilegge sa dove andare a verificare.
+
+---
+
+### Uno sharded cluster rotto risponde benissimo
+
+> Ho scritto sessantadue controlli. Sessantuno passerebbero identici su un cluster che ha messo
+> tutti i ventimila documenti su un solo shard: risponde, scrive, legge, e `sh.status()` gli mostra
+> due shard belli attivi. Uno solo se ne accorge, ed è quello che conta i documenti per shard.
+
+Fonte: [ADR-0065](Decision.md#adr-0065), [V-058](Sources.md#v-058) settimo punto.
+
+**Perché una slide:** è il Blocco 3 in una frase. Distingue «funziona» da «fa quello per cui l'hai
+messo in piedi», che in uno sharded cluster non sono la stessa cosa e non lo sembrano nemmeno.
+
+---
+
+### O distribuisci le scritture, o tieni vicine le letture
+
+> Con la chiave hashed, `{_id: 42}` interroga uno shard e `{_id: {$gte: 100, $lt: 200}}` li
+> interroga tutti e due. Stessa collezione, stessa chiave, due righe di distanza. Non è un difetto
+> della configurazione: è il prezzo, ed è scritto nel manuale.
+
+Fonte: [ADR-0064](Decision.md#adr-0064), [S-066](Sources.md#s-066), misurato in
+[V-058](Sources.md#v-058) terzo punto.
+
+**Perché una slide:** il baratto della shard key in due comandi che si possono eseguire dal vivo. È
+la cosa che chi torna in ufficio applicherà, e l'unica di questa architettura che non si corregge
+senza rifare la collezione.
+
+---
+
+### Il collo di bottiglia non sparisce: cambia nodo
+
+> La versione breve dice che una chiave che cresce sempre manda tutte le scritture su un nodo. Il
+> manuale aggiunge una riga che quasi nessuno riporta: il chunk caldo non resta fermo, quando si
+> divide il pezzo con `MaxKey` finisce su un altro shard. Quindi il nodo cambia. Quello che non
+> cambia è che in ogni istante stanno scrivendo tutti nello stesso posto — più il costo di
+> spostarlo.
+
+Fonte: [S-067](Sources.md#s-067) secondo punto, [ADR-0064](Decision.md#adr-0064).
+
+**Perché una slide:** perché la versione caricaturale si smonta alla prima domanda del pubblico, e
+questa no. Vale anche come metodo: la riga che rovina la spiegazione semplice è di solito quella che
+la rende vera.
+
+---
+
+### Le credenziali del cluster non aprono uno shard
+
+> Stessa utenza, stessa password. Sul router entra; su uno shard interrogato in diretta risponde
+> «Authentication failed». Non è un guasto: gli utenti di uno sharded cluster vivono nel database
+> `admin` dei config server, e uno shard autentica contro i propri, che non ci sono.
+
+Fonte: [V-058](Sources.md#v-058) quarto punto, [ADR-0065](Decision.md#adr-0065).
+
+**Perché una slide:** se resta tempo. È la sorpresa più pratica dello stack — chi prova a
+diagnosticare uno shard collegandocisi sopra la incontra al primo tentativo — e dice in un esempio
+dove sta davvero il centro di un cluster sharded.
+
+---
+
+### Il cluster considera «bilanciata» una distribuzione cento a zero
+
+> Ventimila documenti, chiave `{_id: 1}`: ventimila su uno shard, zero sull'altro. Poi si chiede al
+> cluster se è bilanciato, e risponde `balancerCompliant: true`. Non è un guasto del balancer: è la
+> sua specifica, perché la differenza fra i due shard è 1,2 MB e la soglia perché si muova è 384 MB.
+> La shard key sbagliata non ha sintomo, e lo strumento che dovrebbe accorgersene conferma che va
+> tutto bene.
+
+Fonte: [V-061](Sources.md#v-061) quarto punto, [S-070](Sources.md#s-070) terzo punto,
+[ADR-0068](Decision.md#adr-0068).
+
+**Perché una slide:** è il cuore del Blocco 3, e la sola frase di tutto il talk in cui lo strumento
+di diagnosi mente dicendo la verità. Un errore irreversibile che nessun controllo segnala vale più
+di dieci raccomandazioni su come scegliere una chiave.
+
+---
+
+### La trappola colpisce chi ha scelto bene
+
+> Chiave hashed, `insertMany` di ventimila documenti: **11 328 ms**. Stessa chiave, stessi
+> documenti, `ordered: false`: **336 ms**. Con la chiave monotona le due forme costano uguale. Il
+> costo non è la chiave giusta: è la chiave giusta insieme al predefinito che nessuno cambia, perché
+> mantenere l'ordine fra shard diversi vuol dire aspettare, e con l'hash lo shard cambia quasi a
+> ogni documento.
+
+Fonte: [V-061](Sources.md#v-061) sesto punto, [S-071](Sources.md#s-071) primo punto,
+[ADR-0068](Decision.md#adr-0068).
+
+**Perché una slide:** perché ribalta l'aspettativa. Il pubblico si aspetta che a pagare sia chi
+sbaglia la chiave, e invece paga chi l'ha azzeccata e non ha toccato il codice di caricamento che
+funzionava sul replica set. Un ordine di grandezza, senza un errore e senza un avviso.
+
+---
+
+### I chunk erano quattro. Adesso sono due. Nessuno ha toccato niente
+
+> Spengo il cluster conservando i volumi, lo riaccendo, e i chunk sono la metà. Ventimila documenti
+> prima, ventimila dopo, distribuiti uguale al byte. Non è una migrazione: è una **fusione**, e il
+> registro dice l'ora — tre secondi e otto dopo l'avvio del config server, sei secondi prima che il
+> router esistesse. Dalla 7.0 il balancer fa due mestieri, e in questo laboratorio ne esercita
+> esattamente uno: quello che nessuno guarda.
+
+Fonte: [V-062](Sources.md#v-062) primo e terzo punto, [S-072](Sources.md#s-072),
+[ADR-0069](Decision.md#adr-0069).
+
+**Perché una slide:** perché è una scena da fare dal vivo in un comando — distribuire, contare
+quattro, spegnere, riaccendere, contare due — e perché smonta l'equazione «balancer = migrazione»
+che la documentazione stessa incoraggia. È anche una lezione su come si sbaglia una pagina: la
+misura era giusta, l'aspettativa no.
+
+---
+
+### Un container che condivide la rete di uno shard è amministratore di quello shard
+
+> Il cluster è autenticato: dal router, senza password, non fai niente. Ma gli utenti del cluster
+> vivono sui config server, e gli shard non ne ricevono copia: ogni shard è un replica set **senza
+> utenti**, e per un deployment senza utenti l'eccezione localhost è aperta. Dalla porta pubblicata
+> sull'host non passi — la connessione arriva dal gateway di Docker. Da un container che condivide
+> la rete dello shard sì, perché `localhost` appartiene al network namespace, non al container. E
+> non ti serve il keyfile.
+
+Fonte: [V-064](Sources.md#v-064) terzo, quarto e quinto punto, [S-074](Sources.md#s-074),
+[ADR-0070](Decision.md#adr-0070).
+
+**Perché una slide:** è la frase che fa la differenza fra sapere che l'eccezione localhost esiste e
+sapere dove finisce. Il manuale la enuncia — «applies to each shard individually» — e la misura
+mostra la conseguenza in Docker, che il manuale non può conoscere. Da dire con il comando a
+schermo: due righe, e un `root` che non esisteva.
+
+**Seguito, e va detto sulla stessa slide:** su questo stack, da [ADR-0071](Decision.md#adr-0071),
+quel comando risponde `Unauthorized`. I due shard hanno un amministratore locale, creato dal loro
+init sul primario appena eletto, e il primo utente chiude l'eccezione dietro di sé. La slide non
+perde niente — la falla è di **qualunque** shard senza utenti, che è la condizione predefinita di
+ogni replica set appena inizializzato — ma finire con «e questo è come si chiude» vale più che
+finire con lo spavento. Chiuderla ha un prezzo che sta in una riga: prima le porte pubblicate degli
+shard non accettavano nessuna credenziale, perché non c'era nessun utente; adesso ne accettano una
+([V-066](Sources.md#v-066)).
+
+---
+
+### Il messaggio d'errore che nasconde quello vero
+
+> `mongodump --oplog` su un cluster: «can't use `--oplog` option when dumping from a mongos».
+> Chiaro. Ma se insieme hai messo anche `--db`, la risposta cambia: «`--oplog` mode only supported
+> on full dumps». Non nomina più il router. Togli `--db`, riprovi, e **solo allora** scopri che il
+> problema era un altro. Le due regole sono verificate in quest'ordine, e la prima nasconde la
+> seconda.
+
+Fonte: [V-065](Sources.md#v-065) primo e secondo punto, [S-011](Sources.md#s-011),
+[ADR-0070](Decision.md#adr-0070).
+
+**Perché una slide:** dice una cosa sui messaggi d'errore che vale oltre MongoDB — chi sbaglia due
+cose ne vede riferita una sola, e non è detto che sia quella che conta. Costa dieci secondi e
+resta.
+
+---
+
+### Il restore è riuscito. La collezione non è più distribuita
+
+> Ventimila documenti ripristinati, zero errori, e persino l'indice hashed ricreato. Guardi il
+> conteggio, torna. Guardi dove stanno: **tutti su un solo shard**. `mongorestore` ricrea gli
+> indici e non chiama `shardCollection`. Hai la chiave che serve a distribuire e non hai la
+> distribuzione, e niente te lo dice: hai appena trasformato uno sharded cluster in un replica set
+> con un indice inutile.
+
+Fonte: [V-065](Sources.md#v-065) sesto punto, [ADR-0070](Decision.md#adr-0070).
+
+**Perché una slide:** è il caso peggiore per chi ripristina — nessun errore, nessun avviso, e il
+controllo che verrebbe naturale fare (contare i documenti) conferma che è tutto a posto. Se il
+Blocco 3 ha tempo per un solo avvertimento operativo, è questo.
+
+
+---
+
+### Il ruolo minimo che si promuove da solo
+
+> Il manuale, per l'amministratore di uno shard, prescrive `userAdminAnyDatabase`: amministra gli
+> utenti, **non legge i dati**. Provato: `lab.ordini` risponde `Unauthorized`. Poi quello stesso
+> utente si concede `root` — è un comando, ed è esattamente ciò che «amministra gli utenti»
+> significa — e la collezione la legge. Fra il ruolo minimo e `root`, su quel nodo, non c'è una
+> barriera di privilegio: c'è un comando in più. La barriera vera è **chi conosce la password**.
+
+Fonte: [V-066](Sources.md#v-066) quinto punto, [S-075](Sources.md#s-075),
+[ADR-0071](Decision.md#adr-0071).
+
+**Perché una slide:** smonta l'automatismo per cui «ruolo minimo» equivale a «più sicuro», che in
+sala pensano tutti e nessuno ha provato. È anche l'onestà del lab: spiega perché questo stack usa
+`root` invece di fingere una separazione che con una password sola non esisterebbe. Tre righe di
+console, e si vede.
+
+---
+
+### Abbiamo chiuso un buco, e con il buco se n'è andato l'unico segnale
+
+> Fino a ieri, chiedere a uno shard lo stato del bilanciatore rispondeva «non sei autorizzato»: un
+> errore reticente, ma un errore. Oggi risponde **`true`**. Non è cambiato MongoDB — abbiamo dato
+> agli shard un amministratore, come prescrive il manuale, e adesso quella lettura riesce: legge una
+> collezione che su uno shard non esiste, non trova niente, e dal niente conclude che il bilanciatore
+> è acceso. Il vuoto ha l'aspetto di una risposta.
+
+Fonte: [V-067](Sources.md#v-067) quinto punto, [ADR-0071](Decision.md#adr-0071),
+[ADR-0072](Decision.md#adr-0072).
+
+**Perché una slide:** è il prezzo di una scelta giusta, e non sta scritto in nessun manuale. Chiude
+il paio con «Il messaggio d'errore che nasconde quello vero»: là una regola ne nascondeva un'altra,
+qui a nascondere era un permesso mancante, e a toglierlo siamo stati noi. Due minuti, e in sala
+resta l'idea che rimuovere un errore può togliere un'informazione.
+
+---
+
+### La disponibilità non è del cluster: è di ogni singolo shard
+
+> Lo stesso comando, due configurazioni. Con un membro per shard, fermato quel membro, il router
+> aspetta **quindici secondi** e poi dice che per `shard1rs` non trova un primario: metà dei
+> ventimila documenti è irraggiungibile, mentre l'altra metà continua a rispondere in un secondo.
+> Con tre membri per shard lo stesso guasto quasi non si vede — il conteggio torna ventimila in
+> **zero secondi**, e il primario nel frattempo è passato da `shard1a` a `shard1b`. Uno sharded
+> cluster non cade intero: cade a pezzi, e ogni pezzo si porta via i propri documenti.
+
+Fonte: [V-068](Sources.md#v-068) quarto esito, [ADR-0010](Decision.md#adr-0010).
+
+**Perché una slide:** corregge l'idea che chi arriva dal replica set si porta dietro senza
+accorgersene — «più nodi, più resistenza». Nello sharding la ridondanza sta **dentro** ogni shard, e
+fra shard non c'è: se uno shard non ha un secondario, la sua fetta di dati sparisce e il cluster
+continua a rispondere benissimo per tutto il resto. Le due misure vanno mostrate una accanto
+all'altra, perché è il confronto a dire la cosa vera: la differenza non è il prodotto, è il numero
+di membri per shard.
+
+---
+
+### Un profilo che non esiste non è un errore: è un cluster fatto di un container solo
+
+> Compose non protesta se gli si chiede un profilo che nel file non c'è. Un profilo sconosciuto non
+> seleziona niente, quindi restano i soli servizi che non appartengono a nessun profilo — nel nostro
+> file uno, il one-shot che genera il keyfile. `make up-03 PROFILO=complteo` avvia quel container,
+> lo aspetta, lo vede uscire **0**, e muore dicendo `container sh-keyfile-init exited (0)`. Accusa
+> l'unico pezzo che ha fatto esattamente il suo mestiere. In cinque righe di errore la parola
+> «profilo» non compare mai.
+
+Fonte: [V-069](Sources.md#v-069) secondo esito, [ADR-0074](Decision.md#adr-0074).
+
+**Perché una slide:** completa il paio con «Nominare un servizio non è attivare il suo profilo». Là
+il profilo c'era e non bastava nominarlo; qui il profilo non c'è e nessuno lo dice. Chi porta a casa
+i nostri file Compose incontrerà il secondo caso al primo refuso, e la lezione generale vale oltre
+Docker: quando una selezione non trova niente, il risultato vuoto **è** una risposta valida, e a
+valle nessuno sa più che la domanda era sbagliata.
+
+---
+
+### Un errore risponde alla domanda che gli hai fatto, non a quella che volevi fare
+
+> Due messaggi raccolti nello stesso pomeriggio. `container sh-keyfile-init exited (0)`: vero — quel
+> container è uscito 0 — e il problema era un profilo scritto male. `no containers for project
+> "sqlstart-02-replicaset"`: vero anche questo, perché il comando cerca container **vivi** e quello
+> che aspettava aveva finito; nello stesso istante il progetto ne aveva **cinque**, e `ps` li
+> elencava tutti. Nessuno dei due strumenti ha mentito. Tutt'e due hanno risposto benissimo alla
+> domanda letterale, e il tempo perso è tutto nella distanza fra quella e la domanda vera.
+
+Fonte: [V-069](Sources.md#v-069) secondo e quinto esito, [ADR-0074](Decision.md#adr-0074),
+[ADR-0075](Decision.md#adr-0075).
+
+**Perché una slide:** è la lezione trasversale del blocco, e in sala si spende in un minuto perché i
+due messaggi si mostrano affiancati. Vale per il debug di uno sharded cluster quanto per quello dei
+container: prima di credere a un messaggio d'errore conviene chiedersi **quale domanda** lo strumento
+si è posto. È lo stesso meccanismo per cui un cluster senza shard risponde `[]` invece di dire che è
+rotto.
+
+---
+
+### Un avviso che non cambia il codice d'uscita è un avviso che nessuno legge
+
+> Due punti della catena dello sharded sapevano di essere in guasto e lo scrivevano. Il seed
+> stampava «ATTENZIONE: lab.ordini non risulta distribuita» — corretto, in italiano, esatto — e
+> usciva **0**. Il router ripeteva `Command find requires authentication` e restava `unhealthy`
+> senza che nessuno gli chiedesse perché. Le frasi erano giuste; finivano in uno stream che il
+> chiamante automatico non guarda. `up --wait` raccoglie codici d'uscita e stati di salute, e una
+> catena di sei anelli esiste proprio perché nessuno debba leggere sei log.
+
+Fonte: [V-071](Sources.md#v-071), [V-072](Sources.md#v-072), [ADR-0077](Decision.md#adr-0077), nota
+di metodo 135.
+
+**Perché una slide:** un messaggio diagnostico e un codice d'uscita non sono due modi di dire la
+stessa cosa. Il primo serve a chi è **già andato** a guardare, il secondo serve a **farcelo andare**.
+In sala si mostra affiancando le due righe — l'avviso e lo `exited with code 0` sotto — e la platea
+lo riconosce subito, perché è il difetto che tutti hanno in produzione da qualche parte. Il corollario
+operativo sta in una domanda: se una condizione merita la frase, merita anche il codice? Quando la
+risposta è no, va scritto perché.
+
+---
+
+### Due revisori che trovano cose diverse non sono uno bravo e uno no
+
+> La stessa PR è stata letta da due modelli. Il primo ha guardato una funzione e ha ragionato sul
+> valore di ritorno: ha trovato un difetto di messaggio e ha sbagliato la diagnosi. Il secondo ha
+> guardato la catena di avvio e ha ragionato sul codice d'uscita: ha trovato tre falsi verdi e non ha
+> sbagliato niente. Nessuno dei due ha visto quello che ha visto l'altro.
+
+Fonte: [ADR-0076](Decision.md#adr-0076), [ADR-0077](Decision.md#adr-0077), nota di metodo 136.
+
+**Perché una slide:** la conclusione comoda sarebbe «chiediamo al migliore», e non regge alla prova
+dei fatti. La domanda che si pone al revisore decide che cosa può trovare: il prompt della seconda
+review nominava esplicitamente codici d'uscita e comandi che falliscono in silenzio, e i tre rilievi
+sono arrivati esattamente da lì. Vale per i modelli e vale per le persone, ed è il motivo per cui una
+checklist di review è uno strumento e non una formalità.

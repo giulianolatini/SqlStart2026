@@ -407,8 +407,11 @@ versione** senza aprire il browser — utile in sala, dove la rete non è garant
 > la marcatura «non eseguito» che stava qui è caduta, **e con lei due affermazioni che erano
 > sbagliate** ([V-042](../Sources.md#v-042), [ADR-0049](../Decision.md#adr-0049)). Restano marcate
 > due righe della tabella di §3.2 — `rs.add()` e `rs.remove()` nella forma che riesce, che
-> richiedono un quarto container — e tutta la
-> [§3.3](#33-sharded-cluster-non-eseguito-qui), dovuta a `feature/03-stack-sharded`
+> richiedono un quarto container. [§3.3](#33-sharded-cluster) sullo stack `03-sharded`, con due
+> shard veri: anche lì la marcatura è caduta, **e con lei il blocco d'errore in apertura, che
+> descriveva la risposta di un'istanza singola invece di quella di uno shard**
+> ([V-063](../Sources.md#v-063), [ADR-0049](../Decision.md#adr-0049)). Restano marcate due righe
+> della sua tabella, `sh.disableBalancing()` e `sh.enableBalancing()`
 > ([ADR-0036](../Decision.md#adr-0036), stessa regola di [ADR-0035](../Decision.md#adr-0035)).
 > La sezione si scrive completa perché la guida è una sola; si marca ciò che non è stato provato,
 > perché una guida che afferma cose non provate è peggio di una guida incompleta
@@ -581,37 +584,183 @@ eseguono sono in [ADR-0044](../Decision.md#adr-0044). Le righe di log che distin
 una dimissione stanno in
 [`03-amministrazione/log.md`](../03-amministrazione/log.md#33-la-sequenza-reale-riga-per-riga).
 
-<a id="33-sharded-cluster-non-eseguito-qui"></a>
-### 3.3 Sharded cluster — **non eseguito su questo branch**
+<a id="33-sharded-cluster"></a>
+### 3.3 Sharded cluster
 
-Anche qui l'errore misurato è istruttivo:
+Tutto quello che segue è misurato sullo stack `03-sharded`, profilo `palco`: due shard, un config
+server, un router, MongoDB 7.0.40 ([V-063](../Sources.md#v-063)). La marcatura «non eseguito» che
+stava qui è caduta, **e con lei il blocco d'errore che apriva la sezione**.
+
+**L'errore in apertura era quello di un'altra situazione, e adesso è tornato.** Qui c'era scritto
+che `sh.status()` dato a un `mongod` risponde `MongoshInvalidInputError: This db does not have
+sharding enabled`, e questa sezione lo correggeva: su uno shard di un cluster vero — dicevamo — la
+risposta è `not authorized on config to execute command { find: "version", … }`. Erano vere tutte
+e due, in momenti diversi, e la seconda nascondeva la prima. Da
+[ADR-0071](../Decision.md#adr-0071) ogni shard ha un amministratore locale, e con le credenziali in
+mano si vede che cosa c'era sotto:
 
 ```console
-$ mongosh --quiet --eval 'sh.status()'
-Warning: MongoshWarning: [SHAPI-10003] You are not connected to a mongos. This command may not work as expected.
-MongoshInvalidInputError: [SHAPI-10003] This db does not have sharding enabled. Be sure you are connecting to a mongos from the shell and not to a mongod.
+$ docker exec sh-shard1a mongosh --quiet --eval 'sh.status()'
+Warning: MongoshWarning: [SHAPI-10003] You are not connected to a mongos. This command may not
+work as expected.
+MongoServerError: Command find requires authentication
+
+$ docker exec sh-shard1a mongosh --quiet -u admin -p … --authenticationDatabase admin \
+    --eval 'sh.status()'
+Warning: MongoshWarning: [SHAPI-10003] You are not connected to a mongos. This command may not
+work as expected.
+MongoshInvalidInputError: [SHAPI-10003] This db does not have sharding enabled. Be sure you are
+connecting to a mongos from the shell and not to a mongod.
 ```
 
-«Be sure you are connecting to a mongos from the shell and not to a mongod»: è l'errore che si
-prende chiunque apra la shell sulla porta di uno shard invece che su quella del router. Il
-riconoscimento rapido è quello di [§2.4](#24-sapere-con-chi-si-sta-parlando) — `db.hello().msg`
-vale `isdbgrid` solo su un `mongos`.
+L'avviso `SHAPI-10003` è lo stesso nei tre casi, ed è il segnale che vale la pena imparare: dice
+l'unica cosa che conta, cioè che dall'altra parte non c'è un router. Sotto cambia tutto, e a
+cambiare non è il cluster — è chi chiede. Senza credenziali non si arriva nemmeno alla domanda
+sui permessi; con le credenziali, `mongosh` legge davvero e scopre che il documento che cerca non
+c'è. Uno shard il database `config` ce l'ha — è parte di un cluster — e dentro non ha l'anagrafe:
+`config.version` su uno shard è `null`, attraverso il router è `{ _id: 1, clusterId: … }`, e
+`config.shards` sullo shard conta **zero** ([V-067](../Sources.md#v-067)). L'errore delle istanze
+singole e quello di uno shard hanno la stessa forma perché descrivono la stessa mancanza, arrivata
+per due strade diverse.
 
-I comandi che serviranno in `feature/03`:
+Il riconoscimento rapido resta quello di [§2.4](#24-sapere-con-chi-si-sta-parlando), con una
+precisazione misurata: `db.hello().msg` vale `isdbgrid` sul router, ed è **assente** sia sullo shard
+sia sul config server. È una prova a senso unico — dice che si è sul `mongos`, non dice su quale
+degli altri due ruoli si sia quando manca. Per distinguere quelli serve `db.hello().setName`, che
+sul config server del lab vale `cfgrs`.
 
-| comando | a che cosa serve |
-| --- | --- |
-| `sh.status()` | shard, database, collezioni distribuite, stato del bilanciatore |
-| `sh.enableSharding("lab")` | abilita lo sharding su un database |
-| `sh.shardCollection("lab.ordini", { <chiave> })` | distribuisce una collezione; la scelta della chiave è la decisione irreversibile |
-| `sh.addShard("rs-shard-1/nodo:27017")` | aggiunge uno shard al cluster |
-| `sh.getBalancerState()` / `sh.startBalancer()` / `sh.stopBalancer()` | il bilanciatore, che sposta i chunk |
-| `db.collection.getShardDistribution()` | quanto è distribuita davvero una collezione |
+| comando | a che cosa serve | eseguito |
+| --- | --- | --- |
+| `sh.status()` | shard, database, collezioni distribuite, chunk, stato del bilanciatore | sì |
+| `sh.enableSharding("lab")` | abilita lo sharding su un database | sì — **idempotente**: rieseguito risponde `ok: 1` |
+| `sh.shardCollection("lab.ordini", { <chiave> })` | distribuisce una collezione; la chiave è la decisione irreversibile | sì — idempotente con la **stessa** chiave, `AlreadyInitialized` con una diversa |
+| `sh.addShard("shard1rs/shard1a:27017")` | aggiunge uno shard al cluster | sì, dallo script di avvio; rieseguito dà `IllegalOperation` |
+| `sh.getBalancerState()` | se il bilanciatore **può** girare | sì — `true` |
+| `sh.isBalancerRunning()` | se **sta** girando | sì — `"full"` |
+| `sh.startBalancer()` / `sh.stopBalancer()` | accende e spegne il bilanciatore — **e con lui l'AutoMerger** | sì, in sequenza |
+| `db.collection.getShardDistribution()` | quanto è distribuita davvero una collezione | sì |
+| `sh.balancerCollectionStatus("lab.ordini")` | se il cluster consideri bilanciata *questa* collezione | sì — e vedi l'avvertenza in fondo |
+| `sh.disableBalancing(<ns>)` / `sh.enableBalancing(<ns>)` | il bilanciamento di una collezione sola | **no**: il lab non ne ha bisogno, e provarlo lascerebbe uno stato da ripulire |
 
-L'architettura di questi componenti — router, config server, shard — sta in
-[`02-architetture/standalone.md`](../02-architetture/standalone.md) e nelle pagine che
-`feature/02` e `feature/03` aggiungeranno; qui interessa solo che i comandi si danno **al
-`mongos`**, e che dare `sh.status()` a un `mongod` produce esattamente l'errore qui sopra.
+**I comandi si danno al `mongos`, e l'errore lo dice — a volte.** Dati a uno shard, autenticati:
+
+```
+sh.enableSharding("prova")  → MongoServerError: no such command: 'enableSharding'.
+                              Are you connected to mongos?
+sh.isBalancerRunning()      → MongoServerError: no such command: 'balancerStatus'
+sh.getBalancerState()       → true
+```
+
+I primi due si diagnosticano da soli: la domanda giusta è dentro il messaggio, e arriva anche
+**senza** credenziali, perché un nome di comando che non esiste viene rifiutato prima che
+l'autenticazione entri in gioco. Il terzo è il caso peggiore, e va guardato bene: non è un errore,
+è una risposta plausibile e falsa. `sh.getBalancerState()` non spedisce nessun comando — legge
+`config.settings` e conclude «nessuno ha fermato il bilanciatore, quindi è acceso». Su uno shard
+quella collezione non c'è, la lettura torna vuota, e il vuoto porta alla stessa conclusione per
+puro caso ([V-067](../Sources.md#v-067)).
+
+**La regola che sopravvive ai messaggi.** Le funzioni di `sh` che si risolvono in una **lettura**
+del database `config` adesso, su uno shard, riescono e rispondono il vuoto: `sh.getBalancerState()`
+dice `true`, `sh.status()` dice che lo sharding non è abilitato, `config.shards` conta zero. Quelle
+che spediscono un **comando** trovano un `mongod` che quel comando non ce l'ha, e lo dicono. Fino a
+[ADR-0071](../Decision.md#adr-0071) la differenza non si vedeva, perché senza utenti sullo shard
+ogni lettura di `config` finiva in `Unauthorized`: l'indirizzo sbagliato veniva denunciato, ma per
+la ragione sbagliata. Adesso lo denuncia solo chi manda un comando, e per le letture il controllo
+da fare prima di credere alla risposta è quello di [§2.4](#24-sapere-con-chi-si-sta-parlando).
+
+**Rieseguire non rompe niente, e questo è voluto.** `sh.enableSharding()` su un database già
+abilitato risponde `ok: 1`; `sh.shardCollection()` su una collezione già distribuita **con la stessa
+chiave** risponde `collectionsharded: 'lab.ordini', ok: 1`. È la proprietà su cui poggia
+`30-dati-demo.js`, che al secondo `make up-03` rigira per intero e non deve rompere niente
+([ADR-0065](../Decision.md#adr-0065)).
+
+**Ma la chiave, quella, non si cambia.** Stessa collezione, chiave diversa:
+
+```console
+$ … --eval 'sh.shardCollection("lab.ordini", {_id: 1})'
+AlreadyInitialized: sharding already enabled for collection lab.ordini
+```
+
+Nessuna offerta di ridistribuire, nessuna richiesta di conferma: il cluster dice che la cosa è già
+stata fatta. È la faccia operativa di «MongoDB provides no method to unshard a sharded collection»
+([S-069](../Sources.md#s-069)) — la porta non è chiusa a chiave, non c'è.
+
+**I due errori di `sh.addShard()` accusano cose diverse.** Su uno shard già registrato:
+`IllegalOperation: A shard named shard1rs containing the replica set 'shard1rs' already exists`, che
+è chiaro. Su un insieme che non esiste — cioè quello che si prende chi sbaglia un nome host in un
+file Compose:
+
+```
+FailedToSatisfyReadPreference: Could not find host matching read preference { mode: "primary" }
+for set shard9rs
+```
+
+Non nomina né Docker, né la rete, né la risoluzione dei nomi: parla di *read preference*, e manda a
+cercare nella direzione sbagliata.
+
+**`getBalancerState()` e `isBalancerRunning()` non rispondono alla stessa domanda.** Il manuale è
+esplicito: «`sh.getBalancerState()` checks if the balancer is enabled (i.e. that the balancer is
+permitted to run). `sh.getBalancerState()` does **not** check if the balancer is actively migrating
+data» ([S-073](../Sources.md#s-073)). Il primo dice *può*, il secondo dice *sta*. Sul lab:
+
+```
+sh.getBalancerState()   true
+sh.isBalancerRunning()  "full"
+sh.stopBalancer()       { ok: 1 }
+sh.getBalancerState()   false
+sh.startBalancer()      { ok: 1 }
+sh.getBalancerState()   true
+```
+
+E per sapere se è davvero fermo — prima di un backup fatto a mano, per esempio — il manuale dà
+l'espressione intera, con tutte e due: `!sh.getBalancerState() && !sh.isBalancerRunning()`.
+
+**Avvertenza: `sh.stopBalancer()` fa più di quello che il nome dice.** Dalla 7.0 «stopping the
+balancer also disables the AutoMerger for the sharded cluster», e `sh.startBalancer()` lo riabilita
+([S-073](../Sources.md#s-073)). Su uno stack come questo, dove le migrazioni non scattano mai perché
+la differenza fra gli shard è undicimila volte sotto la soglia, l'AutoMerger è **l'unica cosa che il
+balancer stia facendo**: fermarlo «tanto non migra» ferma proprio quella
+([`sharded-cluster.md` §4.3](../02-architetture/sharded-cluster.md#43-il-balancer-le-sue-due-mansioni-e-quella-che-qui-non-esercita-mai)).
+
+**Avvertenza: `getShardDistribution()` su una collezione non distribuita non dà un errore del
+server.**
+
+```
+undefined: [SHAPI-10001] Collection nondistribuita is not sharded
+```
+
+Il `codeName` è `undefined` perché l'errore è di `mongosh`, non di `mongod`: chi in uno script filtra
+su `e.codeName` non lo intercetta, e chi si aspetta un `MongoServerError` nemmeno.
+
+**Avvertenza: `balancerCompliant: true` non vuol dire «distribuita bene».** Su una collezione con
+ventimila documenti su uno shard e zero sull'altro, `sh.balancerCollectionStatus()` risponde
+`balancerCompliant: true` — e ha ragione, perché la differenza è sotto la soglia di 384 MB
+([V-061](../Sources.md#v-061)). Il comando dice se **il balancer** ha qualcosa da fare, non se la
+shard key è quella giusta. Per quello serve `getShardDistribution()`, e serve guardarlo.
+
+**Il codice di uscita, ancora una volta, non è l'esito** ([ADR-0036](../Decision.md#adr-0036)). Lo
+stesso comando che fallisce:
+
+```console
+$ mongosh … --eval 'try { sh.shardCollection("lab.ordini", {_id: 1}) } catch (e) { print(e.codeName) }'
+   → esce 0
+$ mongosh … --eval 'sh.shardCollection("lab.ordini", {_id: 1})'
+   → esce 1
+```
+
+L'uscita segue l'eccezione **non catturata**, non l'operazione. Il paradosso è che lo script scritto
+bene — quello che cattura l'errore per stamparlo — esce sempre `0`: è proprio il codice prudente
+quello di cui l'uscita non dice niente. Vedi [§4.4](#44-i-codici-di-uscita).
+
+Che cosa resta **non** eseguito, e perché: `sh.disableBalancing()` e `sh.enableBalancing()`, che
+lascerebbero sulla collezione un `noBalance` da ripulire; la finestra di bilanciamento
+(`activeWindow`) e `attemptToBalanceJumboChunks`, che governano fenomeni che su due megabyte di
+dati non si presentano ([S-073](../Sources.md#s-073), riserve).
+
+L'architettura di questi componenti sta in
+[`02-architetture/sharded-cluster.md`](../02-architetture/sharded-cluster.md); qui interessa che i
+comandi si danno **al `mongos`**, e che darli a un `mongod` produce due errori diversi a seconda di
+che `mongod` sia.
 
 ---
 
@@ -836,6 +985,9 @@ non è stato misurato), [ADR-0024](../Decision.md#adr-0024) (la gerarchia delle 
 [ADR-0026](../Decision.md#adr-0026) (le immagini pinnate e `--env-file`),
 [ADR-0034](../Decision.md#adr-0034) (come si provoca un failover),
 [ADR-0044](../Decision.md#adr-0044) (i due bersagli del failover, e i loro tempi),
-[ADR-0049](../Decision.md#adr-0049) (la §3.2 eseguita, e le due frasi che erano sbagliate).
+[ADR-0049](../Decision.md#adr-0049) (la §3.2 eseguita, e le due frasi che erano sbagliate),
+[ADR-0071](../Decision.md#adr-0071) (l'amministratore per shard, che ha cambiato tre risposte
+di §3.3), [ADR-0072](../Decision.md#adr-0072) (le misure che una decisione invalida si
+riscrivono subito).
 
-**Fonti:** [S-044](../Sources.md#s-044), [S-045](../Sources.md#s-045), [S-046](../Sources.md#s-046), [S-047](../Sources.md#s-047), [V-009](../Sources.md#v-009), [V-010](../Sources.md#v-010), [V-013](../Sources.md#v-013), [V-018](../Sources.md#v-018), [V-019](../Sources.md#v-019), [V-020](../Sources.md#v-020), [V-029](../Sources.md#v-029), [V-042](../Sources.md#v-042)
+**Fonti:** [S-044](../Sources.md#s-044), [S-045](../Sources.md#s-045), [S-046](../Sources.md#s-046), [S-047](../Sources.md#s-047), [V-009](../Sources.md#v-009), [V-010](../Sources.md#v-010), [V-013](../Sources.md#v-013), [V-018](../Sources.md#v-018), [V-019](../Sources.md#v-019), [V-020](../Sources.md#v-020), [V-029](../Sources.md#v-029), [V-042](../Sources.md#v-042), [V-063](../Sources.md#v-063), [V-067](../Sources.md#v-067)
