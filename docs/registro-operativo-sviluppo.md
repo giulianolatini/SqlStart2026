@@ -4712,3 +4712,89 @@ Stato aggiornato: decisioni fino ad **ADR-0080**, verifiche fino a **V-074**, no
 alla **145**. Le suite: **143** prove per gli strumenti, **19** per l'applicazione. Prossimo passo:
 **Task 4** del [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), i doppi in memoria —
 non mock, ma implementazioni vere delle porte.
+
+---
+
+## 2026-09-03 — `feature/04`, fuori dai task: la documentazione dell'applicazione, e tre modi di sbagliare che si assomigliano
+
+Il PO ha chiesto una cosa che il piano non prevedeva, e aveva ragione a chiederla: molto di quello
+che era stato spiegato scrivendo il dominio — perché `frozen` non basta, perché `isinstance` contro
+un `Protocol` guarda i nomi e non le firme, perché il listener di PyMongo deve tacere e uscire — è
+materiale didattico, ed è **esattamente** ciò che il talk esiste per trasmettere. Viveva in tre
+posti dove invecchia male: nelle docstring, dove lo legge solo chi apre quel file; qui dentro, che è
+cronologico e non si consulta per argomento; e in chat, che non è un posto.
+
+**Nove pagine in `app/docs/`**, e [ADR-0081](Decision.md#adr-0081) che dice perché stanno lì e non
+in `docs/06-sviluppo/`. Cinque sui principi — l'architettura esagonale, le porte e i doppi, gli
+eventi congelati, la concorrenza dei listener, i tipi e le guardie — più un registro di sviluppo
+dell'applicazione raccontato per task invece che per giornata, una mappa delle decisioni che la
+vincolano, un `Sources.md` proprio e un indice.
+
+**Perché non in `docs/`.** Due ostacoli, uno di lettore e uno di macchina. `docs/06-sviluppo/` ha un
+altro lettore — chi ha visto il talk e non aprirà mai `app/src/` — e le sue due pagine
+sull'applicazione sono promesse al Task 17, cioè dopo che il codice di cui parlano sarà già scritto.
+L'ostacolo di macchina è più interessante: le fonti di queste spiegazioni sono documentazione di
+linguaggio e di strumenti, che **nessun ADR cita né deve citare**, perché sono vincoli del
+linguaggio e non scelte del progetto. Messe in `docs/Sources.md` sarebbero tutte orfane, e
+`check_citations.py` avrebbe bocciato la build. La regola non aveva torto: stava dicendo che quelle
+voci non appartengono a quel registro. Prefissi distinti — `A-` per le fonti esterne, `M-` per le
+misure — e le voci canoniche si puntano, mai si copiano.
+
+**Una citazione falsa, presa per caso.** Scrivendo `app/docs/Sources.md` avevo attribuito ad
+[ADR-0024](Decision.md#adr-0024) la regola «il registro operativo non si riscrive». ADR-0024 dice
+tutt'altro: parla della gerarchia delle fonti. E **nessun ADR** enuncia quella regola — è una pratica
+costante del repository, con il precedente di [ADR-0068](Decision.md#adr-0068) («resta com'è, con la
+sua data»), ma non è mai stata scritta come decisione. Il rimando è stato sostituito con un rinvio
+alla pratica e a quel precedente.
+
+**Una misura che ha corretto la voce di ieri.** Il Task 3 aveva scritto che senza `slots` gli eventi
+«tornano ad avere un `__dict__` in cui due thread possono scriversi di nascosto». Misurato: il
+`__dict__` c'è, ma l'assegnazione normale resta bloccata da `frozen`; passano solo
+`object.__setattr__` e la scrittura diretta nel `__dict__`. La formulazione giusta è «`frozen`
+protegge da una distrazione, `slots` protegge anche da chi conosce la scorciatoia». Questa voce non
+si riscrive: la correzione sta in `app/docs/Sources.md` (M-003), nella pagina sugli eventi, e nella
+docstring della prova, che portava la stessa frase troppo larga.
+
+**Il controllo dei collegamenti è stato esteso, ed è servito.** `make docs-check` esegue ora
+`check_links.py docs app/docs README.md`. Al primo passaggio, su nove pagine nuove e più di sessanta
+rimandi ad ancore di `Decision.md` e `Sources.md`, un solo collegamento è risultato rotto — e non
+era un'ancora sbagliata ma un rimando a una cartella invece che a un file. Fino a quel momento
+**nessuno di quei sessanta rimandi era mai stato verificato**, compreso `#adr-0068` scritto mezz'ora
+prima.
+
+**Note di metodo.**
+
+146. **Una citazione plausibile è più pericolosa di una mancante.** Un'affermazione senza fonte si
+     vede: è nuda, e chi legge sa di doversi fidare dell'autore. Un'affermazione con accanto
+     `[ADR-0024]` sembra già verificata, e nessuno la apre — men che meno in un repository dove
+     citare è la norma, perché lì la presenza del rimando è il segnale di qualità e smette di essere
+     una domanda. La difesa non è citare di meno, è **aprire il documento nel momento in cui si
+     scrive il numero**, non dopo: il numero giusto si ricorda quasi sempre, e «quasi sempre» è
+     precisamente la frequenza con cui questo errore passa. Vale il doppio quando si cita a memoria
+     un documento che si è scritto, perché la fiducia nella propria memoria è più alta e la memoria
+     non lo sa.
+147. **Quando un controllo rifiuta materiale legittimo, la sede che manca può essere un registro
+     intero, non una voce.** La nota 141 aveva stabilito che un controllo che ostacola qualcosa di
+     legittimo va guardato come ipotesi: di solito segnala che manca una sede, e la sede era un ADR.
+     Qui la stessa domanda ha dato una risposta di taglia diversa. Non mancava una voce in
+     `Sources.md`: mancava un **secondo registro**, con un proprio spazio di numerazione, perché le
+     fonti che non appartenevano lì non erano una o due ma un'intera categoria — la documentazione
+     del linguaggio, che nessuna decisione di progetto cita né deve citare. Il segnale che distingue
+     i due casi è **quante voci** il controllo rifiuterebbe: una è una dimenticanza, tutte quelle di
+     un tipo sono una sede mancante. E aprire il secondo registro impone subito una scelta che
+     conviene fare bene la prima volta, cioè prefissi diversi: due registri con la stessa
+     numerazione producono `S-042` ambigui, e l'ambiguità arriva quando qualcuno cita di fretta.
+148. **Un controllo che riceve i percorsi da esaminare non fallisce su ciò che non gli hanno dato:
+     tace.** `check_links.py` prende i percorsi come argomenti, ed è la scelta giusta — decidere da
+     sé che cosa guardare vorrebbe dire indovinare. La conseguenza è che un albero di documentazione
+     nuovo nasce **invisibile**: nessun errore, nessun avviso, il verde di sempre. È la stessa forma
+     della nota 142 — un controllo che passa perché non ha niente da guardare — con la differenza
+     che qui il materiale c'è e la lacuna sta nella riga del `Makefile`. La regola operativa:
+     **creare una cartella di documentazione e aggiungerla al bersaglio sono lo stesso atto**, e la
+     verifica che l'atto sia compiuto è banale — introdurre un rimando rotto apposta e vedere il
+     controllo nominarlo. Senza, la prima cosa che si scopre è quanti collegamenti erano rotti da
+     mesi.
+
+Stato aggiornato: decisioni fino ad **ADR-0081**, verifiche fino a **V-074**, note di metodo fino
+alla **148**. Le suite: **143** prove per gli strumenti, **19** per l'applicazione. Prossimo passo:
+**Task 4** del [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).

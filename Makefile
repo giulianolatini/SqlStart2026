@@ -59,7 +59,7 @@ app-test-integration: ## Esegue la suite di integrazione dell'applicazione (rich
 
 docs-check: ## Verifica il legame fra ADR e fonti, e i collegamenti fra le pagine
 	uv run --project tools python tools/check_citations.py docs/Decision.md docs/Sources.md
-	uv run --project tools python tools/check_links.py docs README.md
+	uv run --project tools python tools/check_links.py docs app/docs README.md
 
 images-pull: ## Scarica le immagini e le pinna per digest (richiede rete)
 	./tools/pull-images.sh --pull

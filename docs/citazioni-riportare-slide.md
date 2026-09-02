@@ -1657,3 +1657,65 @@ dei fatti. La domanda che si pone al revisore decide che cosa può trovare: il p
 review nominava esplicitamente codici d'uscita e comandi che falliscono in silenzio, e i tre rilievi
 sono arrivati esattamente da lì. Vale per i modelli e vale per le persone, ed è il motivo per cui una
 checklist di review è uno strumento e non una formalità.
+
+---
+
+### `frozen` protegge da una distrazione, `slots` protegge anche da chi conosce la scorciatoia
+
+> Congelare una dataclass Python blocca l'assegnazione normale, e basta: l'istanza conserva un
+> `__dict__`, e da lì passano sia `object.__setattr__` sia la scrittura diretta. Misurato sulle due
+> varianti della stessa classe, la differenza è netta. Senza `slots`: assegnazione bloccata,
+> `object.__setattr__` **riesce**, scrittura nel `__dict__` **riesce**. Con `slots`: il `__dict__`
+> non esiste, e con esso spariscono entrambe le vie. La documentazione lo dice fin dalla prima riga
+> e nessuno la legge fino in fondo — «It is not possible to create truly immutable Python objects.
+> However, by passing `frozen=True` […] you can **emulate** immutability».
+
+Fonte: [`app/docs/Sources.md` M-003](../app/docs/Sources.md#m-003) e
+[A-002](../app/docs/Sources.md#a-002), [ADR-0019](Decision.md#adr-0019).
+
+**Perché una slide:** l'oggetto che attraversa la coda fra il thread del driver e quello del disegno
+è il punto in cui la demo del failover può mentire, e «l'ho congelato» è la rassicurazione che tutti
+danno per buona. La misura mostra che protegge dalla svista e non dalla scorciatoia, che è
+esattamente la distinzione utile: `frozen` difende dal codice scritto in buona fede, `slots` chiude
+anche la porta di servizio. Vale oltre Python — ogni garanzia di immutabilità va guardata chiedendo
+*da chi* protegge, non *se* protegge.
+
+---
+
+### Rompere una guardia apposta ha tre esiti, non due
+
+> Scritto il controllo che verifica che tutti gli eventi siano congelati, l'ho rotto apposta
+> aggiungendo un nono evento mutabile. Non è fallito: **la classe non è arrivata a esistere** —
+> `TypeError: cannot inherit non-frozen dataclass from a frozen one`. Il controllo scatta e va bene;
+> il controllo tace e va corretto; oppure la violazione **non è costruibile**, perché il linguaggio
+> la vieta prima. Il terzo somiglia al primo, perché entrambi finiscono con la suite verde, ma
+> significa che l'asserzione sta controllando il compilatore.
+
+Fonte: [`app/docs/Sources.md` M-002](../app/docs/Sources.md#m-002),
+[registro operativo, nota 144](registro-operativo-sviluppo.md).
+
+**Perché una slide:** è il seguito naturale di «un controllo scritto quando non può fallire va rotto
+apposta», e ne mostra il limite. La disciplina di rompere le proprie guardie non basta se poi si
+legge il verde come conferma: bisogna sapere quale dei due verdi si sta guardando. E la conseguenza
+pratica è controintuitiva — un'asserzione che non può fallire va **tolta**, non lasciata lì «che male
+non fa», perché chi la legge crede che stia sorvegliando qualcosa.
+
+---
+
+### Una citazione plausibile è più pericolosa di una mancante
+
+> Scrivendo la documentazione dell'applicazione avevo attribuito a un ADR una regola che quell'ADR
+> non contiene, e che **nessun ADR** del repository contiene: è una pratica costante, mai scritta
+> come decisione. Il rimando era plausibile, il numero era di un documento vero, e proprio per questo
+> nessuno l'avrebbe aperto. Un'affermazione senza fonte è nuda e chi legge sa di doversi fidare
+> dell'autore; un'affermazione con accanto un numero sembra già verificata.
+
+Fonte: [ADR-0081](Decision.md#adr-0081),
+[registro operativo, nota 146](registro-operativo-sviluppo.md).
+
+**Perché una slide:** in un repository dove citare è la norma, la presenza del rimando diventa il
+segnale di qualità e smette di essere una domanda — cioè la disciplina delle fonti produce, come
+effetto collaterale, il posto perfetto in cui nascondere un'affermazione non verificata. Vale il
+doppio quando si cita a memoria un documento che si è scritto: la fiducia nella propria memoria è più
+alta, e la memoria non lo sa. La difesa è banale e va detta ad alta voce — si apre il documento nel
+momento in cui si scrive il numero, non dopo.

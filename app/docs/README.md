@@ -1,0 +1,87 @@
+# La documentazione di `mongolab`
+
+Questa cartella spiega **come è fatta l'applicazione del lab e perché**. Sta accanto al codice, non
+in `docs/`, perché parla di scelte che si capiscono avendo i sorgenti sotto gli occhi: un file che si
+apre nella finestra accanto a quello che descrive.
+
+`mongolab` è l'applicazione console che, durante il talk, mostra dall'interno che cosa succede a un
+client MongoDB mentre il cluster sotto di lui cambia forma. È il pezzo che trasforma un failover da
+affermazione in **cronaca in diretta**.
+
+## Le pagine, nell'ordine in cui conviene leggerle
+
+| # | Pagina | Risponde a |
+|---|---|---|
+| 1 | [01-architettura-esagonale.md](01-architettura-esagonale.md) | perché quattro cartelle invece di un file solo |
+| 2 | [02-porte-e-doppi.md](02-porte-e-doppi.md) | che cos'è una porta, e perché non è una classe astratta |
+| 3 | [03-eventi-immutabili.md](03-eventi-immutabili.md) | perché un evento è congelato, e perché `frozen` da solo non basta |
+| 4 | [04-eventi-del-driver-e-concorrenza.md](04-eventi-del-driver-e-concorrenza.md) | che cosa vede il client durante un failover, e perché il listener deve tacere e uscire |
+| 5 | [05-tipi-prove-e-guardie.md](05-tipi-prove-e-guardie.md) | chi controlla che tutto questo resti vero |
+
+Si leggono in ordine, ma nessuna dipende dalle altre per essere comprensibile. Chi arriva da una
+domanda precisa può entrare dal punto giusto.
+
+## Le altre tre
+
+- **[registro-sviluppo-app.md](registro-sviluppo-app.md)** — la cronaca di come l'applicazione è
+  stata costruita, task per task, comprese le volte in cui la scoperta ha contraddetto il piano.
+  È la pagina da leggere per capire **il processo**, non il risultato.
+- **[decisioni-che-vincolano-app.md](decisioni-che-vincolano-app.md)** — la mappa delle decisioni
+  architetturali del repository che mordono su questo codice: che cosa impongono, dove si vedono,
+  se sono già applicate.
+- **[Sources.md](Sources.md)** — le fonti esterne consultate (`A-0NN`) e le misure fatte in locale
+  (`M-0NN`), con verdetto e riserve.
+
+## Il patto di lettura
+
+Queste pagine seguono le regole del repository, e vale la pena conoscerle prima di fidarsi di una
+riga:
+
+**Ogni affermazione tecnica porta la sua fonte.** `A-0NN` e `M-0NN` rimandano a
+[Sources.md](Sources.md); `S-0NN`, `V-0NN` e `C-0NN` al registro canonico
+[`docs/Sources.md`](../../docs/Sources.md); `ADR-0NNN` a
+[`docs/Decision.md`](../../docs/Decision.md).
+
+**Ciò che è stato misurato qui è distinto da ciò che è stato letto altrove.** Una voce `M-` è un
+esperimento eseguito su questo ambiente, con il suo output riportato. Una voce `A-` è una pagina di
+documentazione ufficiale, con la data in cui è stata consultata. **Dove le due non concordano, la
+riserva è scritta**, e la misura non zittisce la fonte né viceversa.
+
+**Le lacune sono dichiarate, non riempite.** Quando la documentazione di uno strumento tace su
+qualcosa che serviva sapere, la pagina lo dice invece di indovinare. Il caso più notevole è la
+documentazione di Rich, che non nomina mai i thread: il progetto non se n'è appoggiato in nessuna
+delle due direzioni, e ha cambiato il disegno finché la domanda è diventata irrilevante.
+
+**Dove una pagina descrive il futuro, lo dichiara in testa.** Il codice arriva in diciotto task, e
+alcune di queste pagine descrivono principi già decisi il cui codice non è ancora scritto. Chi legge
+deve poterlo sapere senza andare a controllare.
+
+## Rapporto con `docs/`
+
+Il repository ha una documentazione canonica in [`docs/`](../../docs/README.md), che copre il talk, gli stack
+Compose, le decisioni, le fonti e il registro operativo. **Quella resta la sede normativa.** Queste
+pagine non la contraddicono e non la duplicano: dove serve una decisione o una fonte del repository,
+la **citano** invece di ricopiarla, perché un contenuto duplicato è un contenuto che prima o poi
+diverge.
+
+Le pagine divulgative promesse dal piano — `docs/06-sviluppo/architettura-app.md` e
+`docs/06-sviluppo/tdd-e-doppi.md`, al Task 17 — nasceranno **rimandando qui**, non ripetendo. Il loro
+mestiere è diverso: raccontano l'applicazione a chi ha visto il talk e non aprirà mai `app/src/`.
+Queste pagine parlano a chi il codice lo apre.
+
+Perché due `Sources.md` e non uno solo è spiegato nell'intestazione di [Sources.md](Sources.md): in
+breve, il controllo automatico delle citazioni del repository considera **orfana** una fonte che
+nessun ADR cita, e le fonti di linguaggio e strumenti non sono citate da nessun ADR né devono
+esserlo. Aprire la sede che mancava era la risposta giusta; aggirare il controllo no.
+
+## Verificare che questa documentazione sia sana
+
+```sh
+make docs-check     # collegamenti e ancore, anche di queste pagine
+make app-test       # le prove unitarie citate qui
+make app-check      # mypy --strict
+```
+
+Il controllo dei collegamenti percorre anche `app/docs`: ogni rimando a un ADR o a una fonte del
+registro canonico viene verificato, ancora compresa. Un `#adr-0019` scritto male è un errore che
+fallisce, non un rimando che porta in cima alla pagina.

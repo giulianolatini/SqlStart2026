@@ -3,9 +3,13 @@
 Materiale del talk **MongoDB: dalla singola istanza al cluster** — SqlStart 2026, Ancona,
 venerdì 18 settembre 2026.
 
-Questa cartella contiene tutta la documentazione del progetto. L'unico file Markdown fuori
-da qui è il [`README.md`](../README.md) di radice, che serve a chi arriva dal talk e vuole
-capire in trenta secondi cosa ha davanti.
+Questa cartella contiene la documentazione del progetto: il talk, gli stack, le decisioni, le
+fonti e il registro operativo. Fuori da qui stanno due cose sole, ed entrambe per una ragione:
+il [`README.md`](../README.md) di radice, che serve a chi arriva dal talk e vuole capire in
+trenta secondi cosa ha davanti, e [`app/docs/`](../app/docs/README.md), che spiega
+l'applicazione `mongolab` **accanto al suo codice**, perché sono pagine che si leggono con i
+sorgenti aperti nella finestra di fianco. Quelle pagine citano queste e non le duplicano; il
+controllo dei collegamenti percorre entrambe le cartelle.
 
 ## Come si legge
 
@@ -100,13 +104,13 @@ sono state eseguite qui, perché qui non c'è né un Ubuntu né un Windows
 |---|---|---|
 | [`06-sviluppo/gestione-risorse-compose.md`](06-sviluppo/gestione-risorse-compose.md) | `mem_limit` e `cpus`, la cache WiredTiger nei container, come si dimostra che i limiti sono applicati; i due profili dello sharded cluster — a chi serve ciascuno, quanto costa, come si sceglie | già nel repository |
 | [`06-sviluppo/worktree-e-branch-di-lavoro.md`](06-sviluppo/worktree-e-branch-di-lavoro.md) | come si apre un branch di feature con il suo worktree e come lo si chiude dopo la PR; l'ordine vincolante della rimozione, e come si esce se una sessione è rimasta agganciata a un worktree cancellato | già nel repository |
-| `06-sviluppo/architettura-app.md` | stratificazione dell'applicazione, porte, modello a eventi, composition root | `feature/04-app-python` |
-| `06-sviluppo/tdd-e-doppi.md` | separazione fra suite unitaria e di integrazione, fake contro mock, come si prova il failover senza aspettarlo | `feature/04-app-python` |
+| `06-sviluppo/architettura-app.md` | stratificazione dell'applicazione, porte, modello a eventi, composition root; racconta a chi non apre i sorgenti quello che [`app/docs/`](../app/docs/README.md) spiega a chi li apre | `feature/04-app-python` |
+| `06-sviluppo/tdd-e-doppi.md` | separazione fra suite unitaria e di integrazione, fake contro mock, come si prova il failover senza aspettarlo; rimanda a [`app/docs/05-tipi-prove-e-guardie.md`](../app/docs/05-tipi-prove-e-guardie.md) invece di ripeterlo | `feature/04-app-python` |
 
 ## Dove sta il resto
 
 | Cartella | Contenuto |
 |---|---|
 | `docker/` | i tre stack Compose: `01-standalone`, `02-replicaset`, `03-sharded` |
-| `app/` | l'applicazione dimostrativa in Python |
+| `app/` | l'applicazione dimostrativa in Python, con la propria documentazione in [`app/docs/`](../app/docs/README.md): principi di funzionamento, registro di sviluppo, decisioni vincolanti e fonti proprie ([ADR-0081](Decision.md#adr-0081)) |
 | `tools/` | strumenti di repository: preflight, pre-scaricamento delle immagini, e i tre controllori che tengono gli artefatti allineati alle decisioni — citazioni, file Compose, collegamenti ([ADR-0038](Decision.md#adr-0038)) |

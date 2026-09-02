@@ -5181,3 +5181,71 @@ problema. **Ripinnare alla 8.2.12 per avere un «8» sulle slide** — già scar
 ragioni che non sono cambiate, e riscartata da ADR-0058 un giorno fa.
 
 **Fonti:** [V-074](Sources.md#v-074), [S-028](Sources.md#s-028)
+
+---
+
+<a id="adr-0081"></a>
+## ADR-0081 — La documentazione dell'applicazione sta accanto al codice, con un registro delle fonti proprio
+
+**Data:** 2026-09-03 · **Stato:** Accettata
+
+**Contesto:** scrivendo il dominio di `mongolab` sono emerse spiegazioni che non hanno una sede.
+Perché `frozen=True` non basta e serve anche `slots=True`; perché `isinstance` contro un `Protocol`
+guarda i nomi e non le firme; perché il listener di PyMongo deve depositare in coda e uscire. Sono
+affermazioni verificate, alcune misurate su questo ambiente, e sono esattamente il materiale
+didattico che il talk esiste per trasmettere. Finora vivevano in tre posti dove invecchiano male:
+nelle docstring, dove le legge solo chi apre quel file; nel registro operativo, che è cronologico e
+non si consulta per argomento; e in chat, che non è un posto.
+
+Le sedi previste dal repository non le accolgono. `docs/06-sviluppo/` è divulgativa e ha un altro
+lettore — chi ha visto il talk e non aprirà mai `app/src/`; le sue due pagine sull'applicazione sono
+promesse al **Task 17**, cioè fra due settimane, e nascerebbero comunque senza il dettaglio che serve
+a chi il codice lo apre. Il registro operativo è **append-only** per costruzione: ottimo per sapere
+quando si è deciso qualcosa, inservibile per sapere che cosa vale adesso.
+
+C'è un secondo ostacolo, ed è tecnico. Le fonti di queste spiegazioni sono documentazione di
+linguaggio e di strumenti — `typing`, `dataclasses`, mypy, pytest — che **nessun ADR cita né deve
+citare**: sono vincoli del linguaggio, non scelte del progetto. Messe in `docs/Sources.md`
+diventerebbero tutte **orfane**, e `check_citations.py` boccerebbe la build. La regola non ha torto:
+sta dicendo che quelle voci non appartengono a quel registro.
+
+**Decisione:** la documentazione dell'applicazione sta in **`app/docs/`**, accanto al codice che
+descrive, con un proprio `Sources.md` che usa prefissi distinti — **`A-0NN`** per le fonti esterne e
+**`M-0NN`** per le misure eseguite in locale — così che non si confondano con gli `S-`/`V-`/`C-` del
+registro canonico. Le voci canoniche si **puntano**, mai si copiano.
+
+`docs/` resta la sede normativa: decisioni, fonti del progetto, registro operativo e materiale del
+talk non si spostano e non si duplicano. Le pagine di `app/docs/` citano `docs/` e non viceversa,
+tranne l'indice, che le annuncia. Le due pagine del Task 17 nasceranno **rimandando** qui invece di
+ripetere.
+
+Il controllo dei collegamenti si estende a `app/docs`: `make docs-check` esegue ora
+`check_links.py docs app/docs README.md`. `check_citations.py` non cambia — continua a guardare
+soltanto `docs/Decision.md` e `docs/Sources.md`, che è ciò che deve fare.
+
+**Conseguenze:** ogni rimando da `app/docs/` a un ADR o a una fonte canonica è verificato con la sua
+ancora, e un `#adr-0019` scritto male fallisce invece di portare in cima alla pagina. Al primo
+passaggio del controllo, sulle nove pagine nuove, un solo collegamento è risultato rotto.
+
+Il repository accetta un costo: la documentazione non è più tutta in un posto, e
+`docs/README.md` ha dovuto correggere la propria affermazione — non era più vero che l'unico
+Markdown fuori da `docs/` fosse il `README.md` di radice. In cambio, chi apre `app/` trova la
+spiegazione dove sta il codice, e chi apre `docs/` continua a trovare tutto ciò che è normativo.
+
+Il rischio dichiarato è la **divergenza**: due sedi che raccontano la stessa cosa finiscono per
+raccontarla diversamente. La difesa scelta non è una regola scritta ma la disciplina del rimando —
+`app/docs/` cita e non ricopia — più il controllo automatico che verifica che i rimandi restino
+validi. È una difesa parziale: verifica che il collegamento porti da qualche parte, non che i due
+testi concordino. Vale la pena saperlo.
+
+**Alternative scartate:** **tutto in `docs/06-sviluppo/`** — sede giusta per il lettore sbagliato, e
+disponibile solo dal Task 17, cioè dopo che il codice di cui parla è già scritto. **Solo docstring**
+— non spiegano perché una scelta è stata fatta rispetto alle alternative, e chi cerca «come funziona
+questa applicazione» non apre otto file. **Le fonti dell'applicazione in `docs/Sources.md`** —
+sarebbero orfane e farebbero fallire `check_citations.py`; aggirare quel controllo per farcele stare
+sarebbe l'esatto opposto di ciò che il repository fa quando una regola ostacola qualcosa di
+legittimo, cioè aprire la sede che manca (nota di metodo 141). **Riusare i prefissi `S-`/`V-` anche
+in `app/docs/Sources.md`** — due registri con la stessa numerazione producono `S-042` ambigui, e
+l'ambiguità arriverebbe proprio quando qualcuno cita di fretta.
+
+**Fonti:** nessuna (decisione organizzativa)

@@ -103,8 +103,10 @@ def test_ogni_evento_ha_i_propri_slot() -> None:
     primo per costruzione. Asserirle qui sarebbe controllare il compilatore.
 
     `slots=True` no: si dimentica in silenzio, la classe nasce, e le sue istanze tornano
-    ad avere un `__dict__` in cui due thread possono scriversi di nascosto. Questa riga
-    fallisce davvero, ed è stata vista fallire nominando la classe colpevole.
+    ad avere un `__dict__`. L'assegnazione normale resta bloccata da `frozen`, ma
+    `object.__setattr__` e la scrittura diretta nel `__dict__` passano — misurato in
+    `app/docs/Sources.md`, M-003. Questa riga fallisce davvero, ed è stata vista fallire
+    nominando la classe colpevole.
     """
     for classe in sottoclassi_di_evento():
         assert "__slots__" in vars(classe), classe.__name__
