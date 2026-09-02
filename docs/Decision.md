@@ -4087,3 +4087,102 @@ metadati che non ci sono più. Nessuna migrazione: questo è un laboratorio, e i
 venticinque secondi.
 
 **Fonti:** [S-022](Sources.md#s-022) · [V-060](Sources.md#v-060)
+
+---
+
+<a id="adr-0068"></a>
+## ADR-0068 — La pagina dello sharded cluster mostra la chiave sbagliata invece di descriverla
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** L'[indice](README.md) promette per nome
+`docs/02-architetture/sharded-cluster.md` da `feature/00`, e il design le assegna il Blocco 3 del
+talk: otto minuti, una slide, `sh.status()` già a schermo e il rimando al repository. Il materiale
+esiste ed è sparso: il blocco `LA SHARD KEY` dentro `docker/03-sharded/init/30-dati-demo.js`, sette
+ADR fra la [0058](#adr-0058) e la [0067](#adr-0067), sei verifiche empiriche dalla
+[V-052](Sources.md#v-052) alla [V-060](Sources.md#v-060). La pagina lo raccoglie; non lo riscopre.
+
+Ma due sezioni non si potevano scrivere con quello che c'era. Il **balancer** era un verbo senza
+misure: il repository non sapeva se in questa demo lavorasse. E la **shard key sbagliata** era una
+citazione — ottima, tripla, ma una citazione: il difetto che il Blocco 3 esiste per raccontare non
+era mai stato visto accadere in questo laboratorio, e [ADR-0052](#adr-0052) ha stabilito che una
+trappola scritta senza il sintomo è una previsione. [V-061](Sources.md#v-061) ha colmato tutti e
+due i buchi, e ha trovato per strada una terza cosa che nessuno cercava.
+
+**Decisione.**
+
+*La pagina apre con l'irreversibilità, non con la topologia.* Il primo fatto non è che i componenti
+sono tre: è che «once a collection has been sharded, MongoDB provides no method to unshard a sharded
+collection» ([S-069](Sources.md#s-069)). Le altre due pagine di `02-architetture` descrivono scelte
+che si disfano spegnendo un container; questa no. Chi legge deve saperlo prima di trovare la parte
+interessante, perché è l'unica informazione che cambia il momento in cui si decide.
+
+*«Quando non serve» si scrive, e si dichiara che il manuale non lo dice.* La sezione è necessaria —
+è la domanda vera del pubblico — ma la fonte non la copre: la pagina d'ingresso del manuale non
+contiene nessuna soglia, nessuna dimensione minima, nessuna sconsiglio circostanziato
+([S-069](Sources.md#s-069), «cosa non afferma»). Quello che il manuale offre è il prezzo dichiarato,
+«the trade-off is increased complexity in infrastructure and maintenance», e il resto è un giudizio
+di chi scrive, tratto dai numeri dei tre stack di questo repository. Va detto in quei termini, non
+attribuito a MongoDB.
+
+*La chiave sbagliata si mostra con i numeri di una prova, non con un avvertimento.* Ventimila
+documenti, chiave `{_id: 1}`, e **ventimila su uno dei due shard**; poi la stessa collezione con la
+sola chiave cambiata, e 9860 contro 10140 ([V-061](Sources.md#v-061)). Il pezzo che vale la slide
+non è però lo squilibrio: è che `sh.balancerCollectionStatus()` su quella collezione risponde
+`balancerCompliant: true`. **Il cluster considera bilanciata una distribuzione cento a zero**, e ha
+ragione, perché la differenza è sotto la soglia. L'errore non ha sintomo, e lo strumento che
+dovrebbe accorgersene conferma che va tutto bene.
+
+*Il balancer si racconta con la sua soglia, e con il fatto che qui non entra mai in scena.* Gira sul
+primario dei config server e non su `mongos` ([S-070](Sources.md#s-070)), è acceso da solo, e si
+muove solo quando la differenza fra due shard supera tre volte la dimensione di range configurata —
+384 MB con i 128 predefiniti. Nella demo la differenza è di **34 KB**, e il registro del cluster
+riporta **zero** migrazioni su sei eventi totali ([V-061](Sources.md#v-061)). I quattro chunk sono
+opera di `shardCollection()` su collezione vuota, non del balancer. Dire «il balancer bilancia» a
+proposito di questa demo sarebbe una didascalia falsa su una fotografia vera.
+
+*La trappola dell'`insertMany` ordinato entra nella pagina, perché è quella che capita davvero.*
+Con chiave hashed un lotto `ordered: true` — che è il **predefinito** — costa fra venti e trenta
+volte un lotto `ordered: false`, mentre con chiave monotona le due forme costano uguale
+([V-061](Sources.md#v-061), [S-071](Sources.md#s-071)). È il difetto più insidioso dei tre, perché
+colpisce chi ha fatto la scelta **giusta**: distribuisci bene, non tocchi il codice di caricamento
+che funzionava, e le scritture rallentano di un ordine di grandezza senza un errore. Il seed del lab
+scrive `ordered: false` dal primo giorno, per allineamento con gli altri due stack; oggi si sa
+perché era la riga giusta.
+
+*Ogni numero porta la sua riserva addosso, sulla stessa riga.* Come in [ADR-0046](#adr-0046) per il
+replica set: il 49,3 / 50,7 è questo dataset con questo seme; il fattore venticinque è due shard e
+documenti da 121 byte; la soglia dei 384 MB non è mai stata superata, quindi è provato che sotto il
+balancer sta fermo e non che sopra si muova. Le riserve stanno accanto ai numeri, non in fondo,
+perché in fondo non arrivano sulle slide.
+
+*Il file Compose non si ripete riga per riga.* La pagina del replica set lo fa e fa bene, perché lì
+il file è il soggetto. Qui il file è commentato per esteso, i suoi sei anelli sono già raccontati in
+[ADR-0062](#adr-0062) e [ADR-0065](#adr-0065), e ripeterli raddoppierebbe la pagina spostando
+l'attenzione dalla decisione che conta. Restano nella pagina i due punti che si capiscono solo
+guardando il file: la catena che rende onesto `up --wait`, e il difetto del dbpath dei config server
+([ADR-0067](#adr-0067)), che è la storia migliore che questo branch abbia prodotto.
+
+**Conseguenze.** Nasce `docs/02-architetture/sharded-cluster.md`. In `docs/README.md` la riga passa
+da promessa a collegamento, e con essa si chiude l'ultima delle tre pagine di architettura previste
+dal design. Entrano tre fonti nuove — [S-069](Sources.md#s-069), [S-070](Sources.md#s-070),
+[S-071](Sources.md#s-071) — e una verifica, [V-061](Sources.md#v-061). Due frasi vanno in
+`docs/citazioni-riportare-slide.md`, e sono le due che il Blocco 3 può reggere da solo se il tempo
+stringe.
+
+Resta dichiarato nella sezione «cosa questa pagina non dice» tutto ciò che non è stato misurato:
+zone, resharding, chunk jumbo, il comportamento **oltre** la soglia del balancer, il confronto di
+prestazioni fra le tre architetture — che ha senso solo sotto carico controllato, cioè con
+l'applicazione di `feature/04` — e `analyzeShardKey`, che sarebbe lo strumento giusto in un caso
+vero e che richiede query reali.
+
+**Alternative scartate:** descrivere la chiave sbagliata citando le fonti e basta — ci sarebbero
+volute due ore in meno e la pagina avrebbe detto «attenzione alle chiavi monotone», che è
+esattamente il genere di frase che si dimentica uscendo dalla sala; mostrare lo squilibrio senza
+`balancerCompliant: true` — sarebbe il difetto senza la parte che lo rende pericoloso, cioè il
+silenzio; raccontare il balancer come se lavorasse, perché è quello che il pubblico si aspetta — è
+una bugia comoda e questa è la pagina sbagliata dove dirla; rimandare la trappola dell'`ordered` a
+`feature/04`, dove ci sarà un'applicazione che scrive — il numero c'è adesso, e un difetto che
+colpisce chi ha scelto bene non si tiene in un cassetto per due settimane.
+
+**Fonti:** [S-066](Sources.md#s-066) · [S-067](Sources.md#s-067) · [S-069](Sources.md#s-069) · [S-070](Sources.md#s-070) · [S-071](Sources.md#s-071) · [V-058](Sources.md#v-058) · [V-061](Sources.md#v-061)

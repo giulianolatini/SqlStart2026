@@ -1410,3 +1410,37 @@ Fonte: [V-058](Sources.md#v-058) quarto punto, [ADR-0065](Decision.md#adr-0065).
 **Perché una slide:** se resta tempo. È la sorpresa più pratica dello stack — chi prova a
 diagnosticare uno shard collegandocisi sopra la incontra al primo tentativo — e dice in un esempio
 dove sta davvero il centro di un cluster sharded.
+
+---
+
+### Il cluster considera «bilanciata» una distribuzione cento a zero
+
+> Ventimila documenti, chiave `{_id: 1}`: ventimila su uno shard, zero sull'altro. Poi si chiede al
+> cluster se è bilanciato, e risponde `balancerCompliant: true`. Non è un guasto del balancer: è la
+> sua specifica, perché la differenza fra i due shard è 1,2 MB e la soglia perché si muova è 384 MB.
+> La shard key sbagliata non ha sintomo, e lo strumento che dovrebbe accorgersene conferma che va
+> tutto bene.
+
+Fonte: [V-061](Sources.md#v-061) quarto punto, [S-070](Sources.md#s-070) terzo punto,
+[ADR-0068](Decision.md#adr-0068).
+
+**Perché una slide:** è il cuore del Blocco 3, e la sola frase di tutto il talk in cui lo strumento
+di diagnosi mente dicendo la verità. Un errore irreversibile che nessun controllo segnala vale più
+di dieci raccomandazioni su come scegliere una chiave.
+
+---
+
+### La trappola colpisce chi ha scelto bene
+
+> Chiave hashed, `insertMany` di ventimila documenti: **11 328 ms**. Stessa chiave, stessi
+> documenti, `ordered: false`: **336 ms**. Con la chiave monotona le due forme costano uguale. Il
+> costo non è la chiave giusta: è la chiave giusta insieme al predefinito che nessuno cambia, perché
+> mantenere l'ordine fra shard diversi vuol dire aspettare, e con l'hash lo shard cambia quasi a
+> ogni documento.
+
+Fonte: [V-061](Sources.md#v-061) sesto punto, [S-071](Sources.md#s-071) primo punto,
+[ADR-0068](Decision.md#adr-0068).
+
+**Perché una slide:** perché ribalta l'aspettativa. Il pubblico si aspetta che a pagare sia chi
+sbaglia la chiave, e invece paga chi l'ha azzeccata e non ha toccato il codice di caricamento che
+funzionava sul replica set. Un ordine di grandezza, senza un errore e senza un avviso.

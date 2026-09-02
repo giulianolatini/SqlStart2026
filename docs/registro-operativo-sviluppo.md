@@ -3577,3 +3577,96 @@ Un dettaglio che vale la pena aver guardato invece di darlo per scontato: `alpin
 attaccato una seconda etichetta alla stessa immagine. Tolta l'etichetta di troppo con
 `docker image rm alpine:latest`, che risponde `Untagged` e non `Deleted`, il disco è esattamente
 com'era.
+
+---
+
+## 2026-09-02 — Task 8: la pagina dello sharded cluster, scritta dopo aver visto sbagliare la chiave
+
+L'[indice](README.md) prometteva `docs/02-architetture/sharded-cluster.md` per nome dalla
+`feature/00`, e il design le assegna il Blocco 3: otto minuti, una slide, `sh.status()` a schermo.
+Il materiale c'era, sparso in sette ADR, sei verifiche e un blocco di commento dentro
+`30-dati-demo.js`. Raccoglierlo sarebbe bastato per una pagina onesta. Non è bastato per due
+sezioni.
+
+**Il balancer era un verbo senza misure.** Il repository lo nominava in tre punti e non sapeva se in
+questa demo lavorasse. **La shard key sbagliata era una citazione** — tripla, ottima, e mai vista
+accadere qui dentro: esattamente ciò che [ADR-0052](Decision.md#adr-0052) chiama una previsione, non
+una trappola. Prima di scrivere la pagina sono andato a misurare tutte e due
+([V-061](Sources.md#v-061)), e per fondarla su testo verificabile ho aggiunto tre pagine del manuale
+7.0 come fonti: [S-069](Sources.md#s-069) l'ingresso allo sharding, [S-070](Sources.md#s-070) il
+balancer, [S-071](Sources.md#s-071) le scritture in lotto.
+
+**Il balancer non entra mai in scena.** `lab.ordini` pesa 2 437 499 byte in tutto, la differenza fra
+i due shard è di **34 409 byte**, e la soglia perché una migrazione parta è tre volte la dimensione
+di range configurata, cioè **384 MB** con i 128 predefiniti: un rapporto di uno a undicimila e
+settecento. Il registro del cluster conferma: sei eventi in tutto, **zero** `moveChunk` e zero
+`moveRange`. I quattro chunk della demo sono opera di `shardCollection()` su collezione vuota — «by
+default, the operation creates 2 chunks per shard» — e i loro confini sono lo spazio a 64 bit tagliato
+in quattro parti uguali, da `MinKey` a −2⁶²+2 a 0 a +2⁶²−2 a `MaxKey`. Non è bilanciamento: è
+geometria decisa prima che esistesse un documento. Dire «e qui il balancer ridistribuisce» sarebbe
+stata una didascalia falsa su una fotografia vera.
+
+**La chiave sbagliata, provata.** Stessa forma di documento, stessi `_id` interi crescenti, cambiata
+solo la chiave: `{_id: 1}` invece di `{_id: "hashed"}`. Su collezione vuota, **un** chunk su un
+solo shard; dopo ventimila inserimenti, **20 000 documenti su uno shard e l'altro che non compare
+nemmeno nella distribuzione**, ancora un chunk, zero migrazioni. La controprova con la chiave hashed
+sulla stessa collezione: 9860 e 10140, gli stessi due numeri di [V-058](Sources.md#v-058).
+
+E poi il pezzo che non cercavo. Su quella collezione cento-a-zero,
+`sh.balancerCollectionStatus()` risponde **`balancerCompliant: true`**. Il cluster considera
+bilanciata una distribuzione in cui uno dei due shard non sta facendo niente — e ha ragione, perché
+la differenza è 1,2 MB contro una soglia di 384. L'errore irreversibile di questa architettura non
+ha sintomo, e lo strumento che dovrebbe accorgersene conferma che va tutto bene. Quella riga è
+diventata il centro della pagina e la prima delle due citazioni per le slide.
+
+**La terza cosa, che nessuno cercava.** Misurando i tempi di caricamento delle due chiavi ho ottenuto
+9718 ms per la hashed contro poche centinaia per la ranged: in contraddizione con
+[V-058](Sources.md#v-058), che per gli stessi ventimila documenti aveva misurato 1202 ms. Prima di
+pubblicare un numero che smentiva il repository ho alternato l'ordine su tre giri — hashed
+9910/8180/10027, ranged 704/192/432 — e il divario è rimasto: non era rumore né effetto della cache.
+La causa vera l'ha data il codice del lab, non il ragionamento: `30-dati-demo.js` alla riga 296 scrive
+`ordered: false`, e le mie prove usavano il predefinito. Un esperimento due-per-due l'ha confermato:
+hashed + `ordered: true` costa 11 328 e 9 393 ms, hashed + `ordered: false` 336 e 408 ms, la chiave
+monotona costa uguale in tutte e due le forme. Il costo **non** è la chiave hashed: è la chiave
+hashed insieme al lotto ordinato, perché «`mongos` attempts to send the writes to multiple shards
+simultaneously» e con l'ordine da mantenere non può ([S-071](Sources.md#s-071)). È il difetto più
+insidioso dei tre, perché colpisce chi ha scelto **bene** e non ha toccato il codice di caricamento
+che funzionava sul replica set. Il lab scriveva la riga giusta dal primo giorno per allineamento con
+gli altri due stack; da oggi sa perché.
+
+Il valore fuori scala — 1947 ms per ranged + `ordered: false`, contro 192, 248 e 340 degli altri tre
+casi ranged — è rimasto nella tabella con la sua riserva. Toglierlo sarebbe scegliere i dati.
+
+**La forma della pagina** è fissata in [ADR-0068](Decision.md#adr-0068): apre sull'irreversibilità e
+non sulla topologia, perché è l'unica informazione che cambia il *momento* in cui si decide; scrive
+«quando non serve» dichiarando che il manuale non lo dice — la sezione «Considerations Before
+Sharding» non contiene nessuna soglia, nessuna dimensione minima, nessuno sconsiglio circostanziato
+([S-069](Sources.md#s-069), «cosa non afferma»), quindi il giudizio è di chi scrive e va attribuito a
+chi scrive; e non ripete il file Compose riga per riga come fa la pagina del replica set, perché qui
+il file non è il soggetto — restano solo i due punti che si capiscono guardandolo, la catena dei sei
+anelli e il difetto del dbpath dei config server.
+
+Tutte le prove hanno girato in un database `prova` buttato via alla fine. `lab.ordini` è stata
+ricontata a ogni passaggio — 20 000, sempre — e `make smoke-03` chiude a 62 controlli e 0
+fallimenti.
+
+Chiuso il Task 8, l'indice non ha più promesse aperte fra le pagine di architettura: le tre stanno
+tutte nel repository.
+
+**Note di metodo.**
+
+112. **Se una misura contraddice quello che il repository ha già scritto, la contraddizione è
+     l'informazione — ma solo dopo aver escluso te stesso.** Il primo istinto davanti a 9718 ms
+     contro 1202 è ripetere finché non torna, il secondo è pubblicare il numero nuovo dicendo «sul
+     mio portatile fa così». Nessuno dei due serve. Quello che è servito è stato tenere la
+     contraddizione aperta e cercare **che cosa avevo fatto di diverso**, che si scopre leggendo il
+     codice del lab e non rieseguendo il proprio. La differenza era un parametro che non avevo
+     nemmeno scritto, perché era il predefinito. Una misura che contraddice il registro è quasi
+     sempre una misura di un'altra cosa: trovare quale altra cosa vale più della misura.
+113. **Una trappola descritta bene resta una previsione: diventa una trappola quando la vedi
+     scattare.** La chiave monotona era spiegata in questo repository con tre citazioni e un
+     paragrafo di commento nel seed, e sembrava materiale finito. Provarla ha aggiunto la sola cosa
+     che le mancava — che l'errore **non ha sintomo**, e che lo strumento di diagnosi lo dichiara
+     conforme. Quella riga non sta in nessuna delle tre citazioni: si vede solo eseguendo. Vale come
+     regola di dosaggio dello sforzo, perché provare costa ore: si prova ciò che il talk deve
+     **mostrare**, e si cita ciò che il talk deve solo dire.

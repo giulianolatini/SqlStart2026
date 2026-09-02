@@ -2141,7 +2141,7 @@ web:
   l'indice `_id_hashed` che `shardCollection()` crea da sé si può togliere solo «starting in
   MongoDB 7.0.3 (and 6.0.12 and 5.0.22)» — il lab è sulla 7.0.40 e quindi ci rientra, ma è un
   dettaglio legato alla versione pinnata da [ADR-0028](Decision.md#adr-0028).
-- **Usata da:** ADR-0064
+- **Usata da:** ADR-0064, ADR-0068
 
 <a id="s-067"></a>
 ### S-067 — MongoDB Manual 7.0: Choose a Shard Key
@@ -2190,7 +2190,7 @@ web:
   (`analyzeShardKey`), che il lab non usa e che sarebbe lo strumento giusto in un caso vero. Non è
   entrato nel materiale perché richiede un campione di query reali, che una demo con dati generati
   non ha.
-- **Usata da:** ADR-0064
+- **Usata da:** ADR-0064, ADR-0068
 
 <a id="s-068"></a>
 ### S-068 — Docker Docs: Use profiles with Compose
@@ -2219,6 +2219,171 @@ web:
   disponibile. Qui è provata su v5.5.0 ([V-059](#v-059)); su una versione più vecchia il
   comportamento va riverificato prima di fidarsene.
 - **Usata da:** ADR-0066
+
+<a id="s-069"></a>
+### S-069 — MongoDB Manual 7.0: Sharding (la pagina d'ingresso)
+
+- **URL:** https://www.mongodb.com/docs/v7.0/sharding/ (citazioni dalla variante `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — il problema, che è di capacità e non di disponibilità.** «Database
+  systems with large data sets or high throughput applications can challenge the capacity of a
+  single server. For example, high query rates can exhaust the CPU capacity of the server. Working
+  set sizes larger than the system's RAM stress the I/O capacity of disk drives.» Le due risposte
+  possibili sono nominate e messe una contro l'altra: «*Vertical Scaling* increases the capacity of
+  a single server by using a more powerful CPU, adding more RAM, or expanding storage. Available
+  technology and cloud provider hardware configurations impose a practical maximum for vertical
+  scaling.» contro «*Horizontal Scaling* involves dividing the system dataset and load over
+  multiple servers, adding more servers to increase capacity as required. Each machine handles a
+  subset of the overall workload, which can cost less than high-end hardware for a single machine.
+  **The trade-off is increased complexity in infrastructure and maintenance.**» L'ultima frase è
+  quella che il laboratorio mette in pratica: undici container contro uno.
+- **Cosa afferma, secondo punto — i tre componenti, e i loro vincoli.** «Each shard contains a
+  subset of the sharded data. Each shard must be deployed as a replica set.» · «The `mongos` acts
+  as a query router, providing an interface between client applications and the sharded cluster.» ·
+  «Config servers store metadata and configuration settings for the cluster. Config servers must be
+  deployed as a replica set (CSRS).» E la granularità: «MongoDB shards data at the collection
+  level, distributing the collection data across the shards in the cluster.»
+- **Cosa afferma, terzo punto — l'irreversibilità, che è la frase che apre la pagina del lab.**
+  Sotto il titolo «Considerations Before Sharding»: «Sharded cluster infrastructure requirements
+  and complexity require careful planning, execution, and maintenance.» e subito dopo, in una riga
+  sola: «**Once a collection has been sharded, MongoDB provides no method to unshard a sharded
+  collection.**» Con il temperamento che va riportato insieme: «While you can reshard your
+  collection later, carefully consider your shard key choice to avoid scalability and performance
+  issues.»
+- **Cosa afferma, quarto punto — le collezioni che non sono distribuite non spariscono.** «A
+  database can have a mixture of sharded and unsharded collections. Sharded collections are
+  partitioned and distributed across the shards in the cluster. **Unsharded collections are stored
+  on a primary shard. Each database has its own primary shard.**» È la spiegazione del settimo
+  esito di [V-058](#v-058), dove una collezione creata al volo attraverso il router risultava non
+  distribuita e viveva tutta su `shard2rs`.
+- **Cosa afferma, quinto punto — da dove si entra, e da dove non si entra.** «You must connect to a
+  mongos router to interact with any collection in the sharded cluster. This includes sharded *and*
+  unsharded collections. **Clients should *never* connect to a single shard to perform read or
+  write operations.**» Letta insieme al quarto esito di [V-058](#v-058) — le stesse credenziali che
+  entrano dal router falliscono su uno shard — questa riga cambia di segno: quello che sembrava un
+  limite scomodo del lab è la configurazione che rende difficile fare la cosa che il manuale
+  vieta.
+- **Cosa afferma, sesto punto — che cosa si guadagna, in tre voci.** Letture e scritture: «MongoDB
+  distributes the read and write workload across the shards in the sharded cluster, allowing each
+  shard to process a subset of cluster operations.» Capacità: «As the data set grows, additional
+  shards increase the storage capacity of the cluster.» E la disponibilità, che è **parziale** e va
+  detta così: «Even if one or more shard replica sets become completely unavailable, the sharded
+  cluster can continue to perform partial reads and writes. That is, while data on the unavailable
+  shard(s) cannot be accessed, reads or writes directed at the available shards can still succeed.»
+- **Cosa non afferma:** **quando lo sharding non serve.** La pagina non contiene una soglia, una
+  dimensione minima, un numero di documenti, né una frase del tipo «non distribuire se…». La
+  sezione che sembra promettere quel contenuto — «Considerations Before Sharding» — avverte sulla
+  complessità, sull'irreversibilità e sulla scelta della chiave, ma non sconsiglia mai lo sharding
+  in nessuna circostanza. Chi scrive «il manuale dice di non fare sharding sotto i N documenti» sta
+  citando qualcos'altro. Nella pagina del laboratorio quel giudizio è dichiarato per quello che è:
+  una conclusione tratta dai numeri dei tre stack, non una citazione.
+- **Riserve:** due. La prima riguarda una condizione che il lab non incontra mai e che quindi non è
+  stata indagata: «Starting in MongoDB 5.1, when starting, restarting or adding a shard server with
+  `sh.addShard()` the Cluster Wide Write Concern (CWWC) must be set», e «if the `CWWC` is not set
+  and the shard is configured such that the default write concern is `{ w : 1 }` the shard server
+  will fail to start or be added and returns an error». Lo stack 03 non imposta mai il CWWC e
+  `sh.addShard()` riesce ([V-055](#v-055)): la condizione descritta non si presenta con un replica
+  set da uno o tre membri, ma il perché non è stato verificato. La seconda: la pagina descrive
+  anche zone, resharding, change stream e transazioni distribuite, che il laboratorio non usa e su
+  cui questa fonte non è stata letta con attenzione.
+- **Usata da:** ADR-0068
+
+<a id="s-070"></a>
+### S-070 — MongoDB Manual 7.0: Sharded Cluster Balancer
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/sharding-balancer-administration/ (citazioni dalla
+  variante `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — che cos'è e, soprattutto, dove gira.** «The MongoDB balancer is a
+  background process that monitors the amount of data on each shard for each sharded collection.»
+  E la riga che smentisce l'idea più diffusa: «**The balancer runs on the primary of the config
+  server replica set (CSRS).**» Non su `mongos`. Il router instrada; a spostare i dati è il
+  primario dei config server, che nel lab è un container che sembra non fare niente.
+- **Cosa afferma, secondo punto — è acceso da solo.** «By default, the balancer process is always
+  enabled.» Coerente con quanto `sh.status()` mostrava già a cluster vuoto in
+  [V-055](#v-055): `Currently enabled: yes` con zero shard registrati.
+- **Cosa afferma, terzo punto — la soglia, che è la ragione per cui nel lab non si muove mai.** «To
+  minimize the impact of balancing on the cluster, the balancer only begins balancing after the
+  distribution of data for a sharded collection has reached certain thresholds.» E il numero:
+  «**A collection is considered balanced if the difference in data between shards (for that
+  collection) is less than three times the configured range size for the collection. For the
+  default range size of `128MB`, two shards must have a data size difference for a given collection
+  of at least `384MB` for a migration to occur.**» La stessa regola detta in termini di chunk:
+  «When the collection data shared between two shards differs by three or more times the configured
+  `chunkSize` setting, the balancer migrates chunks between the shards.»
+- **Cosa afferma, quarto punto — non è gratis, e la pagina lo dice due volte.** «The balancing
+  procedure for sharded clusters is entirely transparent to the user and application layer, though
+  there may be some performance impact while the procedure takes place.» · «Range migrations carry
+  some overhead in terms of bandwidth and workload, both of which can impact database performance.»
+  Il momento più caro è nominato con precisione: «MongoDB briefly pauses all application reads and
+  writes to the collection being migrated to on the source shard before updating the config servers
+  with the range location. MongoDB resumes application reads and writes after the update.»
+- **Cosa afferma, quinto punto — quanto può fare in parallelo.** «Restricting a shard to at most
+  one migration at any given time.» e «For a sharded cluster with *n* shards, MongoDB can perform
+  at most *n/2* (rounded down) simultaneous migrations». Con i due shard del lab: **una** migrazione
+  alla volta, se mai ce ne fosse una.
+- **Cosa non afferma:** ogni quanto il balancer guardi. Non c'è una frequenza di sondaggio, non c'è
+  la durata tipica di una migrazione, e non c'è alcun modo di dedurre dalla pagina quanto tempo
+  passi fra il superamento della soglia e il primo spostamento. La pagina descrive **se** il
+  balancer si muove, non **quando**.
+- **Riserve:** i 128 MB sono il valore predefinito di `chunkSize`, non una costante: è
+  configurabile per collezione con `configureCollectionBalancing`. Nel lab il predefinito è quello
+  in vigore, letto e non supposto ([V-061](#v-061) riporta `chunkSize: 128` da
+  `sh.balancerCollectionStatus()`). E la soglia dei 384 MB **non è mai stata superata** in nessuna
+  misura di questo repository: quello che è provato è che sotto la soglia il balancer sta fermo,
+  non che sopra si muova.
+- **Usata da:** ADR-0068
+
+<a id="s-071"></a>
+### S-071 — MongoDB Manual 7.0: Bulk Write Operations (l'ordine, e il collo di bottiglia monotono)
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/bulk-write-operations/ (citazioni dalla variante
+  `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — ordinato e non ordinato non sono la stessa operazione.** «Bulk
+  write operations execute either serially (*ordered*) or in any order (*unordered*). **By default,
+  operations are ordered and stop on the first error.** Unordered operations continue despite
+  errors and may execute in parallel, **making them typically faster for sharded collections.**»
+  Il predefinito è quello caro, ed è il predefinito.
+- **Cosa afferma, secondo punto — e per uno sharded cluster lo dice esplicitamente.** Sotto
+  «Strategies for Bulk Inserts to a Sharded Collection», la sezione «Unordered Writes to `mongos`»:
+  «To improve write performance to sharded clusters, perform an unordered bulk write by setting
+  `ordered` to `false` when you perform a bulk write. **`mongos` attempts to send the writes to
+  multiple shards simultaneously.**» Il meccanismo è tutto in quel *simultaneously*: con un lotto
+  ordinato non può, perché mantenere l'ordine fra shard diversi vuol dire aspettare.
+- **Cosa afferma, terzo punto — il collo di bottiglia monotono, detto più brutalmente che in
+  [S-067](#s-067).** «Avoid Monotonic Throttling»: «**If your shard key increases monotonically
+  during an insert, then all inserted data goes to the last chunk in the collection, which will
+  always end up on a single shard. Therefore, the insert capacity of the cluster will never exceed
+  the insert capacity of that single shard.**» È la terza fonte indipendente sullo stesso difetto,
+  e l'unica che lo formula come un tetto invece che come uno squilibrio.
+- **Cosa afferma, quarto punto — e spiega perché nel lab si distribuisce prima e si riempie poi.**
+  «If your sharded collection is empty and you are not using hashed sharding for the first key of
+  your shard key, then your collection has only one initial chunk, which resides on a single shard.
+  MongoDB must then take time to receive data and distribute chunks to the available shards.» Il
+  «one initial chunk» è esattamente quello che [V-061](#v-061) ha contato distribuendo una
+  collezione vuota con `{_id: 1}`.
+- **Cosa non afferma:** **quanto** costi l'ordine. «Typically faster» non è un numero, e la pagina
+  non ne dà nessuno: né un fattore, né un ordine di grandezza, né una dipendenza dal numero di
+  shard. Il rapporto di circa venticinque a uno misurato nel lab è in [V-061](#v-061) e non qui.
+  E non dice che cosa succeda con una chiave **hashed** in particolare: parla di sharded
+  collection in generale, mentre il caso peggiore è quello in cui lo shard di destinazione cambia
+  quasi a ogni documento.
+- **Riserve:** l'esempio di codice della sezione «Avoid Monotonic Throttling» è in C++ e lavora
+  sugli `ObjectId`, invertendo o scambiando parole di sedici bit per rompere la monotonia. Non è
+  applicabile al laboratorio, dove gli `_id` sono interi generati apposta, e non è stato provato.
+  La pagina è quella del ramo v7.0, cioè della versione pinnata; sul ramo 8.x la stessa materia è
+  riorganizzata sotto `bulkWrite`.
+- **Usata da:** ADR-0068
 
 ## Verifiche empiriche
 
@@ -6397,7 +6562,7 @@ db.ordini.find({citta: "Ancona"})               -> shard1rs, shard2rs      (2 sh
   controllo aggiunto. Password di scarto, `.env` cancellato in coda, ogni giro chiuso con `down -v`
   e residui verificati a zero: nessun container, nessun volume, nessuna rete. Tutto su arm64.
 - **Data:** 2026-09-01
-- **Usata da:** ADR-0064, ADR-0065
+- **Usata da:** ADR-0064, ADR-0065, ADR-0068
 
 <a id="v-059"></a>
 ### V-059 — Il profilo con cui si spegne non è quello con cui si è acceso, e Compose non lo dice
@@ -6562,3 +6727,141 @@ cluster pronto: 2 shard registrati
   due casi. Le sei misure qui sopra restano quelle prese davvero, con `alpine`.
 - **Data:** 2026-09-02
 - **Usata da:** ADR-0067
+
+<a id="v-061"></a>
+### V-061 — Il balancer non si muove mai, e la chiave sbagliata passa per «bilanciata»
+
+- **Comandi:** `make up-03`; da `mongos`, `db.collection.stats()`, `$shardedDataDistribution`,
+  `config.chunks`, `config.changelog`, `sh.balancerCollectionStatus()`, `sh.shardCollection()` con
+  le due strategie, `insertMany` con `ordered` vero e falso; `make smoke-03`
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.5.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), profilo `palco`, 2026-09-02
+- **Che cosa si voleva sapere:** il Task 8 scrive la pagina dello sharded cluster, e due sezioni
+  non si potevano scrivere con quello che c'era. La prima è il balancer: dire «bilancia» è un
+  aggettivo, e serviva sapere se in questa demo lavori davvero. La seconda è la shard key
+  sbagliata, che fino a oggi il repository citava ([S-067](#s-067)) senza averla mai vista fallire —
+  e una trappola scritta senza il sintomo è una previsione ([ADR-0052](Decision.md#adr-0052)).
+
+- **Esito, primo punto — quanto pesa davvero la collezione della demo.** Da `mongos`, su
+  `lab.ordini` a cluster sano:
+
+```
+documenti      : 20000
+dataSize       : 2 437 499 byte   (avgObjSize 121)
+shard1rs       : 1 201 545 byte
+shard2rs       : 1 235 954 byte
+differenza     :    34 409 byte
+```
+
+  La soglia oltre la quale il balancer si muove è **tre volte** la dimensione di range configurata,
+  cioè 384 MB con i 128 MB predefiniti ([S-070](#s-070)). `sh.balancerCollectionStatus("lab.ordini")`
+  conferma il predefinito in vigore — `chunkSize: 128` — e risponde `balancerCompliant: true`. La
+  differenza misurata sta **quattro ordini di grandezza** sotto la soglia: 34 KB contro 384 MB, un
+  rapporto di circa **1 a 11 700**.
+
+- **Esito, secondo punto — e infatti il balancer non ha mai spostato niente.** Il registro del
+  cluster, dalla nascita:
+
+```
+config.changelog: 6 eventi in tutto
+   addShard: 2
+   shardCollection.start: 1      shardCollection.end: 1
+   setClusterParameter.start: 1  setClusterParameter.end: 1
+migrazioni (moveChunk | moveRange): 0
+balancer abilitato: true     ·     in corso: false
+```
+
+  I quattro chunk della demo **non sono opera del balancer**: sono la distribuzione iniziale che
+  `shardCollection()` fa su una collezione vuota, due per shard ([S-066](#s-066)). Il balancer è
+  acceso, guarda, e non ha mai avuto niente da fare. Detto per la pagina: in questa demo il balancer
+  **non entra in scena**, e raccontarlo come se stesse lavorando sarebbe falso.
+
+- **Esito, terzo punto — i confini dei quattro chunk, che non sono casuali.** Letti da
+  `config.chunks`, con i due estremi a 64 bit riportati in decimale:
+
+```
+shard2rs   MinKey            ->  -4 611 686 018 427 387 902     (-2^62 + 2)
+shard2rs   -4 611 686 …902   ->                            0
+shard1rs                 0   ->   4 611 686 018 427 387 902     (+2^62 - 2)
+shard1rs    4 611 686 …902   ->  MaxKey
+```
+
+  È lo spazio dei valori hash — un intero con segno a 64 bit — tagliato in **quattro parti uguali**,
+  due per shard. Non è una distribuzione che emerge dai dati: è geometria decisa prima che il primo
+  documento esista.
+
+- **Esito, quarto punto — la chiave sbagliata, provata.** Database di scarto, stessa forma di
+  documento, stessi `_id` interi 0…19 999, chiave `{_id: 1}` invece di `{_id: "hashed"}`. Alla
+  distribuzione, su collezione **vuota**:
+
+```
+chunk alla creazione: 1
+   shard1rs   MinKey -> MaxKey
+```
+
+  Un chunk solo, su un solo shard, come [S-071](#s-071) dichiara. Poi i ventimila documenti:
+
+```
+shard1rs: 20000 documenti, 1 200 000 byte
+shard2rs: —  (non compare nella distribuzione)
+chunk dopo l'inserimento: 1
+migrazioni nel changelog: 0
+balancerCompliant: TRUE
+```
+
+  **Il cento per cento dei documenti su uno dei due shard, e il cluster la considera una collezione
+  bilanciata.** Non è un guasto del balancer: 1,2 MB di differenza sono sotto la soglia di 384 MB,
+  quindi la risposta è formalmente corretta. È il punto didattico dell'intera misura — l'errore non
+  ha nessun sintomo, e lo strumento che dovrebbe accorgersene risponde «tutto a posto».
+
+- **Esito, quinto punto — la controprova, con la sola chiave cambiata.** Stessa collezione, stessa
+  forma, stessi `_id`, chiave `{_id: "hashed"}`:
+
+```
+shard1rs:  9860 documenti
+shard2rs: 10140 documenti
+```
+
+  Sono **le stesse due cifre** della demo ([V-058](#v-058)), su un database diverso e con documenti
+  diversi: la ripartizione dipende dall'hash degli `_id` e dai confini dei chunk, non dal contenuto.
+
+- **Esito, sesto punto — il tempo, dove c'era una contraddizione da sciogliere.** Le prime misure
+  davano la chiave hashed a circa 9 800 ms contro i 530 della ranged, mentre [V-058](#v-058) aveva
+  cronometrato il seed della demo — stessa chiave hashed, stessi ventimila documenti — a **1202 ms**.
+  Uno dei due numeri doveva essere sbagliato. Alternando l'ordine su tre giri il divario è rimasto
+  al suo posto (hashed 9910 / 8180 / 10027 ms, ranged 704 / 192 / 432), quindi non era rumore. La
+  differenza era nel codice: il seed del lab scrive `insertMany(lotto, { ordered: false, … })`
+  (`docker/03-sharded/init/30-dati-demo.js`, riga 296), le prove no. Quattro casi, due giri:
+
+```
+                          giro 1      giro 2
+hashed  ordered: true     11 328 ms    9 393 ms
+hashed  ordered: false       336 ms      408 ms
+ranged  ordered: true        340 ms      192 ms
+ranged  ordered: false       248 ms    1 947 ms
+```
+
+  Il costo **non è la chiave hashed**: è la chiave hashed *insieme* al lotto ordinato. Con
+  `ordered: false` le due chiavi costano uguale. Con `ordered: true` — che è il **predefinito** —
+  la hashed paga un fattore fra venti e trenta, perché mantenere l'ordine fra shard diversi
+  impedisce al router di spedire in parallelo, e con una chiave hashed lo shard di destinazione
+  cambia quasi a ogni documento ([S-071](#s-071)).
+
+- **Esito, settimo punto — il laboratorio è rimasto intatto.** Ogni prova è stata fatta in un
+  database `prova` cancellato in coda; `lab.ordini` è rimasta a 20 000 documenti in ogni
+  controllo, e `make smoke-03` chiude a **62 controlli superati e 0 errori** dopo tutto.
+
+- **Riserve:** cinque. *(a)* Il valore `1 947 ms` di «ranged, `ordered: false`» è fuori scala
+  rispetto agli altri tre valori ranged, tutti fra 192 e 340 ms: è rumore della macchina, e viene
+  riportato invece che tolto perché toglierlo sarebbe scegliere i dati. Tutti i tempi sono
+  esecuzioni singole su un portatile con Docker Desktop, non medie. *(b)* La soglia dei 384 MB
+  **non è stata superata**: è provato che sotto la soglia il balancer sta fermo, non che sopra si
+  muova. *(c)* Lo shard che riceve tutto con la chiave monotona è lo **shard primario del
+  database**, e non è sempre lo stesso: nei primi giri era `shard1rs`, nell'ultimo `shard2rs`.
+  Quello che è costante è che sia **uno solo**. *(d)* Il fattore venticinque vale per due shard e
+  per documenti di 121 byte medi; con più shard il divario può solo peggiorare, ma non è stato
+  provato. *(e)* Tutto sul profilo `palco`, cioè con un membro per insieme, e su arm64.
+- **Conseguenza:** [ADR-0068](Decision.md#adr-0068), e le sezioni 4 e 3.2 di
+  `docs/02-architetture/sharded-cluster.md`.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0068
