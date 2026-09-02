@@ -100,24 +100,26 @@ target.
 
 ### Dal secondo stack in poi serve un file che il repository non contiene
 
-L'istanza singola non ha utenti, quindi non ha password. Il replica set sì — e lo sharded
-cluster, quando arriverà, pure. Quella password **non è nel repository e non ci sarà mai**:
+L'istanza singola non ha utenti, quindi non ha password. Il replica set sì, e lo sharded
+cluster pure: sono **due file distinti**, uno per stack, con la stessa riga da riempire. Quella
+password **non è nel repository e non ci sarà mai**:
 `.env.example` è versionato e porta un segnaposto vuoto, `.env` è ignorato da git e porta il
 valore ([ADR-0040](docs/Decision.md#adr-0040)). È il motivo per cui il file non si può
 scaricare insieme al resto: va creato una volta, sulla propria macchina.
 
 ```bash
 cp docker/02-replicaset/.env.example docker/02-replicaset/.env
-# poi aprire il file e scrivere la password dopo «PASSWORD_AMMINISTRATORE=»
+cp docker/03-sharded/.env.example docker/03-sharded/.env
+# poi aprire i file e scrivere la password dopo «PASSWORD_AMMINISTRATORE=»
 ```
 
 Sono credenziali da **laboratorio**, su uno stack che non va esposto fuori dalla macchina di
 chi lo esegue: una password semplice va benissimo. Quello che non va bene è che stia in un
 file versionato, dove sopravvive alla demo e viene copiata altrove insieme al resto.
 
-Chi salta il passo non rompe niente e non resta senza indizi: `make up-02` si ferma prima di
-toccare Docker e stampa quale file manca e come crearlo, invece di lasciare a Compose un «env
-file not found» che non spiega perché quel file non c'è. Il resto di `.env.example` ha già i
+Chi salta il passo non rompe niente e non resta senza indizi: `make up-02` e `make up-03` si
+fermano prima di toccare Docker e stampano quale file manca e come crearlo, invece di lasciare a
+Compose un «env file not found» che non spiega perché quel file non c'è. Il resto di `.env.example` ha già i
 valori del lab: **l'unica riga da riempire è la password**.
 
 Fatto quello, il replica set si accende come l'istanza singola:

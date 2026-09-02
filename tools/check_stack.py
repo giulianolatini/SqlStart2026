@@ -255,12 +255,18 @@ def nome_del_set(configdb: str | None) -> str | None:
 
     Dalla 3.4 `mongos` accetta soltanto la forma `nomeSet/host:porta,…`. L'elenco
     nudo di host è la scrittura di prima, ed è quella che si trova copiando una
-    guida vecchia: oggi produce `FailedToParse: invalid url` e il router non
-    parte (misurato in V-057).
+    guida vecchia: oggi il router non parte (misurato in V-057 e V-070).
+
+    **Un nome vuoto è un nome assente.** `/cfg1:27017` la barra ce l'ha, ma prima
+    non c'è niente. Restituire `""` non farebbe passare il file — il chiamante
+    cercherebbe comunque quel nome fra i `--replSet` e non lo troverebbe — ma lo
+    manderebbe sul messaggio sbagliato: quello del refuso, che dice «i processi
+    partono tutti», mentre `mongos` con quell'argomento non parte affatto
+    (V-070). Lo spazio conta come vuoto per la stessa ragione.
     """
     if not configdb or "/" not in configdb:
         return None
-    return configdb.split("/", 1)[0]
+    return configdb.split("/", 1)[0].strip() or None
 
 
 def montaggi(servizio: dict) -> list[tuple[str, str]]:
@@ -494,8 +500,11 @@ def problemi_di_ruolo(
             problemi.append(
                 f"{nome}: «--configdb {configdb}» non nomina un replica set. "
                 "Dalla 3.4 mongos accetta soltanto la forma "
-                "«nomeSet/host:porta,…», e su un elenco nudo di host risponde "
-                "«FailedToParse: invalid url» (ADR-0063, V-057)"
+                "«nomeSet/host:porta,…» e rifiuta il resto sulla riga di "
+                "comando, con due messaggi diversi: «FailedToParse: invalid "
+                "url» su un elenco di host separati da virgola, «BadValue: "
+                "configdb supports only replica set connection string» su un "
+                "host solo o su un nome di set vuoto (ADR-0063, V-057, V-070)"
             )
         elif nome_del_set(configdb) not in set_dichiarati:
             problemi.append(

@@ -7915,3 +7915,80 @@ giro   up -d --wait torna   rs-init esce   margine   wait rs-init
 - **Usata da:** ADR-0074, ADR-0075
 
 ---
+
+<a id="v-070"></a>
+### V-070 — I due messaggi di un `--configdb` malformato, e il nome di set vuoto che passava per refuso
+
+- **Comandi:** `docker run --rm --entrypoint mongos <digest> --configdb <forma>` su tre forme
+  malformate; `check_stack.nome_del_set` chiamata direttamente su quattro stringhe; e
+  `check_stack.verifica` su un documento sharded sintetico con `--configdb /cfg1:27017`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, immagine `mongo` pinnata per digest da
+  `tools/images.env` (MongoDB 7.0.40), 2026-09-02. Nessuno stack acceso: i tre rifiuti sono
+  dell'analizzatore degli argomenti e arrivano in meno di un secondo.
+- **Che cosa si voleva sapere:** se il rilievo lasciato da Copilot sulla PR #4 —
+  «`nome_del_set()` può restituire una stringa vuota se `--configdb` inizia con `/`, e a quel
+  punto il chiamante la tratta come un nome di replica set valido» — descriva un difetto reale.
+
+- **Esito, primo punto — l'osservazione è esatta.** La funzione, prima della correzione:
+
+```
+nome_del_set('/cfg1:27017')      -> ''
+nome_del_set('   /cfg1:27017')   -> '   '
+nome_del_set('cfgrs/cfg1:27017') -> 'cfgrs'
+nome_del_set('cfg1:27017')       -> None
+```
+
+- **Esito, secondo punto — la diagnosi no: nessun file passava.** Dato a `verifica` un `mongos`
+  con `--configdb /cfg1:27017`, i problemi restituiti sono **due**, non zero: il file veniva
+  bocciato e `check_stack.py` usciva diverso da zero. La stringa vuota non veniva accettata come
+  nome valido — cadeva nel controllo successivo, «nessun mongod dichiara questo `--replSet`».
+  **Non c'era nessun falso negativo**, e non c'è mai stato uno stack approvato per sbaglio.
+
+- **Esito, terzo punto — il difetto vero è la diagnosi, ed è peggiore di quanto suggerito.** Il
+  messaggio che usciva era questo:
+
+```
+mongos: «--configdb» nomina il replica set «», che nessun mongod di questo
+file dichiara con «--replSet». È il caso del refuso, ed è l'unico in cui
+nessuno protesta: i processi partono tutti, e mongos resta a cercare un
+set che non esiste (ADR-0063)
+```
+
+  Due affermazioni false in tre righe. «Nomina il replica set «»»: non nomina niente. «Nessuno
+  protesta: i processi partono tutti»: `mongos` con quell'argomento **non parte**, esce **2** e lo
+  dice. Il messaggio mandava a cercare un refuso di due lettere dentro i `--replSet` del file,
+  mentre il difetto era una barra di troppo sotto gli occhi di chi legge.
+
+- **Esito, quarto punto — `mongos` ha due messaggi per il `--configdb` malformato, non uno.** È la
+  virgola a decidere quale:
+
+```
+mongos --configdb a:27017,b:27017
+  -> FailedToParse: invalid url [a:27017,b:27017]                          (uscita 2)
+mongos --configdb cfg1:27017
+  -> BadValue: configdb supports only replica set connection string        (uscita 2)
+mongos --configdb /cfg1:27017
+  -> BadValue: configdb supports only replica set connection string        (uscita 2)
+```
+
+  [V-057](#v-057) aveva misurato la sola forma con la virgola, ed è accurata. Il messaggio di
+  `check_stack.py` però citava quella stringa come se fosse **l'unica**, e la prova che lo copriva
+  usava un host solo: uno scarto fra ciò che la prova esercitava e ciò che il messaggio prometteva,
+  nato dentro lo stesso commit. Adesso il messaggio porta entrambe le stringhe.
+
+- **Riserve:**
+  - **a.** Le tre forme sono state provate con `docker run` sulla riga di comando, fuori dallo
+    stack. È il posto giusto — il rifiuto è dell'analizzatore degli argomenti e precede qualunque
+    rete — ma non dice nulla su che cosa farebbe un `mongos` già avviato.
+  - **b.** I testi dei due messaggi sono di **MongoDB 7.0.40**, l'immagine pinnata del repository.
+    Sono stringhe di prodotto e possono cambiare di versione: quello che non cambia è che il
+    processo esce 2 senza partire.
+  - **c.** Non è stata cercata una classificazione esaustiva delle forme malformate. Due messaggi
+    sono quelli incontrati su tre tentativi, non l'elenco completo di ciò che `mongos` sa dire.
+  - **d.** La correzione riguarda **la qualità della diagnosi, non la copertura**: prima e dopo, un
+    `--configdb` con il nome di set vuoto fa fallire `make stack-check`. Chi misurasse il valore di
+    questa modifica contando gli stack bocciati non troverebbe differenza.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0076
+
+---

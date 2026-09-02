@@ -4799,3 +4799,72 @@ calendario di [ADR-0057](#adr-0057) non lo consente, e un debito rinviato due vo
 nessuno salderà.
 
 **Fonti:** [V-069](Sources.md#v-069)
+
+---
+
+<a id="adr-0076"></a>
+## ADR-0076 — Un nome di replica set vuoto è un nome assente, e un messaggio che dice «nessuno protesta» deve averlo verificato
+
+**Data:** 2026-09-02 · **Stato:** Accettata
+
+**Contesto.** La PR #4 è stata data in lettura a un recensore esterno, come le tre precedenti.
+Dei due rilievi, uno riguarda `tools/check_stack.py`: «`nome_del_set()` può restituire una stringa
+vuota se `--configdb` inizia con `/`, e a quel punto il chiamante la tratta come un nome di
+replica set valido».
+
+Arbitrato eseguendo ([V-070](Sources.md#v-070)), il rilievo si spacca in due. **L'osservazione è
+esatta**: `nome_del_set('/cfg1:27017')` restituiva `''`, e con uno spazio davanti restituiva lo
+spazio. **La diagnosi è sbagliata**: il chiamante non la trattava affatto come valida — il file
+veniva bocciato lo stesso, con due problemi, e `check_stack.py` usciva diverso da zero. Non
+esisteva il falso negativo che il rilievo lascia immaginare.
+
+Il difetto però c'era, ed era peggiore di quello segnalato. Il messaggio che usciva diceva «nomina
+il replica set «»» — non nomina niente — e soprattutto «è l'unico caso in cui nessuno protesta: i
+processi partono tutti». Misurato: `mongos --configdb /cfg1:27017` **non parte**, esce 2 e
+risponde `BadValue: configdb supports only replica set connection string`. Lo strumento mandava a
+cercare un refuso di due lettere dentro i `--replSet` del file, mentre il difetto era una barra di
+troppo in bella vista. È esattamente la forma d'errore già registrata dalla **nota di metodo 129**
+e da [ADR-0072](#adr-0072): un messaggio vero alla lettera che risponde alla domanda sbagliata.
+
+La misura ha trovato un secondo scostamento che nessuno aveva cercato. Il messaggio del
+`--configdb` senza nome di set cita `FailedToParse: invalid url`, che [V-057](Sources.md#v-057)
+aveva misurato — sulla forma con la **virgola**. Su un host solo, che è precisamente ciò che la
+prova del repository esercitava, `mongos` risponde `BadValue: configdb supports only replica set
+connection string`. La fonte era accurata; il messaggio la generalizzava.
+
+**Decisione.**
+
+1. **`nome_del_set` normalizza, e un nome vuoto è un nome assente.** Restituisce `None` per
+   `/cfg1:27017` come per `cfg1:27017`, e lo spazio conta come vuoto. Le due scritture sono lo
+   stesso errore — «`--configdb` non nomina un replica set» — e devono ricevere lo stesso
+   messaggio.
+
+2. **Il messaggio porta entrambe le stringhe misurate**, con la condizione che le distingue: la
+   virgola. Un messaggio di `check_stack.py` cita il sintomo che l'utente vedrà, e citarne uno solo
+   quando ce ne sono due è una promessa che l'utente scopre falsa nel momento peggiore.
+
+3. **Un rilievo esterno si accoglie per l'osservazione, non per la diagnosi.** Qui accogliere il
+   verdetto («è trattata come valida») avrebbe portato a cercare un falso negativo inesistente;
+   respingere il rilievo perché il verdetto è falso avrebbe lasciato in piedi un messaggio che
+   afferma il contrario di ciò che accade. Le due parti si separano eseguendo, e solo eseguendo.
+
+4. **Le due prove nuove sono state viste fallire prima di essere accettate** (nota di metodo 131).
+   Con il difetto rimesso al suo posto, la prima riporta per intero il messaggio del refuso e la
+   seconda `assert '' is None`: la suite passa da 139 a **141**.
+
+**Conseguenze.** `make stack-check` boccia esattamente gli stessi file di prima — la copertura non
+cambia, e chi misurasse questa modifica contando gli stack respinti non troverebbe differenza. A
+cambiare è che il file bocciato adesso dice dov'è il difetto. Resta scritto che [V-057](Sources.md#v-057)
+è accurata e che a essere troppo larga era la sua citazione: una fonte misurata su un caso non
+autorizza a parlare di tutti i casi della stessa famiglia.
+
+**Alternative scartate.** Lasciare com'era, visto che nessun file passava per sbaglio — sarebbe
+coerente solo se il valore di `check_stack.py` fosse il codice d'uscita, mentre è il messaggio:
+un controllo che boccia senza saper dire perché costringe a rifare a mano il lavoro che dovrebbe
+risparmiare. Far restituire a `nome_del_set` la stringa vuota e distinguere nel chiamante — sposta
+la normalizzazione nel punto in cui il valore si usa invece che in quello in cui si produce, e
+obbliga ogni futuro chiamante a ricordarsene. Aggiungere un terzo messaggio dedicato al nome vuoto
+— tre messaggi per un errore che l'utente vede sempre nello stesso modo, e la prova avrebbe dovuto
+distinguere due casi che `mongos` non distingue.
+
+**Fonti:** [V-070](Sources.md#v-070)

@@ -4230,7 +4230,7 @@ gli stessi esiti, e le 15 porte tutte libere.
      non controlla niente — un `assert` su un dizionario vuoto passa sempre. Rompere ciò che si sta
      proteggendo è l'unico modo economico di sapere che la protezione tocca la cosa giusta.
 
-**Consuntivo del branch, alla vigilia dell'unione.** **Ventidue** commit e **trentatré** file
+**Consuntivo del branch, alla vigilia dell'unione.** **Ventitré** commit e **trentatré** file
 rispetto a `develop`: il piano, undici di task, due punti di ripresa, il commit di avvio, quello
 della nota di metodo lasciata da `feature/02`, la correzione del numero della PR e questo — che è
 compreso nel conto, come prescrive la **nota 37**. La riga diceva «venti» quando fu scritta, e la
@@ -4274,3 +4274,79 @@ anche i numeri delle PR erano dentro il pacchetto invertito.
      posizione.
 
 Stato aggiornato: note di metodo fino alla **132**.
+
+---
+
+## 2026-09-02 — Una review esterna su PR #4, e una fonte citata più larga di com'era stata misurata
+
+Aperta la PR #4, Giuliano l'ha data in lettura a Copilot, come le tre precedenti. Due rilievi in
+linea, entrambi in italiano, entrambi con file e riga. Arbitrati eseguendo, come vuole la regola
+che vale dalla PR #1: prima si lancia il comando, poi si giudica.
+
+**Il primo rilievo è mezzo giusto, e la metà giusta è più grave della metà sbagliata.** Su
+`tools/check_stack.py` il recensore scrive che `nome_del_set()` può restituire una stringa vuota
+se `--configdb` comincia con `/`, «e a quel punto il chiamante la tratta come un nome di replica
+set valido». La prima parte è vera: chiamata su `/cfg1:27017` la funzione restituiva `''`, e con
+uno spazio davanti restituiva lo spazio. La seconda è falsa: dato quel file a `verifica`, i
+problemi restituiti sono **due** e lo stack viene bocciato. Nessun falso negativo, e nessuno stack
+del repository è mai stato approvato per sbaglio.
+
+Il difetto vero sta dove il rilievo non guardava. Il messaggio che usciva era quello del refuso, e
+diceva due cose false in tre righe: «nomina il replica set «»», che non nomina niente, e
+soprattutto «è l'unico caso in cui nessuno protesta: i processi partono tutti». Misurato:
+`mongos --configdb /cfg1:27017` non parte, esce **2** e risponde `BadValue: configdb supports only
+replica set connection string`. Lo strumento mandava a cercare un refuso di due lettere dentro i
+`--replSet` del file mentre il difetto era una barra di troppo in bella vista — la stessa forma
+d'errore della nota 129, incontrata per la terza volta in questo branch.
+
+**E qui la misura ha trovato una cosa che nessuno cercava.** Il messaggio del `--configdb` senza
+nome di set cita `FailedToParse: invalid url`. È una stringa vera, misurata in
+[V-057](Sources.md#v-057) — sulla forma con la **virgola**, `a:27017,b:27017`. Su un host solo
+`mongos` risponde `BadValue: configdb supports only replica set connection string`, cioè un'altra
+cosa. E l'host solo è precisamente ciò che la prova del repository esercitava. Per tutto il Task 5
+la prova ha verificato un caso e il messaggio ne ha promesso un altro, e sono nati nello stesso
+commit. La fonte non ha mai sbagliato: a essere troppo larga era la citazione che ne facevo.
+
+Il motivo per cui la cosa è passata sta nella prova: `assert any("--configdb" in problema …)`.
+Quell'asserzione è vera per il messaggio giusto e per quello del refuso allo stesso modo, quindi
+non poteva distinguerli. Era una prova che si era vista fallire — la nota 131 è rispettata — ma
+che passava per una ragione più debole di quella per cui era stata scritta.
+
+Correzioni: `nome_del_set` normalizza con `strip()` e restituisce `None` per il nome vuoto; il
+messaggio porta entrambe le stringhe misurate, con la virgola come condizione che le distingue.
+Due prove nuove, rotte prima di essere accettate: con il difetto rimesso, la prima riporta per
+intero il messaggio del refuso e la seconda `assert '' is None`. La suite passa da 139 a **141**.
+La decisione è [ADR-0076](Decision.md#adr-0076), la misura [V-070](Sources.md#v-070).
+
+**Il secondo rilievo è giusto e basta.** Il `README.md` scriveva «lo sharded cluster, quando
+arriverà, pure» a proposito del file `.env`, mentre la riga 55 dello stesso file dichiara
+`docker/03-sharded` «nel repository». La contraddizione è nata in questa PR: la tabella dello stato
+è stata aggiornata, il paragrafo sotto no. Guardandolo per correggerlo è venuta fuori la metà
+operativa dello stesso difetto — la sezione si intitola «Dal secondo stack in poi» ma il blocco di
+comandi copiava un file solo, e `docker/03-sharded/.env.example` esiste dal 2 settembre. Adesso il
+paragrafo dice che i file sono due, il blocco li copia entrambi e la frase sugli indizi nomina
+`make up-03` accanto a `make up-02`, perché il guardiano ce l'hanno tutti e due.
+
+**Che cosa non è stato fatto.** Nessuno dei due rilievi tocca il perimetro del branch, e non è
+stato aperto niente di nuovo per l'occasione. Il riepilogo della review elenca i file toccati senza
+altri rilievi: i due commenti in linea sono tutto.
+
+133. **Una fonte misurata su un caso non autorizza a parlare di tutti i casi della sua famiglia.**
+     [V-057](Sources.md#v-057) ha misurato l'elenco di host separati da virgola e ha scritto
+     esattamente quello. Il messaggio dello strumento ha citato la fonte e ha allargato: da «su
+     questa forma risponde così» a «su un elenco nudo di host risponde così». L'allargamento è
+     avvenuto nel passaggio dalla fonte al codice, dove nessun controllo guarda, ed è invisibile
+     proprio perché la citazione è corretta — il numero della fonte esiste, la stringa è testuale,
+     manca solo la condizione sotto cui vale. Citare una misura significa citarne anche il caso.
+
+134. **Un'asserzione può essere così larga da passare per la ragione sbagliata.** La prova che
+     copriva questo messaggio chiedeva che fra i problemi ce ne fosse uno contenente
+     `--configdb`, ed era vera tanto per il messaggio corretto quanto per quello del refuso. È il
+     grado sopra la nota 131: la prova era stata vista fallire, quindi controllava *qualcosa* — ma
+     controllava che ci fosse **un** messaggio, non **quel** messaggio. Quando il valore di uno
+     strumento è ciò che dice, l'asserzione deve leggere ciò che dice, e la forma che funziona è
+     dichiarare anche ciò che il messaggio **non** deve contenere.
+
+Stato aggiornato: decisioni fino a **ADR-0076**, verifiche fino a **V-070**, note di metodo fino
+alla **134**. La suite è a **141** prove. La PR #4 resta aperta: i due thread sono stati chiusi con
+la prova, e l'unione spetta al PO.

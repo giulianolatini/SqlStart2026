@@ -1,6 +1,14 @@
 import pytest
 
-from check_stack import carica, digest_noti_da, leggi_ambiente, main, risolvi, verifica
+from check_stack import (
+    carica,
+    digest_noti_da,
+    leggi_ambiente,
+    main,
+    nome_del_set,
+    risolvi,
+    verifica,
+)
 
 
 def conforme(**modifiche):
@@ -811,6 +819,42 @@ def test_un_configdb_senza_nome_del_set_e_un_problema():
     )
     problemi = verifica(documento, digest_noti={"sha256:aaa"})
     assert any("--configdb" in problema for problema in problemi), problemi
+
+
+def test_un_configdb_con_il_nome_del_set_vuoto_accusa_la_forma_non_il_refuso():
+    # Rilievo di Copilot sulla PR #4, verificato: `/cfg1:27017` la barra ce l'ha,
+    # ma non nomina niente. Il file veniva bocciato lo stesso — quindi nessun
+    # falso negativo — con il messaggio del refuso, che dice «i processi partono
+    # tutti». Misurato: `mongos --configdb /cfg1:27017` non parte affatto, esce 2
+    # e risponde `BadValue: configdb supports only replica set connection string`
+    # (V-070). Un messaggio che manda a cercare un refuso in un `--replSet` è
+    # peggio del silenzio: la barra di troppo è sotto gli occhi di chi legge.
+    documento = sharded(
+        mongos={
+            "command": [
+                "mongos",
+                "--configdb",
+                "/cfg1:27017",
+                "--keyFile",
+                "/keyfile/mongo-keyfile",
+            ]
+        }
+    )
+    problemi = verifica(documento, digest_noti={"sha256:aaa"})
+    accuse = [problema for problema in problemi if problema.startswith("mongos:")]
+    assert accuse, problemi
+    assert all("non nomina un replica set" in accusa for accusa in accuse), accuse
+    assert not any("refuso" in accusa for accusa in accuse), accuse
+
+
+def test_un_nome_di_set_di_soli_spazi_vale_come_assente():
+    # Stessa regola, scritta dove si vede: `nome_del_set` normalizza, e uno spazio
+    # non è un nome. Senza `.strip()` il chiamante confronterebbe «   » con i
+    # `--replSet` dichiarati e ricadrebbe di nuovo sul messaggio del refuso.
+    assert nome_del_set("/cfg1:27017") is None
+    assert nome_del_set("   /cfg1:27017") is None
+    assert nome_del_set("cfgrs/cfg1:27017") == "cfgrs"
+    assert nome_del_set("cfg1:27017") is None
 
 
 def test_un_configdb_che_nomina_un_set_inesistente_e_un_problema():
