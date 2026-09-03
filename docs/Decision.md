@@ -5376,3 +5376,82 @@ ADR-0020.
 
 **Fonti:** nessuna (decisione operativa interna, che estende [ADR-0056](#adr-0056) e serve
 [ADR-0020](#adr-0020))
+
+---
+
+<a id="adr-0084"></a>
+## ADR-0084 — Un restore che perde documenti non è un restore riuscito, anche se `mongorestore` esce zero
+
+**Data:** 2026-09-03 · **Stato:** Accettata
+
+**Contesto:** [ADR-0077](#adr-0077) dice che «un avviso che non cambia il codice d'uscita è un
+avviso che nessuno legge», e lo dice guardando gli script del laboratorio: se un controllo scopre
+qualcosa e poi esce zero, la catena a valle prosegue come se nulla fosse. Il Task 9 di `feature/04`
+ha incontrato la stessa frase dal lato opposto — non uno script che scrive noi, ma uno strumento
+ufficiale che **ha** l'informazione, la stampa, e esce zero lo stesso.
+
+La misura è in [M-024](../app/docs/Sources.md#m-024). Un `mongorestore` su una destinazione già
+popolata riporta:
+
+```
+400000 document(s) restored successfully. 50000 document(s) failed to restore.
+```
+
+e il codice d'uscita è **0**. Non è un caso limite costruito per l'occasione: è quello che succede
+ogni volta che un restore ricade su documenti il cui `_id` esiste già, cioè il secondo giro di
+qualunque restore sulla stessa destinazione. Chi chiama controllando soltanto il codice d'uscita —
+che è il modo in cui si controlla un processo esterno — riceve «riuscito» per un'operazione che ha
+perso un documento su nove.
+
+Sul palco questo è precisamente il difetto peggiore. L'Atto III del Blocco 2 mostra un backup che
+gira mentre il cluster lavora, e la tesi è che il dump non disturbi. Una tesi del genere si regge
+sul fatto che il dump e il restore **siano andati a buon fine**: un ripristino che ha perso un
+nono dei documenti senza dirlo trasformerebbe la dimostrazione in un'affermazione falsa fatta con
+sicurezza.
+
+**Decisione:** l'adattatore `SubprocessBackup` legge la riga di sommario e, quando i falliti sono
+più di zero, solleva `RestoreIncompleto` con i due conteggi — restaurati e persi. Mette cioè il
+verdetto che lo strumento non ha messo.
+
+Tre precisazioni su che cosa questo *non* è. **Non sostituisce il codice d'uscita:** un'uscita
+diversa da zero resta `ComandoFallito` e ha la precedenza, perché lì lo strumento il verdetto lo ha
+dato e va riportato con il suo codice e il suo messaggio. **Non annulla niente:** i documenti già
+entrati restano dentro, l'eccezione racconta l'accaduto e non lo disfa — chi la riceve deve
+decidere che cosa fare della destinazione, e la scelta non è dell'adattatore. **Non è una politica
+sul numero di documenti attesi:** l'adattatore non sa quanti dovevano essere, sa solo che lo
+strumento ne ha dichiarati alcuni persi, e su quello si basa.
+
+La responsabilità sta nell'adattatore e non in chi lo chiama per la ragione che rende una porta una
+porta: la riga di sommario è testo di `mongorestore`, e chi chiama parla con `BackupTool`, non con
+`mongorestore`. Spostare il controllo di sopra vorrebbe dire che ogni chiamante rifà lo stesso
+riconoscimento della stessa riga, e che il primo che si dimentica di farlo riapre il buco.
+
+Il prezzo, dichiarato: **la riga di sommario è un formato di testo, non un'interfaccia**. Se una
+versione futura la riscrive, la guardia non diventa sbagliata — diventa **muta**, che è peggio,
+perché torna il silenzio di prima senza che nessuno lo veda. La difesa è una prova di integrazione
+che esegue un secondo restore sulla stessa destinazione e pretende `RestoreIncompleto` con
+`restaurati == 0` e `falliti == 100000`: il giorno in cui il formato cambia, quella prova diventa
+rossa. È la stessa forma di difesa già usata per l'ispettore che dipende da `config`
+([A-013](../app/docs/Sources.md#a-013)).
+
+**Alternative scartate:** **registrare un avviso e proseguire** — è esattamente lo sbaglio che
+ADR-0077 descrive, con l'aggravante che qui l'avviso esiste già ed è lo strumento a scriverlo.
+**Contare i documenti a posteriori** — richiede di sapere quanti dovevano essere, cioè di mettere
+nell'adattatore una conoscenza del dominio che non gli appartiene; e sulla destinazione di una
+demo il conteggio atteso è proprio la cosa che si vuole verificare, non un dato da assumere.
+**`--stopOnError` sulla riga di comando dello strumento** — non è stata misurata, e in ogni caso
+risponde a un'altra domanda: cambia ciò che lo strumento **fa**, interrompendolo a metà, invece di
+cambiare ciò che l'applicazione **dice** di quello che è successo; un restore fermato a metà è un
+esito peggiore da spiegare dal palco di un restore completato e dichiarato incompleto.
+**Considerare fallito qualunque restore con almeno un fallimento solo nelle prove, e non in
+produzione** — le prove verificherebbero un comportamento che l'applicazione non ha.
+
+Questo ADR **estende** ADR-0077: la regola era «un avviso che non cambia il codice d'uscita è un
+avviso che nessuno legge», e vale per gli avvisi che scriviamo noi. L'aggiunta è che, quando lo
+strumento di qualcun altro commette lo stesso errore, l'adattatore che lo incapsula è il posto in
+cui si ripara.
+
+**Fonti:** nessuna in [`Sources.md`](Sources.md) (decisione di disegno interna, che estende
+[ADR-0077](#adr-0077)); le misure che la giustificano sono
+[M-024](../app/docs/Sources.md#m-024) e [M-023](../app/docs/Sources.md#m-023) nel registro
+dell'applicazione

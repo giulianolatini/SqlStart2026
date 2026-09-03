@@ -5425,3 +5425,118 @@ Stato aggiornato: decisioni fino ad **ADR-0083**, verifiche fino a **V-074**, no
 alla **167**. Le suite: **143** prove per gli strumenti, **214** per l'applicazione più **33** di
 integrazione, `mypy --strict` verde su 39 file. Prossimo passo: **Task 9** del
 [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).
+
+---
+
+## 2026-09-03 — `feature/04`, Task 9: lo strumento che ha perso cinquantamila documenti ed è uscito zero
+
+Il Task 9 attacca la porta `BackupTool` a `mongodump` e `mongorestore`. È il primo adattatore che
+non parla con una libreria ma con un **processo**, e le differenze rispetto a `PymongoStore` vengono
+tutte da lì: la credenziale attraversa un confine di sistema operativo invece che una chiamata di
+funzione, l'avanzamento è testo da riconoscere riga per riga invece che un valore di ritorno, il
+verdetto è un intero che decide qualcun altro, e il processo **sopravvive** a chi lo ha lanciato.
+Le prove dell'applicazione passano da **214 a 243** unitarie e da **33 a 43** di integrazione;
+`mypy --strict` verde su **42** file.
+
+Tre cose sono state scoperte eseguendo, e nessuna delle tre era nel piano.
+
+**Il motivo scritto nel piano era sbagliato, mentre la regola era giusta.** Il Passo 2 prescrive di
+lanciare il processo con gli argomenti in lista e mai con una stringa di shell, «perché una stringa
+di shell fa comparire la password nella tabella dei processi di chiunque guardi». La lista è la
+scelta giusta. Il motivo no: con `-p <valore>` come **elemento della lista** — nessuna shell
+coinvolta da nessuna parte — un `ps -eo args` dentro il container mostra il segreto per intero,
+sedici campioni su sedici presi a cinquanta millisecondi l'uno dall'altro. La tabella dei processi
+legge `argv`, e ad `argv` non importa da dove è arrivato. Quello che protegge davvero il segreto è
+**omettere `-p`**: gli strumenti allora chiedono la password e la leggono dallo `stdin` anche quando
+lo `stdin` non è un terminale. La lista resta comunque necessaria, per la ragione che il piano non
+nomina — senza shell non c'è nessuno a interpretare uno spazio, un apice o un `$` dentro una
+password o dentro un percorso.
+
+**`mongorestore` ha perso cinquantamila documenti ed è uscito zero.** Un restore ripetuto sulla
+stessa destinazione ricade su `_id` che esistono già — lo strumento **inserisce**, non fonde — e
+dichiara `0 document(s) restored successfully. 50000 document(s) failed to restore.` prima di
+restituire **0** al sistema operativo. Chi controlla il processo nel modo in cui si controlla un
+processo, cioè guardando l'intero che restituisce, riceve «riuscito». È
+[ADR-0077](Decision.md#adr-0077) visto dal lato opposto: lì la regola nasceva guardando gli script
+che scriviamo noi, qui è lo strumento ufficiale di MongoDB a scrivere l'avviso e a non cambiare il
+codice d'uscita. Da qui [ADR-0084](Decision.md#adr-0084): quando lo strumento di qualcun altro
+commette quell'errore, l'adattatore che lo incapsula è il posto in cui si ripara, e
+`RestoreIncompleto` mette il verdetto che `mongorestore` non ha messo.
+
+**Quella guardia non è stata progettata: l'ha scoperta il codice che la contiene.** Le prime due
+prove di integrazione sul restore davano per **idempotente** un restore ripetuto, e la premessa era
+scritta a chiare lettere nella docstring di una di loro, come una cosa ovvia. Eseguite,
+`RestoreIncompleto` è stata sollevata, e la parte sbagliata era l'assunzione della prova. È il caso
+speculare della **nota 164**: lì una seconda implementazione corretta rivela il difetto
+dell'originale, qui il codice di produzione rivela il difetto dell'affermazione fatta dalla prova.
+
+**Il comando arriva dal costruttore, e la ragione è un privilegio.** `SubprocessBackup` non sa come
+si raggiunge `mongodump`: lo riceve, `("docker", "exec", "-i", "mongo-rs-1", "mongodump")` dalle
+prove sull'host e `("mongodump",)` dal container al Task 12. Se la politica di esecuzione stesse
+dentro l'adattatore, l'applicazione containerizzata di [ADR-0012](Decision.md#adr-0012) si
+porterebbe dietro una dipendenza dal **socket Docker** — cioè il permesso di comandare il demone che
+fa girare l'intero laboratorio — per fare una cosa che dal suo container sa già fare da sé. Un
+adattatore che decide come raggiungere lo strumento decide anche, senza volerlo, quali privilegi
+servono per usarlo.
+
+**Le prove unitarie lanciano processi veri, e non è purismo.** Metà di ciò che l'adattatore deve
+garantire — che il figlio parta alla chiamata e non al primo `next()`, che la password non finisca
+fra i suoi argomenti, che l'iteratore abbandonato non lasci un processo orfano — riguarda proprio il
+confine col sistema operativo, cioè esattamente la parte che un mock sostituirebbe con la propria
+opinione. Un mock che dicesse «sì, ho ricevuto `kill`» non dimostrerebbe che il processo è morto. Al
+posto di `mongodump` c'è un programma Python di sei righe che scrive pid e argomenti in un diario,
+legge lo `stdin` e stampa su `stderr` **le righe misurate**; il pid nel diario è ciò che permette
+alla prova sulla chiusura di chiedere al sistema operativo se quel processo è ancora vivo.
+
+**Sei mutazioni, cinque rosse e una verde.** L'adattatore è stato rotto una volta alla volta —
+password rimessa in `argv`, sommario ridotto ad avviso, `dump` trasformata in funzione generatrice,
+`kill` tolto, codice d'uscita ignorato, base 1024 cambiata in 1000 — pretendendo che una prova
+**precisa** se ne accorgesse. Le prime cinque sono diventate rosse subito. La sesta è rimasta verde,
+perché l'unica prova sulle barre usava il formato senza unità di `mongodump`, dove il
+moltiplicatore non entra mai in gioco. Le due prove nate da lì giudicano contro la dimensione vera
+del file, letta con `stat` dentro il container: `6094260` byte annunciati come `5.81MB`, che in base
+1000 farebbero `6.09`.
+
+**Un falso rosso durante la verifica della verifica.** Alla prima esecuzione della sesta mutazione
+`pytest` riportava un numero che nel sorgente su disco non c'era. La causa: `1024**2` e `1000**2`
+hanno la **stessa lunghezza in byte**, lo script riscriveva il file entro lo stesso secondo, e
+l'invalidazione della cache dei bytecode di Python guarda l'orario di modifica al secondo e la
+dimensione del sorgente — due valori identici, quindi il `.pyc` mutato è stato considerato valido.
+`PYTHONDONTWRITEBYTECODE=1` nell'ambiente dei sottoprocessi ha chiuso il caso.
+
+### Note di metodo
+
+168. **Il motivo scritto accanto a una regola giusta va eseguito come la regola.** La **nota 167**
+     dice che un commento che descrive una protezione è un'asserzione. Questa è la stessa cosa un
+     passo prima: il «perché» scritto in un piano è formulato **prima** di misurare, quindi è
+     un'ipotesi, e una regola giusta sostenuta da un'ipotesi sbagliata è più pericolosa di una
+     regola assente — perché chi la legge smette di cercare. «Gli argomenti in lista, altrimenti la
+     password finisce nella tabella dei processi» avrebbe fatto scrivere il codice giusto e
+     smettere di pensare al punto esatto in cui il codice giusto non basta.
+
+169. **Rompere il codice a mano trova l'asserzione che non hai scritto.** Una suite verde dice che
+     le prove che ci sono passano, non che le prove che servono esistano. Il modo più economico di
+     misurare la differenza è cambiare un comportamento alla volta e pretendere che una prova
+     **nominata in anticipo** diventi rossa: se resta verde, non è la mutazione a essere innocua, è
+     la prova a non esserci. Sull'adattatore del Task 9 il conto è stato cinque su sei, e la sesta
+     mancava proprio dove il codice faceva la cosa meno ovvia.
+
+170. **Una verifica giudicata contro una copia della stessa scelta non è una verifica.** La prova
+     sulla conversione delle unità stava per confrontare un `1024**2` scritto nella prova con un
+     `1024**2` scritto nel codice: due copie della stessa decisione coincidono sempre, anche quando
+     la decisione è sbagliata. Il metro deve venire da fuori — qui la dimensione vera del file letta
+     con `stat`. Vale ogni volta che una prova contiene una costante che il codice contiene uguale:
+     quella costante non sta verificando niente.
+
+171. **Una cache che decide da sé quando è valida può rendere verde una prova rossa.** Python
+     invalida i bytecode confrontando orario di modifica **al secondo** e dimensione del sorgente.
+     Una modifica della stessa lunghezza fatta entro lo stesso secondo passa inosservata, e il
+     `.pyc` vecchio viene eseguito al posto del codice nuovo. È un caso stretto e reale, e si
+     incontra esattamente dove fa più danno: negli strumenti che modificano il codice per verificare
+     le prove, dove un falso verde è indistinguibile dal risultato che si sta cercando. Chi scrive
+     uno strumento del genere disattiva la cache, e non si fida di averla vista funzionare.
+
+Stato aggiornato: decisioni fino ad **ADR-0084**, verifiche fino a **V-074**, note di metodo fino
+alla **171**. Le suite: **143** prove per gli strumenti, **243** per l'applicazione più **43** di
+integrazione, `mypy --strict` verde su 42 file. Prossimo passo: **Task 10** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).

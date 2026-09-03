@@ -21,6 +21,7 @@ affermazione in **cronaca in diretta**.
 | 7 | [07-topologia-failover-e-i-due-numeri.md](07-topologia-failover-e-i-due-numeri.md) | come si riconosce un failover, e dove si calcolano durata dell'interruzione e scritture perse |
 | 8 | [08-il-ponte-sdam-e-i-thread-del-driver.md](08-il-ponte-sdam-e-i-thread-del-driver.md) | chi chiama i listener, da quale thread, e quanto costa scrivere una riga di troppo dentro un callback |
 | 9 | [09-adattatori-veri-e-contratto-condiviso.md](09-adattatori-veri-e-contratto-condiviso.md) | che cosa si rompe quando i doppi incontrano MongoDB vero, e il contratto che li tiene onesti |
+| 10 | [10-processi-esterni-e-il-verdetto-che-manca.md](10-processi-esterni-e-il-verdetto-che-manca.md) | che cosa cambia quando l'adattatore lancia un processo invece di chiamare una libreria, e dove mettere la password |
 
 Si leggono in ordine, ma nessuna dipende dalle altre per essere comprensibile. Chi arriva da una
 domanda precisa può entrare dal punto giusto.

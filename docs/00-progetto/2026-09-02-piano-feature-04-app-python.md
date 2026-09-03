@@ -319,20 +319,20 @@ davvero.
 **File:** creare `app/src/mongolab/infrastructure/backup.py`, `app/tests/unit/test_backup.py`, prove
 in `app/tests/integration/`.
 
-- [ ] **Passo 1.** `dump` ritorna un `Iterator[Progress]`: l'avanzamento si consuma man mano, non si
+- [x] **Passo 1.** `dump` ritorna un `Iterator[Progress]`: l'avanzamento si consuma man mano, non si
       aspetta la fine. È ciò che permette all'Atto III del Blocco 2 di mostrare il throughput che
       **non** crolla mentre il dump gira.
-- [ ] **Passo 2.** Il processo esterno si lancia con gli argomenti in **lista**, mai con una stringa
+- [x] **Passo 2.** Il processo esterno si lancia con gli argomenti in **lista**, mai con una stringa
       di shell: la password dell'amministratore è uno degli argomenti, e una stringa di shell la fa
       comparire nella tabella dei processi di chiunque guardi.
-- [ ] **Passo 3.** Un `mongodump` che esce diverso da zero è un errore che si propaga con il suo
+- [x] **Passo 3.** Un `mongodump` che esce diverso da zero è un errore che si propaga con il suo
       codice e il suo messaggio, non un iteratore che finisce in silenzio. È la lezione di
       [ADR-0077](../Decision.md#adr-0077): un avviso che non cambia il codice d'uscita è un avviso
       che nessuno legge.
-- [ ] **Passo 4.** Prove unitarie contro `FakeBackup` per la logica di consumo e per il fallimento a
+- [x] **Passo 4.** Prove unitarie contro `FakeBackup` per la logica di consumo e per il fallimento a
       metà; prove di integrazione contro `mongodump` vero, con `--readPreference=secondary --oplog`
       sullo stack 02, che è esattamente la forma che il Blocco 2 Atto III mostra.
-- [ ] **Passo 5.** `restore` e verifica dei conteggi su database di destinazione, come da copione.
+- [x] **Passo 5.** `restore` e verifica dei conteggi su database di destinazione, come da copione.
       Commit: `feat: dump e restore come processi, con l'avanzamento che si consuma`.
 
 ---

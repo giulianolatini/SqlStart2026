@@ -598,9 +598,79 @@ resta.
 `sveglia()` esegue `make up-01` da sé — che è [ADR-0020](../../docs/Decision.md#adr-0020) applicato:
 si prova l'artefatto che il pubblico eseguirà, non un facsimile.
 
+## Task 9 — Un processo esterno, e il verdetto che manca
+
+**Deciso:** `SubprocessBackup` attacca la porta `BackupTool` a `mongodump` e `mongorestore`. È il
+primo adattatore che non parla con una libreria ma con un **processo**, e le quattro differenze
+vengono tutte da lì: la credenziale attraversa un confine di sistema operativo, l'avanzamento è
+testo da riconoscere, l'errore è un intero, e il processo sopravvive a chi lo ha lanciato. Il
+capitolo è [10](10-processi-esterni-e-il-verdetto-che-manca.md).
+
+**Il piano aveva ragione sulla regola e torto sul motivo.** Il Passo 2 chiedeva la lista di
+argomenti al posto della stringa di shell «perché una stringa di shell fa comparire la password
+nella tabella dei processi». Con `-p <valore>` come elemento della lista — nessuna shell coinvolta —
+`ps -eo args` dentro il container lo mostra per intero, sedici campioni su sedici
+([M-025](Sources.md#m-025)). La tabella dei processi legge `argv`, e ad `argv` non importa da dove
+è arrivato. Quello che funziona è omettere `-p`: gli strumenti chiedono la password e la leggono
+dallo `stdin` anche quando lo `stdin` non è un terminale ([M-023](Sources.md#m-023)). La lista resta
+la scelta giusta per la ragione che il piano non nomina — senza shell nessuno interpreta uno spazio,
+un apice o un `$` dentro una password o dentro un percorso.
+
+**Il comando arriva dal costruttore.** `("docker", "exec", "-i", "mongo-rs-1", "mongodump")` dalle
+prove sull'host, `("mongodump",)` dal container al Task 12. Se la politica di esecuzione stesse
+nell'adattatore, l'applicazione containerizzata di
+[ADR-0012](../../docs/Decision.md#adr-0012) si porterebbe dietro una dipendenza dal socket Docker
+per fare una cosa che dal suo container sa già fare da sé. È la stessa scelta che fa arrivare a
+`PymongoStore` una `Collection` già fatta.
+
+**`mongorestore` ha perso cinquantamila documenti ed è uscito zero.** Un restore ripetuto sulla
+stessa destinazione ricade su `_id` che esistono già, dichiara `0 document(s) restored successfully.
+50000 document(s) failed to restore.` e restituisce **0** al sistema operativo
+([M-024](Sources.md#m-024)). Chi controlla il processo nel modo in cui si controlla un processo
+riceve «riuscito». Da qui [ADR-0084](../../docs/Decision.md#adr-0084), che estende
+[ADR-0077](../../docs/Decision.md#adr-0077): la regola valeva per gli avvisi che scriviamo noi,
+l'aggiunta è che quando lo strumento di qualcun altro commette lo stesso errore, l'adattatore che
+lo incapsula è il posto in cui si ripara. L'adattatore solleva `RestoreIncompleto` con i due
+conteggi.
+
+**La guardia non è stata progettata: è stata scoperta dal codice che la contiene.** Le prime due
+prove di integrazione sul restore davano per idempotente un restore ripetuto — c'era scritto nella
+docstring di una di loro, come premessa ovvia. Eseguite, `RestoreIncompleto` è stata sollevata, e
+l'assunzione della prova era la parte sbagliata. Le prove sono state riscritte su destinazioni
+fresche e il caso è diventato una prova sua.
+
+**`dump` non è una funzione generatrice, e la porta lo pretendeva dal Task 4.** Con un `yield`
+dentro, chiamare `dump` non eseguirebbe niente e `mongodump` partirebbe al primo `next()`: lo stesso
+codice sarebbe corretto o sbagliato con la stessa forma, e l'errore arriverebbe dentro il ciclo che
+disegna la schermata invece che dove il dump è stato chiesto. `dump` è una funzione normale che
+*ritorna* l'iteratore di un'altra, e la prova pretende `FileNotFoundError` senza iterare niente.
+
+**Le prove unitarie lanciano processi veri.** Nessun `Mock` di `subprocess`: metà di ciò che
+l'adattatore garantisce riguarda il confine col sistema operativo, cioè esattamente la parte che un
+mock sostituirebbe con la propria opinione. Al posto di `mongodump` c'è un programma Python di sei
+righe che scrive pid e argomenti in un diario, e le righe che stampa su `stderr` sono **le righe
+misurate**. Il pid nel diario è ciò che permette alla prova sulla chiusura di chiedere al sistema
+operativo se il processo è morto, invece di chiedere a un mock se ha ricevuto una chiamata.
+
+**Sei mutazioni, e la sesta non la vedeva nessuno.** L'adattatore è stato rotto una volta alla volta
+— password in `argv`, sommario ridotto ad avviso, `dump` resa generatrice, `kill` tolto, codice
+d'uscita ignorato, base 1024 cambiata in 1000. Le prime cinque sono diventate rosse subito; la base
+è rimasta verde, perché l'unica prova sulle barre usava il formato senza unità di `mongodump`. Da lì
+due prove nuove sulle barre del restore, una delle quali giudica contro la dimensione vera del file
+letta con `stat` ([M-026](Sources.md#m-026)) invece che contro un `1024**2` riscritto nella prova.
+
+**Numeri.** 243 prove unitarie in circa un secondo, 43 di integrazione, `mypy --strict` verde su 42
+file. La suite di integrazione è passata da 1,46 s a **28–40 s** — due esecuzioni consecutive hanno
+dato 39,6 s e 28,4 s, e la variabilità è quella di due strumenti che leggono e scrivono su disco
+dentro un container: dieci di quelle prove eseguono `mongodump` e
+`mongorestore` veri su centomila documenti, ed è il prezzo di
+[ADR-0020](../../docs/Decision.md#adr-0020) applicato a uno strumento lento.
+
+---
+
 ## Che cosa manca
 
-I task dall'8 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
+I task dal 10 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
 futuro, che lo stanno facendo. L'avviso di stato in testa a
 [04-eventi-del-driver-e-concorrenza.md](04-eventi-del-driver-e-concorrenza.md) è stato riscritto al
 Task 7, perché quella pagina descriveva un codice che adesso esiste.
@@ -633,6 +703,11 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | L'ispettore dipende da `config`, che il manuale dichiara interno | [A-013, riserve](Sources.md#a-013) | dichiarata: la difesa è la prova sullo stack 03, che diventa rossa se il formato cambia |
 | `ordered=False` è stato misurato solo su istanza singola in loopback | [M-021, riserve](Sources.md#m-021) | se il Blocco 3 mostrerà scritture lente |
 | Il sink testuale per le registrazioni di riserva | [decisioni](decisioni-che-vincolano-app.md#adr-0050) | Task 18 |
+| Uccidere il client `docker exec` non uccide `mongodump` dentro il container | [10](10-processi-esterni-e-il-verdetto-che-manca.md#literatore-abbandonato-e-un-limite-che-va-detto) | Task 12: dal container non c'è più nessun `docker exec` in mezzo |
+| `Progress.completati` non porta l'unità: documenti per il dump, byte per il restore | [10](10-processi-esterni-e-il-verdetto-che-manca.md#un-inconveniente-dichiarato-completati-non-porta-con-sé-lunità) | Task 10, se la TUI dovrà stampare il numero e non solo la percentuale |
+| Il formato del testo di `mongodump`/`mongorestore` è quello della 100.18.0 | [M-024, riserve](Sources.md#m-024) | dichiarata: la difesa è la suite di integrazione, che diventa rossa se il formato cambia |
+| Un `BrokenPipeError` scrivendo la password a un processo già morto non è gestito | [M-023, riserve](Sources.md#m-023) | la prima volta che si riprodurrà: gestire un caso mai visto è codice che nessuna prova copre |
+| `--nsFrom`/`--nsTo` senza `--nsInclude` è stato osservato una volta e non ripetuto | [M-024, riserve](Sources.md#m-024) | dichiarata: ripeterlo significa far passare `mongorestore` sugli utenti dell'amministratore |
 
 ---
 

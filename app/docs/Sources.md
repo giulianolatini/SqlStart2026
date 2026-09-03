@@ -1269,6 +1269,180 @@ misure valgono per l'ambiente descritto in [M-001](#m-001) e per nessun altro.
 
 ---
 
+<a id="m-023"></a>
+### M-023 — La password letta da uno `stdin` che non è un terminale
+
+- **Data:** 2026-09-03
+- **Comando:** `mongodump` 100.18.0 dentro `mongo-rs-1`, **senza** `-p`, con il segreto scritto sul
+  tubo e il tubo chiuso subito dopo:
+  ```sh
+  docker exec -i mongo-rs-1 mongodump \
+      --host rs0/mongo-rs-1:27017,mongo-rs-2:27017,mongo-rs-3:27017 \
+      --username admin --authenticationDatabase admin \
+      --readPreference=secondary --oplog --out /tmp/probe9
+  # sullo stdin: la password, un a capo, e la chiusura
+  ```
+- **Output:** codice d'uscita **0**, `stdout` **vuoto**, e su `stderr`:
+  ```
+  2026-09-03T12:41:52.688+0000	reading password from standard input
+  Enter password for mongo user:
+  2026-09-03T12:41:52.707+0000	writing `lab.ordini` to `/tmp/probe9/lab/ordini.bson`
+  2026-09-03T12:41:52.754+0000	done dumping `lab.ordini` (50000 documents)
+  2026-09-03T12:41:52.756+0000	writing captured oplog to ``
+  2026-09-03T12:41:52.756+0000		dumped 1 oplog entry
+  ```
+- **Che cosa dimostra:** tre cose che l'adattatore usa tutte. Che lo strumento **chiede** la
+  password quando `-p` manca e la **legge dal tubo** anche se il tubo non è un terminale, il che
+  rende praticabile tenerla fuori da `argv` ([M-025](#m-025)). Che il `-i` di `docker exec` è
+  obbligatorio: senza, lo `stdin` del client non è collegato al processo dentro il container e la
+  password non arriva. E che la riga del prompt, `Enter password for mongo user:`, esce **senza il
+  prefisso dell'orario** che tutte le altre righe hanno — è la ragione per cui il riconoscitore
+  dell'adattatore, che quel prefisso lo pretende, la scarta senza doverla nominare.
+- **Perché è stata fatta:** perché il Passo 2 del Task 9 prescriveva la lista di argomenti al posto
+  della stringa di shell «perché la stringa fa comparire la password nella tabella dei processi», e
+  bisognava sapere se esistesse un posto dove metterla che non fosse `argv`. Esiste.
+- **Riserve:** il testo del prompt non è un'interfaccia, e la misura vale per la **100.18.0**. Una
+  versione che smettesse di leggere da uno `stdin` non interattivo non romperebbe una prova unitaria
+  — le romperebbe tutte quelle di integrazione, che è dove il buco si vedrebbe. Non è stato
+  verificato che cosa succeda se il processo muore **prima** che la password sia scritta: sarebbe un
+  `BrokenPipeError`, e non è mai stato riprodotto.
+- **Usata da:** [10-processi-esterni-e-il-verdetto-che-manca.md](10-processi-esterni-e-il-verdetto-che-manca.md)
+
+---
+
+<a id="m-024"></a>
+### M-024 — `mongorestore` perde cinquantamila documenti ed esce **zero**
+
+- **Data:** 2026-09-03
+- **Comando:** lo stesso restore, due volte di fila sulla **stessa** destinazione. Il primo la
+  riempie, il secondo ricade su `_id` che esistono già:
+  ```sh
+  docker exec -i mongo-rs-1 mongorestore \
+      --host rs0/mongo-rs-1:27017,mongo-rs-2:27017,mongo-rs-3:27017 \
+      --username admin --authenticationDatabase admin \
+      --nsInclude 'lab.*' --nsFrom 'lab.*' --nsTo 'mongolab_prove_m9.*' /tmp/probe9
+  ```
+- **Output:** il primo giro, codice **0**:
+  ```
+  2026-09-03T12:41:55.254+0000	finished restoring `mongolab_prove_m9.ordini` (50000 documents, 0 failures)
+  2026-09-03T12:41:55.254+0000	50000 document(s) restored successfully. 0 document(s) failed to restore.
+  ```
+  il secondo giro, cinquantamila righe come questa —
+  ```
+  2026-09-03T12:41:55.771+0000	continuing through error: E11000 duplicate key error collection: mongolab_prove_m9.ordini index: _id_ dup key: { _id: 0 }
+  ```
+  — e poi, **codice d'uscita 0**:
+  ```
+  2026-09-03T12:42:04.982+0000	finished restoring `mongolab_prove_m9.ordini` (0 documents, 50000 failures)
+  2026-09-03T12:42:04.982+0000	0 document(s) restored successfully. 50000 document(s) failed to restore.
+  ```
+- **Che cosa dimostra:** che il codice d'uscita di `mongorestore` **non** è il verdetto
+  sull'operazione. Lo strumento sa di aver perso tutto, lo scrive, e poi dichiara successo al
+  sistema operativo. Chi controlla il processo nel modo in cui si controlla un processo — guardando
+  l'intero che restituisce — riceve «riuscito». È il motivo di
+  [ADR-0084](../../docs/Decision.md#adr-0084): l'adattatore legge la riga di sommario e solleva
+  `RestoreIncompleto`, mettendo il verdetto che lo strumento non ha messo.
+
+  La stessa esecuzione chiude altre due domande. `--nsInclude` è ciò che **filtra**: il dump
+  conteneva `admin.system.users` e `admin.system.version`, e il restore con `--nsInclude 'lab.*'`
+  non li nomina, toccando la sola `ordini`. E `--oplogReplay` non convive con la riscrittura dei
+  nomi, in nessuna delle due forme — con gli inclusi:
+  ```
+  2026-09-03T12:42:05.073+0000	Failed: cannot use --oplogReplay with includes specified
+  ```
+  con le sole rinomine:
+  ```
+  2026-09-03T12:43:34.236+0000	Failed: cannot use --oplogReplay with namespace renames specified
+  ```
+  entrambe con **codice 1**, cioè entrambe dette nel modo giusto: qui il verdetto c'è.
+- **Perché è stata fatta:** per scrivere `restore` sapendo che cosa lo strumento garantisce.
+  L'ordine dei fatti è stato l'inverso di quello raccontato qui: la prima stesura delle prove di
+  integrazione dava per **idempotente** un restore ripetuto, l'adattatore ha sollevato
+  `RestoreIncompleto`, e la parte sbagliata era l'assunzione nella docstring della prova.
+- **Riserve:** la riga di sommario è **testo**, non un'interfaccia. Se una versione la riscrive, la
+  guardia dell'adattatore non diventa sbagliata: diventa **muta**, che è peggio, e la difesa è la
+  prova di integrazione che pretende `RestoreIncompleto` sul secondo giro. Il caso complementare —
+  `--nsFrom`/`--nsTo` **senza** `--nsInclude`, che nella prima sonda aveva riscritto anche `lab` e
+  toccato `admin/system.users.bson` — è stato osservato una volta e **non ripetuto** qui, perché
+  ripeterlo significa far passare `mongorestore` sugli utenti dell'amministratore dello stack.
+- **Usata da:** [10-processi-esterni-e-il-verdetto-che-manca.md](10-processi-esterni-e-il-verdetto-che-manca.md)
+
+---
+
+<a id="m-025"></a>
+### M-025 — `-p` fra gli argomenti si legge nella tabella dei processi del container
+
+- **Data:** 2026-09-03
+- **Comando:** un `mongorestore` lanciato **apposta** nel modo sbagliato, con `-p <segreto>` come
+  elemento di `argv`, mentre da un secondo `exec` un campionamento ogni 50 ms guarda:
+  ```sh
+  docker exec mongo-rs-1 ps -eo args
+  ```
+- **Output:** 16 campioni su 16 contengono il processo, con una sola riga distinta. **Il segreto è
+  stato sostituito dallo script prima di stampare** — la sonda non lo scrive mai, e ciò che asserisce
+  è il valore booleano sulla riga grezza, `il segreto compare nella riga: True`:
+  ```
+  il segreto compare nella riga: True
+  mongorestore --host rs0/mongo-rs-1:27017,mongo-rs-2:27017,mongo-rs-3:27017 --username admin
+  --authenticationDatabase admin -p <PASSWORD> --nsInclude lab.* --nsFrom lab.* --nsTo
+  mongolab_prove_m9.* /tmp/probe9
+  ```
+- **Che cosa dimostra:** che **la lista di argomenti non basta**. Il Passo 2 del piano del Task 9
+  chiede la lista al posto della stringa di shell perché «una stringa di shell la fa comparire nella
+  tabella dei processi di chiunque guardi»; la misura dice che a comparire nella tabella dei processi
+  è `argv`, e ad `argv` non importa da dove è arrivato — lista o stringa, il risultato è lo stesso.
+  Chiunque abbia un `exec` su quel container, per i secondi in cui il dump gira, legge la password
+  dell'amministratore. La lista resta comunque la scelta giusta, per la ragione che il piano non
+  nomina: senza shell non c'è nessuno a interpretare uno spazio, un apice o un `$` dentro una
+  password o dentro un percorso. Ma la cosa che protegge il segreto è **omettere `-p`** e scriverlo
+  sullo `stdin` ([M-023](#m-023)).
+- **Perché è stata fatta:** perché la motivazione scritta nel piano era plausibile e incompleta, ed
+  è il genere di frase che nessuno rimette in discussione perché sta accanto alla regola giusta.
+- **Riserve:** la finestra è breve — il segreto è visibile solo mentre il processo vive — e questo
+  la rende più insidiosa, non meno: un campionamento a 50 ms l'ha presa 16 volte su 16, e un
+  osservatore paziente non ha bisogno di essere fortunato. Non è stato verificato se `mongodump`
+  riscriva `argv` dopo l'avvio, come fanno alcuni strumenti: sulla 100.18.0 evidentemente no, e
+  contarci sarebbe comunque appoggiarsi a un comportamento non documentato.
+- **Usata da:** [10-processi-esterni-e-il-verdetto-che-manca.md](10-processi-esterni-e-il-verdetto-che-manca.md)
+
+---
+
+<a id="m-026"></a>
+### M-026 — La barra di `mongorestore` conta byte, e li conta in base 1024
+
+- **Data:** 2026-09-03
+- **Comando:** la dimensione vera del file, letta dentro il container sullo stesso `.bson` che quel
+  restore stava leggendo, messa accanto alla barra che lo annunciava:
+  ```sh
+  docker exec mongo-rs-1 stat -c '%s %n' /tmp/probe9/lab/ordini.bson
+  ```
+- **Output:**
+  ```
+  6094260 /tmp/probe9/lab/ordini.bson
+  2026-09-03T12:42:04.982+0000	[########################]  mongolab_prove_m9.ordini  5.81MB/5.81MB  (100.0%)
+  ```
+  e, sulla collezione da 400 000 documenti della prima sonda, `48760014` byte annunciati come
+  `46.5MB`.
+- **Che cosa dimostra:** che `MB` qui vale 1024², non 1000². `6094260 / 1024² = 5,8129` — che
+  arrotondato è il `5,81` stampato; in base 1000 farebbe `6,09`, e la barra direbbe un altro numero.
+  Sul file grande la distanza è ancora più netta: `46,5 × 1024² = 48 758 784`, lontano dai
+  `48 760 014` veri dello **0,003%**, mentre `46,5 × 1000² = 46 500 000` sbaglia del **4,6%**. La
+  seconda cosa che dimostra è che le barre dei due strumenti contano **unità diverse**: quella di
+  `mongodump` conta documenti (`1863086/2000000`), quella di `mongorestore` conta byte.
+- **Perché è stata fatta:** perché senza un metro esterno la prova sulla conversione sarebbe stata
+  un `1024**2` scritto nella prova confrontato con un `1024**2` scritto nel codice, cioè la verifica
+  che due copie della stessa scelta coincidono. La misura è la sola cosa che rende quell'asserzione
+  un'asserzione. Era anche l'unica mutazione, delle sei provate sull'adattatore, che nessuna prova
+  vedeva.
+- **Riserve:** l'arrotondamento a due cifre lascia margine — su `5,81` la base 1000 e la base 1024
+  distano abbastanza da non confondersi, ma su file di certe dimensioni potrebbero. Il file grande
+  è la misura che decide, e sta qui per quello. Resta dichiarato che `Progress.completati` non porta
+  con sé l'unità: per un dump sono documenti, per un restore byte, e chi legge deve saperlo dal
+  contesto.
+- **Usata da:** [10-processi-esterni-e-il-verdetto-che-manca.md](10-processi-esterni-e-il-verdetto-che-manca.md)
+
+---
+
 ## Fonti canoniche che l'applicazione usa senza copiarle
 
 Queste stanno in [`docs/Sources.md`](../../docs/Sources.md) e sono citate da un ADR. Qui c'è solo

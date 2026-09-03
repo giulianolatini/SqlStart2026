@@ -2209,3 +2209,49 @@ giustificazione è di una riga: un container di prova configurato altrove sarebb
 stack del lab è rotto. La seconda metà — quello che le prove smontano sono i **dati**, non
 l'infrastruttura — è la regola pratica che rende sopportabile la prima.
 
+---
+
+### Lo strumento che ha perso cinquantamila documenti ed è uscito zero
+
+> `mongorestore` ha dichiarato `0 document(s) restored successfully. 50000 document(s) failed to
+> restore.` e ha restituito **0** al sistema operativo. Chi controlla il processo nel modo in cui si
+> controlla un processo riceve «riuscito».
+
+Fonte: [ADR-0084](Decision.md#adr-0084), [`app/docs/Sources.md`, M-024](../app/docs/Sources.md#m-024).
+
+**Perché una slide:** perché il codice d'uscita è il modo in cui *tutti* controllano un processo
+esterno, e questo è un caso in cui mente — non un caso limite costruito ad arte, ma il secondo giro
+di qualunque restore sulla stessa destinazione. La morale sta in una riga: quando lo strumento di
+qualcun altro non dà il verdetto, l'adattatore che lo incapsula è il posto in cui si ripara.
+
+---
+
+### La lista di argomenti non basta: `argv` è pubblico comunque
+
+> La tabella dei processi legge `argv`, e ad `argv` non importa da dove è arrivato. Con `-p` nella
+> lista, senza nessuna shell di mezzo, `ps` dentro il container mostra la password
+> dell'amministratore per tutto il tempo in cui il dump gira.
+
+Fonte: [`app/docs/Sources.md`, M-025](../app/docs/Sources.md#m-025),
+[`app/docs/10-processi-esterni-e-il-verdetto-che-manca.md`](../app/docs/10-processi-esterni-e-il-verdetto-che-manca.md).
+
+**Perché una slide:** perché «usa la lista, non la stringa di shell» è il consiglio che tutti danno
+e che tutti fermano un passo prima. La lista serve — protegge dagli spazi e dagli apici, non dagli
+occhi. Il segreto si tiene fuori da `argv`, e per `mongodump` la strada è omettere `-p` e scrivere
+la password sullo `stdin`, che lo strumento legge anche quando non è un terminale.
+
+---
+
+### La prova diceva una cosa falsa, e a scoprirlo è stato il codice
+
+> Avevo scritto, nella docstring di una prova, che un restore ripetuto è idempotente. Non lo è:
+> `mongorestore` inserisce, e il secondo giro collide su ogni `_id`. L'adattatore ha sollevato, e la
+> parte sbagliata era la mia premessa.
+
+Fonte: [registro operativo, Task 9](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md`, M-024](../app/docs/Sources.md#m-024).
+
+**Perché una slide:** perché rovescia l'immagine abituale — la prova che giudica il codice — e mostra
+l'altro verso, che capita più spesso di quanto si ammetta. Una docstring di prova è un'asserzione
+come le altre, scritta nel punto in cui nessuno la rilegge, e un codice che solleva quando non te lo
+aspetti è la cosa più vicina a una revisione paritaria che si possa avere alle undici di sera.
