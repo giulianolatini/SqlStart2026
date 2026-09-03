@@ -241,19 +241,19 @@ prove che non provano niente.
 
 **File:** creare `app/src/mongolab/application/topologia.py`, `app/tests/unit/test_topologia.py`.
 
-- [ ] **Passo 1.** Prove prima: una sequenza di descrizioni di topologia in ingresso produce una
+- [x] **Passo 1.** Prove prima: una sequenza di descrizioni di topologia in ingresso produce una
       sequenza attesa di `ServerStateChanged` e `TopologyChanged`. Il caso che conta è primario →
       nessun primario → primario **diverso**, cioè il failover, e va provato con `FakeClock` in
       millisecondi.
-- [ ] **Passo 2.** I due numeri che giustificano l'applicazione — **durata dell'interruzione** e
+- [x] **Passo 2.** I due numeri che giustificano l'applicazione — **durata dell'interruzione** e
       **scritture perse** — si calcolano qui, non nella TUI. La durata è fra l'ultimo istante con
       primario e il primo istante con primario nuovo; le scritture perse sono quelle confermate al
       client e assenti dopo. Provare entrambi contro `FakeClock`, dove il valore atteso è esatto e
       non una tolleranza.
-- [ ] **Passo 3.** Un `TopologyWatcher` che non vede un primario per la durata configurata smette di
+- [x] **Passo 3.** Un `TopologyWatcher` che non vede un primario per la durata configurata smette di
       ritentare, ed emette l'evento che lo dice. È la regola che finora esisteva solo come frase nel
       design: adesso ha una prova, e la prova gira in millisecondi.
-- [ ] **Passo 4.** `make app-test`, `make app-check`. Commit:
+- [x] **Passo 4.** `make app-test`, `make app-check`. Commit:
       `feat: la macchina a stati della topologia, e i due numeri del failover`.
 
 ---

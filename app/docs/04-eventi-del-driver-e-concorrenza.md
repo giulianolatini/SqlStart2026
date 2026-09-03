@@ -185,7 +185,7 @@ contro uno stack vero. Se qualcosa non tornasse, la conseguenza sarebbe una voce
 un ADR — non una riga di codice che aggira il problema in silenzio.
 
 C'è un caso già segnalato come dubbio, e vale la pena saperlo in anticipo: `ChunkMigrated` è
-l'unico degli otto eventi che potrebbe risultare **non osservabile dal client**. Un client parla con
+l'unico dei nove eventi che potrebbe risultare **non osservabile dal client**. Un client parla con
 `mongos`, e la migrazione di un chunk è una faccenda fra shard e config server. Se si scoprisse che
 non lo è, quell'evento cambierà natura — non resterà un campo morto lasciato lì per non toccare il
 disegno.

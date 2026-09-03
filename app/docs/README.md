@@ -18,6 +18,7 @@ affermazione in **cronaca in diretta**.
 | 4 | [04-eventi-del-driver-e-concorrenza.md](04-eventi-del-driver-e-concorrenza.md) | che cosa vede il client durante un failover, e perché il listener deve tacere e uscire |
 | 5 | [05-tipi-prove-e-guardie.md](05-tipi-prove-e-guardie.md) | chi controlla che tutto questo resti vero |
 | 6 | [06-carico-tentativi-e-latenze.md](06-carico-tentativi-e-latenze.md) | perché i percentili e non la media, e perché i worker non toccano il sink |
+| 7 | [07-topologia-failover-e-i-due-numeri.md](07-topologia-failover-e-i-due-numeri.md) | come si riconosce un failover, e dove si calcolano durata dell'interruzione e scritture perse |
 
 Si leggono in ordine, ma nessuna dipende dalle altre per essere comprensibile. Chi arriva da una
 domanda precisa può entrare dal punto giusto.

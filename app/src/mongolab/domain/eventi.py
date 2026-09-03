@@ -1,4 +1,10 @@
-"""Gli otto eventi del §6.3. Immutabili, e con l'istante come campo esplicito.
+"""I nove eventi del §6.3. Immutabili, e con l'istante come campo esplicito.
+
+Il design ne elencava **otto**. Il nono, `PrimaryWaitAbandoned`, è arrivato al Task 6 di
+`feature/04` con ADR-0082: la regola «dopo tanto senza primario, smetti di ritentare»
+esisteva come frase dal §6.2, e nessuno degli otto sapeva raccontarne l'esito senza
+mentire. Il §6.3 non si riscrive: l'ADR lo emenda, e la guardia in `test_dominio.py`
+conta nove.
 
 **Immutabili non per eleganza.** Un evento nasce dentro un callback di pymongo, che gira
 sul thread del driver, e viene letto dal ciclo di disegno, che gira sul thread
@@ -31,6 +37,7 @@ __all__ = [
     "ChunkMigrated",
     "Evento",
     "LatencySampled",
+    "PrimaryWaitAbandoned",
     "RetryAttempted",
     "ServerStateChanged",
     "TopologyChanged",
@@ -145,3 +152,25 @@ class ChunkMigrated(Evento):
     da_shard: str
     a_shard: str
     chunk: str
+
+
+@dataclass(frozen=True, slots=True)
+class PrimaryWaitAbandoned(Evento):
+    """Il client ha smesso di aspettare un primario (ADR-0082).
+
+    Non è un fallimento del cluster: è una **decisione di chi osserva**. Il cluster può
+    benissimo eleggere un primario un istante dopo; questo evento dice che nessuno starà
+    più a guardare.
+
+    I due numeri viaggiano insieme perché `atteso_ms` da solo non si legge: «ho aspettato
+    30 000 ms» non dice se è tanto finché non si sa che la pazienza valeva 30 000. Nella
+    demo la pazienza si abbassa apposta, per non far attendere la sala, ed è il rapporto
+    fra i due a restare vero.
+
+    `ultimo_primario` è opzionale perché un client può connettersi a primario **già**
+    caduto, e in quel caso non ne ha mai visto uno da nominare.
+    """
+
+    atteso_ms: float
+    pazienza_ms: float
+    ultimo_primario: str | None

@@ -32,7 +32,6 @@ from mongolab.application.workload import (
     riassumi,
 )
 from mongolab.domain.eventi import (
-    Evento,
     LatencySampled,
     RetryAttempted,
     WriteFailed,
@@ -41,6 +40,7 @@ from mongolab.domain.eventi import (
 from mongolab.domain.modelli import Documento
 from mongolab.domain.porte import Clock, DocumentStore, EventSink
 
+from tests.aiutanti import specie
 from tests.doppi import (
     ArchivioCheRompe,
     ArchivioLento,
@@ -53,18 +53,6 @@ from tests.doppi import (
 ISTANTE = datetime(2026, 9, 18, 9, 30, 0, tzinfo=UTC)
 
 
-def _specie[E: Evento](eventi: list[Evento], tipo: type[E]) -> list[E]:
-    """Gli eventi di una sola specie, **con il loro tipo**.
-
-    Il parametro di tipo non è ornamento. Scritto `-> list[Evento]`, questo filtro
-    restituirebbe la classe base e ogni asserzione su un campo specifico —
-    `evento.durata_ms` — passerebbe a runtime e verrebbe bocciata da mypy, che è
-    esattamente quello che è successo alla prima esecuzione di `make app-check`. Il
-    filtro sa quale specie ha cercato: qui glielo si fa dire.
-    """
-    return [evento for evento in eventi if isinstance(evento, tipo)]
-
-
 # --- Le scritture che riescono --------------------------------------------------------
 
 
@@ -75,8 +63,8 @@ def test_n_scritture_producono_n_successi_e_altrettante_latenze() -> None:
 
     corridore.esegui(scritture=5)
 
-    assert len(_specie(sink.eventi, WriteSucceeded)) == 5
-    assert len(_specie(sink.eventi, LatencySampled)) == 5
+    assert len(specie(sink.eventi, WriteSucceeded)) == 5
+    assert len(specie(sink.eventi, LatencySampled)) == 5
     assert archivio.count({}) == 5
 
 
@@ -96,7 +84,7 @@ def test_ogni_evento_di_successo_dice_quanti_documenti_ha_confermato() -> None:
 
     corridore.esegui(scritture=2, per_scrittura=3)
 
-    assert [evento.documenti for evento in _specie(sink.eventi, WriteSucceeded)] == [3, 3]
+    assert [evento.documenti for evento in specie(sink.eventi, WriteSucceeded)] == [3, 3]
 
 
 def test_i_documenti_generati_sono_distinti() -> None:
@@ -131,8 +119,8 @@ def test_la_latenza_e_il_tempo_passato_sull_orologio() -> None:
 
     WorkloadRunner(archivio, orologio, sink).esegui(scritture=2)
 
-    successi = _specie(sink.eventi, WriteSucceeded)
-    campioni = _specie(sink.eventi, LatencySampled)
+    successi = specie(sink.eventi, WriteSucceeded)
+    campioni = specie(sink.eventi, LatencySampled)
     assert [evento.durata_ms for evento in successi] == [12.0, 12.0]
     assert [evento.durata_ms for evento in campioni] == [12.0, 12.0]
 
@@ -141,7 +129,7 @@ def test_il_campione_di_latenza_nomina_l_operazione() -> None:
     sink = RecordingSink()
     WorkloadRunner(InMemoryStore(), FakeClock(ISTANTE), sink).esegui(scritture=1)
 
-    (campione,) = _specie(sink.eventi, LatencySampled)
+    (campione,) = specie(sink.eventi, LatencySampled)
     assert campione.operazione == "insert_many"
 
 
@@ -177,7 +165,7 @@ def test_il_fallimento_nomina_il_tipo_di_errore_e_il_motivo() -> None:
 
     WorkloadRunner(archivio, FakeClock(ISTANTE), sink).esegui(scritture=1, per_scrittura=4)
 
-    (fallimento,) = _specie(sink.eventi, WriteFailed)
+    (fallimento,) = specie(sink.eventi, WriteFailed)
     assert fallimento.tipo_errore == ScritturaRifiutata.__name__
     assert fallimento.motivo == "niente primario"
     assert fallimento.documenti == 4
@@ -192,8 +180,8 @@ def test_la_politica_smette_dopo_i_tentativi_previsti_e_non_prima() -> None:
         archivio, FakeClock(ISTANTE), sink, politica=politica
     ).esegui(scritture=1)
 
-    assert len(_specie(sink.eventi, WriteFailed)) == 3
-    assert len(_specie(sink.eventi, RetryAttempted)) == 2
+    assert len(specie(sink.eventi, WriteFailed)) == 3
+    assert len(specie(sink.eventi, RetryAttempted)) == 2
     assert riepilogo.fallite == 1
     assert riepilogo.riuscite == 0
 
@@ -218,7 +206,7 @@ def test_l_attesa_raddoppia_a_ogni_tentativo() -> None:
         ArchivioCheRompe(InMemoryStore()), orologio, sink, politica=politica
     ).esegui(scritture=1)
 
-    tentativi = _specie(sink.eventi, RetryAttempted)
+    tentativi = specie(sink.eventi, RetryAttempted)
     assert [evento.attesa_ms for evento in tentativi] == [50.0, 100.0, 200.0]
     assert orologio.attese == [0.05, 0.1, 0.2]
 
@@ -234,7 +222,7 @@ def test_l_attesa_non_supera_il_tetto() -> None:
         ArchivioCheRompe(InMemoryStore()), orologio, sink, politica=politica
     ).esegui(scritture=1)
 
-    tentativi = _specie(sink.eventi, RetryAttempted)
+    tentativi = specie(sink.eventi, RetryAttempted)
     assert [evento.attesa_ms for evento in tentativi] == [50.0, 120.0, 120.0]
 
 
@@ -245,7 +233,7 @@ def test_il_tentativo_e_numerato_come_la_prova_che_sta_per_fare() -> None:
         ArchivioCheRompe(InMemoryStore()), FakeClock(ISTANTE), sink
     ).esegui(scritture=1)
 
-    assert [evento.tentativo for evento in _specie(sink.eventi, RetryAttempted)] == [2, 3]
+    assert [evento.tentativo for evento in specie(sink.eventi, RetryAttempted)] == [2, 3]
 
 
 def test_l_attesa_del_primo_tentativo_non_esiste() -> None:
@@ -266,7 +254,7 @@ def test_una_scrittura_che_riesce_al_primo_colpo_non_chiede_attese() -> None:
     WorkloadRunner(InMemoryStore(), orologio, sink).esegui(scritture=3)
 
     assert orologio.attese == []
-    assert _specie(sink.eventi, RetryAttempted) == []
+    assert specie(sink.eventi, RetryAttempted) == []
 
 
 def test_una_scrittura_fallita_non_entra_nel_campione_delle_latenze() -> None:
@@ -276,7 +264,7 @@ def test_una_scrittura_fallita_non_entra_nel_campione_delle_latenze() -> None:
         ArchivioCheRompe(InMemoryStore()), FakeClock(ISTANTE), sink
     ).esegui(scritture=1)
 
-    assert _specie(sink.eventi, LatencySampled) == []
+    assert specie(sink.eventi, LatencySampled) == []
     assert riepilogo.latenze is None
 
 
@@ -401,8 +389,8 @@ def test_con_piu_scrittori_nessun_evento_si_perde() -> None:
         archivio, FakeClock(ISTANTE), sink, scrittori=4
     ).esegui(scritture=40)
 
-    assert len(_specie(sink.eventi, WriteSucceeded)) == 40
-    assert len(_specie(sink.eventi, LatencySampled)) == 40
+    assert len(specie(sink.eventi, WriteSucceeded)) == 40
+    assert len(specie(sink.eventi, LatencySampled)) == 40
     assert riepilogo.riuscite == 40
     assert archivio.count({}) == 40
 
@@ -445,7 +433,7 @@ def test_piu_scrittori_del_lavoro_non_producono_scritture_in_piu() -> None:
     WorkloadRunner(archivio, FakeClock(ISTANTE), sink, scrittori=8).esegui(scritture=3)
 
     assert archivio.count({}) == 3
-    assert len(_specie(sink.eventi, WriteSucceeded)) == 3
+    assert len(specie(sink.eventi, WriteSucceeded)) == 3
 
 
 # --- Le porte ------------------------------------------------------------------------

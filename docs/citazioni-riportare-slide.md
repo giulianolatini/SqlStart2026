@@ -1885,5 +1885,87 @@ Fonte: [registro operativo, nota 156](registro-operativo-sviluppo.md),
 **Perché una slide:** perché il pubblico che scrive Python conosce l'aiutante di tre righe e non lo
 rilegge mai. Un filtro che perde il tipo lo perde esattamente dove le asserzioni sono più specifiche,
 cioè dove il controllo serviva di più, e lo perde in silenzio. La correzione è una riga di PEP 695 —
-`def _specie[E: Evento](eventi: list[Evento], tipo: type[E]) -> list[E]` — ma il punto non è la
+`def specie[E: Evento](eventi: list[Evento], tipo: type[E]) -> list[E]` — ma il punto non è la
 sintassi: è che quando un aiutante *sa* qualcosa che il chiamante userà, glielo si deve far dire.
+---
+
+### Una guardia si prova solo con un caso in cui, se non ci fosse, si vedrebbe
+
+> La prova asseriva che gli eventi escono in ordine di indirizzo. Ho tolto l'ordinamento: è rimasta
+> verde. Nel suo scenario i server comparivano già in ordine alfabetico. Osservava il risultato
+> giusto per il motivo sbagliato.
+
+Fonte: [registro operativo, nota 159](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md` M-011](../app/docs/Sources.md#m-011).
+
+**Perché una slide:** perché è la prova inutile più difficile da riconoscere. Non è sbagliata, non è
+incompleta, asserisce esattamente ciò che deve — e non potrebbe fallire. Il pubblico che scrive prove
+riconosce all'istante la sensazione, perché la copertura la contava come coperta. La regola sta prima
+della prova, nella sua costruzione: si nomina la modifica al codice di produzione che la farebbe
+fallire, e se non se ne trova una, il caso scelto è complice.
+
+---
+
+### Il caso pericoloso non è la prova che fallisce: è la prova che non è stata eseguita
+
+> Lo script diceva ventuno su ventuno. Non aveva eseguito una sola prova: un'opzione scritta male
+> faceva uscire `pytest` con **4** — errore d'uso — e «diverso da zero» era stato letto come «la
+> guardia ha scattato».
+
+Fonte: [registro operativo, nota 157](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md` M-011](../app/docs/Sources.md#m-011), che estende
+[M-005](../app/docs/Sources.md#m-005) — «nessuna prova raccolta» esce con **5**.
+
+**Perché una slide:** perché il verdetto era il migliore possibile, e per questo nessuno lo avrebbe
+messo in dubbio. `pytest` risponde con almeno quattro cose diverse — 0, 1, 4, 5 — e solo l'**1**
+significa che una prova ha fallito. Un arnese che classifica esiti elenca i codici che conosce e
+tratta come guasto quello che non riconosce. Il segnale d'allarme, in sala come al terminale, è lo
+stesso: **un rapporto troppo pulito**.
+
+---
+
+### Due rotture della stessa dimensione, scritte nello stesso secondo, sono la stessa rottura
+
+> Il rapporto attribuiva a due mutazioni diverse la stessa prova fallita, che è un'impossibilità
+> logica. Python decide se ricompilare guardando data di modifica **in secondi** e dimensione **in
+> byte**: 16 036 e 16 036, nello stesso secondo. La seconda corsa eseguiva il bytecode della prima.
+
+Fonte: [registro operativo, nota 158](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md` M-011](../app/docs/Sources.md#m-011).
+
+**Perché una slide:** perché la cache di CPython è pensata per un umano che salva un file ogni tanto,
+e uno script di mutazione ne salva venti al minuto — viola entrambe le ipotesi implicite, la
+risoluzione dell'orologio e la variazione di lunghezza. Vale oltre Python: **ogni cache ha un
+criterio di invalidazione, e va conosciuto prima di metterla in un ciclo automatico.**
+
+---
+
+### Un numero può sbagliare verso il rassicurante, e può sbagliare verso lo spettacolare
+
+> Un'interruzione già in corso al primo sguardo, misurata da lì, dà un minimo: sbaglia per difetto, e
+> chi legge lo sospetta. Un'interruzione già chiusa, se ogni sguardo ne spostasse la fine, cresce a
+> ogni giro: sbaglia per eccesso, e nessuno lo sospetta — perché il numero grosso conferma la tesi.
+
+Fonte: [registro operativo, nota 160](registro-operativo-sviluppo.md), che continua la
+[nota 155](registro-operativo-sviluppo.md),
+[`app/docs/07-topologia-failover-e-i-due-numeri.md`](../app/docs/07-topologia-failover-e-i-due-numeri.md).
+
+**Perché una slide:** perché arriva subito dopo lo «zero che sembra una misura» e ne mostra il lato
+scomodo. Delle due direzioni dell'errore, l'attenzione ne guarda una sola, ed è quella che non
+conviene a chi sta parlando. La riga che chiude: quando un numero finisce su una slide a sostegno di
+un'affermazione, la prova che serve è quella che **gli impedirebbe di crescere**.
+
+---
+
+### `IRRAGGIUNGIBILE` è un'osservazione, `SCONOSCIUTO` è l'assenza di un'osservazione
+
+> Un server che sparisce dall'elenco non è un server che ha smesso di rispondere. Nel primo caso
+> nessuno l'ha interrogato; nel secondo qualcuno ci ha provato e non ha ottenuto risposta. Metterli
+> nello stesso stato significa dire in cronaca che un membro è caduto, quando è stato solo tolto.
+
+Fonte: [`app/docs/07-topologia-failover-e-i-due-numeri.md`](../app/docs/07-topologia-failover-e-i-due-numeri.md).
+
+**Perché una slide:** perché è la stessa disciplina dei doppi che sollevano invece di inventare, e
+della latenza che vale `None` invece di zero, applicata a un `enum`. Un tipo che ha uno stato per «non
+lo so» permette di non mentire; uno che non ce l'ha costringe a scegliere una bugia plausibile. Dal
+palco vale come domanda al pubblico: **quanti dei vostri `enum` hanno lo stato per «non lo so»?**

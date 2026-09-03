@@ -358,9 +358,82 @@ spostassero, resterebbe quella sola a difendere l'invariante.
 
 ---
 
+## Task 6 — L'osservatore della topologia, e i due numeri del failover
+
+**Che cosa chiedeva.** Un `TopologyWatcher` che, viste in ingresso alcune descrizioni di topologia,
+produca la sequenza attesa di `ServerStateChanged` e `TopologyChanged`; il caso che conta è primario
+→ nessun primario → primario **diverso**, provato con `FakeClock` in millisecondi. Poi i due numeri
+che giustificano l'applicazione — durata dell'interruzione e scritture perse — calcolati **qui** e
+non nella TUI, con valori attesi esatti e non tolleranze. Infine la regola del §6.2, «dopo 30 s senza
+primario smetti di ritentare», che finora esisteva solo come frase nel design.
+
+**Che cosa è stato scritto.** `application/topologia.py` e `tests/unit/test_topologia.py`:
+`TopologyWatcher`, e due valori congelati che portano i numeri, `Interruzione` e `Bilancio`. Le prove
+passano da **106 a 153**, `mypy --strict` verde su 28 file. Le scelte sono spiegate in
+[07-topologia-failover-e-i-due-numeri.md](07-topologia-failover-e-i-due-numeri.md); qui c'è il
+processo.
+
+**Diversamente dal previsto — il nono evento, e una guardia che ha fatto il suo mestiere.**
+
+Il Passo 3 chiedeva che la resa fosse **detta con un evento**. Nessuno degli otto del §6.3 sapeva
+dirlo senza mentire, e aggiungerne uno faceva fallire
+`test_gli_eventi_del_design_sono_otto_e_sono_quelli` — la guardia scritta al Task 3 proprio perché il
+dominio non crescesse in silenzio. Ha funzionato come doveva: ha reso il costo visibile e ha
+costretto a passare per un ADR. [ADR-0082](../../docs/Decision.md#adr-0082) porta gli eventi a
+**nove** con `PrimaryWaitAbandoned`, e la guardia — rinominata — adesso ne conta nove.
+
+Il che rende imprecisi, da oggi, il titolo e il corpo della voce del **Task 3** qui sopra, che
+parlano di otto eventi. Restano come sono: erano esatti con le informazioni di allora, e questa è la
+correzione prescritta dalla disciplina append-only.
+
+**Diversamente dal previsto — due volte l'arnese ha mentito prima del codice.**
+
+Ventun rotture deliberate sull'osservatore ([M-011](Sources.md#m-011)), e i primi due rapporti erano
+falsi entrambi.
+
+Il primo diceva *ventuno su ventuno catturate* senza aver eseguito una sola prova: era rimasta in
+riga di comando un'opzione inesistente, `pytest` usciva con **4** — errore d'uso — e lo script
+leggeva «diverso da zero» come «una prova ha fallito». Il repository conosceva già il codice 5,
+«nessuna prova raccolta» ([M-005](Sources.md#m-005)); adesso conosce anche il 4. **Nota 157.**
+
+Il secondo attribuiva a due rotture diverse la stessa prova fallita, che è un'impossibilità logica.
+Python decide se ricompilare un modulo guardando **data di modifica in secondi e dimensione in byte**
+del sorgente: due mutazioni della stessa lunghezza, scritte nello stesso secondo, condividono il
+`.pyc`. Le rotture 5 e 6 producevano entrambe 16 036 byte, la 9 e la 10 entrambe 16 033.
+**Nota 158.**
+
+In tutti e due i casi il segnale d'allarme è stato lo stesso: **un rapporto troppo pulito**. Vale la
+pena tenerlo, perché è l'unico che si accende quando lo strumento di verifica è quello rotto.
+
+**Quattro guardie scoperte su ventuno, e una prova che guardava il risultato giusto.**
+
+Al netto degli arnesi, la prima corsa onesta ha dato diciassette rosse e **quattro mute**. La più
+istruttiva è la 4: togliendo `sorted` dall'elenco dei server, la prova che asserisce l'ordine per
+indirizzo restava verde, perché in quella prova anche l'ordine di comparsa era già alfabetico.
+Osservava il risultato giusto per il motivo sbagliato. La prova nuova elenca i server **al
+contrario** nella descrizione di partenza. **Nota 159:** una guardia si prova solo con un caso in
+cui, se non ci fosse, si vedrebbe.
+
+**Un numero può sbagliare verso lo spettacolare.** La nota 155 diceva che uno zero inventato è la
+peggiore risposta mancante, perché sembra una misura. Qui la stessa domanda ha avuto due risposte
+opposte, e vanno tenute insieme. Un'interruzione già in corso al primo sguardo **non si misura**:
+`durata_ms` resta `None`, perché il valore che si potrebbe scrivere sarebbe un minimo, e sbaglierebbe
+verso il rassicurante. Un'interruzione chiusa **non si riapre** allo sguardo dopo: spostarne la fine
+la allungherebbe a ogni giro, e sbaglierebbe verso lo spettacolare. Il secondo errore è più difficile
+da notare, perché la slide ci guadagna. **Nota 160.**
+
+**Che cosa resta aperto.** Questo osservatore **interroga**, non ascolta: la risoluzione della misura
+è l'intervallo di campionamento, e l'errore sulla durata è al più un intervallo. Il valore
+predefinito, 500 ms, non è misurato — è scelto. La misura vera arriva al Task 7, con `SdamBridge` e i
+callback di PyMongo, che riferiscono il cambiamento quando accade. Nessun `ClusterInspector` reale
+esiste ancora, e per il `TopologyWatcher` non c'è l'invariante di thread che il Task 5 ha dato al
+generatore di carico: oggi lo si usa da un thread solo, ma nessuna prova lo dice.
+
+---
+
 ## Che cosa manca
 
-I task dal 6 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
+I task dal 7 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
 futuro, che lo stanno facendo — in particolare
 [04-eventi-del-driver-e-concorrenza.md](04-eventi-del-driver-e-concorrenza.md), che porta in testa un
 avviso di stato.
@@ -376,6 +449,10 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | `$group` non è nel dialetto di `InMemoryStore` | il messaggio di `NonSupportato`, e [02](02-porte-e-doppi.md#dove-il-doppio-non-sa-solleva) | la prima prova che lo chiederà |
 | Il rifiuto dei booleani in `_come_intero` non è coperto da nessuna prova | [M-006, riserve](Sources.md#m-006) | la prima prova che dipenderà da lui |
 | `SdamBridge` e la coda: il comportamento di PyMongo va **osservato**, non solo letto | [04](04-eventi-del-driver-e-concorrenza.md#che-cosa-non-è-ancora-verificato) | Task 7 |
+| Nessun `ClusterInspector` reale: il `TopologyWatcher` ha visto solo topologie finte | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | Task 7 |
+| L'osservatore interroga invece di ascoltare: la risoluzione è l'intervallo | [07](07-topologia-failover-e-i-due-numeri.md#il-limite-di-questo-osservatore-dichiarato) | Task 7 |
+| L'intervallo predefinito di 500 ms è scelto, non misurato | [07](07-topologia-failover-e-i-due-numeri.md#il-limite-di-questo-osservatore-dichiarato) | Task 7 |
+| Il `TopologyWatcher` non ha un invariante di thread: oggi lo usa un thread solo | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | Task 10, con la TUI |
 | `ChunkMigrated` potrebbe non essere osservabile da un client di `mongos` | [04](04-eventi-del-driver-e-concorrenza.md#che-cosa-non-è-ancora-verificato) | Task 7 |
 | Come le prove di integrazione ricevono la credenziale senza violare ADR-0054 | [decisioni](decisioni-che-vincolano-app.md#adr-0054) | Task 8 |
 | `refresh_per_second` dichiarato invece che ereditato | [04](04-eventi-del-driver-e-concorrenza.md) | Task 10 |
@@ -388,4 +465,4 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 
 **Il registro completo del repository**, che copre anche le altre feature, è
 [`docs/registro-operativo-sviluppo.md`](../../docs/registro-operativo-sviluppo.md). Le note di metodo
-citate qui (137–156) stanno lì per esteso.
+citate qui (137–160) stanno lì per esteso.

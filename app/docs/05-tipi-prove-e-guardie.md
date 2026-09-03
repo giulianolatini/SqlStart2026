@@ -143,8 +143,8 @@ Gli esperimenti fatti finora, con l'esito:
 |---|---|---|
 | import estranei nel dominio | `import pymongo` in `domain/__init__.py` | fallisce: «`domain/__init__.py` importa `['pymongo']`» |
 | la guardia guarda il vuoto | — | coperta da un'asserzione sul numero di moduli esaminati |
-| eventi tutti congelati | un nono evento `@dataclass` senza `frozen` | **la classe non nasce** ([M-002](Sources.md#m-002)) |
-| eventi tutti slottati | un nono evento `frozen=True` senza `slots=True` | fallisce, nominando la classe |
+| eventi tutti congelati | un evento in più `@dataclass` senza `frozen` | **la classe non nasce** ([M-002](Sources.md#m-002)) |
+| eventi tutti slottati | un evento in più `frozen=True` senza `slots=True` | fallisce, nominando la classe |
 | la base congelata e slottata | tolto `slots=True` a `Evento` | fallisce su due prove |
 
 ## Il terzo esito

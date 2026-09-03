@@ -3,7 +3,7 @@
 > Il principio in una riga: **un evento è un fatto, e un fatto non cambia.** Il che, in Python,
 > richiede due decoratori e non uno.
 
-## Gli otto eventi
+## I nove eventi
 
 Sono i fatti che `mongolab` sa raccontare. Stanno in `app/src/mongolab/domain/eventi.py`, tutti
 `@dataclass(frozen=True, slots=True)`, tutti figli di una base `Evento` che porta un solo campo.
@@ -18,6 +18,13 @@ Sono i fatti che `mongolab` sa raccontare. Stanno in `app/src/mongolab/domain/ev
 | `ServerStateChanged` | `indirizzo`, `precedente`, `successivo` | il singolo membro che cade o risale |
 | `BackupProgressed` | `avanzamento` | il dump che procede |
 | `ChunkMigrated` | `collezione`, `da_shard`, `a_shard`, `chunk` | il balancer che sposta |
+| `PrimaryWaitAbandoned` | `atteso_ms`, `pazienza_ms`, `ultimo_primario` | il client che smette di aspettare |
+
+Otto vengono dal §6.3 del design. Il nono è arrivato dopo, al Task 6, e non per comodità: la
+regola del §6.2 «dopo 30 s senza primario, smetti di ritentare» non aveva un evento che sapesse
+dirla senza mentire, e aggiungerne uno è costato un ADR ([ADR-0082](../../docs/Decision.md#adr-0082)).
+Come ci sia riuscita una guardia a imporlo sta in
+[07-topologia-failover-e-i-due-numeri.md](07-topologia-failover-e-i-due-numeri.md).
 
 ## Perché immutabili: la coda è una consegna
 
@@ -137,8 +144,8 @@ La prova che sorveglia gli eventi li **scopre** invece di elencarli: percorre il
 le sottoclassi di `Evento`, e applica le regole a tutte. Elencarli a mano vorrebbe dire che un nono
 evento aggiunto fra sei mesi sfugge a ogni controllo, e ci sfugge in silenzio.
 
-Scritta la prova, l'ho rotta apposta — la disciplina della nota di metodo 142 — aggiungendo un nono
-evento mutabile. **E non è fallita: la classe non è arrivata a esistere.**
+Scritta la prova, l'ho rotta apposta — la disciplina della nota di metodo 142 — aggiungendo un
+evento mutabile in più (allora sarebbe stato il nono; oggi il decimo). **E non è fallita: la classe non è arrivata a esistere.**
 
 ```
 TypeError: cannot inherit non-frozen dataclass from a frozen one
@@ -148,7 +155,7 @@ TypeError: cannot inherit non-frozen dataclass from a frozen one
 Un'asserzione su `frozen` nelle sottoclassi non poteva fallire, e per la stessa ragione non poteva
 fallire quella sull'ordine dei campi: sarebbero state controlli sul compilatore travestiti da prove.
 
-Restava viva solo `slots`, che si dimentica in silenzio: un nono evento `frozen=True` senza
+Restava viva solo `slots`, che si dimentica in silenzio: un evento in più `frozen=True` senza
 `slots=True` nasce senza protestare. Quella variante ha fatto fallire due prove nominando la classe
 colpevole.
 

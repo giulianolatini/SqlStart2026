@@ -655,6 +655,69 @@ misure valgono per l'ambiente descritto in [M-001](#m-001) e per nessun altro.
   Nessun `FAILED`, nessun messaggio, nessun punto del codice indicato — e un blocco senza messaggio
   somiglia a un problema della macchina molto più che a un difetto. È la **nota di metodo 153**.
 
+<a id="m-011"></a>
+### M-011 — Ventuno rotture deliberate sull'osservatore della topologia, e due rapporti falsi
+
+- **Data:** 2026-09-03
+- **Comando:** ventun modifiche al solo `src/mongolab/application/topologia.py`, una alla volta,
+  ciascuna seguita da `pytest -q` e dal ripristino da copia. Uno script guida il ciclo, con
+  `PYTHONDONTWRITEBYTECODE=1` e la rimozione di ogni `__pycache__` **prima** di ogni corsa (il
+  perché sta nelle riserve).
+- **Output:**
+  ```
+  ROSSO   1. la prima occhiata emette                42 failed, 111 passed
+  ROSSO   2. topologia identica emette lo stesso      2 failed, 151 passed
+  ROSSO   3. il riepilogo prima dei dettagli          3 failed, 150 passed
+  ROSSO   4. l'ordine non e' per indirizzo            1 failed, 152 passed  <- prova nuova
+  ROSSO   5. chi sparisce diventa irraggiungibile     1 failed, 152 passed
+  ROSSO   6. chi arriva viene da irraggiungibile      1 failed, 152 passed
+  ROSSO   7. un'interruzione aperta dura zero         2 failed, 151 passed
+  ROSSO   8. l'interruzione si apre al primo sguardo  1 failed, 152 passed
+  ROSSO   9. lo stesso primario che torna e' failover 1 failed, 152 passed
+  ROSSO  10. la pazienza scade un giro dopo           2 failed, 151 passed
+  ROSSO  11. la resa chiude l'interruzione            1 failed, 152 passed
+  ROSSO  12. dopo la resa si riprende a guardare      1 failed, 152 passed
+  ROSSO  13. si attende anche dopo l'ultimo giro      1 failed, 152 passed
+  ROSSO  14. le perdite possono essere negative       1 failed, 152 passed
+  ROSSO  15. i conteggi negativi passano              1 failed, 152 passed
+  ROSSO  16. zero giri e' un numero di giri           1 failed, 152 passed
+  ROSSO  17. un intervallo di zero va bene            1 failed, 152 passed
+  ROSSO  18. una pazienza di zero va bene             1 failed, 152 passed
+  ROSSO  19. l'interruzione si richiude a ogni giro   2 failed, 151 passed  <- prova nuova
+  ROSSO  20. il ricordo del primario non si azzera    2 failed, 151 passed  <- prova nuova
+  ROSSO  21. segui torna il failover di prima         1 failed, 152 passed  <- prova nuova
+  ```
+- **Che cosa dice:** ventuno su ventuno, ciascuna catturata dalla prova che la nomina. Ma il
+  risultato utile è **quello della prima corsa**, prima che le quattro prove nuove esistessero: le
+  rotture 4, 19, 20 e 21 lasciavano la suite **verde su 148**. Quattro guardie scoperte su ventuno,
+  cioè il terzo esito della nota 144 quasi una volta su cinque.
+
+  La più istruttiva è la 4. Una prova sull'ordine per indirizzo dei `ServerStateChanged` esisteva
+  già; togliendo `sorted` restava verde, perché in quella prova anche l'ordine di comparsa dei
+  server era alfabetico. Osservava il risultato giusto per il motivo sbagliato. La prova nuova
+  elenca i server **al contrario** nella prima descrizione.
+- **Riserve — due volte l'arnese ha mentito prima del codice.**
+
+  **Il codice d'uscita letto come un booleano.** Il primo rapporto diceva *ventuno su ventuno*, e
+  non aveva eseguito una sola prova: era rimasta in riga di comando un'opzione inesistente, e
+  `pytest` usciva con **4** — errore d'uso — per tutte e ventuno. Lo script trattava «diverso da
+  zero» come «una prova ha fallito». Il repository conosceva già il codice 5, «nessuna prova
+  raccolta» ([M-005](#m-005)); adesso conosce anche il 4. Solo l'**1** vuol dire che una prova ha
+  fallito, e un arnese di mutazione deve pretenderlo.
+
+  **Il bytecode riusato fra due rotture diverse.** Il secondo rapporto attribuiva a rotture diverse
+  la stessa prova fallita, il che è impossibile. Python decide se ricompilare un modulo
+  confrontando **la data di modifica in secondi e la dimensione in byte** del sorgente: le rotture 5
+  e 6 sono la stessa sostituzione (`SCONOSCIUTO` → `IRRAGGIUNGIBILE`) in due punti diversi, quindi
+  producono file **della stessa dimensione**, e vengono scritte a meno di un secondo l'una
+  dall'altra. La corsa della 6 eseguiva il `.pyc` della 5. Lo stesso è capitato alla coppia 9/10,
+  anch'essa di dimensione identica (`16033` byte contro `16032` dell'originale).
+
+  In entrambi i casi il segnale d'allarme è stato lo stesso, e vale la pena tenerlo: **un rapporto
+  troppo pulito.** Ventuno rotture su ventuno catturate era il risultato più desiderabile e il più
+  improbabile; due mutazioni distinte catturate dalla stessa identica prova era un'impossibilità
+  logica travestita da conferma.
+
 ---
 
 ## Fonti canoniche che l'applicazione usa senza copiarle

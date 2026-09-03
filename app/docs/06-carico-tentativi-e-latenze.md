@@ -269,7 +269,7 @@ Un ultimo dettaglio, perché è il genere di cosa che si scopre solo eseguendo. 
 eventi per specie con un aiutante:
 
 ```python
-def _specie[E: Evento](eventi: list[Evento], tipo: type[E]) -> list[E]:
+def specie[E: Evento](eventi: list[Evento], tipo: type[E]) -> list[E]:
 ```
 
 Nella prima stesura il tipo di ritorno era `list[Evento]`, e `make app-check` ha bocciato **dieci**

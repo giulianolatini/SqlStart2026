@@ -19,6 +19,7 @@ from mongolab.domain.eventi import (
     ChunkMigrated,
     Evento,
     LatencySampled,
+    PrimaryWaitAbandoned,
     RetryAttempted,
     ServerStateChanged,
     TopologyChanged,
@@ -51,9 +52,13 @@ ISTANTE = datetime(2026, 9, 18, 9, 30, 0, tzinfo=UTC)
 def sottoclassi_di_evento() -> list[type[Evento]]:
     """Gli eventi dichiarati nel modulo, scoperti invece che elencati.
 
-    Elencarli a mano qui vorrebbe dire che una nona classe aggiunta al Task 6 sfugge a
+    Elencarli a mano qui vorrebbe dire che una decima classe aggiunta domani sfugge a
     ogni regola di questo file, e sfugge in silenzio: le prove continuerebbero a passare
-    parlando delle otto che già conoscevano.
+    parlando delle nove che già conoscevano.
+
+    La nona è arrivata davvero, al Task 6, ed è andata come doveva: la guardia sotto ha
+    fallito, e per farla tornare verde è servito un ADR (l'0082) invece di una riga
+    in più in un insieme.
     """
     return [
         valore
@@ -64,11 +69,18 @@ def sottoclassi_di_evento() -> list[type[Evento]]:
     ]
 
 
-def test_gli_eventi_del_design_sono_otto_e_sono_quelli() -> None:
+def test_gli_eventi_del_design_sono_nove_e_sono_quelli() -> None:
+    """Otto dal §6.3, il nono da ADR-0082.
+
+    Questa prova non elenca per pignoleria: elenca perché il costo di aggiungere un
+    evento deve restare **visibile**. Un dominio che cresce in silenzio è un dominio in
+    cui, fra tre task, nessuno sa più quali fatti l'applicazione sa raccontare.
+    """
     attesi = {
         "BackupProgressed",
         "ChunkMigrated",
         "LatencySampled",
+        "PrimaryWaitAbandoned",
         "RetryAttempted",
         "ServerStateChanged",
         "TopologyChanged",
@@ -137,7 +149,7 @@ def test_un_evento_e_confrontabile_per_valore() -> None:
     assert primo == secondo
 
 
-def test_gli_otto_eventi_si_costruiscono() -> None:
+def test_i_nove_eventi_si_costruiscono() -> None:
     # Una prova noiosa che serve a una cosa sola: se una firma cambia, se ne accorge qui
     # e non dentro il primo caso d'uso che la usa.
     topologia = DescrizioneTopologia(tipo=TipoTopologia.SCONOSCIUTA, server=())
@@ -161,8 +173,14 @@ def test_gli_otto_eventi_si_costruiscono() -> None:
             a_shard="shard2",
             chunk="[MinKey, 100)",
         ),
+        PrimaryWaitAbandoned(
+            istante=ISTANTE,
+            atteso_ms=30_000.0,
+            pazienza_ms=30_000.0,
+            ultimo_primario="mongo1:27017",
+        ),
     ]
-    assert len(costruiti) == 8
+    assert len(costruiti) == 9
     assert all(evento.istante == ISTANTE for evento in costruiti)
 
 

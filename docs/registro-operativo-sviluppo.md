@@ -5051,3 +5051,131 @@ Stato aggiornato: decisioni fino ad **ADR-0081**, verifiche fino a **V-074**, no
 alla **156**. Le suite: **143** prove per gli strumenti, **106** per l'applicazione. Prossimo passo:
 **Task 6** del [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), l'osservatore della
 topologia — che chiederà a `FakeInspector` la sequenza di stati per cui è stato disegnato.
+
+---
+
+## 2026-09-03 — `feature/04`, Task 6: la macchina a stati della topologia, due numeri, e due volte l'arnese che mente
+
+`TopologyWatcher` è l'occhio dell'applicazione sul cluster: guarda la topologia, racconta che cosa è
+cambiato, e calcola i due numeri per cui il talk esiste — **quanto è durata l'interruzione** e
+**quante scritture confermate sono sparite**. Come tutto ciò che sta in `application/`, non sa che
+esiste MongoDB: parla con `ClusterInspector`, `Clock` ed `EventSink`. Le prove dell'applicazione
+passano da **106 a 153**, `mypy --strict` verde su 28 file.
+
+Il caso che conta non è uno stato, è un **passaggio**: primario, nessun primario, primario
+**diverso**. Tre fotogrammi, e solo il terzo dice «failover» — se torna lo stesso primario è stata
+un'interruzione, non un cambio di guardia. La distinzione vive in `Interruzione`, che tiene i due
+indirizzi e non solo i due istanti.
+
+I due numeri stanno qui e non nella TUI. Una durata calcolata dentro il ciclo di disegno la si può
+provare solo aspettandola davvero; calcolata dietro la porta `Clock`, il valore atteso è **esatto** —
+250,0 ms, non «fra 200 e 300» — e la prova gira in millisecondi. È la ragione per cui `Clock` è una
+porta, scritta in ADR-0007 e finalmente riscossa.
+
+**Diversamente dal previsto — la regola del §6.2 ha chiesto un nono evento, e una guardia gliel'ha
+fatto pagare.**
+
+«Dopo 30 s senza primario, smetti di ritentare» era una frase del design senza codice. Tradurla ha
+chiesto che la resa fosse **detta**, e nessuno degli otto eventi del §6.3 sapeva dirla senza mentire:
+`WriteFailed` racconta una scrittura che qui nessuno ha tentato, `RetryAttempted` annuncia un
+tentativo che non ci sarà — al Task 5 era già stato stabilito, con una prova, che l'ultimo evento di
+una resa non può essere un tentativo mai eseguito — e `TopologyChanged` riferisce il cluster, mentre
+la resa è una decisione di chi osserva.
+
+Aggiungere l'evento faceva fallire `test_gli_eventi_del_design_sono_otto_e_sono_quelli`, la guardia
+scritta al Task 3 perché il dominio non crescesse in silenzio. Ha funzionato esattamente come doveva:
+non ha impedito la modifica, ne ha reso **visibile il costo**, e ha costretto la decisione a passare
+per la sede giusta. [ADR-0082](Decision.md#adr-0082) porta gli eventi a nove con
+`PrimaryWaitAbandoned`, che dichiara `atteso_ms`, `pazienza_ms` e `ultimo_primario`. I due numeri
+viaggiano insieme perché «ho aspettato 30 000 ms» non si legge finché non si sa quanta pazienza
+c'era, e dal vivo la pazienza si abbassa apposta per non tenere ferma la sala.
+
+**Diversamente dal previsto — due rapporti falsi prima di un rapporto vero.**
+
+Ventun rotture deliberate sull'osservatore, una alla volta, con ripristino da copia
+([M-011](../app/docs/Sources.md#m-011)). I primi due esiti erano sbagliati entrambi, e per ragioni
+diverse.
+
+Il primo diceva *ventuno su ventuno catturate*, e non aveva eseguito **una sola prova**: era rimasta
+in riga di comando un'opzione inesistente, `pytest` usciva con **4** — errore d'uso — per tutte e
+ventuno, e lo script leggeva «diverso da zero» come «una prova ha fallito». Il repository conosceva
+già il codice 5, «nessuna prova raccolta» ([M-005](../app/docs/Sources.md#m-005)), e non aveva
+imparato la lezione generale.
+
+Il secondo attribuiva a rotture diverse la stessa prova fallita, il che è impossibile. Python decide
+se ricompilare un modulo confrontando **data di modifica in secondi e dimensione in byte** del
+sorgente: le rotture 5 e 6 sono la stessa sostituzione in due punti, producono file identici in
+lunghezza — 16 036 byte — e vengono scritte a meno di un secondo l'una dall'altra. La corsa della 6
+eseguiva il bytecode della 5. Stessa cosa per la coppia 9/10, entrambe 16 033.
+
+Il segnale d'allarme, tutte e due le volte, è stato lo stesso: **un rapporto troppo pulito**. Ventuno
+su ventuno era il risultato più desiderabile e il meno probabile; due mutazioni distinte catturate
+dalla stessa identica prova era un'impossibilità logica travestita da conferma.
+
+**Quattro guardie scoperte, e una prova che osservava il risultato giusto per il motivo sbagliato.**
+
+Al netto degli arnesi: diciassette rosse, **quattro mute**. La più istruttiva è la quarta. Una prova
+sull'ordine per indirizzo dei `ServerStateChanged` esisteva già; togliendo `sorted` restava verde,
+perché in quella prova anche l'ordine di comparsa dei server era alfabetico. La guardia non era
+provata — era **accompagnata** da un caso che le dava ragione senza interrogarla. La prova nuova
+elenca i server al contrario nella descrizione di partenza.
+
+**Che cosa resta aperto, dichiarato.** Questo osservatore **interroga**, non ascolta: la risoluzione
+della misura è l'intervallo di campionamento, e l'errore sulla durata è al più un intervallo. Il
+valore predefinito di 500 ms è scelto, non misurato. La misura vera arriva al Task 7, con
+`SdamBridge` e i callback di PyMongo, che riferiscono il cambiamento quando accade invece che al
+sondaggio successivo. Nessun `ClusterInspector` reale esiste ancora, e per il `TopologyWatcher` non
+c'è l'invariante di thread che il Task 5 ha dato al generatore di carico.
+
+**Note di metodo.**
+
+157. **Un codice d'uscita non è un booleano, e trattarlo come tale rovescia il verdetto.** Uno script
+     che rompe il codice apposta chiede a `pytest`: «hai fallito?». Ma `pytest` risponde con almeno
+     quattro cose diverse — 0 tutto verde, 1 una prova ha fallito, 4 errore d'uso, 5 nessuna prova
+     raccolta — e solo l'**1** è la risposta cercata. Un'opzione scritta male produce 4 su ogni
+     corsa, e uno script che legge «diverso da zero» come «la guardia ha scattato» riferisce
+     ventuno successi senza aver eseguito niente. La regola: un arnese che classifica esiti
+     **elenca** i codici che conosce e tratta come guasto proprio quello che non riconosce; e chi lo
+     scrive controlla che l'output non sia vuoto, perché un rapporto pieno di verdetti e privo di
+     testo è il ritratto di uno strumento che non ha mai chiamato lo strumento vero. La forma più
+     generale: **il caso più pericoloso non è la prova che fallisce, è la prova che non è stata
+     eseguita** — le due si assomigliano solo se si guarda un numero invece di una riga.
+158. **Due modifiche della stessa dimensione, scritte nello stesso secondo, sono la stessa modifica.**
+     Python decide se ricompilare un sorgente confrontando la sua data di modifica **in secondi** e
+     la sua dimensione **in byte** con quanto registrato nell'intestazione del `.pyc`; il contenuto
+     non lo guarda. Un ciclo di rotture deliberate viola entrambe le ipotesi implicite di quel
+     controllo: scrive più versioni al secondo, e produce versioni della stessa lunghezza ogni volta
+     che sostituisce un nome con un altro della stessa misura. Il risultato è che una corsa esegue il
+     bytecode della corsa prima, e il rapporto attribuisce a una mutazione l'effetto di un'altra. La
+     regola pratica: chi genera codice a macchina disattiva il bytecode (`PYTHONDONTWRITEBYTECODE=1`)
+     e cancella i `__pycache__` prima di ogni corsa. La regola generale: **ogni cache ha un criterio
+     di invalidazione, e va conosciuto prima di usarla in un ciclo automatico** — quello di CPython è
+     pensato per un umano che salva un file ogni tanto, non per uno script che ne salva venti al
+     minuto.
+159. **Una guardia si prova solo con un caso in cui, se non ci fosse, si vedrebbe.** Una prova
+     asseriva che gli eventi escono in ordine di indirizzo; togliendo l'ordinamento restava verde,
+     perché nel suo scenario i server comparivano già in ordine alfabetico. Osservava il risultato
+     giusto per il motivo sbagliato: confermava l'ordine senza mai metterlo alla prova. È la forma
+     più subdola di prova inutile, perché non è né sbagliata né incompleta — asserisce esattamente
+     ciò che deve, e non potrebbe fallire. La regola sta prima della prova, nella sua costruzione:
+     **prima di scriverla, si nomina la modifica al codice di produzione che la farebbe fallire**;
+     se non se ne trova una, il caso scelto è complice. Per una guardia sull'ordine questo significa
+     un ingresso disordinato; per una sul filtro, un elemento da scartare; per una sul limite, un
+     valore oltre.
+160. **Un numero può sbagliare verso il rassicurante, e può sbagliare verso lo spettacolare: il
+     secondo è più difficile da vedere.** La nota 155 diceva di non inventare zeri. Il seguito è che
+     l'errore ha due direzioni, e l'attenzione ne guarda una sola. Un'interruzione già in corso al
+     primo sguardo, se la si misurasse dall'istante in cui la si è vista, darebbe un minimo:
+     sbaglierebbe per difetto, e chi legge lo sospetta. Un'interruzione già chiusa, se ogni sguardo
+     successivo ne spostasse la fine, crescerebbe a ogni giro: sbaglierebbe per eccesso, e nessuno lo
+     sospetta, perché il numero grosso conferma la tesi che si sta esponendo. Nella prima corsa di
+     rotture era il secondo caso a non essere coperto da nessuna prova. La regola: **quando un
+     numero finisce su una slide a sostegno di un'affermazione, la prova che serve è quella che lo
+     impedirebbe di crescere**, non quella che lo impedirebbe di sparire; e dove il valore onesto non
+     esiste, il tipo dice `None` invece di scegliere una direzione.
+
+Stato aggiornato: decisioni fino ad **ADR-0082**, verifiche fino a **V-074**, note di metodo fino
+alla **160**. Le suite: **143** prove per gli strumenti, **153** per l'applicazione, `mypy --strict`
+verde su 28 file. Prossimo passo: **Task 7** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), `SdamBridge` — dove le topologie
+smetteranno di essere finte, e i callback di PyMongo andranno **osservati**, non solo letti.

@@ -5249,3 +5249,64 @@ in `app/docs/Sources.md`** — due registri con la stessa numerazione producono 
 l'ambiguità arriverebbe proprio quando qualcuno cita di fretta.
 
 **Fonti:** nessuna (decisione organizzativa)
+
+---
+
+<a id="adr-0082"></a>
+## ADR-0082 — Gli eventi del §6.3 diventano nove: il client può dire di aver smesso di aspettare
+
+**Data:** 2026-09-03 · **Stato:** Accettata
+
+**Contesto:** il §6.2 del design contiene una regola scritta come frase e mai implementata: «dopo
+30 s senza primario, smetti di ritentare». È la regola per cui esiste la porta `Clock`, ed è citata
+lì proprio come esempio di ciò che si prova in millisecondi invece che in decine di secondi. Il
+Task 6 di `feature/04` la traduce in codice — `TopologyWatcher` osserva la topologia, e se non vede
+un primario entro la pazienza configurata smette di guardare — e il piano chiede che lo dica
+emettendo un evento.
+
+Nessuno degli otto eventi del §6.3 può dirlo senza mentire. `WriteFailed` racconta una scrittura
+rifiutata, e qui nessuno ha tentato di scrivere: metterlo in cronaca inventa un'operazione.
+`RetryAttempted` annuncia un tentativo che sta per essere fatto, ed è l'esatto contrario di una resa
+— al Task 5 il repository ha già stabilito, con una prova, che l'ultimo evento di una resa **non**
+può essere un `RetryAttempted`, perché un tentativo annunciato e mai eseguito è una cronaca falsa.
+`TopologyChanged` e `ServerStateChanged` riferiscono osservazioni, mentre la resa è una decisione di
+chi osserva: non è cambiato niente nel cluster, è cambiato che il client ha smesso di chiedere.
+Restano `LatencySampled`, `BackupProgressed` e `ChunkMigrated`, che non c'entrano.
+
+Il vincolo che ha reso visibile il problema è una guardia: `test_gli_eventi_del_design_sono_otto_e_sono_quelli`
+elenca le sottoclassi di `Evento` e le confronta con l'insieme del design. Un nono evento aggiunto
+per comodità la fa fallire. È il meccanismo che ha funzionato come doveva — ha costretto a passare di
+qui invece di lasciar crescere il dominio in silenzio.
+
+**Decisione:** gli eventi del §6.3 diventano **nove**. Il nono è `PrimaryWaitAbandoned`, e porta
+`atteso_ms`, `pazienza_ms` e `ultimo_primario`. Dice un fatto che nessun altro evento dice: **il
+client ha smesso di aspettare un primario**, dopo aver atteso tanto, contro una pazienza che valeva
+tanto, avendo visto per ultimo quel primario lì.
+
+I due numeri viaggiano insieme e non è ridondanza: `atteso_ms` da solo non si legge. «Ho aspettato
+30 000 ms» non dice se è tanto o poco finché non si sa che la pazienza era di 30 000 — e in una demo
+dal vivo, dove la pazienza si abbassa apposta per non far attendere la sala, il rapporto fra i due è
+esattamente ciò che il pubblico deve vedere. `ultimo_primario` è opzionale perché un client può
+arrivare a primario già caduto, e in quel caso non ne ha mai visto uno.
+
+La guardia si aggiorna insieme all'ADR, e resta una guardia: elenca **nove** nomi e li confronta con
+le sottoclassi trovate. Il decimo evento aggiunto per comodità continuerà a farla fallire.
+
+Il design **non si riscrive**: questo ADR lo emenda, come ADR-0078 ha emendato la clausola di data di
+ADR-0057. Chi legge il §6.3 e conta otto nomi trova qui il nono e la ragione per cui è arrivato dopo.
+
+**Alternative scartate:** **riusare `WriteFailed`** con `tipo_errore="ServerSelectionTimeoutError"` —
+è la forma in cui la resa si manifesterebbe davvero in PyMongo, ma il `TopologyWatcher` non scrive, e
+una scrittura fallita in cronaca dove nessuno ha scritto è il tipo di falso che il repository ha
+appena finito di combattere nei doppi (nota di metodo 149). **Non emettere niente** e limitarsi al
+valore di ritorno — il comportamento sarebbe provato lo stesso, perché «ha smesso» si verifica
+mostrando che ha smesso di guardare, ma la resa sparirebbe dalla cronaca a schermo, che è il posto in
+cui la demo esiste per mostrarla; e il piano chiede un evento. **Un evento generico**
+`ClientGaveUp(operazione, motivo)` — coprirebbe anche le rese future, ma un evento che va bene per
+tutto porta i suoi dati come testo libero, e i due numeri che rendono leggibile questa resa
+tornerebbero a essere una stringa da leggere a occhio. **Un campo booleano su `TopologyChanged`** —
+appiccicherebbe una decisione del client a un evento che riferisce il cluster, e renderebbe
+`precedente`/`successiva` obbligatorie in un momento in cui non è cambiato niente.
+
+**Fonti:** nessuna (decisione di disegno interna, che emenda il §6.3 di
+[`docs/00-progetto/2026-08-24-design.md`](00-progetto/2026-08-24-design.md))
