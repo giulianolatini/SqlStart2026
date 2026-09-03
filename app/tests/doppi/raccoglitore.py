@@ -1,4 +1,6 @@
-"""Il sink che non disegna niente e ricorda tutto."""
+"""Il sink che non disegna niente e ricorda tutto — nemmeno chi lo ha chiamato."""
+
+import threading
 
 from mongolab.domain.eventi import Evento
 
@@ -26,6 +28,16 @@ class RecordingSink:
 
     def __init__(self) -> None:
         self.eventi: list[Evento] = []
+        self.chiamanti: set[int] = set()
+        """Gli identificatori dei thread che hanno chiamato `emit`.
+
+        Il §6.3 non promette qualcosa sugli eventi ma su **chi li consegna**: un solo
+        punto di sincronizzazione, un solo thread che tocca il sink. È una promessa
+        asseribile solo se il sink ricorda da dove è stato chiamato, e senza queste due
+        righe la regola resterebbe una frase del design — di quelle che restano vere
+        finché qualcuno non emette da un worker e nessuno se ne accorge.
+        """
 
     def emit(self, evento: Evento) -> None:
+        self.chiamanti.add(threading.get_ident())
         self.eventi.append(evento)

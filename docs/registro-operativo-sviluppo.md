@@ -4921,3 +4921,133 @@ Stato aggiornato: decisioni fino ad **ADR-0081**, verifiche fino a **V-074**, no
 alla **152**. Le suite: **143** prove per gli strumenti, **54** per l'applicazione. Prossimo passo:
 **Task 5** del [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), il generatore di
 carico — che chiederà al doppio la prima cosa che oggi non sa fare: fallire.
+
+---
+
+## 2026-09-03 — `feature/04`, Task 5: il carico e i tentativi, un percentile che non era un numero, e una rottura che non fallisce
+
+`WorkloadRunner` è il primo caso d'uso vero dell'applicazione: genera scritture, ritenta quelle che
+falliscono, misura quanto ci mettono, e racconta tutto emettendo eventi. Non sa che esiste MongoDB —
+parla con `DocumentStore`, `Clock` ed `EventSink`, e con nient'altro. Le prove
+dell'applicazione passano da **54 a 106**, `mypy --strict` verde su 25 file.
+
+Il debito che il Task 4 aveva dichiarato per nome è stato pagato qui: nessun doppio sapeva rompersi,
+e una politica di tentativi non è provabile contro un archivio che riesce sempre. Sono nati
+`ArchivioCheRompe` e `ArchivioLento`, che non riscrivono `InMemoryStore` ma lo **avvolgono** —
+e si compongono fra loro, perché ciascuno annota l'archivio interno con la porta e non con la
+classe. È la regola del repository applicata alla lettera: la capacità si aggiunge insieme alla
+prova che ne ha bisogno, mai semplificando la prova.
+
+**Il rosso c'era, ma era povero.**
+
+Le prove scritte per prime fallivano tutte con un `ModuleNotFoundError`. È un rosso vero, ma dice
+«manca tutto», non «questa guardia serve». Alla prima esecuzione dopo l'implementazione la suite è
+passata intera, e a quel punto la domanda onesta non è «è verde?» ma «quali di queste prove
+avrebbero visto un errore?». La risposta si compra solo rompendo: cinque rotture deliberate, una
+alla volta, con ripristino da copia ([M-010](../app/docs/Sources.md#m-010)).
+
+La quinta ha trovato una guardia **scoperta**. Togliendo da `PoliticaTentativi.attesa_ms` il rifiuto
+del primo tentativo — quello che non attende, perché non ha niente da ritentare — la suite è rimasta
+verde su 105. Nessuna prova la interrogava. La rottura non ha confermato una difesa: ne ha rivelato
+l'assenza, che è il terzo esito della nota 144 nella sua forma più utile. La prova
+`test_l_attesa_del_primo_tentativo_non_esiste` è nata lì, e da allora sono 106.
+
+**Diversamente dal previsto — la quarta rottura non fallisce, si pianta.**
+
+Il §6.3 del design impone che i worker non tocchino la TUI: pubblicano su una `queue.Queue`, e un
+thread solo drena. `WorkloadRunner` applica la stessa disciplina un livello più in basso — i worker
+non toccano il **sink** — e per sapere quando smettere di drenare conta le sentinelle: ogni worker,
+qualunque cosa accada, mette in coda un `None` come ultimo gesto, dentro un `finally`.
+
+Spostando quel `put` fuori dal `finally` mi aspettavo un rosso. Ho ottenuto un blocco. Il worker
+muore prima di segnalare, il chiamante aspetta un `None` che non arriverà, e la suite resta ferma al
+68 % finché il `timeout` non la uccide: `Error 143`. Nessun `FAILED`, nessun messaggio, nessun punto
+del codice indicato.
+
+Ai tre esiti della nota 144 se ne aggiunge un quarto, ed è il più difficile da leggere, perché
+somiglia a un problema della macchina molto più che a un difetto: davanti a una suite che non torna
+si pensa a Docker, alla rete, al portatile.
+
+**Diversamente dal previsto — «p95» non era un numero.**
+
+Avevo scritto `percentile` come una cosa ovvia. Poi ho misurato. Su un campione con un gradino — 95
+latenze da 1 ms, poi 50, 60, 70, 80 e 900 — il novantacinquesimo percentile vale **1,0** per rango
+più vicino, **3,45** con `statistics.quantiles(method='inclusive')`, **47,55** con `'exclusive'`; la
+media, per confronto, 12,55 ([M-009](../app/docs/Sources.md#m-009)). Quarantasette volte l'uno
+dall'altro, e nessuno dei tre sbaglia: rispondono a tre domande diverse. Le due forme di `quantiles`
+stimano un quantile della popolazione e per farlo interpolano, e la documentazione lo dichiara
+apertamente — «if a cut point falls one-third of the distance between two sample values, 100 and
+112, the cut-point will evaluate to 104» ([A-009](../app/docs/Sources.md#a-009)).
+
+La scelta non è cambiata: rango più vicino, perché ogni numero che finisce su una slide deve poter
+essere ritrovato nel campione. È cambiato il suo statuto, da abitudine a decisione documentata, con
+la fonte accanto e con la riserva scritta, che è scomoda: su quel campione il p95 per rango cade in
+cima al pianerottolo e della coda non dice niente. Lì la coda la mostra il p99 (80,0) e la dice
+tutta il massimo (900,0). È la ragione per cui il riepilogo porta **sei** numeri e non uno.
+
+Nello stesso conto è caduta una domanda che poteva restare un dubbio: `ceil` su un prodotto in
+virgola mobile è la combinazione in cui un ulp diventa un rango sbagliato di uno. Verificato contro
+l'aritmetica esatta di `Fraction` su cinque quantili e duecentomila taglie di campione: zero
+divergenze ([M-008](../app/docs/Sources.md#m-008)). Con la riserva giusta — è una verifica esaustiva
+**su un intervallo**, non una dimostrazione.
+
+**Lo zero che sembra una misura.** La prima stesura del riepilogo restituiva latenze a zero quando
+non c'era nessun campione. Un p95 di zero millisecondi su una corsa in cui tutto è fallito legge
+«velocissimo» dove la verità è «mai arrivato». Ora è `latenze=None`, e `riassumi` su un campione
+vuoto solleva invece di inventare.
+
+**Un aiutante di prova che spegneva il controllo.** Il filtro `_specie(eventi, WriteSucceeded)`
+tornava `list[Evento]`, e `mypy --strict` ha bocciato **dieci** asserzioni in un colpo:
+`"Evento" has no attribute "durata_ms"`. A runtime sarebbero passate tutte. La correzione è un
+parametro di tipo — `def _specie[E: Evento](eventi: list[Evento], tipo: type[E]) -> list[E]`, PEP 695,
+che mypy 1.13 su Python 3.13.15 accetta senza cerimonie.
+
+**Che cosa resta aperto, dichiarato.** La saturazione di `maxPoolSize` è materiale didattico del
+design, e qui non si può misurare: contro `InMemoryStore` non c'è nessun pool da saturare. Resta il
+gancio — il parametro `scrittori` — e la misura è del Task 16, dove andrà guardata anche la coda,
+che con `maxsize=0` è illimitata ([A-010](../app/docs/Sources.md#a-010)). E un avvertimento che vale
+la pena portarsi dietro: oggi la violazione del §6.3 è vista *per quello che è* da **una sola**
+prova, quella che confronta gli identificatori di thread; le altre cinque che falliscono insieme a
+lei lo fanno per effetto collaterale, perché i conteggi vivono nel ciclo di drenaggio.
+
+**Note di metodo.**
+
+153. **Una rottura deliberata ha un quarto esito, e non fallisce: pianta.** La nota 144 ne elencava
+     tre — la guardia scatta, la guardia tace, l'oggetto non è più costruibile. Ne manca uno, e si
+     vede solo rompendo codice concorrente: togliendo la garanzia che un worker segnali sempre la
+     propria fine, la suite non produce nessun `FAILED`, nessun messaggio, nessun punto del codice
+     indicato — resta ferma finché un `timeout` non la uccide, e l'unica traccia è un codice
+     d'uscita. È l'esito più insidioso perché **un blocco senza messaggio somiglia a un guasto
+     dell'ambiente**: la reazione naturale è sospettare Docker, la rete, la macchina. La regola
+     pratica ne discende: le prove concorrenti si eseguono sempre sotto un `timeout`, e il primo
+     sospetto davanti a una suite che non torna dopo una modifica è la modifica, non il portatile.
+154. **Un percentile senza la sua definizione non è un numero.** «p95 = 47,55 ms» sembra un fatto e
+     non lo è: sullo stesso campione, tre modi legittimi di calcolarlo danno 1,0, 3,45 e 47,55 —
+     quarantasette volte l'uno dall'altro — perché rispondono a tre domande diverse. Chi stima un
+     quantile della popolazione interpola, e ottiene un valore che nessuno ha misurato; chi riferisce
+     ciò che ha misurato prende un valore osservato, e paga con l'effetto pianerottolo. Nessuno dei
+     due sbaglia; sbaglia chi pubblica il numero senza dire quale dei due sta facendo. La regola:
+     ogni indicatore aggregato porta con sé la propria definizione, e mai da solo — un percentile che
+     non è accompagnato almeno dal massimo è un modo di non guardare la coda.
+155. **Zero è la peggiore risposta mancante, perché ha la faccia di una misura.** Restituire `0.0`
+     per una latenza che non è stata misurata, `0` per un conteggio che non è stato fatto, una lista
+     vuota per una domanda a cui non si è risposto: sono tutti valori che attraversano i controlli di
+     tipo, si sommano, si stampano e si mediano. Un p95 di zero millisecondi su una corsa in cui ogni
+     scrittura è fallita legge «velocissimo» dove la verità è «mai arrivato», e a differenza di
+     un'eccezione non lo dice a nessuno. È la regola del doppio che solleva (nota 149) portata dai
+     doppi ai dati: **dove non c'è una risposta giusta, il tipo deve poter dire di non averla** —
+     `None`, o un errore, mai un valore neutro.
+156. **Un aiutante di prova che perde il tipo spegne il controllo dove serviva di più.** Un filtro
+     che riceve eventi di dieci specie e ne restituisce una sola ha, nella firma ingenua, il tipo
+     della lista di partenza; le asserzioni che seguono toccano i campi della specie filtrata, cioè
+     esattamente ciò che quel tipo non promette. `mypy --strict` ha bocciato dieci asserzioni in un
+     colpo, e a runtime sarebbero passate tutte. La lezione non è «annotare meglio»: è che il codice
+     di prova va tipizzato **almeno** quanto quello di produzione, perché è lì che le asserzioni sono
+     più specifiche, ed è lì che una perdita di tipo passa inosservata più a lungo — nessuno rilegge
+     un aiutante di tre righe. Quando un aiutante *sa* qualcosa che il chiamante userà, glielo si fa
+     dire con un parametro di tipo.
+
+Stato aggiornato: decisioni fino ad **ADR-0081**, verifiche fino a **V-074**, note di metodo fino
+alla **156**. Le suite: **143** prove per gli strumenti, **106** per l'applicazione. Prossimo passo:
+**Task 6** del [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), l'osservatore della
+topologia — che chiederà a `FakeInspector` la sequenza di stati per cui è stato disegnato.

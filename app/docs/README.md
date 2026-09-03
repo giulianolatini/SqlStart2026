@@ -17,6 +17,7 @@ affermazione in **cronaca in diretta**.
 | 3 | [03-eventi-immutabili.md](03-eventi-immutabili.md) | perché un evento è congelato, e perché `frozen` da solo non basta |
 | 4 | [04-eventi-del-driver-e-concorrenza.md](04-eventi-del-driver-e-concorrenza.md) | che cosa vede il client durante un failover, e perché il listener deve tacere e uscire |
 | 5 | [05-tipi-prove-e-guardie.md](05-tipi-prove-e-guardie.md) | chi controlla che tutto questo resti vero |
+| 6 | [06-carico-tentativi-e-latenze.md](06-carico-tentativi-e-latenze.md) | perché i percentili e non la media, e perché i worker non toccano il sink |
 
 Si leggono in ordine, ma nessuna dipende dalle altre per essere comprensibile. Chi arriva da una
 domanda precisa può entrare dal punto giusto.

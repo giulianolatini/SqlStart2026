@@ -21,17 +21,26 @@ prova scrive `archivio: DocumentStore = InMemoryStore()`. La loro promessa è ve
 in `tests/unit/test_doppi.py`.
 """
 
-from tests.doppi.archivio import InMemoryStore, NonSupportato
+from tests.doppi.archivio import (
+    ArchivioCheRompe,
+    ArchivioLento,
+    InMemoryStore,
+    NonSupportato,
+    ScritturaRifiutata,
+)
 from tests.doppi.backup import FakeBackup
 from tests.doppi.ispettore import FakeInspector
 from tests.doppi.orologio import FakeClock
 from tests.doppi.raccoglitore import RecordingSink
 
 __all__ = [
+    "ArchivioCheRompe",
+    "ArchivioLento",
     "FakeBackup",
     "FakeClock",
     "FakeInspector",
     "InMemoryStore",
     "NonSupportato",
     "RecordingSink",
+    "ScritturaRifiutata",
 ]

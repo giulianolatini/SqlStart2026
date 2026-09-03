@@ -34,8 +34,8 @@ prima o poi diverge, e a quel punto nessuna delle due è affidabile.
 
 Ogni voce `A-` porta **URL, editore, versione documentata, data di consultazione, che cosa afferma
 davvero** e — quando c'è — la **riserva**: il punto in cui la pagina *non* dice quello che si
-vorrebbe farle dire. La riserva non è una formalità. Due delle sette fonti qui sotto tacciono
-proprio sul punto per cui erano state aperte, e la cosa si scopre solo leggendole.
+vorrebbe farle dire. La riserva non è una formalità. Più d'una, fra le dieci fonti qui sotto, tace
+proprio sul punto per cui la si era aperta, e la cosa si scopre solo leggendole.
 
 Ogni voce `M-` porta il **comando** e l'**output testuale**, così che chiunque possa rifarla. Le
 misure valgono per l'ambiente descritto in [M-001](#m-001) e per nessun altro.
@@ -246,6 +246,85 @@ misure valgono per l'ambiente descritto in [M-001](#m-001) e per nessun altro.
   quindi c'è, e questa pagina la dichiara come rischio generale del driver senza misurarla per
   PyMongo. Nel repository nessuna affermazione si appoggia a più di così.
 - **Usata da:** [02-porte-e-doppi.md](02-porte-e-doppi.md)
+
+---
+
+<a id="a-008"></a>
+### A-008 — Python: `statistics.median` interpola, e la documentazione lo dice
+
+- **URL:** https://docs.python.org/3/library/statistics.html#statistics.median
+- **Editore:** Python Software Foundation — libreria standard
+- **Versione documentata:** Python 3.14.7 (il canale `/3/` segue l'ultima versione pubblicata)
+- **Consultata:** 2026-09-03
+- **Verdetto:** conferma piena, e la pagina nomina da sé il compromesso che `mongolab` sceglie
+- **Cosa afferma:** la mediana di un campione di lunghezza pari **non è un valore osservato**.
+  «When the number of data points is even, the median is interpolated by taking the average of the
+  two middle values», ed è per questo che `median([1, 3, 5, 7])` vale `4.0`, che nel campione non
+  c'è. La stessa pagina descrive l'alternativa e la ragione per cui esiste: «Use the low median when
+  your data are discrete and you prefer the median to be an actual data point rather than
+  interpolated».
+- **Conseguenza qui:** `mongolab` calcola la mediana come percentile per rango più vicino, che è la
+  seconda forma — «an actual data point». La coincidenza con `statistics.median_low` non è supposta
+  ma misurata, in [M-009](#m-009). Non si usa direttamente `median_low` perché la mediana qui non è
+  un caso a parte: è il quantile 0,5 della stessa funzione che calcola p95 e p99, e due definizioni
+  diverse nello stesso riquadro di riepilogo sarebbero una trappola per chi legge i numeri.
+- **Riserve:** la pagina parla di dati **discreti** («when your data are discrete»), e le latenze in
+  millisecondi sono continue. L'argomento della documentazione non copre quindi esattamente questo
+  caso; la ragione per cui la scelta vale lo stesso è un'altra, ed è dichiarata nel codice: un
+  numero che finisce su una slide deve poter essere ritrovato nel campione.
+- **Usata da:** [06-carico-tentativi-e-latenze.md](06-carico-tentativi-e-latenze.md)
+
+<a id="a-009"></a>
+### A-009 — Python: `statistics.quantiles` interpola linearmente fra i due punti vicini
+
+- **URL:** https://docs.python.org/3/library/statistics.html#statistics.quantiles
+- **Editore:** Python Software Foundation — libreria standard
+- **Versione documentata:** Python 3.14.7
+- **Consultata:** 2026-09-03
+- **Verdetto:** conferma piena — è la funzione che si sarebbe usata, e la pagina spiega perché non
+  la si usa
+- **Cosa afferma:** i tagli non cadono sui dati. «The cut points are linearly interpolated from the
+  two nearest data points. For example, if a cut point falls one-third of the distance between two
+  sample values, 100 and 112, the cut-point will evaluate to 104». La funzione ha inoltre **due**
+  metodi, `'exclusive'` (predefinito) e `'inclusive'`, che danno risultati diversi sullo stesso
+  campione: «The method for computing quantiles can be varied depending on whether the data includes
+  or excludes the lowest and highest possible values from the population».
+- **Conseguenza qui:** un p95 di 104 ms su un campione in cui nessuno ha misurato 104 ms è un numero
+  costruito dalla formula. In una demo che esiste per mostrare misure vere è il tipo di numero da
+  non avere sulla slide, e la divergenza fra i tre modi di dire «p95» è misurata in
+  [M-009](#m-009): sullo stesso campione valgono 1,0 — 3,45 — 47,55.
+- **Riserve:** nessuna sul contenuto. La riserva è sulla conclusione, e va detta: l'interpolazione
+  **non è un difetto** di `quantiles`, è la definizione giusta quando si stima un quantile della
+  popolazione da un campione. `mongolab` non stima una popolazione: riferisce le latenze che ha
+  misurato, e per quello serve un valore osservato.
+- **Usata da:** [06-carico-tentativi-e-latenze.md](06-carico-tentativi-e-latenze.md)
+
+<a id="a-010"></a>
+### A-010 — Python: `queue.Queue` è il punto di scambio fra thread, e si occupa dei lucchetti
+
+- **URL:** https://docs.python.org/3/library/queue.html
+- **Editore:** Python Software Foundation — libreria standard
+- **Versione documentata:** Python 3.14.7
+- **Consultata:** 2026-09-03
+- **Verdetto:** conferma piena; è la fonte che rende `queue.Queue` una scelta e non un'abitudine
+- **Cosa afferma:** «The queue module implements multi-producer, multi-consumer queues. It is
+  especially useful in threaded programming when information must be exchanged safely between
+  multiple threads. The `Queue` class in this module implements all the required locking semantics».
+  Il modulo aggiunge come funziona dentro: «Internally, those three types of queues use locks to
+  temporarily block competing threads; however, they are not designed to handle reentrancy within a
+  thread».
+- **Conseguenza qui:** i worker di `WorkloadRunner` non hanno bisogno di un lucchetto proprio, e
+  soprattutto non ne hanno bisogno il sink e la TUI: la coda è l'unico punto in cui i thread si
+  incontrano, e chi drena è uno solo (§6.3, ADR-0019). La riga sulla rientranza è la ragione per cui
+  un `emit` non deve mai rimettere in coda: il sink sta nel thread che drena, e un ciclo lì sarebbe
+  esattamente il caso che il modulo dichiara di non gestire.
+- **Riserve:** la pagina non dice niente su quanto la coda possa crescere se il produttore corre più
+  del consumatore. Con `maxsize=0` — quello che `mongolab` usa — la coda è illimitata, e sotto un
+  carico che il drenaggio non regge cresce in memoria finché non finisce. Non è un problema alle
+  scale della demo (secondi, migliaia di eventi) e lo diventerebbe in un carico lungo: la sede in
+  cui si guarderà è il Task 16.
+- **Usata da:** [06-carico-tentativi-e-latenze.md](06-carico-tentativi-e-latenze.md),
+  [04-eventi-del-driver-e-concorrenza.md](04-eventi-del-driver-e-concorrenza.md)
 
 ---
 
@@ -466,6 +545,115 @@ misure valgono per l'ambiente descritto in [M-001](#m-001) e per nessun altro.
   Un `-> Generator[...]` esplicito non cambierebbe niente, ma non è stato provato. Nessuna opzione
   di mypy è stata cercata per farlo distinguere: potrebbe esistere, e questa voce afferma solo che
   la configurazione `strict` del progetto non la applica.
+
+---
+
+<a id="m-008"></a>
+### M-008 — Il rango di un percentile calcolato in virgola mobile non sbaglia mai, qui
+
+- **Data:** 2026-09-03
+- **Comando:** `percentile` calcola il rango come `math.ceil(quantile * len(campione))`, cioè con un
+  prodotto in virgola mobile dentro un `ceil` — la combinazione in cui un errore di un ulp diventa
+  un rango sbagliato di uno, e quindi un valore diverso. Il confronto è con l'aritmetica esatta di
+  `fractions.Fraction`:
+  ```python
+  for q in (0.5, 0.9, 0.95, 0.99, 0.999):
+      esatto_q = Fraction(q).limit_denominator(1000)
+      for n in range(1, 200001):
+          if math.ceil(q * n) != math.ceil(esatto_q * n):
+              sbagli.append((q, n))
+  ```
+  eseguito con l'interprete del progetto: `uv run --directory app python rango.py`.
+- **Output:**
+  ```
+  versione: 3.13.15 | GIL attivo: True
+  ranghi divergenti su 5 quantili x 200000 campioni: 0
+  ```
+- **Che cosa dice:** per i quantili che `mongolab` usa e per campioni fino a duecentomila latenze,
+  `ceil` in virgola mobile e il rango esatto coincidono sempre. La riga sul GIL è dello stesso
+  comando e serve a un'altra prova: la suite concorrente si appoggia al fatto che `list.extend` di
+  `InMemoryStore` non perda documenti sotto quattro scrittori, e su un interprete *free-threaded*
+  quel presupposto andrebbe riverificato invece che ereditato.
+- **Riserve:** è una verifica **esaustiva su un intervallo**, non una dimostrazione. Fuori
+  dall'intervallo — quantili scritti come `0.9999`, campioni da milioni di elementi — non dice
+  niente, e la forma giusta della difesa in quel caso sarebbe calcolare il rango in aritmetica
+  intera invece di misurare che quella in virgola mobile tiene.
+
+<a id="m-009"></a>
+### M-009 — «p95» sullo stesso campione vale 1,0 oppure 3,45 oppure 47,55
+
+- **Data:** 2026-09-03
+- **Comando:** un campione costruito apposta con un gradino — 95 latenze da 1 ms, poi 50, 60, 70,
+  80 e 900 ms — passato ai tre modi di calcolare il novantacinquesimo percentile, più la media.
+  Nella stessa esecuzione, 20 000 campioni casuali per confrontare il quantile 0,5 per rango più
+  vicino con `statistics.median_low`.
+- **Output:**
+  ```
+  mediana per rango vs median_low: 0 divergenze su 20000 campioni
+  campione: 95 valori a 1.0 piu 50, 60, 70, 80, 900 (n=100)
+    rango piu vicino: 1.0
+    quantiles inclusive[94]: 3.45
+    quantiles exclusive[94]: 47.55
+    media: 12.55
+    osservato nel campione? mio=True incl=False
+  Latenze(campioni=100, minimo_ms=1.0, mediana_ms=1.0, p95_ms=1.0, p99_ms=80.0, massimo_ms=900.0)
+  ```
+- **Che cosa dice:** due cose, e la seconda è scomoda. La prima è che la mediana per rango più
+  vicino **è** `statistics.median_low`, su ventimila campioni casuali senza una divergenza: la
+  scelta di `mongolab` coincide con una funzione della libreria standard, e la coincidenza è
+  misurata invece che supposta. La seconda è che «p95» da solo non è un numero: sullo stesso
+  campione i tre metodi danno 1,0, 3,45 e 47,55 — quarantasette volte l'uno dall'altro — e nessuno
+  dei tre sbaglia, perché stanno rispondendo a tre domande diverse. Solo il primo, però,
+  restituisce un valore che qualcuno ha misurato davvero (`mio=True`, `incl=False`).
+- **Riserve:** la riserva riguarda la scelta di `mongolab`, e va scritta perché la misura la mostra.
+  Con 95 valori su 100 identici, il p95 per rango cade **in cima al pianerottolo**: vale 1,0 e non
+  racconta niente della coda, che pure c'è e arriva a 900 ms. In quel campione è il p99 a mostrarla
+  — 80,0 — e il massimo a dirla tutta. Non è un difetto del metodo ma il suo confine: il percentile
+  per rango risponde «il più piccolo valore osservato sotto il quale sta almeno il 95 % del
+  campione», e su una distribuzione a gradino quella risposta sta sul gradino. È la ragione per cui
+  il riepilogo di `mongolab` porta **sei** numeri e non uno.
+
+<a id="m-010"></a>
+### M-010 — Quattro rotture deliberate sul generatore di carico, e una che non fallisce
+
+- **Data:** 2026-09-03
+- **Comando:** quattro modifiche al solo `src/mongolab/application/workload.py`, una alla volta,
+  ciascuna seguita da `make app-test` e dal ripristino da copia.
+- **Output:**
+  ```
+  1. tolto il «return» che ferma i tentativi all'ultimo:
+     FAILED test_la_politica_smette_dopo_i_tentativi_previsti_e_non_prima - assert 3 == 2
+     FAILED test_l_ultimo_evento_di_una_resa_e_il_fallimento_non_il_tentativo - assert False
+     FAILED test_l_attesa_raddoppia_a_ogni_tentativo - assert [50.0, 100.0, 200.0, 400.0] == [50.0, 100.0, 200.0]
+     FAILED test_l_attesa_non_supera_il_tetto - assert [50.0, 120.0, 120.0, 120.0] == [50.0, 120.0, 120.0]
+     FAILED test_il_tentativo_e_numerato_come_la_prova_che_sta_per_fare - assert [2, 3, 4] == [2, 3]
+     5 failed, 100 passed in 0.11s
+
+  2. i worker emettono sul sink invece che in coda:
+     FAILED test_solo_il_thread_chiamante_tocca_il_sink - assert {6178680832} == {8352227712}
+     (piu cinque prove sui conteggi, che vivono nel ciclo di drenaggio)
+     6 failed, 99 passed in 0.11s
+
+  3. mediana con statistics.median al posto del rango piu vicino:
+     FAILED test_riassumi_su_un_campione_noto - Latenze(... mediana_ms=5.5 ...) != (... 5.0 ...)
+     1 failed, 104 passed in 0.09s
+
+  4. la sentinella spostata fuori dal «finally»:
+     ...............  (la suite si ferma al 68 %)
+     make: *** [app-test] Error 143      <- SIGTERM, dopo 45 s di «timeout»
+  ```
+- **Che cosa dice:** le prime tre rotture sono i due esiti noti della **nota 142** — la guardia
+  scatta, e dice dove. La seconda merita una riga a sé: l'unica prova che vede la violazione *per
+  quello che è* è quella sul thread, e lo dice mostrando due identificatori diversi. Le altre
+  cinque falliscono per un effetto collaterale, perché i conteggi del riepilogo vivono nello stesso
+  ciclo che drena la coda; se un giorno i conteggi si spostassero altrove, resterebbe **una sola**
+  prova a difendere l'invariante del §6.3, ed è bene saperlo adesso.
+- **Riserve:** la quarta rottura è l'esito nuovo, e non compare nella nota 144. Togliendo il
+  `finally` che garantisce la sentinella, la prova sul generatore che solleva **non fallisce: si
+  pianta**. Il worker muore prima di segnalare la fine del turno, il chiamante aspetta una
+  sentinella che non arriverà, e la suite resta ferma finché qualcuno non la uccide da fuori.
+  Nessun `FAILED`, nessun messaggio, nessun punto del codice indicato — e un blocco senza messaggio
+  somiglia a un problema della macchina molto più che a un difetto. È la **nota di metodo 153**.
 
 ---
 

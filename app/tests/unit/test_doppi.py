@@ -13,6 +13,7 @@ lo mostra scrivendo l'orologio che lo inganna.
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+import threading
 
 import pytest
 
@@ -41,12 +42,15 @@ from mongolab.domain.porte import (
 )
 
 from tests.doppi import (
+    ArchivioCheRompe,
+    ArchivioLento,
     FakeBackup,
     FakeClock,
     FakeInspector,
     InMemoryStore,
     NonSupportato,
     RecordingSink,
+    ScritturaRifiutata,
 )
 
 ISTANTE = datetime(2026, 9, 18, 9, 30, 0, tzinfo=UTC)
@@ -151,6 +155,35 @@ def test_il_raccoglitore_conserva_gli_eventi_e_non_una_loro_versione() -> None:
     raccoglitore = RecordingSink()
     raccoglitore.emit(evento)
     assert raccoglitore.eventi == [evento]
+
+
+def test_il_raccoglitore_ricorda_da_quale_thread_e_stato_chiamato() -> None:
+    """La promessa che rende asseribile la regola del §6.3.
+
+    Non è una curiosità: «un solo thread tocca il sink» è un invariante di progetto
+    (ADR-0019), e un invariante che nessuna prova può leggere è una frase. Qui il
+    raccoglitore lo rende leggibile — `test_workload.py` ci asserisce sopra con più
+    scrittori in corsa.
+    """
+    raccoglitore = RecordingSink()
+    assert raccoglitore.chiamanti == set()
+
+    raccoglitore.emit(LatencySampled(istante=ISTANTE, operazione="find", durata_ms=2.0))
+
+    assert raccoglitore.chiamanti == {threading.get_ident()}
+
+
+def test_il_raccoglitore_vede_i_thread_diversi_come_diversi() -> None:
+    """Se non li distinguesse, la prova sul punto unico di sincronizzazione sarebbe vuota."""
+    raccoglitore = RecordingSink()
+    evento = LatencySampled(istante=ISTANTE, operazione="find", durata_ms=2.0)
+
+    altro = threading.Thread(target=raccoglitore.emit, args=(evento,))
+    altro.start()
+    altro.join()
+    raccoglitore.emit(evento)
+
+    assert len(raccoglitore.chiamanti) == 2
 
 
 def test_il_raccoglitore_passa_per_la_porta() -> None:
@@ -549,3 +582,139 @@ def test_il_backup_finto_passa_per_la_porta() -> None:
         pytest.approx(33.33, abs=0.01),
         pytest.approx(66.67, abs=0.01),
     ]
+
+
+# --- ArchivioCheRompe -----------------------------------------------------------------
+
+
+def test_l_archivio_che_rompe_rifiuta_le_scritture() -> None:
+    archivio = ArchivioCheRompe(InMemoryStore())
+
+    with pytest.raises(ScritturaRifiutata):
+        archivio.insert_many([{"_id": 1}])
+
+
+def test_l_archivio_che_rompe_smette_di_rompere_dopo_i_guasti_previsti() -> None:
+    """È la forma che serve al Task 5: fallisce, si ritenta, la seconda volta passa."""
+    archivio = ArchivioCheRompe(InMemoryStore(), guasti=2)
+
+    for _ in range(2):
+        with pytest.raises(ScritturaRifiutata):
+            archivio.insert_many([{"_id": 1}])
+
+    assert archivio.insert_many([{"_id": 1}]) == 1
+    assert archivio.count({}) == 1
+
+
+def test_l_archivio_che_rompe_conta_anche_le_scritture_fallite() -> None:
+    archivio = ArchivioCheRompe(InMemoryStore(), guasti=1)
+
+    with pytest.raises(ScritturaRifiutata):
+        archivio.insert_many([{"_id": 1}])
+    archivio.insert_many([{"_id": 2}])
+
+    assert archivio.tentate == 2
+
+
+def test_l_archivio_che_rompe_non_scrive_quando_fallisce() -> None:
+    """Un guasto che scrivesse lo stesso renderebbe non falsificabile la misura del Blocco 2."""
+    archivio = ArchivioCheRompe(InMemoryStore(), guasti=1)
+
+    with pytest.raises(ScritturaRifiutata):
+        archivio.insert_many([{"_id": 1}])
+
+    assert archivio.count({}) == 0
+
+
+def test_l_archivio_che_rompe_lascia_passare_le_letture() -> None:
+    """Le letture funzionano **durante** il guasto: senza, non c'è scena da mostrare."""
+    dentro = InMemoryStore()
+    dentro.insert_many([{"_id": 1, "stato": "confermato"}])
+    archivio = ArchivioCheRompe(dentro)
+
+    assert archivio.count({"stato": "confermato"}) == 1
+    assert archivio.find_page({}) == ({"_id": 1, "stato": "confermato"},)
+    assert archivio.aggregate([{"$count": "quanti"}]) == ({"quanti": 1},)
+
+
+def test_l_archivio_che_rompe_dice_perche() -> None:
+    archivio = ArchivioCheRompe(InMemoryStore(), motivo="niente primario")
+
+    with pytest.raises(ScritturaRifiutata, match="niente primario"):
+        archivio.insert_many([{"_id": 1}])
+
+
+def test_l_archivio_che_rompe_passa_per_la_porta() -> None:
+    archivio: DocumentStore = ArchivioCheRompe(InMemoryStore(), guasti=0)
+    assert archivio.insert_many([{"_id": 1}]) == 1
+
+
+# --- ArchivioLento --------------------------------------------------------------------
+
+
+def test_l_archivio_lento_fa_passare_il_tempo_dentro_la_chiamata() -> None:
+    orologio = FakeClock(ISTANTE)
+    archivio = ArchivioLento(InMemoryStore(), orologio, costo_ms=12.0)
+
+    prima = orologio.now()
+    archivio.insert_many([{"_id": 1}])
+
+    assert (orologio.now() - prima) == timedelta(milliseconds=12)
+
+
+def test_l_archivio_lento_non_finge_di_aver_dormito() -> None:
+    """Il costo di una chiamata non è un'attesa chiesta: `attese` deve restare pulita.
+
+    È la distinzione che rende asseribile il backoff. Se il tempo speso dentro
+    `insert_many` finisse in `attese`, la prova sul raddoppio dell'attesa vedrebbe numeri
+    che nessuno ha chiesto, e fallirebbe per un motivo che sembra un altro.
+    """
+    orologio = FakeClock(ISTANTE)
+    archivio = ArchivioLento(InMemoryStore(), orologio, costo_ms=12.0)
+
+    archivio.insert_many([{"_id": 1}])
+
+    assert orologio.attese == []
+
+
+def test_l_archivio_lento_conserva_davvero_i_documenti() -> None:
+    archivio = ArchivioLento(InMemoryStore(), FakeClock(ISTANTE), costo_ms=1.0)
+
+    assert archivio.insert_many([{"_id": 1}, {"_id": 2}]) == 2
+    assert archivio.count({}) == 2
+
+
+def test_l_archivio_lento_costa_anche_sulle_letture() -> None:
+    orologio = FakeClock(ISTANTE)
+    archivio = ArchivioLento(InMemoryStore(), orologio, costo_ms=5.0)
+
+    prima = orologio.now()
+    archivio.count({})
+
+    assert (orologio.now() - prima) == timedelta(milliseconds=5)
+
+
+def test_i_due_archivi_si_compongono() -> None:
+    """Guasto **e** lento insieme, senza che nessuno dei due sappia dell'altro.
+
+    È la dimostrazione che le porte `Protocol` reggono: `ArchivioLento` annota `dentro`
+    con `DocumentStore`, quindi accetta qualunque archivio — compreso uno che rompe.
+    """
+    orologio = FakeClock(ISTANTE)
+    archivio = ArchivioLento(
+        ArchivioCheRompe(InMemoryStore(), guasti=1), orologio, costo_ms=3.0
+    )
+
+    with pytest.raises(ScritturaRifiutata):
+        archivio.insert_many([{"_id": 1}])
+    archivio.insert_many([{"_id": 1}])
+
+    assert orologio.now() - ISTANTE == timedelta(milliseconds=6)
+    assert archivio.count({}) == 1
+
+
+def test_l_archivio_lento_passa_per_la_porta() -> None:
+    archivio: DocumentStore = ArchivioLento(
+        InMemoryStore(), FakeClock(ISTANTE), costo_ms=1.0
+    )
+    assert archivio.insert_many([{"_id": 1}]) == 1

@@ -1816,3 +1816,74 @@ dall'errore, perché è quello in cui l'autore sta ammettendo un limite. Nessuno
 modestia. Il modo di trovare una lacuna vera è **rompere e guardare**, non immaginare; e chi rompe a
 caso scopre anche l'altra faccia della cosa, cioè che una guardia scritta per prudenza e mai provata
 sopravvive alla revisione ma non alla mutazione.
+
+
+---
+
+### «p95» da solo non è un numero: sullo stesso campione vale 1,0 oppure 47,55
+
+> Novantacinque latenze da 1 ms, poi 50, 60, 70, 80 e 900. Il novantacinquesimo percentile di questo
+> campione vale **1,0** per rango più vicino, **3,45** con `statistics.quantiles(method='inclusive')`,
+> **47,55** con `'exclusive'`. Quarantasette volte l'uno dall'altro, e nessuno dei tre sbaglia.
+
+Fonte: [`app/docs/Sources.md` M-009](../app/docs/Sources.md#m-009) e
+[A-009](../app/docs/Sources.md#a-009) — «The cut points are linearly interpolated from the two
+nearest data points… if a cut point falls one-third of the distance between two sample values, 100
+and 112, the cut-point will evaluate to 104» —
+[registro operativo, nota 154](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché «p95» è la parola con cui in sala si chiude una discussione, e la slide
+mostra che da sola non chiude niente. I tre numeri rispondono a tre domande diverse: chi **stima** un
+quantile della popolazione interpola, e ottiene un valore che nessuno ha misurato; chi **riferisce**
+ciò che ha misurato prende un valore osservato, e paga con l'effetto pianerottolo. Il difetto non è
+scegliere male: è pubblicare il numero senza dire quale delle due cose si sta facendo.
+
+---
+
+### Zero è la peggiore risposta mancante, perché ha la faccia di una misura
+
+> Un p95 di zero millisecondi su una corsa in cui ogni scrittura è fallita legge «velocissimo» dove
+> la verità è «mai arrivato». E a differenza di un'eccezione, non lo dice a nessuno.
+
+Fonte: [registro operativo, nota 155](registro-operativo-sviluppo.md),
+[`app/docs/06-carico-tentativi-e-latenze.md`](../app/docs/06-carico-tentativi-e-latenze.md).
+
+**Perché una slide:** è la regola del doppio che solleva, portata dai doppi ai dati. Uno zero al
+posto di una misura che non c'è attraversa i controlli di tipo, si somma, si stampa e si media —
+sopravvive a tutto ciò che di solito ferma un errore, perché non ha la forma di un errore. La riga
+che chiude il punto è breve: dove non c'è una risposta giusta, il tipo deve poter dire di non averla.
+
+---
+
+### C'è un quarto esito, e non è un fallimento: la suite si pianta
+
+> Ho spostato di due righe la garanzia che un thread segnali sempre di aver finito, aspettandomi un
+> rosso. La suite si è fermata al 68 % e ci è rimasta. Nessun `FAILED`, nessun messaggio, nessun
+> punto del codice indicato: solo un `timeout` e un codice d'uscita.
+
+Fonte: [`app/docs/Sources.md` M-010](../app/docs/Sources.md#m-010),
+[registro operativo, nota 153](registro-operativo-sviluppo.md) — che estende la
+[nota 144](registro-operativo-sviluppo.md), «rompere una guardia apposta ha tre esiti, non due».
+
+**Perché una slide:** perché arriva **dopo** la slide dei tre esiti, e la corregge in diretta. È il
+caso peggiore da leggere non per gravità ma per somiglianza: un blocco senza messaggio somiglia a un
+guasto dell'ambiente, e la reazione naturale è sospettare Docker, la rete, il portatile — cioè
+cercare il difetto ovunque tranne che nella modifica appena fatta. La regola pratica sta in una riga:
+le prove concorrenti si eseguono sotto un `timeout`, sempre.
+
+---
+
+### Il codice di prova va tipizzato più di quello di produzione, non meno
+
+> Un aiutante di tre righe filtrava gli eventi per specie e restituiva il tipo di partenza.
+> `mypy --strict` ha bocciato **dieci** asserzioni in un colpo: `"Evento" has no attribute
+> "durata_ms"`. A runtime sarebbero passate tutte.
+
+Fonte: [registro operativo, nota 156](registro-operativo-sviluppo.md),
+[`app/docs/06-carico-tentativi-e-latenze.md`](../app/docs/06-carico-tentativi-e-latenze.md).
+
+**Perché una slide:** perché il pubblico che scrive Python conosce l'aiutante di tre righe e non lo
+rilegge mai. Un filtro che perde il tipo lo perde esattamente dove le asserzioni sono più specifiche,
+cioè dove il controllo serviva di più, e lo perde in silenzio. La correzione è una riga di PEP 695 —
+`def _specie[E: Evento](eventi: list[Evento], tipo: type[E]) -> list[E]` — ma il punto non è la
+sintassi: è che quando un aiutante *sa* qualcosa che il chiamante userà, glielo si deve far dire.

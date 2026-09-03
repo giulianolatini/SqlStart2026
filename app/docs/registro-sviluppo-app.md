@@ -282,9 +282,85 @@ fallisce arriverà al Task 5, insieme alla prova che ne ha bisogno.
 
 ---
 
+## Task 5 — Il generatore di carico, i tentativi, le latenze
+
+**Che cosa chiedeva.** `WorkloadRunner` in TDD contro i doppi: N scritture producono N
+`WriteSucceeded` e altrettanti `LatencySampled`; uno store che solleva produce `WriteFailed` seguito
+da `RetryAttempted`; la politica smette quando deve e **non** prima. Poi le latenze aggregate per
+percentili, la concorrenza del §6.3, e il gancio per `maxPoolSize` lasciato senza misurarlo.
+
+**Che cosa è stato scritto.** `application/workload.py` — la prima classe di caso d'uso del
+progetto — e `tests/unit/test_workload.py`. Insieme sono nati i due doppi che mancavano,
+`ArchivioCheRompe` e `ArchivioLento`, e `RecordingSink` ha imparato a ricordare **da quale thread**
+è stato chiamato. Le prove passano da **54 a 106**, `mypy --strict` verde su 25 file. Le scelte —
+percentili, tentativi, coda — sono spiegate in
+[06-carico-tentativi-e-latenze.md](06-carico-tentativi-e-latenze.md); qui c'è il processo.
+
+**Il rosso c'era, ma non dove me lo aspettavo.** Le prove scritte per prime fallivano tutte con un
+`ModuleNotFoundError`: il modulo non esisteva. È un rosso vero ma povero — dice «manca tutto», non
+«questa guardia serve». Alla prima esecuzione dopo l'implementazione la suite è passata intera, e a
+quel punto la domanda onesta non è «è verde?» ma «quali di queste prove avrebbero visto un errore?».
+La risposta si compra solo rompendo, ed è la **nota 142** applicata alla lettera: cinque rotture
+deliberate, una alla volta, con ripristino da copia ([M-010](Sources.md#m-010)).
+
+**La quinta rottura ha trovato una guardia scoperta.** Togliendo da `PoliticaTentativi.attesa_ms` il
+rifiuto del primo tentativo — quello che non attende, perché non ha niente da ritentare — la suite è
+rimasta **verde su 105**. Nessuna prova la interrogava. È il terzo esito della **nota 144** nella sua
+forma più utile: la rottura non ha confermato una difesa, ne ha rivelato l'assenza. La prova
+`test_l_attesa_del_primo_tentativo_non_esiste` è nata lì, e da allora sono 106.
+
+**Diversamente dal previsto — una rottura che non fallisce, si pianta.**
+
+La quarta rottura sposta fuori dal `finally` la sentinella con cui ogni worker dichiara di aver
+finito. Mi aspettavo un rosso; ho ottenuto un blocco. Il worker muore prima di segnalare, il
+chiamante aspetta un `None` che non arriverà, e la suite resta ferma al 68 % finché il `timeout` non
+la uccide: `Error 143`. Nessun `FAILED`, nessun messaggio, nessun punto del codice indicato.
+
+Ai tre esiti della nota 144 se ne aggiunge un quarto, ed è il peggiore da leggere, perché **somiglia
+a un problema della macchina molto più che a un difetto del codice** — la reazione naturale davanti
+a una suite che non torna è pensare a Docker, alla rete, al portatile. È la **nota di metodo 153**.
+
+**Diversamente dal previsto — «p95» non era un numero.**
+
+Avevo scritto `percentile` come una cosa ovvia. Poi ho misurato: sullo stesso campione, con un
+gradino di latenze, il novantacinquesimo percentile vale **1,0** per rango più vicino, **3,45** con
+`statistics.quantiles(method='inclusive')`, **47,55** con `'exclusive'`
+([M-009](Sources.md#m-009)). Quarantasette volte l'uno dall'altro, e nessuno dei tre sbaglia:
+rispondono a tre domande diverse.
+
+La scelta — rango più vicino, perché ogni numero riferito deve essere stato osservato — non è
+cambiata. È cambiato il suo statuto: da abitudine a decisione documentata, con la sua fonte
+([A-009](Sources.md#a-009)) e con la sua riserva scritta, che è scomoda: su quel campione il p95 per
+rango cade in cima al pianerottolo e non racconta la coda. È la ragione per cui il riepilogo porta
+sei numeri e non uno. **Nota 154.**
+
+**Lo zero che sembra una misura.** La prima stesura del riepilogo restituiva latenze a zero quando
+non c'era nessun campione. Un p95 di zero millisecondi su una corsa in cui tutto è fallito legge
+«velocissimo» dove la verità è «mai arrivato»: è la peggiore risposta mancante, perché non ha la
+faccia di una risposta mancante. Ora è `latenze=None`, e `riassumi` su un campione vuoto solleva
+invece di inventare. **Nota 155**, ed è la regola dei doppi applicata alle statistiche.
+
+**Un aiutante di prova che spegneva il controllo.** Il filtro `_specie(eventi, WriteSucceeded)`
+tornava `list[Evento]`, e `mypy --strict` ha bocciato **dieci** asserzioni in un colpo:
+`"Evento" has no attribute "durata_ms"`. A runtime sarebbero passate tutte. La correzione è un
+parametro di tipo (`def _specie[E: Evento](...) -> list[E]`), ma la lezione sta nel verso: un
+aiutante di prova che perde il tipo lo perde **dove le asserzioni sono più specifiche**, cioè dove
+il controllo serviva di più, e lo perde in silenzio. **Nota 156.**
+
+**Che cosa resta aperto.** La saturazione di `maxPoolSize` non è misurata e qui non può esserlo:
+contro `InMemoryStore` non c'è nessun pool da saturare. `scrittori` è il gancio, e la misura è del
+Task 16, dove la coda illimitata va guardata per la stessa ragione
+([A-010, riserve](Sources.md#a-010)).
+E c'è un avvertimento che vale la pena portarsi dietro: oggi la violazione del §6.3 è vista *per
+quello che è* da **una sola** prova, quella sul thread; le altre cinque che falliscono insieme a lei
+lo fanno per effetto collaterale, perché i conteggi vivono nel ciclo di drenaggio. Se i conteggi si
+spostassero, resterebbe quella sola a difendere l'invariante.
+
+---
+
 ## Che cosa manca
 
-I task dal 5 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
+I task dal 6 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
 futuro, che lo stanno facendo — in particolare
 [04-eventi-del-driver-e-concorrenza.md](04-eventi-del-driver-e-concorrenza.md), che porta in testa un
 avviso di stato.
@@ -293,7 +369,10 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 
 | Aperto | Dove è dichiarato | Quando si chiude |
 |---|---|---|
-| Uno store che **fallisce** le scritture: oggi nessun doppio sa rompersi | [registro, Task 4](#task-4--i-doppi-scritti-prima-del-codice-che-dovranno-verificare) | Task 5 |
+| ~~Uno store che **fallisce** le scritture: oggi nessun doppio sa rompersi~~ | [registro, Task 4](#task-4--i-doppi-scritti-prima-del-codice-che-dovranno-verificare) | **chiuso** al Task 5 |
+| La saturazione di `maxPoolSize`: `scrittori` è il gancio, non la misura | [06](06-carico-tentativi-e-latenze.md#il-gancio-per-maxpoolsize-e-la-misura-che-non-cè) | Task 16 |
+| La coda è illimitata: sotto un carico lungo cresce in memoria | [A-010, riserve](Sources.md#a-010) | Task 16 |
+| L'invariante del §6.3 è difeso *per quello che è* da una sola prova | [registro, Task 5](#task-5--il-generatore-di-carico-i-tentativi-le-latenze) | se i conteggi lasciassero il ciclo di drenaggio |
 | `$group` non è nel dialetto di `InMemoryStore` | il messaggio di `NonSupportato`, e [02](02-porte-e-doppi.md#dove-il-doppio-non-sa-solleva) | la prima prova che lo chiederà |
 | Il rifiuto dei booleani in `_come_intero` non è coperto da nessuna prova | [M-006, riserve](Sources.md#m-006) | la prima prova che dipenderà da lui |
 | `SdamBridge` e la coda: il comportamento di PyMongo va **osservato**, non solo letto | [04](04-eventi-del-driver-e-concorrenza.md#che-cosa-non-è-ancora-verificato) | Task 7 |
@@ -309,4 +388,4 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 
 **Il registro completo del repository**, che copre anche le altre feature, è
 [`docs/registro-operativo-sviluppo.md`](../../docs/registro-operativo-sviluppo.md). Le note di metodo
-citate qui (137–152) stanno lì per esteso.
+citate qui (137–156) stanno lì per esteso.

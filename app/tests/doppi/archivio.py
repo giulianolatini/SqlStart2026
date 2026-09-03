@@ -1,10 +1,24 @@
-"""L'archivio che conserva davvero i documenti, e dice quando non sa fare qualcosa."""
+"""Gli archivi di prova: quello che conserva davvero, quello che rompe, quello che rallenta.
+
+Tre `DocumentStore`, e due dei tre avvolgono il primo invece di rifarlo. La composizione
+non è eleganza fine a se stessa: è la dimostrazione che le porte `Protocol` reggono, e
+costa meno di un doppio che finge di essere tutte e tre le cose a comando.
+"""
 
 from typing import Mapping, Sequence
 
 from mongolab.domain.modelli import Documento
+from mongolab.domain.porte import DocumentStore
 
-__all__ = ["InMemoryStore", "NonSupportato"]
+from tests.doppi.orologio import FakeClock
+
+__all__ = [
+    "ArchivioCheRompe",
+    "ArchivioLento",
+    "InMemoryStore",
+    "NonSupportato",
+    "ScritturaRifiutata",
+]
 
 
 class NonSupportato(NotImplementedError):
@@ -176,3 +190,118 @@ class InMemoryStore:
         if not isinstance(argomento, str):
             raise NonSupportato(f"{stadio} vuole il nome di un campo, ha ricevuto {argomento!r}.")
         return argomento
+
+
+class ScritturaRifiutata(RuntimeError):
+    """L'errore che `ArchivioCheRompe` solleva al posto del driver.
+
+    Non imita `pymongo.errors.AutoReconnect` e non ne eredita, apposta: il codice sotto
+    prova non deve riconoscere *quel* tipo — se lo facesse, il dominio saprebbe che
+    esiste MongoDB. Ciò che deve fare è trattare qualunque eccezione come un fallimento
+    di scrittura, e questo tipo esiste per verificare proprio quella genericità.
+    """
+
+
+class ArchivioCheRompe:
+    """Un `DocumentStore` che rifiuta le scritture, e per il resto delega.
+
+    Il Task 4 ha lasciato aperto un debito preciso: nessun doppio sapeva rompersi, e la
+    politica dei tentativi non è provabile contro un archivio che riesce sempre. La
+    regola è che la capacità arriva **insieme** alla prova che ne ha bisogno — mai
+    semplificando la prova — ed è quello che succede qui.
+
+    **Avvolge invece di sostituire.** Non reimplementa la memoria: tiene dentro di sé un
+    altro `DocumentStore` vero e gli passa tutto ciò che non deve fallire. Le letture
+    quindi funzionano davvero anche durante il guasto, che è la condizione per la misura
+    del Blocco 2 — confermate contro ritrovate — e per una scena in cui il carico continua
+    mentre le scritture non passano.
+
+    **`dentro` è annotato con la porta, non con `InMemoryStore`.** È una scelta che si
+    paga da sola: mypy verifica al punto di costruzione che l'archivio avvolto rispetti
+    `DocumentStore`, e i doppi si compongono — `ArchivioLento(ArchivioCheRompe(...))` è un
+    archivio lento **e** guasto senza che nessuno dei due sappia dell'altro.
+
+    `guasti` è quante scritture fallire prima di lasciar passare le altre; `None`, il
+    valore predefinito, vuol dire **sempre**, che è il caso della resa definitiva. Il
+    conteggio non è protetto da un lucchetto: questo doppio è pensato per le prove a un
+    solo scrittore, dove la sequenza dei guasti è parte di ciò che si asserisce.
+    """
+
+    def __init__(
+        self,
+        dentro: DocumentStore,
+        guasti: int | None = None,
+        motivo: str = "il server ha rifiutato la scrittura",
+    ) -> None:
+        self._dentro = dentro
+        self._rimasti = guasti
+        self._motivo = motivo
+        self.tentate = 0
+        """Quante scritture sono state chiese in tutto, riuscite o no."""
+
+    def insert_many(self, documenti: Sequence[Documento]) -> int:
+        self.tentate += 1
+        if self._rimasti is None:
+            raise ScritturaRifiutata(self._motivo)
+        if self._rimasti > 0:
+            self._rimasti -= 1
+            raise ScritturaRifiutata(self._motivo)
+        return self._dentro.insert_many(documenti)
+
+    def find_page(
+        self, filtro: Documento, salta: int = 0, quanti: int = 20
+    ) -> tuple[Documento, ...]:
+        return self._dentro.find_page(filtro, salta, quanti)
+
+    def count(self, filtro: Documento) -> int:
+        return self._dentro.count(filtro)
+
+    def aggregate(self, pipeline: Sequence[Documento]) -> tuple[Documento, ...]:
+        return self._dentro.aggregate(pipeline)
+
+
+class ArchivioLento:
+    """Un `DocumentStore` che fa **costare tempo** ogni operazione, e per il resto delega.
+
+    Senza di lui la latenza non è provabile. `FakeClock` non avanza da solo — è la sua
+    virtù — quindi contro `InMemoryStore` ogni scrittura dura zero millisecondi, e una
+    prova che asserisse `durata_ms == 0.0` verificherebbe l'immobilità dell'orologio
+    invece della misura. Qui il tempo passa **dentro** la chiamata, che è dove passa
+    anche nella realtà, e l'asserzione diventa un numero scelto: `costo_ms=12.0`.
+
+    Prende `FakeClock` e non `Clock`, e la differenza è sostanziale: `avanza` non è nella
+    porta e non deve esserci. Il codice di produzione può solo **chiedere** di dormire; a
+    far passare il tempo mentre lavora è il mondo, e in una prova il mondo è questo
+    doppio. Tenerli distinti è ciò che permette a `FakeClock.attese` di contenere solo il
+    backoff.
+
+    Un limite da conoscere: `timedelta` arrotonda al microsecondo, quindi un costo sotto
+    il millesimo di millisecondo sparisce. Per le latenze di rete che questa applicazione
+    misura non è un problema; per un'ipotetica prova su microsecondi lo sarebbe.
+    """
+
+    def __init__(self, dentro: DocumentStore, orologio: FakeClock, costo_ms: float) -> None:
+        self._dentro = dentro
+        self._orologio = orologio
+        self._costo_ms = costo_ms
+
+    def insert_many(self, documenti: Sequence[Documento]) -> int:
+        self._costa()
+        return self._dentro.insert_many(documenti)
+
+    def find_page(
+        self, filtro: Documento, salta: int = 0, quanti: int = 20
+    ) -> tuple[Documento, ...]:
+        self._costa()
+        return self._dentro.find_page(filtro, salta, quanti)
+
+    def count(self, filtro: Documento) -> int:
+        self._costa()
+        return self._dentro.count(filtro)
+
+    def aggregate(self, pipeline: Sequence[Documento]) -> tuple[Documento, ...]:
+        self._costa()
+        return self._dentro.aggregate(pipeline)
+
+    def _costa(self) -> None:
+        self._orologio.avanza(self._costo_ms / 1000)

@@ -139,6 +139,41 @@ chiede perché l'interfaccia si aggiorna così.
 **L'istante arriva dal `Clock`, non da `time.time()`.** Se il tempo entra dalla porta, la cronaca
 del failover si può riprodurre in una prova che dura un battito di ciglia.
 
+## La coda, e perché è lei a tenere i lucchetti
+
+ADR-0019 nomina `queue.Queue` senza spiegare perché quella e non una lista con un `Lock` intorno. La
+ragione sta nella prima riga della documentazione del modulo: «It is especially useful in threaded
+programming when information must be exchanged safely between multiple threads. The `Queue` class in
+this module implements all the required locking semantics» ([A-010](Sources.md#a-010)).
+
+Il punto non è che la coda sia più veloce: è che **il lucchetto sta dentro di lei**. Nel codice
+dell'applicazione non compare nessun `Lock`, e quindi non c'è nessun ordine di acquisizione da
+ricordare, nessun `finally` che rilascia, nessun percorso in cui un'eccezione lascia chiuso qualcosa.
+Un lock scritto a mano intorno a una lista farebbe la stessa cosa e aprirebbe tutte quelle domande.
+
+La stessa pagina aggiunge un avvertimento che qui vale come regola: «they are not designed to handle
+reentrancy within a thread». Tradotto in questo disegno: **un `emit` non deve mai rimettere in coda**.
+Il sink gira nel thread che drena, e un sink che ripubblicasse mentre viene drenato sarebbe
+esattamente il caso che il modulo dichiara di non gestire.
+
+### Lo stesso schema, un livello più in basso
+
+Dal Task 5 la disciplina non è più solo sul confine col driver: `WorkloadRunner` la applica ai propri
+scrittori. I worker del `ThreadPoolExecutor` non chiamano `EventSink.emit`, pubblicano in coda; il
+thread chiamante drena e chiama `emit`. Il sink resta un oggetto a thread singolo per costruzione,
+non per convenzione.
+
+Con una differenza che il caso del driver non ha: qui la corsa **finisce**, e il ciclo di drenaggio
+deve saperlo. Ogni worker mette in coda un `None` come ultimo gesto, dentro un `finally`, e il
+chiamante conta le sentinelle. Spostando quel `put` fuori dal `finally`, la suite non fallisce: si
+pianta ([M-010](Sources.md#m-010)). Il dettaglio sta in
+[06-carico-tentativi-e-latenze.md](06-carico-tentativi-e-latenze.md).
+
+La riserva è la stessa in entrambi i casi, ed è dichiarata: con `maxsize=0` la coda è illimitata, e
+un produttore che corra più del consumatore la fa crescere in memoria finché non finisce. Alle scale
+della demo — secondi, migliaia di eventi — non è un problema; la sede in cui si guarderà è il
+Task 16.
+
 ## Che cosa non è ancora verificato
 
 Onestà sullo stato: quanto sopra è **deciso e documentato**, non ancora **misurato qui**. Le
@@ -160,7 +195,8 @@ disegno.
 **Da leggere dopo:** [05-tipi-prove-e-guardie.md](05-tipi-prove-e-guardie.md), che spiega come si
 verifica tutto questo senza aspettare che accada.
 
-**Fonti:** [S-010](../../docs/Sources.md#s-010), [S-018](../../docs/Sources.md#s-018).
+**Fonti:** [S-010](../../docs/Sources.md#s-010), [S-018](../../docs/Sources.md#s-018),
+[A-010](Sources.md#a-010), [M-010](Sources.md#m-010).
 **Decisioni:** [ADR-0006](../../docs/Decision.md#adr-0006),
 [ADR-0007](../../docs/Decision.md#adr-0007), [ADR-0019](../../docs/Decision.md#adr-0019),
 [ADR-0050](../../docs/Decision.md#adr-0050).

@@ -216,23 +216,23 @@ prove che non provano niente.
 
 **File:** creare `app/src/mongolab/application/workload.py`, `app/tests/unit/test_workload.py`.
 
-- [ ] **Passo 1.** Scrivere **prima** le prove, contro `InMemoryStore` + `FakeClock` +
+- [x] **Passo 1.** Scrivere **prima** le prove, contro `InMemoryStore` + `FakeClock` +
       `RecordingSink`: N scritture producono N `WriteSucceeded` e altrettanti `LatencySampled`; uno
       store che solleva produce `WriteFailed` seguito da `RetryAttempted`; la politica di retry
       smette quando deve e **non** prima. Eseguirle e vederle fallire.
-- [ ] **Passo 2.** Implementare il minimo che le fa passare. `WorkloadRunner` non sa che esiste
+- [x] **Passo 2.** Implementare il minimo che le fa passare. `WorkloadRunner` non sa che esiste
       MongoDB: parla con `DocumentStore`, `Clock` ed `EventSink`, e basta.
-- [ ] **Passo 3.** L'aggregazione delle latenze: mediana e percentili sul campione, non media. Le
+- [x] **Passo 3.** L'aggregazione delle latenze: mediana e percentili sul campione, non media. Le
       prove fissano il comportamento su campioni piccoli e noti, dove il valore atteso si calcola a
       mano — perché è lì che gli errori di un percentile si vedono.
-- [ ] **Passo 4.** La concorrenza con `ThreadPoolExecutor` (§6.3): i worker **non** toccano il sink
+- [x] **Passo 4.** La concorrenza con `ThreadPoolExecutor` (§6.3): i worker **non** toccano il sink
       direttamente, pubblicano su una `queue.Queue`. Provare che con più worker la sequenza di
       eventi resta completa e che nessun evento si perde; l'ordine fra worker diversi non è
       garantito, e la prova non deve pretenderlo.
-- [ ] **Passo 5.** La saturazione di `maxPoolSize` è **materiale didattico** dichiarato dal design:
+- [x] **Passo 5.** La saturazione di `maxPoolSize` è **materiale didattico** dichiarato dal design:
       lasciare il gancio, cioè il parametro configurabile, e annotare che la misura arriva al Task
       16 e non qui.
-- [ ] **Passo 6.** `make app-test`, `make app-check`. Commit:
+- [x] **Passo 6.** `make app-test`, `make app-check`. Commit:
       `feat: il generatore di carico, con i tentativi e le latenze provati sui doppi`.
 
 ---
