@@ -97,10 +97,12 @@ suo, invecchierebbe in silenzio. È la nota di metodo 145 del
 
 ## I doppi non sono mock
 
-Al Task 4 del [piano](../../docs/00-progetto/2026-09-02-piano-feature-04-app-python.md) arrivano
-cinque doppi: `InMemoryStore`, `FakeInspector`, `FakeBackup`, `FakeClock`, `RecordingSink`. La
-regola che li governa è dichiarata prima che esistano, perché è il punto in cui una suite di prove
-smette di provare qualcosa.
+I cinque doppi sono arrivati al Task 4 del
+[piano](../../docs/00-progetto/2026-09-02-piano-feature-04-app-python.md) e stanno in
+`app/tests/doppi/`, uno per file: `InMemoryStore` (`archivio.py`), `FakeInspector`
+(`ispettore.py`), `FakeBackup` (`backup.py`), `FakeClock` (`orologio.py`), `RecordingSink`
+(`raccoglitore.py`). La regola che li governa era dichiarata prima che esistessero, perché è il
+punto in cui una suite di prove smette di provare qualcosa.
 
 **Un doppio implementa il comportamento; un mock registra le chiamate.** `InMemoryStore` conserva
 davvero i documenti: `insert_many` li mette in una lista, `count` la conta, `find_page` la impagina.
@@ -122,6 +124,86 @@ dell'adattatore — stessi tipi, stessi valori di ritorno. È la ragione per cui
 dominio, è una `Mapping[str, object]` e non un tipo di pymongo: così le due implementazioni della
 stessa porta sono confrontabili, e una prova scritta contro il doppio ha senso anche contro il
 cluster.
+
+### Dove il doppio non sa, solleva
+
+`InMemoryStore` parla un dialetto piccolo e dichiarato: uguaglianza su campi di primo livello,
+`$match`, `$limit`, `$count`. Tutto il resto — un `$gt`, un percorso puntato, uno stadio
+sconosciuto — solleva `NonSupportato` **nominando ciò che non sa fare** e dicendo che cosa
+farne: insegnarglielo insieme alla prova che lo verifica.
+
+L'alternativa non è sollevare *meno*: è tacere. Un doppio che ignorasse un `$gt` che non capisce
+restituirebbe tutti i documenti, e la prova che lo usa diventerebbe verde senza che nessuno abbia
+scritto una riga di codice difettoso. **Un doppio che tace su ciò che non sa è più pericoloso di
+uno che non c'è**, perché uno che non c'è lo si nota.
+
+Che il rifiuto sia verificato quanto il comportamento si vede rompendo il doppio apposta. Con un
+`_corrisponde` che restituisce sempre `True` — la rottura che un doppio permissivo produce davvero
+— falliscono sette prove, e due di quelle sette falliscono con `DID NOT RAISE NonSupportato`:
+[M-006](Sources.md#m-006). La stessa misura mostra il limite del metodo, perché una rottura
+scoperta si trova al secondo tentativo, ed è annotata lì.
+
+Per la stessa ragione `$group` **non** c'è. Nessuna prova l'ha ancora chiesto; il giorno in cui una
+lo chiederà, arriverà lo stadio insieme a lei. Il messaggio d'errore lo dice per nome, così chi lo
+incontra non deve indovinare se sia una dimenticanza o una scelta.
+
+### Due divergenze da MongoDB, e due risposte diverse
+
+Imitare un database significa scegliere, e in due punti la scelta ovvia in Python non è quella di
+MongoDB. Le due risposte del doppio sono opposte, e il criterio che le distingue è se
+un'implementazione giusta esista:
+
+- **`{"campo": None}` lo sa fare.** Nel manuale, «The `{ metacritic : null }` query matches
+  documents that contain the `metacritic` field with a `null` value **or** do not contain the
+  `metacritic` field» ([A-006](Sources.md#a-006)). In Python `documento.get(chiave) is not None`
+  indovina quella semantica e `chiave not in documento` la sbaglia: due righe ugualmente ovvie, di
+  cui una è quella giusta. Si sceglie con la fonte in mano e con la prova accanto.
+- **`{"campo": {...}}` senza operatori lo rifiuta.** MongoDB richiede «an *exact* match of the
+  specified `<value>` document, **including the field order**», e avverte del rischio di
+  «unpredictable behavior when used with a driver that does not use ordered data structures»
+  ([A-007](Sources.md#a-007)). L'uguaglianza fra `dict` di Python l'ordine lo ignora: qui nessuna
+  implementazione ovvia è quella giusta, e imitare male è peggio che dichiarare di non saper fare.
+
+Ne resta una terza, che non si può né imitare né rifiutare: i documenti tornano nell'ordine di
+inserimento, mentre MongoDB senza `sort` esplicito non promette **nessun** ordine. È scritta nella
+docstring del doppio perché una prova che vi si appoggiasse passerebbe qui e potrebbe fallire al
+Task 8 contro lo stack vero.
+
+### Un doppio può sbagliare anche il *quando*
+
+`FakeBackup.dump` registra la richiesta e **restituisce** un generatore costruito a parte, invece di
+essere una funzione generatrice. È una riga che sembra uno stilismo e non lo è: «The execution
+starts when one of the generator's methods is called» ([A-005](Sources.md#a-005)), quindi con
+`yield from` nel corpo la chiamata non eseguirebbe niente — né la registrazione qui, né l'avvio di
+`mongodump` nell'adattatore vero del Task 9. La porta promette che il dump *parte*, non che
+partirebbe se qualcuno guardasse.
+
+La parte che vale la pena ricordare è chi se ne accorge. Scritto nella forma sbagliata, il doppio
+fa fallire **una** prova — quella che chiama `dump()` senza scorrerlo e controlla che la richiesta
+sia stata registrata — mentre `mypy --strict` resta verde: le due forme hanno lo stesso tipo
+annotato, `Iterator[Progress]` ([M-007](Sources.md#m-007)). Insieme a [M-004](Sources.md#m-004) fa
+un promemoria in due direzioni: mypy è l'**unico** posto in cui la conformità alle porte è
+verificata, e non verifica tutto.
+
+### Ogni doppio porta la sua prova
+
+`tests/unit/test_doppi.py` verifica la promessa di ciascuno, non la sua implementazione: che
+`InMemoryStore` ritrovi ciò che ha accettato, che `FakeClock` distingua «ha dormito» da «il tempo è
+passato», che `FakeInspector` resti sull'ultima topologia invece di esaurirsi, che `RecordingSink`
+conservi gli eventi in ordine. Provare i doppi non è girare a vuoto: sono ciò su cui poggeranno le
+prove dei Task 5 e 6, e un attrezzo di misura si tara prima di misurarci.
+
+Ogni doppio ha poi una prova a sé, `…_passa_per_la_porta`, il cui corpo è quasi vuoto perché tutto
+il lavoro lo fa una riga che sembra ridondante e non lo è:
+
+```python
+archivio: DocumentStore = InMemoryStore()
+```
+
+L'annotazione è il punto in cui la conformità strutturale viene verificata davvero, da
+`mypy --strict` ([A-003](Sources.md#a-003)). Nessun doppio eredita la sua porta e nessuno la
+importa per conformarsi; senza quella riga, un doppio potrebbe allontanarsi dalla porta senza che
+niente lo dica — e [M-004](Sources.md#m-004) mostra che `isinstance` non lo direbbe.
 
 ## Una nota sui tipi: `object`, non `Any`
 

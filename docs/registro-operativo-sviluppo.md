@@ -4798,3 +4798,126 @@ prima.
 Stato aggiornato: decisioni fino ad **ADR-0081**, verifiche fino a **V-074**, note di metodo fino
 alla **148**. Le suite: **143** prove per gli strumenti, **19** per l'applicazione. Prossimo passo:
 **Task 4** del [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).
+
+---
+
+## 2026-09-03 — `feature/04`, Task 4: i doppi, e tre modi in cui un doppio può mentire
+
+Cinque doppi, uno per porta, in `app/tests/doppi/`: `InMemoryStore`, `FakeInspector`, `FakeBackup`,
+`FakeClock`, `RecordingSink`. Sono scritti **prima** dei casi d'uso che dovranno verificare — i Task
+5 e 6 fanno TDD contro di loro — e la ragione è la stessa per cui si scrive prima la prova: un
+doppio disegnato guardando il codice sotto prova concorda con lui per costruzione. Le prove
+dell'applicazione passano da **19 a 54**.
+
+La regola era già scritta in `app/docs/02-porte-e-doppi.md` prima che i doppi esistessero: **un
+doppio implementa il comportamento, un mock registra le chiamate**. `InMemoryStore` conserva davvero
+i documenti, li filtra davvero, li impagina davvero. `FakeClock` fa passare il tempo per davvero.
+Scrivendoli è emerso che la regola ha un rovescio, ed è il rovescio che ha insegnato qualcosa.
+
+**Il rovescio: che cosa fa un doppio quando non sa.**
+
+`InMemoryStore` parla un dialetto piccolo — uguaglianza su campi di primo livello, `$match`,
+`$limit`, `$count` — e tutto il resto solleva `NonSupportato` nominando ciò che non sa fare. La
+tentazione opposta non è restituire un risultato sbagliato: è **ignorare in silenzio** l'operatore
+che non si conosce. Un `$gt` ignorato restituisce tutti i documenti, la prova che lo usa diventa
+verde, e nessuno ha scritto una riga di codice difettoso. Il difetto è nell'attrezzo di misura.
+
+Che il rifiuto sia verificato quanto il comportamento non è un'opinione: rompendo `_corrisponde`
+perché restituisse sempre `True` falliscono **sette** prove, e due delle sette falliscono con
+`DID NOT RAISE NonSupportato` ([M-006](../app/docs/Sources.md#m-006)). Terzo esito della nota 144 —
+la guardia c'è e si è vista sparare.
+
+**Diversamente dal previsto — avevo rifiutato ciò che andava implementato.**
+
+La prima versione di `InMemoryStore` rifiutava anche `{"campo": None}`, con questa motivazione
+scritta nella docstring: `dict.get` restituisce `None` per un campo assente, quindi arriverebbe alla
+semantica di MongoDB **per caso**, e per caso è il modo peggiore di essere giusti. Il ragionamento
+sembrava solido finché non ho aperto il manuale: «The `{ metacritic : null }` query matches
+documents that contain the `metacritic` field with a `null` value **or** do not contain the
+`metacritic` field» ([A-006](../app/docs/Sources.md#a-006)).
+
+Quella semantica è **dichiarata**. Non è un caso: è la regola, e una regola dichiarata si implementa
+deliberatamente, con la citazione accanto e la prova che la fissa. Rifiutarla era la scelta più
+debole, non la più prudente. Il rifiuto è rimasto dov'era giusto, cioè sul confronto con un
+sottodocumento intero, che MongoDB risolve «including the field order»
+([A-007](../app/docs/Sources.md#a-007)) mentre `dict` di Python l'ordine lo ignora.
+
+Le due decisioni sembrano opposte e obbediscono allo stesso criterio, che è la nota 150.
+
+**Diversamente dal previsto — una riga che cambia *quando*, e nessun tipo se ne accorge.**
+
+`FakeBackup.dump` registra la richiesta e **restituisce** un generatore, invece di essere una
+funzione generatrice. Scritta con `yield from` nel corpo — la forma che viene più naturale — la
+chiamata non eseguirebbe niente: «The execution starts when one of the generator's methods is
+called» ([A-005](../app/docs/Sources.md#a-005)). Nel doppio vuol dire che la richiesta non viene
+registrata; nell'adattatore del Task 9 vorrà dire che `mongodump` non parte.
+
+Rotta apposta, la forma sbagliata fa fallire **una** prova e lascia `mypy --strict` **verde**: le
+due forme hanno lo stesso tipo annotato, `Iterator[Progress]`
+([M-007](../app/docs/Sources.md#m-007)). Insieme a M-004 — `isinstance` contro un `Protocol` accetta
+una firma sbagliata — compone un promemoria in due direzioni: mypy è l'unico posto in cui la
+conformità alle porte è verificata, e non verifica tutto.
+
+**Una riserva scritta male, e la misura che l'ha corretta.**
+
+Scrivendo M-006 avevo aggiunto una riserva plausibile: la misura mostra che *quelle* prove reggono a
+*quella* rottura, e non ad altre — per esempio un `$limit` che tagliasse dalla coda invece che dalla
+testa. Sono andato a controllare prima di lasciarlo scritto: la prova sull'aggregazione asserisce
+`[1, 2]`, quindi un `$limit` dalla coda **fallirebbe**. L'esempio era falso.
+
+Cercando una rottura davvero scoperta l'ho trovata al secondo tentativo: togliendo da `_come_intero`
+il rifiuto dei booleani le prove restano **54 verdi**, perché nessuna chiede `{"$limit": True}`.
+Quel rifiuto è oggi una precauzione non verificata, ed è scritto nella riserva al posto
+dell'esempio inventato.
+
+**Che cosa è stato rimandato, e perché non è un debito.**
+
+`$group` non c'è: nessuna prova l'ha chiesto. Un `topology()` che solleva non c'è: al Task 6 un
+cluster irraggiungibile si racconta con una topologia senza primario. Uno store che fallisce le
+scritture non c'è, e il Task 5 lo chiederà — arriverà allora, insieme alla prova che ne ha bisogno.
+Ogni messaggio di `NonSupportato` dice per nome che cosa manca e che cosa farne, così chi lo incontra
+non deve indovinare se sia una dimenticanza.
+
+**Note di metodo.**
+
+149. **Un doppio che tace su ciò che non sa è più pericoloso di uno che non c'è.** Un doppio
+     mancante si nota: il codice non compila, la prova non parte. Un doppio che riceve un operatore
+     che non conosce e lo ignora restituisce un risultato plausibile, e la prova diventa verde **per
+     il motivo sbagliato** senza che nessuno abbia scritto una riga di codice difettoso — il difetto
+     è nell'attrezzo di misura, che è il posto in cui si guarda per ultimo. La regola operativa è
+     che ogni doppio dichiari il proprio dialetto e sollevi su tutto il resto, **nominando** ciò che
+     non sa fare e dicendo che cosa farne: insegnarglielo insieme alla prova che lo verifica, mai
+     riscrivere la prova per chiedergli qualcosa di più semplice. E il rifiuto va provato come il
+     comportamento: senza un `pytest.raises`, il silenzio torna alla prima distrazione.
+150. **Fra due imitazioni ugualmente ovvie, la fonte dice quale è giusta; se nessuna lo è, si
+     rifiuta.** Imitare un sistema esterno costringe a scegliere nei punti in cui l'ovvio del
+     linguaggio ospite diverge dall'originale, e i due casi vanno separati prima di decidere. Se
+     l'originale **dichiara** il proprio comportamento — `{campo: null}` prende anche i documenti
+     senza quel campo — allora un'implementazione giusta esiste, e la si scrive deliberatamente con
+     la citazione accanto: arrivarci per caso e rifiutare per prudenza sono entrambi modi di non
+     aver deciso. Se invece l'originale fa qualcosa che il linguaggio ospite non sa fare —
+     confrontare documenti rispettando l'ordine delle chiavi — nessuna implementazione ovvia è
+     quella giusta, e allora imitare male è peggio che dichiarare di non saper fare. Il discrimine
+     non è la difficoltà: è se esista una risposta giusta da scrivere.
+151. **Un errore di *quando* non è un errore di tipo.** Una funzione generatrice e una funzione che
+     restituisce un generatore hanno la stessa annotazione, `Iterator[T]`, e `mypy --strict` le
+     accetta entrambe; ma la prima non esegue niente finché qualcuno non scorre il risultato. Ogni
+     effetto che la porta promette **alla chiamata** — registrare, avviare un processo, prendere un
+     lock — sparisce senza che un tipo se ne accorga. La regola pratica è che quando una porta
+     promette «avvia X e produce l'avanzamento mentre procede», l'implementazione fa l'avvio nel
+     corpo e **restituisce** l'iteratore; e la prova che lo verifica è quella che chiama senza
+     scorrere. Vale in generale: i sistemi di tipi controllano *che cosa*, quasi mai *quando*.
+152. **Anche una riserva è un'affermazione, e va misurata come le altre.** Scrivere «questa misura
+     non copre X» è il gesto più onesto della pagina, ed è proprio per questo che nessuno lo
+     verifica: la modestia sembra al riparo dall'errore. Non lo è — un esempio di rottura scoperta
+     inventato a tavolino può essere falso, e il mio lo era: la prova che credevo cieca vedeva
+     benissimo. È la nota 146 applicata al proprio codice invece che alle proprie citazioni, con
+     l'aggravante che qui il documento da aprire è la suite, e basta un minuto. Il modo di trovare
+     una lacuna vera è **rompere e guardare**, non immaginare; e quando si rompe a caso si scopre
+     l'altra faccia della cosa, cioè che una guardia scritta per prudenza e mai provata sopravvive
+     alla revisione ma non alla mutazione.
+
+Stato aggiornato: decisioni fino ad **ADR-0081**, verifiche fino a **V-074**, note di metodo fino
+alla **152**. Le suite: **143** prove per gli strumenti, **54** per l'applicazione. Prossimo passo:
+**Task 5** del [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), il generatore di
+carico — che chiederà al doppio la prima cosa che oggi non sa fare: fallire.

@@ -34,7 +34,7 @@ prima o poi diverge, e a quel punto nessuna delle due è affidabile.
 
 Ogni voce `A-` porta **URL, editore, versione documentata, data di consultazione, che cosa afferma
 davvero** e — quando c'è — la **riserva**: il punto in cui la pagina *non* dice quello che si
-vorrebbe farle dire. La riserva non è una formalità. Due delle quattro fonti qui sotto tacciono
+vorrebbe farle dire. La riserva non è una formalità. Due delle sette fonti qui sotto tacciono
 proprio sul punto per cui erano state aperte, e la cosa si scopre solo leggendole.
 
 Ogni voce `M-` porta il **comando** e l'**output testuale**, così che chiunque possa rifarla. Le
@@ -164,6 +164,88 @@ misure valgono per l'ambiente descritto in [M-001](#m-001) e per nessun altro.
   si sposta. Il significato del `5` è stato comunque **verificato qui** sulla versione installata:
   [M-005](#m-005).
 - **Usata da:** [05-tipi-prove-e-guardie.md](05-tipi-prove-e-guardie.md)
+
+<a id="a-005"></a>
+### A-005 — Python: quando comincia a eseguire una funzione generatrice
+
+- **URL:** https://docs.python.org/3/reference/expressions.html#yield-expressions
+- **Editore:** Python Software Foundation — riferimento ufficiale del linguaggio
+- **Versione documentata:** Python 3.14.7 (il canale `/3/` segue l'ultima versione pubblicata)
+- **Consultata:** 2026-09-03
+- **Verdetto:** conferma piena, ed è la frase su cui poggia la forma di `FakeBackup`
+- **Cosa afferma:** chiamare una funzione generatrice **non esegue il suo corpo**. «When a generator
+  function is called, it returns an iterator known as a generator. That generator then controls the
+  execution of the generator function. **The execution starts when one of the generator's methods
+  is called.** At that time, the execution proceeds to the first yield expression, where it is
+  suspended again, returning the value of `yield_list` to the generator's caller». La sospensione
+  conserva tutto: «all local state is retained, including the current bindings of local variables,
+  the instruction pointer».
+- **Conseguenza qui:** un `dump()` scritto come funzione generatrice non avvia niente finché
+  qualcuno non scorre il risultato. Nell'adattatore vero del Task 9 vorrebbe dire che
+  `mongodump` non parte alla chiamata; nel doppio vuol dire che la richiesta non viene registrata.
+  La porta promette che qualcosa accade **alla chiamata**, quindi `FakeBackup.dump` registra subito
+  e restituisce un generatore costruito a parte.
+- **Riserve:** la pagina descrive il comportamento a **runtime** e non dice niente su come lo si
+  distingua staticamente. È il punto che rende la cosa insidiosa, ed è misurato in
+  [M-007](#m-007): una funzione generatrice e una funzione che restituisce un generatore hanno lo
+  stesso tipo annotato, `Iterator[Progress]`, e `mypy --strict` non le distingue.
+- **Usata da:** [02-porte-e-doppi.md](02-porte-e-doppi.md)
+
+<a id="a-006"></a>
+### A-006 — MongoDB: `{campo: null}` prende anche i documenti senza quel campo
+
+- **URL:** https://www.mongodb.com/docs/manual/tutorial/query-for-null-fields/
+- **Editore:** MongoDB, Inc. — Database Manual
+- **Versione documentata:** 8.3 (canale «Current» del manuale)
+- **Consultata:** 2026-09-03
+- **Verdetto:** conferma — la semantica è dichiarata, non dedotta
+- **Cosa afferma:** «The `{ metacritic : null }` query matches documents that contain the
+  `metacritic` field with a `null` value **or** do not contain the `metacritic` field», e il
+  risultato è descritto due volte perché non sia frainteso: «The query returns all documents in the
+  `movies` collection where the `metacritic` field contains a `null` value or does not exist».
+  Distinguere i due casi richiede altri operatori: `{ $type: 10 }` prende **solo** il `null`
+  esplicito, `{ $exists: false }` **solo** il campo assente, `{ $ne: null }` i documenti dove il
+  campo «exists **and** does not have a null value».
+- **Conseguenza qui:** in `InMemoryStore._corrisponde`, per un valore atteso `None`, la condizione
+  giusta è `documento.get(chiave) is not None` e non `chiave in documento`. Sono due righe
+  ugualmente ovvie e una sola è quella di MongoDB: è il motivo per cui il doppio la implementa
+  invece di rifiutarla, con la prova
+  `test_l_archivio_cerca_i_campi_assenti_come_fa_mongodb` accanto.
+- **Riserve:** tre. La prima è di versione: il lab gira su `mongo:7.0` (`tools/pull-images.sh`),
+  la pagina documenta la 8.3; l'affermazione sui campi di primo livello non è marcata come novità di
+  alcuna versione, ma è una deduzione dai marcatori della pagina. La seconda mostra che queste
+  semantiche **si muovono**: la pagina dichiara che «Starting in MongoDB 9.0, the `{ "a.b": null }`
+  query matches a document in any of these cases», elencando quattro casi per i percorsi puntati. È
+  la conferma che il rifiuto dei percorsi puntati da parte del doppio non è pigrizia: imitarli
+  vorrebbe dire scegliere una versione. La terza: sugli array la pagina avverte che «comparisons to
+  `null` on array fields produce results you might not expect»; il doppio non conosce gli array e
+  quel caso non si presenta.
+- **Usata da:** [02-porte-e-doppi.md](02-porte-e-doppi.md)
+
+<a id="a-007"></a>
+### A-007 — MongoDB: l'uguaglianza su un sottodocumento richiede anche l'ordine dei campi
+
+- **URL:** https://www.mongodb.com/docs/manual/tutorial/query-embedded-documents/
+- **Editore:** MongoDB, Inc. — Database Manual
+- **Versione documentata:** 8.3 (canale «Current» del manuale)
+- **Consultata:** 2026-09-03
+- **Verdetto:** conferma — e la pagina sconsiglia esplicitamente l'operazione
+- **Cosa afferma:** «MongoDB does not recommend comparisons on embedded documents because the
+  operations require an *exact* match of the specified `<value>` document, **including the field
+  order**.» E poi il punto che riguarda chi scrive codice, non chi scrive query a mano: «Queries
+  that use comparisons on embedded documents can result in **unpredictable behavior when used with
+  a driver that does not use ordered data structures for expressing queries**.»
+- **Conseguenza qui:** `InMemoryStore` **rifiuta** `{"campo": {...}}` senza operatori. Non perché
+  sia difficile, ma perché l'uguaglianza fra `dict` di Python ignora l'ordine delle chiavi e quella
+  di MongoDB no: le due risposte divergono sullo stesso dato, e un doppio che desse la risposta di
+  Python farebbe passare una prova che contro il cluster fallirebbe. Il rifiuto nomina il campo e
+  dice perché.
+- **Riserve:** la pagina non dice **quale** driver usi strutture ordinate. PyMongo restituisce
+  `dict`, e in CPython i `dict` conservano l'ordine di inserimento — ma conservare l'ordine non è
+  confrontarlo, e `{"w": 21, "h": 14} == {"h": 14, "w": 21}` resta `True` in Python. La divergenza
+  quindi c'è, e questa pagina la dichiara come rischio generale del driver senza misurarla per
+  PyMongo. Nel repository nessuna affermazione si appoggia a più di così.
+- **Usata da:** [02-porte-e-doppi.md](02-porte-e-doppi.md)
 
 ---
 
@@ -315,6 +397,75 @@ misure valgono per l'ambiente descritto in [M-001](#m-001) e per nessun altro.
 - **Riserve:** il comportamento è quello di pytest 9.1.1 e coincide con [A-004](#a-004). Dal Task 8
   in poi questa misura smetterà di essere riproducibile, perché la directory non sarà più vuota: è
   attesa, ed è il segno che il debito è stato pagato.
+
+<a id="m-006"></a>
+### M-006 — Un archivio che accetta tutto fa fallire sette prove, non zero
+
+- **Data:** 2026-09-03
+- **Comando:** in `tests/doppi/archivio.py`, primo statement di `_corrisponde`:
+  ```python
+  def _corrisponde(self, documento, filtro) -> bool:
+      return True          # rottura deliberata: il filtro non guarda più niente
+  ```
+  poi `make app-test`, poi ripristino.
+- **Output:**
+  ```
+  FAILED test_l_archivio_non_tiene_il_documento_di_chi_lo_ha_chiamato - AssertionError: assert 1 == 0
+  FAILED test_l_archivio_filtra_per_uguaglianza_invece_di_contare_tutto - AssertionError: assert 3 == 2
+  FAILED test_l_archivio_cerca_i_campi_assenti_come_fa_mongodb - assert [1, 2, 3] == [1, 2]
+  FAILED test_l_archivio_non_confronta_sottodocumenti - Failed: DID NOT RAISE NonSupportato
+  FAILED test_l_archivio_impagina_quello_che_il_filtro_ha_scelto - assert [2, 3] == [3]
+  FAILED test_un_filtro_che_l_archivio_non_sa_applicare_solleva - Failed: DID NOT RAISE NonSupportato
+  FAILED test_l_aggregazione_esegue_gli_stadi_che_conosce - AssertionError: assert ({'quanti': 3},) == ({'quanti': 2},)
+  7 failed, 47 passed in 0.08s
+  ```
+- **Che cosa dice:** la rottura è quella che un doppio permissivo produce davvero — «restituisco
+  tutto» —, e le prove la vedono da sette lati. Due righe contano più delle altre cinque, e sono le
+  `DID NOT RAISE`: dicono che il **rifiuto** è verificato quanto il comportamento. Senza quelle due,
+  un `InMemoryStore` che ignorasse in silenzio un `$gt` sconosciuto resterebbe verde, e la prima
+  prova scritta con quell'operatore passerebbe senza che nessuno abbia implementato niente. È il
+  terzo esito della **nota di metodo 144**: la guardia esiste, e si è vista sparare.
+- **Riserve:** la misura mostra che *quelle* prove reggono a *quella* rottura, e non che reggano a
+  tutte. Cercandone una scoperta la si trova subito: togliendo da `_come_intero` il rifiuto dei
+  booleani — `if not isinstance(argomento, int)`, senza l'`isinstance(argomento, bool)` — le prove
+  restano **54 verdi**, perché nessuna chiede `{"$limit": True}`. Il rifiuto dei booleani è quindi
+  oggi una precauzione non verificata: sopravvive alla revisione, non alla mutazione. Ci sarà una
+  prova il giorno in cui qualcosa dipenderà da lui, secondo la stessa regola che tiene `$group`
+  fuori dal dialetto.
+
+<a id="m-007"></a>
+### M-007 — `mypy --strict` non distingue una funzione generatrice da una che restituisce un generatore
+
+- **Data:** 2026-09-03
+- **Comando:** in `tests/doppi/backup.py`, `dump` scritta nella forma che verrebbe più naturale:
+  ```python
+  def dump(self, destinazione: Path) -> Iterator[Progress]:
+      self.dump_chiesti.append(destinazione)
+      yield from self._cronaca()        # invece di: return self._cronaca()
+  ```
+  poi `make app-test` e `make app-check`, poi ripristino.
+- **Output:**
+  ```
+  FAILED tests/unit/test_doppi.py::test_il_backup_finto_registra_la_richiesta_anche_se_nessuno_la_scorre
+         - AssertionError: assert [] == [PosixPath('/tmp/dump')]
+  1 failed, 53 passed in 0.05s
+
+  uv run --directory app mypy
+  Success: no issues found in 23 source files
+  ```
+- **Che cosa dice:** due cose, e la seconda è la ragione per cui questa misura esiste. La prima: la
+  differenza è **osservabile**, e una prova la osserva. Chiamare `dump()` senza scorrere il
+  risultato lascia `dump_chiesti` vuoto, perché il corpo non è mai partito ([A-005](#a-005): «The
+  execution starts when one of the generator's methods is called»). La seconda: **il sistema dei
+  tipi tace.** Le due forme hanno lo stesso tipo annotato, `Iterator[Progress]`, e `mypy --strict`
+  passa su entrambe. Un errore che cambia *quando* il lavoro comincia non è un errore di tipo, e
+  qui la differenza sarà fra «`mongodump` è partito» e «`mongodump` partirà se qualcuno guarda».
+  Sta insieme a [M-004](#m-004) come promemoria in due direzioni: `mypy` è l'unico a verificare la
+  conformità alle porte, e non verifica tutto.
+- **Riserve:** la misura vale per la forma `yield from` in una funzione annotata `Iterator[...]`.
+  Un `-> Generator[...]` esplicito non cambierebbe niente, ma non è stato provato. Nessuna opzione
+  di mypy è stata cercata per farlo distinguere: potrebbe esistere, e questa voce afferma solo che
+  la configurazione `strict` del progetto non la applica.
 
 ---
 

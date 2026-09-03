@@ -191,23 +191,23 @@ I doppi vengono prima perché sono ciò contro cui i Task 5-6 fanno TDD. Scriver
 significherebbe modellarli sull'implementazione che devono verificare, che è il modo di ottenere
 prove che non provano niente.
 
-- [ ] **Passo 1.** `InMemoryStore` **conserva davvero** i documenti: `insert_many` li mette in una
+- [x] **Passo 1.** `InMemoryStore` **conserva davvero** i documenti: `insert_many` li mette in una
       lista, `count` la conta, `find_page` la impagina, `aggregate` esegue il sottoinsieme di
       pipeline che serve. Se una prova ha bisogno di una pipeline che il doppio non sa fare, la si
       aggiunge — non la si finge.
-- [ ] **Passo 2.** `FakeClock`, con `now` che avanza solo quando `sleep` viene chiamato. È il pezzo
+- [x] **Passo 2.** `FakeClock`, con `now` che avanza solo quando `sleep` viene chiamato. È il pezzo
       che permette di provare in millisecondi un comportamento definito in decine di secondi —
       «dopo 30 s senza primario, smetti di ritentare» — e senza di esso quella regola resterebbe non
       provata per tutto il branch.
-- [ ] **Passo 3.** `FakeInspector` che restituisce topologie preparate, compresa quella senza
+- [x] **Passo 3.** `FakeInspector` che restituisce topologie preparate, compresa quella senza
       primario; `FakeBackup` il cui `dump` produce una sequenza di `Progress` decisa dalla prova,
       compreso il caso che fallisce a metà.
-- [ ] **Passo 4.** `RecordingSink`, che accumula gli eventi in una lista. È il doppio più importante
+- [x] **Passo 4.** `RecordingSink`, che accumula gli eventi in una lista. È il doppio più importante
       del branch: l'asserzione tipica di questa suite è sulla **sequenza di eventi**, cioè sul
       comportamento osservabile, non sulla resa a schermo.
-- [ ] **Passo 5.** Una prova per doppio, che ne verifichi la promessa. Un doppio sbagliato non fa
+- [x] **Passo 5.** Una prova per doppio, che ne verifichi la promessa. Un doppio sbagliato non fa
       fallire le prove che lo usano: le fa passare per il motivo sbagliato.
-- [ ] **Passo 6.** `make app-test`, `make app-check`. Commit:
+- [x] **Passo 6.** `make app-test`, `make app-check`. Commit:
       `test: i doppi, scritti prima del codice che dovranno verificare`.
 
 ---

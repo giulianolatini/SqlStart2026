@@ -1041,6 +1041,43 @@ falsa proprio le misure di failover che la demo sta cronometrando.
 
 ---
 
+### Cercare `null` trova anche i documenti che quel campo non ce l'hanno
+
+> «The `{ metacritic : null }` query matches documents that contain the `metacritic` field with a
+> `null` value **or** do not contain the `metacritic` field.»
+
+Fonte: [`app/docs/Sources.md` A-006](../app/docs/Sources.md#a-006) — MongoDB Database Manual, *Query
+for Null or Missing Fields*.
+
+**Perché una slide:** è la differenza fra «l'ordine è stato annullato con motivazione vuota» e «il
+campo motivazione non è mai stato scritto», e in un documento senza schema quei due casi convivono
+nella stessa collezione. Chi arriva da SQL legge `= NULL` e si aspetta il primo. Per distinguerli
+servono altri operatori — `{ $type: 10 }` per il solo `null` esplicito, `{ $exists: false }` per il
+solo campo assente — e il fatto che ne servano due dice tutto: nel modello a documenti «assente» e
+«vuoto» sono due stati, non uno.
+
+---
+
+### Confrontare un sottodocumento intero confronta anche l'ordine dei campi
+
+> «MongoDB does not recommend comparisons on embedded documents because the operations require an
+> *exact* match of the specified `<value>` document, **including the field order**.»
+>
+> «Queries that use comparisons on embedded documents can result in unpredictable behavior when used
+> with a driver that does not use ordered data structures for expressing queries.»
+
+Fonte: [`app/docs/Sources.md` A-007](../app/docs/Sources.md#a-007) — MongoDB Database Manual, *Query
+on Embedded/Nested Documents*.
+
+**Perché una slide:** `{w: 21, h: 14}` e `{h: 14, w: 21}` sono lo stesso oggetto in ogni linguaggio
+che il pubblico usa tutti i giorni, e non sono lo stesso filtro in MongoDB. È la seconda frase a fare
+paura più della prima: il comportamento dipende dalla struttura dati con cui il **driver** esprime la
+query, cioè da qualcosa che chi scrive il codice non vede. La soluzione sta nella stessa pagina, ed
+è la notazione con il punto: si interroga **per campo annidato** — `{ "size.w": 21 }` — non per
+documento intero.
+
+---
+
 ## Repository e distribuzione
 
 ### I limiti di GitHub sui file grandi
@@ -1719,3 +1756,63 @@ effetto collaterale, il posto perfetto in cui nascondere un'affermazione non ver
 doppio quando si cita a memoria un documento che si è scritto: la fiducia nella propria memoria è più
 alta, e la memoria non lo sa. La difesa è banale e va detta ad alta voce — si apre il documento nel
 momento in cui si scrive il numero, non dopo.
+
+---
+
+### Un doppio che tace su ciò che non sa è più pericoloso di uno che non c'è
+
+> Un doppio mancante si nota: il codice non compila, la prova non parte. Un doppio che riceve un
+> operatore che non conosce e lo **ignora** restituisce un risultato plausibile — tutti i documenti,
+> invece di quelli che il filtro avrebbe scelto — e la prova diventa verde per il motivo sbagliato.
+> Nessuno ha scritto una riga di codice difettoso: il difetto è nell'attrezzo di misura, che è il
+> posto in cui si guarda per ultimo.
+
+Fonte: [`app/docs/Sources.md` M-006](../app/docs/Sources.md#m-006),
+[registro operativo, nota 149](registro-operativo-sviluppo.md).
+
+**Perché una slide:** capovolge l'idea intuitiva che un doppio incompleto sia un problema piccolo,
+da colmare quando serve. La misura lo mostra: rompendo il filtro dell'archivio in memoria perché
+accetti tutto, due delle sette prove rosse falliscono con `DID NOT RAISE` — cioè il **rifiuto** era
+provato quanto il comportamento. La regola che ne esce è breve: un doppio dichiara il dialetto che
+parla e solleva su tutto il resto, nominando ciò che non sa fare. E quando l'eccezione arriva in
+faccia a qualcuno c'è una risposta sola — insegnarglielo insieme alla prova che lo verifica, mai
+riscrivere la prova per chiedergli qualcosa di più semplice.
+
+---
+
+### Un errore di *quando* non è un errore di tipo
+
+> «The execution starts when one of the generator's methods is called.»
+>
+> Una funzione generatrice e una funzione che restituisce un generatore hanno la stessa annotazione,
+> `Iterator[T]`. Scritta nella forma sbagliata, la nostra fallisce **una** prova e lascia
+> `mypy --strict` **verde**.
+
+Fonte: [`app/docs/Sources.md` A-005](../app/docs/Sources.md#a-005) — Python Language Reference,
+*Yield expressions* — e [M-007](../app/docs/Sources.md#m-007),
+[registro operativo, nota 151](registro-operativo-sviluppo.md).
+
+**Perché una slide:** è un baco che sopravvive a tutto ciò che di solito rassicura — tipi stretti,
+revisione, nome della funzione — perché non sbaglia *che cosa* fa il codice, sbaglia *quando* lo fa.
+Un `dump()` scritto con `yield` nel corpo non avvia `mongodump` alla chiamata: lo avvia se e quando
+qualcuno scorre il risultato. Il pubblico che scrive Python lo riconosce subito e non ci ha mai
+pensato: i sistemi di tipi controllano *che cosa*, quasi mai *quando*.
+
+---
+
+### Anche una riserva è un'affermazione
+
+> Avevo scritto, sotto una misura, che le prove non avrebbero visto un `$limit` che taglia dalla coda
+> invece che dalla testa. Sembrava una concessione onesta. Sono andato a guardare: la prova
+> asserisce `[1, 2]`, quindi quel taglio lo vede benissimo. L'esempio di lacuna era inventato — e una
+> lacuna vera esisteva, due tentativi più in là.
+
+Fonte: [`app/docs/Sources.md` M-006, riserve](../app/docs/Sources.md#m-006),
+[registro operativo, nota 152](registro-operativo-sviluppo.md).
+
+**Perché una slide:** è la nota sulla citazione plausibile applicata al proprio codice invece che
+alle proprie fonti, e con un'aggravante — la riserva è il punto della pagina che sembra più al riparo
+dall'errore, perché è quello in cui l'autore sta ammettendo un limite. Nessuno controlla una
+modestia. Il modo di trovare una lacuna vera è **rompere e guardare**, non immaginare; e chi rompe a
+caso scopre anche l'altra faccia della cosa, cioè che una guardia scritta per prudenza e mai provata
+sopravvive alla revisione ma non alla mutazione.

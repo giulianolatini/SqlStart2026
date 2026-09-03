@@ -232,9 +232,59 @@ va a controllare.
 
 ---
 
+## Task 4 — I doppi, scritti prima del codice che dovranno verificare
+
+**Che cosa chiedeva.** Un doppio per porta, in `tests/doppi/`, e una prova per doppio.
+
+**Che cosa è stato scritto.** Sei file — `archivio.py`, `ispettore.py`, `backup.py`, `orologio.py`,
+`raccoglitore.py` e l'`__init__.py` che li raccoglie — più `tests/unit/test_doppi.py`. Le prove
+passano da **19 a 54**. Che cosa fanno i doppi e perché stanno in `tests/` è in
+[02-porte-e-doppi.md](02-porte-e-doppi.md#i-doppi-non-sono-mock); qui c'è il processo.
+
+**Prima i doppi, e non è un dettaglio d'ordine.** I Task 5 e 6 faranno TDD contro questi oggetti.
+Scriverli dopo avrebbe voluto dire modellarli sul codice che devono verificare — e un doppio che
+concorda con l'implementazione per costruzione produce prove che non provano niente. Per la stessa
+ragione ho letto i Task 5 e 6 **prima** di disegnarli: è da lì che viene la scelta di dare a
+`FakeInspector` una *sequenza* di topologie invece di una sola, perché ciò che il Task 6 deve
+provare non è uno stato ma un passaggio.
+
+**Diversamente dal previsto — avevo rifiutato ciò che andava implementato.**
+
+`InMemoryStore` all'inizio rifiutava `{"campo": None}`. La motivazione, scritta nella docstring, era
+che `dict.get` arriva alla semantica di MongoDB **per caso**, e per caso è il modo peggiore di
+essere giusti. Poi ho aperto il manuale: quella semantica è dichiarata — `{campo: null}` prende sia
+il `null` esplicito sia i documenti senza quel campo ([A-006](Sources.md#a-006)). Una regola
+dichiarata si implementa deliberatamente, con la citazione accanto e la prova che la fissa;
+rifiutarla era la scelta più debole, non la più prudente.
+
+Il rifiuto è rimasto dove è giusto: sul confronto con un sottodocumento intero, che MongoDB risolve
+«including the field order» ([A-007](Sources.md#a-007)) mentre l'uguaglianza fra `dict` di Python
+l'ordine lo ignora. Il criterio che distingue i due casi — se esista un'implementazione giusta da
+scrivere — è la **nota di metodo 150**.
+
+**Tre rotture deliberate, e ognuna ha detto una cosa diversa.**
+
+| Rottura | Esito | Che cosa ha insegnato |
+|---|---|---|
+| `_corrisponde` restituisce sempre `True` | 7 prove rosse, due con `DID NOT RAISE` | il rifiuto è verificato quanto il comportamento ([M-006](Sources.md#m-006)) |
+| `dump` scritta come funzione generatrice | 1 prova rossa, **mypy verde** | un errore di *quando* non è un errore di tipo ([M-007](Sources.md#m-007)) |
+| `_come_intero` accetta i booleani | **54 verdi** | una guardia mai provata sopravvive alla revisione, non alla mutazione |
+
+La terza non era in programma: è nata da una riserva che avevo scritto a tavolino su M-006 —
+«un `$limit` che tagliasse dalla coda passerebbe» — e che è risultata **falsa** appena sono andato a
+guardare la prova. Cercando una lacuna vera l'ho trovata al secondo tentativo. È la **nota 152**:
+anche una riserva è un'affermazione.
+
+**Che cosa i doppi non sanno fare, dichiarato per nome.** `$group` non c'è, un `topology()` che
+solleva non c'è, uno store che fallisce le scritture non c'è. Non sono dimenticanze: nessuna prova
+li ha ancora chiesti, e il messaggio di `NonSupportato` lo dice a chi li incontra. Lo store che
+fallisce arriverà al Task 5, insieme alla prova che ne ha bisogno.
+
+---
+
 ## Che cosa manca
 
-I task dal 4 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
+I task dal 5 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
 futuro, che lo stanno facendo — in particolare
 [04-eventi-del-driver-e-concorrenza.md](04-eventi-del-driver-e-concorrenza.md), che porta in testa un
 avviso di stato.
@@ -243,6 +293,9 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 
 | Aperto | Dove è dichiarato | Quando si chiude |
 |---|---|---|
+| Uno store che **fallisce** le scritture: oggi nessun doppio sa rompersi | [registro, Task 4](#task-4--i-doppi-scritti-prima-del-codice-che-dovranno-verificare) | Task 5 |
+| `$group` non è nel dialetto di `InMemoryStore` | il messaggio di `NonSupportato`, e [02](02-porte-e-doppi.md#dove-il-doppio-non-sa-solleva) | la prima prova che lo chiederà |
+| Il rifiuto dei booleani in `_come_intero` non è coperto da nessuna prova | [M-006, riserve](Sources.md#m-006) | la prima prova che dipenderà da lui |
 | `SdamBridge` e la coda: il comportamento di PyMongo va **osservato**, non solo letto | [04](04-eventi-del-driver-e-concorrenza.md#che-cosa-non-è-ancora-verificato) | Task 7 |
 | `ChunkMigrated` potrebbe non essere osservabile da un client di `mongos` | [04](04-eventi-del-driver-e-concorrenza.md#che-cosa-non-è-ancora-verificato) | Task 7 |
 | Come le prove di integrazione ricevono la credenziale senza violare ADR-0054 | [decisioni](decisioni-che-vincolano-app.md#adr-0054) | Task 8 |
@@ -256,4 +309,4 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 
 **Il registro completo del repository**, che copre anche le altre feature, è
 [`docs/registro-operativo-sviluppo.md`](../../docs/registro-operativo-sviluppo.md). Le note di metodo
-citate qui (137–145) stanno lì per esteso.
+citate qui (137–152) stanno lì per esteso.

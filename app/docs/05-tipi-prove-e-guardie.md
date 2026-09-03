@@ -41,6 +41,12 @@ files = ["src", "tests"]
 conformi alle porte, e lasciarle fuori dal controllo significherebbe non controllare proprio la cosa
 per cui il controllo esiste.
 
+Dal Task 4 questo vale anche per `tests/doppi/`, che è codice a tutti gli effetti — cinque
+implementazioni delle porte — ma non contiene prove. Le due configurazioni lo trattano ciascuna a
+modo suo, e va bene così: mypy lo controlla perché sta sotto `tests`, pytest non lo raccoglie perché
+`testpaths` nomina `tests/unit`. Un doppio è un attrezzo di misura: si tara con `mypy` e con le
+prove che lo riguardano, non lo si esegue da solo.
+
 ## Le due suite, e perché sono separate
 
 `app/pyproject.toml` dichiara:
