@@ -47,6 +47,7 @@ from mongolab.presentation.righe import COLONNE_SALA, tronca
 __all__ = [
     "GUTTER",
     "IGNOTO",
+    "INDIRIZZO",
     "SEPARATORE",
     "rapporto",
     "riassunto",
@@ -69,6 +70,14 @@ GUTTER = 12
 Le righe di continuazione sono rientrate della stessa misura: è ciò che fa leggere
 l'elenco dei server come una cosa sola sotto `topologia`, invece che come quattro righe
 senza padrone.
+"""
+
+INDIRIZZO = 22
+"""Il minimo della colonna degli indirizzi: `localhost:27021` e i suoi fratelli.
+
+Non è il massimo. Chi stampa la fotografia allarga la colonna quando serve — vedi
+`_larghezza_indirizzi` — perché dentro la rete Compose gli indirizzi sono nomi di
+servizio e questo numero non basta più.
 """
 
 
@@ -153,14 +162,32 @@ def _topologia(vista: DescrizioneTopologia) -> list[str]:
     intestazione = [vista.tipo.value]
     if vista.nome_set is not None:
         intestazione.append(vista.nome_set)
+    larghezza = _larghezza_indirizzi(vista.server)
     return [_voce("topologia", *intestazione)] + [
-        _sotto(_riga_server(server)) for server in vista.server
+        _sotto(_riga_server(server, larghezza)) for server in vista.server
     ]
 
 
-def _riga_server(server: DescrizioneServer) -> str:
+def _larghezza_indirizzi(server: Sequence[DescrizioneServer]) -> int:
+    """Quanto spazio prende la colonna degli indirizzi: il più lungo, più uno.
+
+    Una larghezza fissa a 22 è bastata finché gli indirizzi erano `localhost:27021`. Dal
+    Task 12 l'applicazione guarda anche da dentro la rete Compose, dove sono nomi di
+    servizio, e `mongo-standalone:27017` ne misura esattamente ventidue: la colonna si
+    riempiva tutta e la riga stampava `mongo-standalone:27017standalone`, due parole
+    diverse lette come una. Misurato eseguendo, la prima volta che il container ha parlato.
+
+    Il massimo si calcola su tutti i server insieme e non riga per riga, perché una
+    colonna che cambia larghezza a ogni riga non è una colonna. Il minimo resta 22, così
+    la fotografia dall'host è la stessa di prima.
+    """
+    piu_lungo = max((len(uno.indirizzo) for uno in server), default=0)
+    return max(INDIRIZZO, piu_lungo + 1)
+
+
+def _riga_server(server: DescrizioneServer, larghezza: int = INDIRIZZO) -> str:
     ritardo = IGNOTO if server.ritardo_ms is None else f"{server.ritardo_ms:.1f} ms"
-    riga = f"{server.indirizzo:<22}{server.ruolo.value:<16}{ritardo:>10}"
+    riga = f"{server.indirizzo:<{larghezza}}{server.ruolo.value:<16}{ritardo:>10}"
     return riga if server.errore is None else f"{riga}  {server.errore}"
 
 

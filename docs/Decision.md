@@ -5748,3 +5748,206 @@ composizione: si sposta in `application/scenari.py` al Task 13.
 **Fonti:** [S-010](Sources.md#s-010), per la consegna sincrona degli eventi che è il motivo per cui
 il ponte esiste ([ADR-0019](#adr-0019)); nel registro dell'applicazione
 [M-033](../app/docs/Sources.md#m-033)
+
+---
+
+<a id="adr-0090"></a>
+## ADR-0090 — Lo stesso stack ha due indirizzi, e l'applicazione dichiara da dove sta guardando
+
+**Data:** 2026-09-03 · **Stato:** Accettata
+
+**Contesto:** fino al Task 11 un bersaglio aveva un indirizzo solo — `localhost:27021` per il
+replica set — e una risposta sola alla domanda su `directConnection`. Il Task 12 mette
+l'applicazione dentro la rete Compose, e da lì quell'indirizzo non esiste: si chiama
+`mongo-rs-1:27017`, e sono tre. Non è lo stesso stack visto peggio, sono due punti di
+osservazione con proprietà diverse, e la differenza è precisamente ciò che
+[ADR-0012](#adr-0012) dice essere la scena del talk.
+
+I tre fatti che cambiano insieme sono i semi, `directConnection` e il nome del set. Non sono
+tre campi indipendenti: `directConnection=True` con più di un seme solleva `ConfigurationError`
+**alla costruzione** del client, cioè prima di qualunque rete. Tenerli separati avrebbe
+permesso di scrivere una combinazione che non può esistere.
+
+**Decisione:** una `Vista` — semi, `diretto`, `replica` — e ogni `Bersaglio` ne ha due,
+`da_host` e `da_rete`. Quale delle due valga lo dice la variabile d'ambiente
+`MONGOLAB_PUNTO_DI_VISTA`, che i tre file Compose impostano a `rete` nel servizio `app` e che
+sull'host resta assente, cioè `host`. Un valore che non sia nessuno dei due non viene
+interpretato con indulgenza: solleva `PuntoDiVistaSconosciuto` e nel messaggio elenca quali
+sono.
+
+Una variabile d'ambiente e non un'opzione della riga di comando, perché il punto di vista è una
+proprietà di **dove il processo gira** e non una scelta di chi lo lancia. Chi esegue `mongolab
+stats --target rs` non deve saperlo, e soprattutto non deve poterlo sbagliare in sala: la
+risposta la dà l'ambiente, che è l'unica cosa che quel fatto lo sa davvero.
+
+**Alternative scartate.**
+
+- *Dedurlo, provando a risolvere `mongo-rs-1`.* Una risoluzione DNS che fallisce prende secondi
+  e può fallire per altri dieci motivi. Dedurre una cosa che si può dichiarare significa
+  scambiare un fatto certo con un indizio.
+- *Un secondo bersaglio, `rs-rete`, accanto a `rs`.* Raddoppia la mappa e sposta l'errore su chi
+  scrive `--target`: sarebbe possibile chiedere `rs-rete` dall'host e aspettare venti secondi
+  per un `ServerSelectionTimeout` che parla d'altro.
+- *Tre campi paralleli invece di una `Vista`.* È la forma che permette di scrivere l'impossibile
+  — un seme in più su una vista diretta — e di scoprirlo solo quando il client si costruisce.
+
+**Riserve.** Le prove d'integrazione girano sull'host e **dichiarano** il punto di vista invece
+di leggerlo, perché una sessione che avesse esportato `MONGOLAB_PUNTO_DI_VISTA=rete` — cosa che
+capita provando i comandi di questo task — le farebbe fallire venti secondi per volta parlando
+d'altro. È una precauzione contro l'ambiente, non contro il codice.
+
+**Fonti:** [A-016](../app/docs/Sources.md#a-016) per ciò che la specifica SDAM prescrive,
+[M-036](../app/docs/Sources.md#m-036) per la scoperta misurata, [M-019](../app/docs/Sources.md#m-019) per il
+motivo per cui dall'host non funziona
+
+---
+
+<a id="adr-0091"></a>
+## ADR-0091 — Il servizio `app` sta dentro i tre stack, sotto un profilo, e non in un quarto file
+
+**Data:** 2026-09-03 · **Stato:** Accettata
+
+**Contesto:** perché il client scopra i membri per nome di servizio deve stare **sulla rete di
+quello stack**, e in Compose una rete appartiene a un progetto. Le forme possibili erano tre: un
+quarto file Compose che si attacca alle reti altrui come esterne, un `docker run --network` a
+mano, o un servizio dentro ciascuno dei tre file.
+
+**Decisione:** un servizio `app` in ognuno dei tre `compose.yaml`, sotto il profilo `strumenti`,
+così che `docker compose up` non lo tiri su mai e `docker compose run --rm app` lo accenda per
+il tempo di un comando. Non dichiara `container_name` — di container ne convivono quanti se ne
+lanciano — e non dichiara `depends_on`, perché non serve al *ciclo di vita* dello stack: chi lo
+esegue lo esegue quando lo stack c'è già.
+
+La ripetizione fra i tre file è reale ed è accettata: è la stessa scelta che il repository fa da
+[ADR-0013](#adr-0013) per i tre stack, dove ogni file si legge da solo perché è materiale
+didattico prima che infrastruttura. Il prezzo — tre blocchi che possono divergere — si paga con
+un controllo invece che con un'astrazione: `tools/tests/test_coerenza_repo.py` verifica che i
+tre dichiarino la stessa immagine, che il tag sia la versione di `app/pyproject.toml`, e che
+tutti e tre impostino `MONGOLAB_PUNTO_DI_VISTA: rete`.
+
+Il sorgente arriva per **bind mount** (`../../app/src:/app/src:ro`) e l'ambiente virtuale vive
+in `/opt/mongolab`, fuori da `/app`: se stesse in `/app/.venv`, montare il sorgente dell'host
+sopra `/app` lo coprirebbe — o peggio ci metterebbe sopra il `.venv` di macOS, che dentro Linux
+non è eseguibile. È il §6.5 del design: una modifica al codice non deve richiedere una
+ricostruzione.
+
+**Alternative scartate.**
+
+- *Un quarto file Compose con le reti dichiarate `external`.* Il nome di una rete esterna
+  contiene il nome del progetto, che dipende dalla cartella da cui si esegue: funziona finché
+  nessuno rinomina una directory, e rompe con un messaggio che parla di reti e non di cartelle.
+- *`docker run --network sqlstart-02-replicaset_default`.* Rimette a mano ciò che Compose sa
+  fare, e mette in sala una riga che nessuno può leggere al volo.
+- *Nessun profilo, e il servizio spento con `scale: 0`.* Comparirebbe comunque in `up`, `ps` e
+  nei log, cioè in tutti i posti in cui il pubblico guarda per capire di quanti pezzi è fatto uno
+  stack.
+
+**Riserve.** `docker compose run` **non** ha un flag `--no-build` ([M-035](../app/docs/Sources.md#m-035)):
+la garanzia che nessuna costruzione parta a sorpresa la danno `pull_policy: never`
+([ADR-0039](#adr-0039)) e il controllo di `tools/preflight.sh`, che sono due presidi più forti
+di un flag da ricordare. Il bind mount serve allo **sviluppo**: la sera del talk il sorgente
+dell'immagine e quello dell'host coincidono, e se non coincidessero vincerebbe l'host — il che
+è desiderabile mentre si lavora e sarebbe una sorpresa in sala. Chi registra i filmati di
+riserva ricostruisca prima.
+
+**Fonti:** [M-035](../app/docs/Sources.md#m-035), [M-036](../app/docs/Sources.md#m-036)
+
+---
+
+<a id="adr-0092"></a>
+## ADR-0092 — Il `Makefile` sceglie **da dove** si esegue, e il predefinito è la rete
+
+**Data:** 2026-09-03 · **Stato:** Accettata
+
+**Contesto:** dopo il Task 12 lo stesso comando ha due modi di girare, e servono entrambi:
+dentro la rete è ciò che il talk mostra, sull'host è ciò che serve mentre si sviluppa — nessun
+container da ricostruire, il debugger attaccato, il ciclo corto.
+
+**Decisione:** una variabile `DOVE`, con `rete` come predefinito, che sceglie fra `docker
+compose run --rm app` e `uv run --directory app mongolab`. Il predefinito è `rete` perché il
+comportamento giusto in sala deve essere quello che si ottiene senza ricordarsi niente. Un
+valore diverso da `rete` o `host` viene rifiutato con un messaggio che dice che cosa sono i due,
+non solo che il terzo non esiste.
+
+La mappa `COMPOSE_DI_<nome>` traduce il bersaglio nel file Compose. È la **quarta** scrittura
+della stessa lista di stack, dopo `BERSAGLI`, i file Compose e il guardiano `CHIEDI_TARGET`, e
+una lista scritta quattro volte diverge: tre prove in `tools/tests/test_coerenza_repo.py` la
+tengono ferma, e la più importante non controlla i nomi ma le **destinazioni**, perché
+`COMPOSE_DI_rs = $(COMPOSE_03_BASE)` è una riga valida che accende un container e si collega
+allo stack sbagliato senza dire niente a nessuno.
+
+**Alternative scartate.**
+
+- *`DOVE=host` come predefinito, e `rete` da chiedere.* Metterebbe il modo sbagliato per il
+  talk a portata di dimenticanza, e il modo sbagliato qui non fallisce: stampa `topologia
+  singola` su un replica set sanissimo, che è una risposta plausibile e falsa.
+- *Due famiglie di target, `app-stats` e `app-stats-host`.* Sei target invece di tre, e ogni
+  opzione nuova ne aggiunge due.
+- *Far scegliere all'applicazione, provando prima la rete e poi l'host.* Un fallback silenzioso
+  su una demo che serve proprio a mostrare la differenza fra i due casi.
+
+**Riserve.** `make app-image` costruisce sempre attraverso lo stack 01, perché il servizio è
+identico nei tre e costruirlo tre volte produrrebbe tre volte la stessa immagine. Se un giorno
+i tre divergessero, quella riga diventerebbe falsa in silenzio — ed è esattamente ciò che la
+prova sull'immagine unica impedisce.
+
+**Fonti:** [M-035](../app/docs/Sources.md#m-035)
+
+---
+
+<a id="adr-0093"></a>
+## ADR-0093 — Un servizio che si costruisce si giudica sulle righe `FROM` del suo Dockerfile
+
+**Data:** 2026-09-03 · **Stato:** Accettata
+
+**Contesto:** `tools/check_stack.py` pretende, da [ADR-0009](#adr-0009) e
+[ADR-0018](#adr-0018), che ogni servizio dichiari un'immagine pinnata per digest e nota a
+`tools/images.env`. Il servizio `app` non può obbedire: la sua immagine non viene da un
+registro, la costruisce `make app-image` sulla macchina di chi presenta. Il Passo 5 del Task 12
+dice che, se una regola esistente vieta qualcosa di nuovo, **la regola ha ragione finché non si
+dimostra il contrario**.
+
+La dimostrazione ha richiesto di correggere anche la premessa da cui era partita. La prima
+stesura argomentava che un'immagine costruita in locale «non ha un digest». È falso: con
+l'archivio immagini di containerd, che è quello attivo su questa Docker Desktop, l'`Id` di
+un'immagine *è* il digest del suo manifesto, e `docker image inspect mongolab@sha256:…` la
+trova ([M-037](../app/docs/Sources.md#m-037)).
+
+**Decisione:** un servizio che dichiara `build:` è esente dalla regola sull'immagine e soggetto
+a una regola equivalente un livello più in basso: le righe `FROM` del suo Dockerfile devono
+essere pinnate per digest, e per un digest che `tools/images.env` conosce. `check_stack.py`
+risolve il `Dockerfile` a partire da `build.context`, segue i `${ARG}` attraverso `build.args`,
+salta gli stadi intermedi e i flag, e protesta se una base è mobile, sconosciuta o non
+risolvibile.
+
+Lo scopo della regola originale non si sposta di un millimetro: **nessun bit arriva dalla rete
+senza che qualcuno l'abbia fissato.** Per un servizio che si scarica quei bit sono la sua
+immagine; per uno che si costruisce sono le sue basi — e sono le uniche che vadano davvero in
+rete.
+
+Il digest dell'immagine costruita resta fuori da `images.env` non perché non esista, ma perché
+nessun registro l'ha mai servito e cambia a ogni ricostruzione: metterlo là darebbe a
+`pull-images.sh --verify` una cosa da cercare in rete che in rete non c'è, e il preflight
+fallirebbe la mattina del talk accusando la cache di un difetto che non ha. Ciò che il preflight
+controlla è la sola cosa controllabile e la sola che serva: che l'immagine ci sia, con `make
+app-image` come rimedio.
+
+**Alternative scartate.**
+
+- *Esentare il servizio e basta.* Lascerebbe le basi libere di essere `python:3.13-slim`, cioè
+  un tag mobile, e la prima costruzione senza rete fallirebbe — o peggio riuscirebbe con un
+  contenuto diverso da quello provato.
+- *Scrivere il digest dell'immagine costruita in `images.env`.* Un digest che nessuno può
+  scaricare, che cambia a ogni `make app-image`, e che trasformerebbe `--verify` in un
+  controllo che fallisce a caso.
+- *Scrivere le basi direttamente nel Dockerfile, pinnate.* Toglie il pin dal posto in cui
+  `pull-images.sh` lo aggiorna, e crea due elenchi di immagini da tenere allineati a mano.
+
+**Riserve.** [M-037](../app/docs/Sources.md#m-037) è misurata con l'archivio containerd. Con il
+vecchio archivio a grafo `RepoDigests` resta vuoto finché l'immagine non è spinta, e la premessa
+sbagliata sarebbe stata vera per caso: la decisione non cambia, la sua motivazione sì. Il
+controllo legge il Dockerfile con una regex e non con un parser: gli basta per i `FROM` che
+questo repository scrive, e non pretende di capire ogni Dockerfile del mondo.
+
+**Fonti:** [M-037](../app/docs/Sources.md#m-037), [ADR-0009](#adr-0009), [ADR-0018](#adr-0018),
+[ADR-0039](#adr-0039)

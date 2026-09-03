@@ -2455,3 +2455,93 @@ cosa, non metterlo* — e perché nel mondo dei database questo caso ha una vers
 `--host` che, mancando, punta a `localhost`. La stessa severità vale per gli strumenti attorno: qui
 `make app-stats` senza `TARGET` esce con **2** invece di indovinare, che è lo stesso codice con cui
 Typer rifiuta un parametro sbagliato.
+
+---
+
+### La stringa di connessione non è un indirizzo: è un punto di partenza
+
+> La specifica che tutti i driver MongoDB implementano definisce la *seed list* come «server
+> addresses provided client in initial configuration», e prescrive che il client **MUST add**
+> i server che gli altri membri gli nominano. Misurato: un seme solo, `mongo-rs-2`, e il client
+> finisce per scrivere su `mongo-rs-1` — un nome che nessuno gli aveva dato.
+
+Fonte: [`app/docs/Sources.md`, A-016](../app/docs/Sources.md#a-016) e
+[M-036](../app/docs/Sources.md#m-036), [ADR-0012](Decision.md#adr-0012),
+[registro operativo, nota 187](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché è la cosa che tutti hanno scritto mille volte senza pensarci — un URI
+in un file di configurazione — e quasi nessuno sa che quell'indirizzo è **solo l'inizio**. Da lì
+discendono conseguenze pratiche molto concrete: perché un firewall aperto sul solo seme non basta,
+perché i nomi che il set restituisce devono essere risolvibili dal client, e perché la stessa
+applicazione che funziona dentro Docker non funziona da fuori. Una demo che parte da un seme
+secondario e finisce a scrivere sul primario lo mostra in dieci secondi.
+
+---
+
+### Lo stesso cluster ha due indirizzi, e dal lato sbagliato la verità non è raggiungibile
+
+> Da fuori la rete Compose, un replica set con tre membri sani si legge `ReplicaSetNoPrimary`. Per
+> farlo funzionare bisogna spegnere la scoperta con `directConnection=true` — e allora la topologia
+> si legge `singola` mentre il ruolo del server è `RSPrimary`. Due affermazioni false insieme,
+> nessuna delle quali solleva un errore.
+
+Fonte: [`app/docs/Sources.md`, M-019](../app/docs/Sources.md#m-019),
+[`app/docs/13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md`](../app/docs/13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md),
+[ADR-0012](Decision.md#adr-0012), [ADR-0090](Decision.md#adr-0090).
+
+**Perché una slide:** perché è la trappola in cui cade chiunque provi un replica set in Docker dal
+proprio portatile, e perché la reazione naturale — mettere `directConnection=true` finché non
+funziona — non ripara niente: nasconde. Il cluster non è raggiungibile «un po' meno bene» da fuori;
+è raggiungibile in un modo che **non è quello che l'applicazione userà in produzione**. La
+conseguenza operativa è che una demo di failover ha senso solo dal lato in cui la scoperta è accesa.
+
+---
+
+### Una prova che non potrebbe fallire non dimostra niente, anche quando passa
+
+> Misurare la scoperta dei membri partendo dai tre semi della configurazione è circolare: trovare
+> tre server avendone dati tre è compatibile con un driver che non scopre nulla. Il disegno che
+> dimostra è un seme solo, scelto fra i **non** primari.
+
+Fonte: [`app/docs/Sources.md`, M-036](../app/docs/Sources.md#m-036),
+[registro operativo, nota 187](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché vale per ogni prova, non solo per le misure sui driver, e perché la
+domanda che la rende operativa sta in una riga: *quale osservazione falsificherebbe questa
+asserzione?* Se non ce n'è nessuna, la prova è verde per costruzione. È la stessa idea che rende
+obbligatorio far fallire una prova almeno una volta prima di fidarsene — qui applicata a un
+esperimento invece che a un test.
+
+---
+
+### Una premessa plausibile e mai verificata sopravvive a tutte le revisioni
+
+> «Un'immagine costruita in locale non ha un digest» suona ovvio ed è falso: con l'archivio immagini
+> di containerd, l'`Id` di un'immagine **è** il digest del suo manifesto, anche per ciò che nessuno
+> ha mai pubblicato. Era già scritta in cinque posti quando un `docker image inspect` l'ha smentita.
+
+Fonte: [`app/docs/Sources.md`, M-037](../app/docs/Sources.md#m-037),
+[ADR-0093](Decision.md#adr-0093), [registro operativo, nota 188](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché la decisione presa su quella premessa era **giusta** — il digest di
+un'immagine costruita in casa non va in `images.env` — e questo è precisamente ciò che rende
+l'errore interessante: una motivazione sbagliata sotto una conclusione corretta non viene corretta
+da niente, perché niente si rompe. E c'è l'aggravante che con il vecchio archivio a grafo di Docker
+la premessa sarebbe stata vera per caso. Le frasi che cominciano con «ovviamente» sono candidate a
+diventare una misura.
+
+---
+
+### Prima di segnare chiuso un punto aperto, guardare se lo è
+
+> Il registro dava per chiuso il limite del `docker exec` sul dump, con una motivazione scritta tre
+> task prima: «dal container non c'è più nessun `docker exec` in mezzo». Un comando ha mostrato che
+> nell'immagine `mongodump` non c'è affatto.
+
+Fonte: [`app/docs/Sources.md`, M-039](../app/docs/Sources.md#m-039),
+[registro operativo, nota 193](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché ogni progetto tiene un elenco di cose «da sistemare al prossimo giro»,
+e le scadenze scritte lì dentro sono **previsioni**, non fatti. Un punto chiuso per inerzia è
+peggio di un punto aperto: sparisce dall'elenco e riappare quando c'è pubblico. Il costo di
+verificarlo, qui, è stato un comando di una riga.

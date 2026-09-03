@@ -117,6 +117,55 @@ def test_un_server_senza_ritardo_non_ne_inventa_uno() -> None:
     assert IGNOTO in riga_del_server
 
 
+def test_un_indirizzo_lungo_non_si_incolla_al_ruolo() -> None:
+    """Misurato al Task 12, la prima volta che l'applicazione ha guardato da dentro.
+
+    Dall'host gli indirizzi sono `localhost:27021`, quindici caratteri. Dalla rete Compose
+    sono nomi di servizio, e `mongo-standalone:27017` ne fa **ventidue** — esattamente la
+    larghezza della colonna. Il risultato stampato è stato
+    `mongo-standalone:27017standalone`, due parole diverse lette come una.
+    """
+    lungo = DescrizioneServer(
+        indirizzo="mongo-standalone:27017",
+        ruolo=RuoloServer.STANDALONE,
+        ritardo_ms=0.7,
+    )
+    topologia = DescrizioneTopologia(tipo=TipoTopologia.SINGOLA, server=(lungo,))
+
+    testo = rapporto(ispettore(topologia=topologia), titolo="standalone")
+    riga = next(
+        linea for linea in testo.splitlines() if "mongo-standalone:27017" in linea
+    )
+
+    assert "mongo-standalone:27017standalone" not in riga
+    assert "mongo-standalone:27017 " in riga
+
+
+def test_le_colonne_dei_server_restano_allineate() -> None:
+    # La colonna si allarga per il più lungo, non per ciascuno: tre righe con indirizzi
+    # di lunghezza diversa devono cominciare il ruolo alla stessa colonna, o la
+    # fotografia si legge peggio di un elenco.
+    # I due ruoli sono scelti perché nessuna delle due parole compare dentro l'indirizzo
+    # della propria riga: una prova che cercasse «standalone» dentro
+    # «mongo-standalone:27017» misurerebbe l'indirizzo invece della colonna.
+    corto = DescrizioneServer(
+        indirizzo="mongos:27017", ruolo=RuoloServer.ROUTER, ritardo_ms=0.4
+    )
+    lungo = DescrizioneServer(
+        indirizzo="mongo-config-server:27017",
+        ruolo=RuoloServer.PRIMARIO,
+        ritardo_ms=0.7,
+    )
+    topologia = DescrizioneTopologia(tipo=TipoTopologia.SINGOLA, server=(corto, lungo))
+
+    testo = rapporto(ispettore(topologia=topologia), titolo="misto")
+    righe = [linea for linea in testo.splitlines() if ":27017" in linea]
+
+    assert righe[0].index(RuoloServer.ROUTER.value) == righe[1].index(
+        RuoloServer.PRIMARIO.value
+    )
+
+
 def test_un_server_irraggiungibile_mostra_perche() -> None:
     topologia = DescrizioneTopologia(
         tipo=TipoTopologia.REPLICA_SET_SENZA_PRIMARIO,

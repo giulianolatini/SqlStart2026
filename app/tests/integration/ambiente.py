@@ -31,6 +31,7 @@ dati invece si portano via tutti, e il modo è un database intero usa-e-getta.
 """
 
 from contextlib import contextmanager
+from importlib.metadata import version
 from dataclasses import dataclass
 from typing import Any, Final, Iterator, Mapping
 from uuid import uuid4
@@ -44,12 +45,14 @@ from mongolab.infrastructure.bersagli import (
     BERSAGLI,
     Bersaglio,
     Credenziali,
+    PuntoDiVista,
     radice,
 )
 from mongolab.infrastructure.bersagli import connetti as _connetti
 from mongolab.infrastructure.bersagli import credenziali_di as _credenziali_di
 
 __all__ = [
+    "IMMAGINE",
     "PREFISSO_PROVE",
     "STACK",
     "Credenziali",
@@ -57,6 +60,8 @@ __all__ = [
     "collezione_usa_e_getta",
     "connetti",
     "credenziali_di",
+    "immagine_in_cache",
+    "nel_container",
     "radice",
     "sveglia",
 ]
@@ -97,7 +102,14 @@ class Stack:
 
     @property
     def diretto(self) -> bool:
-        return self.quale.diretto
+        """`directConnection` **dall'host**, che è da dove girano queste prove.
+
+        Dal Task 12 lo stesso stack ha due indirizzi e due risposte a questa domanda: da
+        dentro la rete Compose il replica set si raggiunge con la scoperta accesa. Le
+        prove d'integrazione stanno fuori — `pytest` gira sul portatile, non in un
+        container — quindi qui la vista è sempre quella dell'host.
+        """
+        return self.quale.vista(PuntoDiVista.HOST).diretto
 
     @property
     def ambiente(self) -> str | None:
@@ -130,8 +142,13 @@ def connetti(stack: Stack, attesa_ms: int = 20_000) -> MongoClient[dict[str, Any
     non nell'URI, `directConnection` secondo il punto di vista — stanno adesso in
     `mongolab.infrastructure.bersagli.connetti`, che è ciò che usa anche l'applicazione.
     Provarle qui contro una copia locale sarebbe stato provare l'altra implementazione.
+
+    Il punto di vista si dichiara invece di lasciarlo leggere all'ambiente: se una sessione
+    avesse esportato `MONGOLAB_PUNTO_DI_VISTA=rete` — cosa che capita provando i comandi
+    del Task 12 — l'intera suite si metterebbe a cercare `mongo-rs-1`, che dall'host non
+    esiste, e fallirebbe venti secondi per volta parlando d'altro.
     """
-    return _connetti(stack.quale, attesa_ms=attesa_ms)
+    return _connetti(stack.quale, attesa_ms=attesa_ms, punto=PuntoDiVista.HOST)
 
 
 def risponde(stack: Stack, attesa_ms: int) -> bool:
@@ -189,6 +206,71 @@ def sveglia(stack: Stack) -> None:
             f"`make {stack.bersaglio}` è riuscito ma localhost:{stack.porta} non risponde. "
             f"Se sei dentro un container o su una macchina remota, la porta non è pubblicata lì."
         )
+
+
+# --- L'applicazione dentro la rete (Task 12) -------------------------------------------
+
+IMMAGINE: Final = f"mongolab:{version('mongolab')}"
+"""Il tag che i file Compose chiedono, ricavato dalla versione del pacchetto installato.
+
+Non è riscritto a mano: `tools/tests/test_coerenza_repo.py` verifica che i tre file
+Compose scrivano esattamente `mongolab:` più la versione di `app/pyproject.toml`, quindi
+leggere la versione qui e leggere il tag là danno la stessa stringa — con la differenza
+che questa non invecchia.
+"""
+
+
+def immagine_in_cache() -> bool:
+    """Se l'immagine dell'applicazione è già costruita su questa macchina.
+
+    Le prove che eseguono nel container la chiedono e **saltano** se non c'è, invece di
+    costruirla: `make app-image` vuole la rete la prima volta, e una suite di prove che si
+    mette a scaricare Python è una suite che in sala non finisce. Chi deve accorgersene
+    prima del talk è `tools/preflight.sh`, che infatti blocca.
+    """
+    esito = subprocess.run(
+        ["docker", "image", "inspect", IMMAGINE],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return esito.returncode == 0
+
+
+def nel_container(stack: Stack, *argomenti: str, entrypoint: str | None = None) -> str:
+    """Esegue qualcosa nel servizio `app` dello stack, e restituisce ciò che ha scritto.
+
+    Il comando si compone dai campi del bersaglio — la cartella dello stack e il suo
+    `.env` — e non da una tabella scritta qui: sarebbe la quarta copia della stessa mappa,
+    dopo `BERSAGLI`, il `Makefile` e i file Compose, e la prima a divergere.
+
+    La credenziale non compare mai sulla riga di comando. Arriva al container perché
+    `--env-file` la dà a **Compose**, che la interpola nel blocco `environment:` del
+    servizio; il client `docker` non la vede passare come argomento, che è ciò che
+    [ADR-0054](../../../docs/Decision.md#adr-0054) vieta.
+    """
+    comando = ["docker", "compose", "--env-file", "tools/images.env"]
+    if stack.ambiente is not None:
+        comando += ["--env-file", stack.ambiente]
+    comando += ["-f", f"docker/{stack.nome}/compose.yaml", "run", "--rm"]
+    if entrypoint is not None:
+        comando += ["--entrypoint", entrypoint]
+    comando += ["app", *argomenti]
+    esito = subprocess.run(
+        comando,
+        cwd=radice(),
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    if esito.returncode != 0:
+        coda = "\n".join((esito.stdout + esito.stderr).splitlines()[-20:])
+        raise RuntimeError(
+            f"`docker compose run app` su {stack.nome} è uscito con "
+            f"{esito.returncode}.\n{coda}"
+        )
+    return esito.stdout
 
 
 def spazza(client: MongoClient[dict[str, Any]]) -> int:

@@ -446,6 +446,39 @@ misure valgono per l'ambiente descritto in [M-001](#m-001) e per nessun altro.
 
 ---
 
+<a id="a-016"></a>
+### A-016 — MongoDB: la specifica SDAM dice che il client aggiunge i server che il set gli nomina
+
+- **URL:** https://raw.githubusercontent.com/mongodb/specifications/master/source/server-discovery-and-monitoring/server-discovery-and-monitoring.md
+  — il sorgente e non la pagina resa, perché la resa su GitHub tronca i blocchi lunghi e le
+  frasi che qui contano stanno dentro uno pseudocodice.
+- **Editore:** MongoDB, Inc. — repository `mongodb/specifications`, documento *Server Discovery
+  And Monitoring*, senza numero di versione né data: l'unico metadato in testa è `Status:
+  Accepted`.
+- **Consultata:** 2026-09-03
+- **Verdetto:** **conferma** — e conferma proprio ciò che [ADR-0012](../../docs/Decision.md#adr-0012)
+  aveva dichiarato di non poter affermare
+- **Cosa afferma:** che nella sottoroutine `updateRSWithoutPrimary` il client cicla «for each
+  address in description's "hosts", "passives", and "arbiters"» e, per ogni indirizzo che non
+  conosce ancora, aggiunge una `ServerDescription` di tipo `Unknown` e comincia a sorvegliarlo;
+  e che, nella motivazione, «While there is no known primary, the client MUST **add** servers
+  from non-primaries' host lists, but it MUST NOT remove» server dalla `TopologyDescription`.
+  La rimozione invece spetta al solo primario: è `updateRSFromPrimary` a togliere gli host che
+  la sua lista non nomina. La *seed list* è definita per contrasto: «Server addresses provided
+  to the client in its initial configuration, for example from the connection string» — cioè
+  ciò da cui si parte, non ciò con cui si finisce.
+- **Conseguenza qui:** ADR-0012 portava una riserva dichiarata — *la documentazione non afferma
+  che il driver usi gli host memorizzati nella configurazione del set, e se lo si vuole
+  affermare va mostrato in demo*. La riserva era giusta sul manuale di PyMongo, che davvero non
+  lo dice, e sbagliata sul perimetro: la frase esiste, sta nella specifica *cross-driver* che
+  PyMongo implementa, ed è normativa (`MUST`). Che poi PyMongo la implementi davvero resta una
+  cosa diversa dall'affermarla, ed è misurata in [M-036](#m-036): un seme solo, e tre membri
+  trovati. La distinzione vale per il talk più di entrambe le metà — una promessa sta nella
+  specifica, non nel manuale dello strumento, e chi legge solo il secondo non la trova.
+- **Usata da:** [13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md](13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md)
+
+---
+
 ## Misure fatte qui
 
 <a id="m-001"></a>
@@ -1843,6 +1876,161 @@ misure valgono per l'ambiente descritto in [M-001](#m-001) e per nessun altro.
   appoggiarsi a quel nome. Il riquadro è una scelta di resa di Typer, non un contratto: se
   una versione futura smettesse di incorniciare, la ripulitura resterebbe innocua e le
   prove continuerebbero a valere.
+
+<a id="m-035"></a>
+### M-035 — `docker compose run` non ha `--no-build`, e la garanzia che serve sta altrove
+
+- **Data:** 2026-09-03
+- **Comando:**
+  ```
+  docker compose version
+  docker compose run --help | grep -iE '^\s+--(build|no-build|pull|quiet)'
+  ```
+- **Output:** `Docker Compose version v5.5.0`; i soli flag di quella famiglia sono `--build`
+  («Build image before starting container»), `--pull` («Pull image before running»),
+  `--quiet-build` e `--quiet-pull`. Un `--no-build` non esiste, e passarlo fa uscire
+  `unknown flag: --no-build`.
+- **Che cosa dimostra:** che la simmetria che uno si aspetta — c'è `--build`, quindi ci sarà
+  `--no-build` — non c'è. La scoperta è arrivata nel modo peggiore possibile, cioè eseguendo
+  `make app-stats` la prima volta e vedendolo fallire su un flag che avevo scritto per
+  prudenza.
+- **Perché è stata fatta:** perché il Passo 1 del Task 12 vuole che una modifica al sorgente
+  non richieda una ricostruzione, e la lettura sbagliata di quel requisito è «allora vieta di
+  costruire». La lettura giusta è che nessuno *debba* costruire, e a questo provvedono il bind
+  mount del sorgente e il fatto che l'immagine ci sia già.
+- **Riserve:** la garanzia «nessuna costruzione a sorpresa la sera del talk» non è persa, è
+  spostata in due posti che la danno meglio di un flag sulla riga di comando: `pull_policy:
+  never` scritto nel file ([ADR-0039](../../docs/Decision.md#adr-0039)), che vale per chiunque
+  esegua quel servizio e non solo per chi si ricorda il flag, e il controllo di
+  `tools/preflight.sh`, che la mattina dice se l'immagine c'è e con quale comando costruirla.
+  Misurato su Compose v5.5.0: una versione futura potrebbe aggiungere il flag, e il giorno in
+  cui lo facesse resterebbe comunque il flag più debole dei due presidi.
+
+<a id="m-036"></a>
+### M-036 — Un seme solo, e per giunta un secondario: il client ne trova tre e parla col primario
+
+- **Data:** 2026-09-03
+- **Comando:** dentro la rete Compose dello stack 02, con l'entrypoint sostituito, un client
+  costruito su **un** indirizzo — `mongo-rs-2:27017`, che è un secondario — con
+  `replicaSet='rs0'`; poi un `hello`, e la lettura di `topology_description`.
+  ```
+  docker compose --env-file tools/images.env --env-file docker/02-replicaset/.env \
+    -f docker/02-replicaset/compose.yaml run --rm --entrypoint python app /sonda.py
+  ```
+- **Output:**
+  ```
+  seme passato        : mongo-rs-2:27017
+  tipo di topologia   : ReplicaSetWithPrimary
+  nome del set        : rs0
+  server conosciuti   : 3
+    mongo-rs-1:27017    RSPrimary
+    mongo-rs-2:27017    RSSecondary
+    mongo-rs-3:27017    RSSecondary
+  primario scelto     : mongo-rs-1:27017
+  host dalla config   : ['mongo-rs-1:27017', 'mongo-rs-2:27017', 'mongo-rs-3:27017']
+  ```
+- **Che cosa dimostra:** che PyMongo **4.17.0** fa ciò che la specifica SDAM prescrive
+  ([A-016](#a-016)): i due indirizzi che il client non aveva li ha saputi dalla risposta di
+  `hello`, e ha finito per parlare con un server — `mongo-rs-1` — che nessuno gli aveva mai
+  nominato. È la differenza fra *avere tre semi e trovarne tre*, che non prova niente, e
+  *averne uno e trovarne tre*, che prova la scoperta.
+- **Perché è stata fatta:** perché il Passo 2 del Task 12 chiede di verificare che la scoperta
+  funzioni davvero, e la configurazione di produzione passa tre semi — con i quali la
+  dimostrazione sarebbe stata circolare. La riserva dichiarata di ADR-0012 chiedeva
+  esattamente questo, ed è la ragione per cui il task esiste.
+- **Riserve:** la misura vale per un set con il primario disponibile. La stessa specifica
+  distingue il caso senza primario, in cui il client aggiunge ma non toglie, e quel caso qui
+  non è stato misurato — lo sarà al Task 13, che è dove il failover si mette in scena. La
+  prova che rende la misura ripetibile è
+  `app/tests/integration/test_container.py::test_un_seme_solo_basta_a_trovare_tutti_e_tre`, e
+  usa un programma inline invece del file montato: la sonda di questa misura era un file in
+  una cartella temporanea, che non sarebbe sopravvissuto alla sessione.
+
+<a id="m-037"></a>
+### M-037 — Un'immagine costruita in locale un digest ce l'ha; quello che non ha è un registro che lo serva
+
+- **Data:** 2026-09-03
+- **Comando:**
+  ```
+  docker image inspect mongolab:0.1.0 --format 'Id={{.Id}} RepoDigests={{.RepoDigests}}'
+  docker image inspect mongo:7.0 --format 'Id={{.Id}}'
+  docker info --format '{{.Driver}}'
+  docker image inspect mongolab@sha256:6a8638…
+  ```
+- **Output:** per `mongolab:0.1.0`, `Id` e `RepoDigests` portano **lo stesso** sha256
+  (`6a8638238ac3…`); per `mongo:7.0`, `Id` è `b6421fd6d1c5…`, cioè esattamente il digest che
+  `tools/images.env` pinna. Il driver è `overlayfs` con `driver-type:
+  io.containerd.snapshotter.v1`. E `docker image inspect mongolab@sha256:6a8638…` **risolve**,
+  restituendo `[mongolab:0.1.0]`.
+- **Che cosa dimostra:** che con l'archivio immagini di containerd — quello attivo su questa
+  Docker Desktop — l'`Id` di un'immagine *è* il digest del suo manifesto, per le immagini
+  scaricate come per quelle costruite in casa. La frase «un'immagine costruita in locale non ha
+  un digest», che era scritta nella prima stesura di `problemi_costruzione` in
+  `tools/check_stack.py`, è **falsa**, e questa misura l'ha smentita.
+- **Perché è stata fatta:** per scrivere onestamente la motivazione di
+  [ADR-0093](../../docs/Decision.md#adr-0093), che era stata argomentata su una premessa mai
+  verificata. La conclusione della decisione non cambia — un servizio che dichiara `build:` si
+  giudica sulle righe `FROM` del suo Dockerfile — ma la ragione sì: non «il digest non esiste»,
+  bensì «quel digest nessun registro l'ha mai servito, cambia a ogni ricostruzione, e metterlo
+  in `images.env` darebbe a `pull-images.sh --verify` una cosa da cercare in rete che in rete
+  non c'è».
+- **Riserve:** misurato con l'archivio containerd. Con il vecchio archivio a grafo il
+  comportamento è quello che la premessa dava per scontato — `RepoDigests` vuoto finché
+  l'immagine non è spinta — e allora la premessa sarebbe stata vera per caso. È un buon
+  esempio di quanto valga eseguire: la stessa riga di ragionamento dava la risposta giusta e la
+  spiegazione sbagliata, e solo la seconda si sarebbe portata dietro l'errore.
+
+<a id="m-038"></a>
+### M-038 — Ventidue colonne bastavano per `localhost`, non per un nome di servizio
+
+- **Data:** 2026-09-03
+- **Comando:** `make app-stats TARGET=standalone`, cioè la prima esecuzione dell'applicazione
+  da dentro la rete Compose.
+- **Output:**
+  ```
+  topologia   singola
+              mongo-standalone:27017standalone          0.7 ms
+  ```
+- **Che cosa dimostra:** che `_riga_server` impaginava l'indirizzo con `f"{indirizzo:<22}"`, e
+  che `mongo-standalone:27017` è lungo **esattamente** ventidue caratteri: la colonna si riempie
+  tutta, il riempimento è di zero spazi, e due parole distinte finiscono incollate in una che
+  non esiste. Dall'host non era mai successo perché `localhost:27021` ne misura quindici.
+- **Perché è stata fatta:** non è stata *fatta*, è **capitata** — ed è il motivo per cui vale la
+  pena scriverla. Il Task 12 non parlava di impaginazione; il difetto era in un modulo provato,
+  con ventuno prove verdi, e nessuna lo vedeva perché tutte usavano indirizzi corti. È bastato
+  cambiare il punto da cui si guarda perché comparisse.
+- **Riserve:** la correzione calcola la larghezza sul più lungo degli indirizzi di *quella*
+  fotografia, con ventidue come minimo, così che la vista dall'host resti identica a prima. Le
+  due prove che la sorvegliano scelgono ruoli le cui parole non compaiono negli indirizzi: il
+  primo tentativo cercava `standalone` dentro una riga che conteneva `mongo-standalone:27017`,
+  e passava per la ragione sbagliata.
+
+<a id="m-039"></a>
+### M-039 — Nell'immagine dell'applicazione `mongodump` non c'è, e una previsione del Task 9 resta da onorare
+
+- **Data:** 2026-09-03
+- **Comando:**
+  ```
+  docker run --rm --entrypoint python mongolab:0.1.0 \
+    -c "import shutil; print(shutil.which('mongodump') or 'ASSENTE')"
+  ```
+- **Output:** `ASSENTE`
+- **Che cosa dimostra:** che l'immagine costruita al Task 12 contiene l'interprete, `mongolab` e le
+  sue tre dipendenze, e **non** contiene gli strumenti da riga di comando di MongoDB. La docstring
+  di `infrastructure/backup.py`, scritta al Task 9, prevedeva che «dall'interno della rete Compose
+  al Task 12 [il comando] sarà `("mongodump",)` e basta»: oggi quella riga solleverebbe un
+  `FileNotFoundError`.
+- **Perché è stata fatta:** perché il registro elencava fra i punti aperti «uccidere il client
+  `docker exec` non uccide `mongodump` dentro il container», con «Task 12» come scadenza e la
+  motivazione che dal container non ci sarebbe più stato nessun `docker exec` in mezzo. Prima di
+  segnare chiuso un punto aperto conviene guardare se lo è, e non lo è.
+- **Riserve:** il punto non è urgente e non è un difetto del Task 12, che non doveva installare
+  niente: **nessun comando della CLI usa oggi la porta `BackupTool`**, quindi il caso non si
+  presenta. Si presenta al Task 14, che è dove `demo backup-live` collega quella porta, e lì la
+  scelta è fra installare gli strumenti nell'immagine — con una terza base da pinnare in
+  `tools/images.env` e un'immagine più pesante da tenere in cache — e continuare a passare per
+  `docker exec` dall'host, rinunciando a eseguire quella scena dal container. La decisione è di
+  quel task; qui si registra solo che la previsione non è stata onorata.
 
 ## Fonti canoniche che l'applicazione usa senza copiarle
 

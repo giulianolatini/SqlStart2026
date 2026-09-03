@@ -120,15 +120,20 @@ discover all servers in the replica set» ([S-007](../../docs/Sources.md#s-007))
 ciò che il talk vuole mostrare, ed è la prima cosa che si rompe se l'applicazione gira sull'host e
 il cluster dentro Docker.
 
-**Dove si vede.** Non ancora nel codice: l'adattatore riceverà la stringa di connessione dall'esterno
-invece di costruirla, il che è il motivo per cui `ClusterInspector` non ha metodi di connessione. Il
-`Dockerfile` e il servizio Compose arrivano al Task 12.
+**Dove si vede.** In [`app/Dockerfile`](../Dockerfile), nel servizio `app` di ciascuno dei tre
+`compose.yaml` ([ADR-0091](../../docs/Decision.md#adr-0091)) e nella mappa dei bersagli, che dal
+Task 12 tiene **due** indirizzi per stack e lascia scegliere all'ambiente
+([ADR-0090](../../docs/Decision.md#adr-0090)). `directConnection=true` resta al solo stack 01, dove
+non c'è nulla da scoprire.
 
-**Riserva ereditata.** L'ADR dichiara un limite della propria fonte: la pagina dice che il driver
-«attempts to discover all servers», ma non dice che usi i nomi host memorizzati nella configurazione
-del replica set. Se serve affermarlo in sala, va mostrato in demo.
+**Riserva ereditata, e chiusa.** L'ADR dichiarava un limite della propria fonte: la pagina dice che
+il driver «attempts to discover all servers», ma non dice che usi i nomi host memorizzati nella
+configurazione del replica set. La frase esiste, in un'altra fonte — la specifica SDAM, che è
+normativa e vale per tutti i driver ([A-016](Sources.md#a-016)) — ed è stata anche misurata: un
+seme solo, tre membri trovati, e una scrittura su un server mai nominato al client
+([M-036](Sources.md#m-036)). Resta fuori il caso senza primario, che si vede al Task 13.
 
-**Stato:** **in attesa** (Task 12).
+**Stato:** **applicata** dal Task 12.
 
 ---
 
@@ -196,9 +201,14 @@ uscite passano intatte.
 
 **Conseguenze per `app/`.** Le dipendenze sono bloccate in `app/uv.lock`, che è **versionato**. Non
 c'è integrazione continua: i controlli sono comandi `make` che chiunque esegue in locale. Dal Task 12
-l'immagine dell'applicazione entra nell'elenco delle immagini da avere in cache prima del talk.
+l'immagine dell'applicazione entra nell'elenco delle cose da avere prima del talk, e ci entra in due
+modi diversi: le sue **basi** sono pinnate per digest in `tools/images.env` come tutte le altre,
+perché sono l'unica parte della costruzione che venga dalla rete; l'immagine **costruita** no,
+perché il suo digest nessun registro l'ha mai servito e cambia a ogni ricostruzione, e quindi
+`tools/preflight.sh` ne verifica la presenza invece del digest
+([ADR-0093](../../docs/Decision.md#adr-0093), [M-037](Sources.md#m-037)).
 
-**Stato:** **applicata** per le dipendenze, **in attesa** per l'immagine.
+**Stato:** **applicata**, per le dipendenze e per l'immagine.
 
 <a id="adr-0050"></a>
 ### [ADR-0050](../../docs/Decision.md#adr-0050) — Le registrazioni di riserva si producono con quello che c'è, e il formato è testo

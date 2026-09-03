@@ -1084,3 +1084,159 @@ def test_un_volume_dei_dati_montato_da_un_percorso_dell_host_e_un_problema():
     problemi = verifica(documento, digest_noti={"sha256:aaa"})
     assert len(problemi) == 1
     assert "./dati" in problemi[0]
+
+
+# --- Un servizio che si costruisce invece di scaricarsi --------------------------
+#
+# Il Task 12 aggiunge ai tre stack un servizio che non viene da un registro:
+# `mongolab`, costruito da `app/Dockerfile`. La regola sul digest, presa alla
+# lettera, lo rifiuta per sempre — e non per un difetto del servizio: un'immagine
+# costruita in locale NON HA un digest di registro, perché il digest è l'impronta
+# del manifesto pubblicato, e non è mai stata pubblicata. Scriverne uno
+# inventato non renderebbe l'immagine ripetibile: la renderebbe irrisolvibile.
+#
+# Quindi la regola cambia forma senza cambiare scopo. Lo scopo era: nessun bit
+# arriva dalla rete senza che qualcuno l'abbia fissato. Per un servizio che si
+# costruisce, i bit che arrivano dalla rete sono le SUE BASI, cioè le righe
+# `FROM` del suo Dockerfile — ed è lì che il controllo si sposta.
+
+
+def costruito(tmp_path, dockerfile, **modifiche):
+    """Un servizio che dichiara `build:`, con il suo Dockerfile su disco.
+
+    Il contesto è scritto come lo scriverebbe un `compose.yaml` vero, cioè
+    relativo alla cartella del file: `docker/0X-…/compose.yaml` guarda `../../app`.
+    """
+    (tmp_path / "app").mkdir(exist_ok=True)
+    (tmp_path / "app" / "Dockerfile").write_text(dockerfile, encoding="utf-8")
+    servizio = {
+        "image": "mongolab:0.1.0",
+        "build": {
+            "context": "../../app",
+            "args": {"PYTHON_IMAGE": "python@sha256:bbb"},
+        },
+        "pull_policy": "never",
+        "mem_limit": "256m",
+        "cpus": 0.5,
+    }
+    servizio.update(modifiche)
+    return {"services": {"app": servizio}}
+
+
+def compose_in(tmp_path):
+    """Il percorso che il file avrebbe: due livelli sotto la radice finta."""
+    percorso = tmp_path / "docker" / "01-standalone" / "compose.yaml"
+    percorso.parent.mkdir(parents=True, exist_ok=True)
+    return percorso
+
+
+def test_un_servizio_che_si_costruisce_non_deve_essere_pinnato_per_digest(tmp_path):
+    documento = costruito(tmp_path, "FROM python@sha256:bbb\n")
+    problemi = verifica(
+        documento, digest_noti={"sha256:bbb"}, percorso=compose_in(tmp_path)
+    )
+    assert problemi == []
+
+
+def test_una_base_non_pinnata_e_un_problema(tmp_path):
+    # È la stessa promessa di prima, spostata di un livello: un tag mobile nel
+    # Dockerfile è un tag mobile, e il fatto che stia in un altro file non lo
+    # rende più stabile.
+    documento = costruito(tmp_path, "FROM python:3.13-slim\n")
+    problemi = verifica(
+        documento, digest_noti={"sha256:bbb"}, percorso=compose_in(tmp_path)
+    )
+    assert len(problemi) == 1
+    assert "python:3.13-slim" in problemi[0]
+    assert "Dockerfile" in problemi[0]
+
+
+def test_una_base_con_un_digest_che_nessuno_scarica_e_un_problema(tmp_path):
+    # Pinnata sì, ma se il digest non è in images.env `pull-images.sh` non lo
+    # porta in cache, e la costruzione la sera del talk cerca la rete.
+    documento = costruito(tmp_path, "FROM python@sha256:zzz\n")
+    problemi = verifica(
+        documento, digest_noti={"sha256:bbb"}, percorso=compose_in(tmp_path)
+    )
+    assert len(problemi) == 1
+    assert "sha256:zzz" in problemi[0]
+    assert "images.env" in problemi[0]
+
+
+def test_una_base_dichiarata_come_argomento_si_risolve_con_build_args(tmp_path):
+    # `FROM ${PYTHON_IMAGE}` non è pinnato guardandolo: lo diventa guardando
+    # `build.args`, che è dove il compose scrive il digest. Il controllo deve
+    # leggere i due file insieme, o direbbe una cosa falsa su un file corretto.
+    documento = costruito(tmp_path, "FROM ${PYTHON_IMAGE}\n")
+    problemi = verifica(
+        documento, digest_noti={"sha256:bbb"}, percorso=compose_in(tmp_path)
+    )
+    assert problemi == []
+
+
+def test_una_base_che_nomina_un_argomento_non_dichiarato_e_un_problema(tmp_path):
+    documento = costruito(tmp_path, "FROM ${IMMAGINE_MISTERIOSA}\n")
+    problemi = verifica(
+        documento, digest_noti={"sha256:bbb"}, percorso=compose_in(tmp_path)
+    )
+    assert len(problemi) == 1
+    assert "IMMAGINE_MISTERIOSA" in problemi[0]
+    assert "build.args" in problemi[0]
+
+
+def test_uno_stadio_intermedio_non_e_una_base_da_pinnare(tmp_path):
+    # `FROM uv` dove `uv` è uno stadio dichiarato sopra non scarica niente: è un
+    # riferimento interno al file. Trattarlo come un'immagine darebbe un falso
+    # positivo su ogni costruzione a più stadi, che è la forma che `app/Dockerfile`
+    # usa per prendere il binario di uv.
+    documento = costruito(
+        tmp_path,
+        "FROM python@sha256:bbb AS base\nFROM base\n",
+    )
+    problemi = verifica(
+        documento, digest_noti={"sha256:bbb"}, percorso=compose_in(tmp_path)
+    )
+    assert problemi == []
+
+
+def test_un_dockerfile_che_non_esiste_e_un_problema(tmp_path):
+    documento = costruito(tmp_path, "FROM python@sha256:bbb\n")
+    documento["services"]["app"]["build"]["context"] = "../../inesistente"
+    problemi = verifica(
+        documento, digest_noti={"sha256:bbb"}, percorso=compose_in(tmp_path)
+    )
+    assert len(problemi) == 1
+    assert "inesistente" in problemi[0]
+
+
+def test_senza_il_percorso_del_compose_il_build_non_si_puo_giudicare(tmp_path):
+    # Tacere sarebbe la risposta peggiore: un servizio che si costruisce
+    # passerebbe il controllo senza che nessuno abbia guardato le sue basi.
+    documento = costruito(tmp_path, "FROM python@sha256:bbb\n")
+    problemi = verifica(documento, digest_noti={"sha256:bbb"})
+    assert len(problemi) == 1
+    assert "build" in problemi[0]
+
+
+def test_un_servizio_che_si_costruisce_resta_soggetto_alle_altre_regole(tmp_path):
+    # L'esenzione riguarda il digest, non il resto: senza `mem_limit` un
+    # container che costruisce e poi gira si prende quello che trova.
+    documento = costruito(tmp_path, "FROM python@sha256:bbb\n")
+    del documento["services"]["app"]["mem_limit"]
+    problemi = verifica(
+        documento, digest_noti={"sha256:bbb"}, percorso=compose_in(tmp_path)
+    )
+    assert len(problemi) == 1
+    assert "mem_limit" in problemi[0]
+
+
+def test_un_servizio_che_si_costruisce_non_puo_chiamarsi_latest(tmp_path):
+    # Un'immagine costruita in locale e lasciata a `latest` è un nome che
+    # domani vale un altro contenuto — sulla stessa macchina, senza registro di
+    # mezzo. La regola di ADR-0018 vale anche qui.
+    documento = costruito(tmp_path, "FROM python@sha256:bbb\n", image="mongolab")
+    problemi = verifica(
+        documento, digest_noti={"sha256:bbb"}, percorso=compose_in(tmp_path)
+    )
+    assert len(problemi) == 1
+    assert "latest" in problemi[0]

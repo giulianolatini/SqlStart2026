@@ -840,9 +840,108 @@ in millisecondi, perché `cabla()` non apre niente.
 
 ---
 
+## Task 12 — L'applicazione in container, e la riserva di ADR-0012 chiusa due volte
+
+**Fatto il 3 settembre 2026.** Il capitolo che ne esce è
+[13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md](13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md).
+
+Fino a ieri `mongolab` guardava gli stack da fuori, attraverso una porta pubblicata, e da fuori la
+cosa che il talk deve mostrare **non si vede**: un replica set con tre membri sani si legge
+`ReplicaSetNoPrimary`, e per farlo funzionare bisogna spegnere la scoperta. Da oggi c'è
+un'immagine, un servizio `app` in ognuno dei tre `compose.yaml` e una variabile d'ambiente che dice
+da che parte si sta.
+
+Il perimetro è quello del piano: `Dockerfile` su `python:3.13-slim`, sorgente in bind mount,
+`directConnection=true` solo per lo stack 01, l'immagine nel controllo del preflight,
+`make stack-check` verde. Quello che il piano **non** poteva prevedere è che il Passo 2 — «verificare
+che la scoperta funzioni davvero» — si sarebbe chiuso in due modi indipendenti invece che in uno.
+
+### La riserva di ADR-0012, chiusa leggendo e chiusa misurando
+
+[ADR-0012](../../docs/Decision.md#adr-0012) aveva dichiarato che la documentazione di PyMongo non
+afferma che il driver usi gli host memorizzati nella configurazione del set, e che per affermarlo
+bisognava mostrarlo in demo. Entrambe le cose sono successe.
+
+**Leggendo:** la frase esiste, ma non nel manuale di PyMongo — sta nella specifica *Server Discovery
+And Monitoring* di `mongodb/specifications` ([A-016](Sources.md#a-016)), che tutti i driver
+ufficiali implementano, ed è normativa: «While no known primary, client MUST **add** servers
+non-primaries' host lists, but MUST NOT remove». La stessa specifica definisce la *seed list* come
+«server addresses provided client in initial configuration», cioè da dove si parte e non dove si
+arriva. La riserva era corretta e cercava la risposta un livello sotto a dove stava.
+
+**Misurando:** un seme solo, e non il primario. Con i tre semi della configurazione di produzione la
+dimostrazione sarebbe stata circolare; con `mongo-rs-2:27017` da solo, il client ha trovato tre
+membri e ha scritto su `mongo-rs-1`, un nome che nessuno gli aveva dato
+([M-036](Sources.md#m-036)). La prova che la rende ripetibile è
+`test_un_seme_solo_basta_a_trovare_tutti_e_tre`, e usa `--entrypoint python` per non toccare la
+configurazione vera.
+
+### Quattro decisioni, e una che ha dovuto correggere sé stessa
+
+[ADR-0090](../../docs/Decision.md#adr-0090) dà a ogni bersaglio due `Vista` — semi,
+`directConnection`, nome del set — e lascia scegliere all'ambiente con
+`MONGOLAB_PUNTO_DI_VISTA`. Un tipo solo e non tre campi, perché `directConnection=True` con più di
+un seme è un `ConfigurationError` alla costruzione: tre campi permettono di scriverlo.
+
+[ADR-0091](../../docs/Decision.md#adr-0091) mette il servizio dentro i tre stack sotto il profilo
+`strumenti`, invece che in un quarto file che si attacchi alle reti altrui come esterne — il cui
+nome dipende dalla cartella da cui si esegue.
+
+[ADR-0092](../../docs/Decision.md#adr-0092) dà al `Makefile` la variabile `DOVE`, predefinita a
+`rete`, perché il modo sbagliato qui **non fallisce**: stampa `topologia singola` su un replica set
+sanissimo. Un predefinito che sbaglia in silenzio è una trappola.
+
+[ADR-0093](../../docs/Decision.md#adr-0093) è quella che ha dovuto correggersi. La regola —
+un servizio che dichiara `build:` si giudica sulle righe `FROM` del suo Dockerfile — è rimasta;
+la sua motivazione no. Era argomentata su «un'immagine costruita in locale non ha un digest», che
+suona ovvio ed è falso: con l'archivio immagini di containerd l'`Id` **è** il digest del manifesto
+anche per un'immagine mai pubblicata ([M-037](Sources.md#m-037)). Il punto vero regge lo stesso —
+quel digest nessun registro l'ha mai servito e cambia a ogni ricostruzione — ma la premessa
+sbagliata era già scritta in cinque posti quando la misura l'ha smentita. Con il vecchio archivio a
+grafo sarebbe stata perfino vera, per caso.
+
+### Che cosa si è rotto, e che cosa non si è chiuso
+
+Un difetto, e di un genere che nessuna prova unitaria poteva vedere: `mongo-standalone:27017` è
+lungo **esattamente** ventidue caratteri, quanto la colonna con cui `_riga_server` impaginava gli
+indirizzi, e l'indirizzo finiva incollato al ruolo ([M-038](Sources.md#m-038)). Era latente da tre
+capitoli con ventuno prove verdi: a scoprirlo è stato un dato nuovo, non una svista. La larghezza
+adesso si calcola sul più lungo della fotografia, con ventidue come minimo.
+
+Una previsione, invece, non è stata onorata, e conviene dirlo prima di segnarla chiusa. Il registro
+elencava fra i punti aperti che dal container non ci sarebbe più stato nessun `docker exec` in mezzo
+al dump. L'immagine però contiene l'interprete e `mongolab`, non gli strumenti da riga di comando di
+MongoDB ([M-039](Sources.md#m-039)): `mongodump` lì dentro non c'è. Oggi non fa danno — nessun
+comando della CLI collega la porta `BackupTool` — e la scelta fra installarli e restare su
+`docker exec` è del Task 14.
+
+Un dettaglio di metodo che vale per tutte le guardie nuove: **le cinque prove aggiunte a
+`tools/tests/test_coerenza_repo.py` passavano alla prima esecuzione**, perché sorvegliano una
+configurazione già giusta. Ognuna è stata mutata — si perturba il file, si verifica che la guardia
+scatti con un messaggio leggibile, si ripristina — e la prima delle cinque, così, ha trovato un
+difetto in sé stessa: traducevo in Python il `sed` del preflight con `[^ ]*`, che in Python
+attraversa gli a capo mentre `sed` lavora una riga per volta.
+
+### Numeri
+
+| | Prima | Dopo |
+|---|---|---|
+| Prove unitarie | 425 | **462** |
+| Prove di integrazione | 43 (28,0 s) | **47** (41,2 s) |
+| File controllati da mypy | 57 | **58** |
+| Prove degli strumenti | 143 | **166** |
+| ADR del repository | 89 | **93** |
+| Fonti esterne nel registro dell'app | 15 | **16** |
+| Misure nel registro dell'app | 34 | **39** |
+
+`make stack-check` dice «Stack conformi: 3.» e `tools/preflight.sh` chiude con «Superati: 9 ·
+Avvisi: 1 · Errori: 0 · Pronto.», dove il nono superato è l'immagine dell'applicazione in cache.
+
+---
+
 ## Che cosa manca
 
-I task dall'11 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
+I task dal 13 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
 futuro, che lo stanno facendo. L'avviso di stato in testa a
 [04-eventi-del-driver-e-concorrenza.md](04-eventi-del-driver-e-concorrenza.md) è stato riscritto al
 Task 7, perché quella pagina descriveva un codice che adesso esiste.
@@ -868,14 +967,14 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | Le unità delle durate sono lette nel sorgente di PyMongo, non viste su un battito vero | [M-012, riserve](Sources.md#m-012) | il primo battito su un cluster in movimento: il Task 8 ha collegato l'ispettore, non il ponte |
 | ~~Come le prove di integrazione ricevono la credenziale senza violare ADR-0054~~ | [decisioni](decisioni-che-vincolano-app.md#adr-0054) | **chiuso** al Task 8: [M-018](Sources.md#m-018) e [ADR-0083](../../docs/Decision.md#adr-0083) |
 | ~~`refresh_per_second` dichiarato invece che ereditato~~ | [04](04-eventi-del-driver-e-concorrenza.md) | **chiuso** al Task 10, al contrario: [M-027](Sources.md#m-027) mostra che con `auto_refresh=False` il parametro è **inerte**, e il ritmo vive nel periodo del ciclo ([ADR-0085](../../docs/Decision.md#adr-0085)) |
-| L'immagine dell'applicazione fra quelle da avere in cache offline | [decisioni](decisioni-che-vincolano-app.md#adr-0009) | Task 12 |
+| ~~L'immagine dell'applicazione fra quelle da avere in cache offline~~ | [decisioni](decisioni-che-vincolano-app.md#adr-0009) | **chiuso** al Task 12: le due basi sono pinnate in `tools/images.env` e `tools/preflight.sh` verifica che `mongolab:0.1.0` sia in cache ([ADR-0093](../../docs/Decision.md#adr-0093)) |
 | Il contratto condiviso copre **dodici** comportamenti: la fedeltà del doppio oltre quelli non è misurata | [09](09-adattatori-veri-e-contratto-condiviso.md#che-cosa-questo-capitolo-ha-chiuso-e-che-cosa-no) | non si chiude: si riduce, una verifica alla volta |
-| `REPLICA_SET_CON_PRIMARIO` non è verificabile dall'host: `directConnection` legge la forma `SINGOLA` | [M-019, riserve](Sources.md#m-019) | Task 12, dall'interno della rete Compose |
+| ~~`REPLICA_SET_CON_PRIMARIO` non è verificabile dall'host: `directConnection` legge la forma `SINGOLA`~~ | [M-019, riserve](Sources.md#m-019) | **chiuso** al Task 12: dalla rete Compose la forma si legge `replicaset` con un primario, e c'è una prova d'integrazione che la guarda ([M-036](Sources.md#m-036)) |
 | Dopo un arresto sporco, `$shardedDataDistribution` può riportare conteggi imprecisi | [A-012, riserve](Sources.md#a-012) | dichiarata: il Blocco 3 fa un `docker kill`, e va detto dal palco |
 | L'ispettore dipende da `config`, che il manuale dichiara interno | [A-013, riserve](Sources.md#a-013) | dichiarata: la difesa è la prova sullo stack 03, che diventa rossa se il formato cambia |
 | `ordered=False` è stato misurato solo su istanza singola in loopback | [M-021, riserve](Sources.md#m-021) | se il Blocco 3 mostrerà scritture lente |
 | Il sink testuale per le registrazioni di riserva | [decisioni](decisioni-che-vincolano-app.md#adr-0050) | il sink **c'è** dal Task 10 ([`PlainSink`](11-tre-rese-e-un-solo-thread-che-disegna.md#plainsink-il-flush-non-è-prudenza-è-il-contenuto)); resta collegarlo a `tools/registra-terminale.py`, al Task 18 |
-| Uccidere il client `docker exec` non uccide `mongodump` dentro il container | [10](10-processi-esterni-e-il-verdetto-che-manca.md#literatore-abbandonato-e-un-limite-che-va-detto) | Task 12: dal container non c'è più nessun `docker exec` in mezzo |
+| Uccidere il client `docker exec` non uccide `mongodump` dentro il container | [10](10-processi-esterni-e-il-verdetto-che-manca.md#literatore-abbandonato-e-un-limite-che-va-detto) | **non chiuso al Task 12, e la scadenza si sposta**: l'immagine dell'applicazione non contiene gli strumenti da riga di comando di MongoDB ([M-039](Sources.md#m-039)), quindi dal container `mongodump` non parte affatto. Oggi non fa danno — nessun comando della CLI collega la porta `BackupTool` — e la scelta fra installarli e restare su `docker exec` è del Task 14 |
 | `Progress.completati` non porta l'unità: documenti per il dump, byte per il restore | [10](10-processi-esterni-e-il-verdetto-che-manca.md#un-inconveniente-dichiarato-completati-non-porta-con-sé-lunità) | Task 10 è passato senza chiederlo: la TUI stampa la percentuale, non il numero. Torna al Task 18 se una registrazione mostrerà il conteggio |
 | Il formato del testo di `mongodump`/`mongorestore` è quello della 100.18.0 | [M-024, riserve](Sources.md#m-024) | dichiarata: la difesa è la suite di integrazione, che diventa rossa se il formato cambia |
 | Un `BrokenPipeError` scrivendo la password a un processo già morto non è gestito | [M-023, riserve](Sources.md#m-023) | la prima volta che si riprodurrà: gestire un caso mai visto è codice che nessuna prova copre |
@@ -891,6 +990,12 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | Le letture fallite si contano ma non emettono nessun evento: nel consuntivo ci sono, in cronaca no | [12](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md#che-cosa-questo-capitolo-lascia-aperto) | Task 13, se la scena del failover dovrà mostrarle |
 | `rapporto()` riceve la porta invece dei valori già letti, quindi l'ordine delle interrogazioni è affar suo | [12](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md#terzo-la-fotografia-diceva-sconosciuto-di-un-server-sano) | dichiarata: chi volesse comporre un rapporto da dati raccolti altrove oggi non può |
 | La mappa dei bersagli contiene le porte **predefinite**, e i Compose le scrivono `${PORTA_...:-27021}` | [ADR-0087, riserve](../../docs/Decision.md#adr-0087) | dichiarata: la difesa sarebbe una prova che rilegge il `compose.yaml` e confronta |
+| La scoperta è misurata su un set **con** il primario: il ramo `updateRSWithoutPrimary` non è stato visto | [M-036, riserve](Sources.md#m-036) | Task 13, che è dove il failover si mette in scena |
+| Il bind mount del sorgente fa vincere l'host sull'immagine: in sala sarebbe una sorpresa | [13](13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md#che-cosa-questo-capitolo-lascia-aperto) | Task 18: chi registra i filmati di riserva ricostruisce prima |
+| `make app-image` costruisce sempre attraverso lo stack 01, dando per scontato che i tre servizi `app` siano identici | [ADR-0092, riserve](../../docs/Decision.md#adr-0092) | dichiarata: la difesa è la prova che verifica che i tre stack dichiarino la stessa immagine |
+| `check_stack.py` legge le righe `FROM` con una regex, non con un parser di Dockerfile | [ADR-0093, riserve](../../docs/Decision.md#adr-0093) | dichiarata: basta per i Dockerfile che questo repository scrive |
+| `M-037` è misurata con l'archivio immagini di containerd: con il vecchio archivio a grafo il comportamento è un altro | [M-037, riserve](Sources.md#m-037) | dichiarata: la decisione non cambia, la sua motivazione sì |
+| Le prove d'integrazione **dichiarano** il punto di vista invece di leggerlo dall'ambiente | [ADR-0090, riserve](../../docs/Decision.md#adr-0090) | dichiarata: è una precauzione contro una `MONGOLAB_PUNTO_DI_VISTA` esportata a mano, non contro il codice |
 
 ---
 

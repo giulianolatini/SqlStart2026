@@ -398,22 +398,22 @@ un'ottimizzazione: con `directConnection=false`, che è il valore predefinito, i
 i membri e parla con il primario — e quella scoperta è ciò che il talk mostra, ed è la prima cosa
 che si rompe se l'applicazione gira sull'host e il cluster dentro Docker.
 
-- [ ] **Passo 1.** `Dockerfile` su `python:3.13-slim`, dipendenze con `uv`, sorgente in
+- [x] **Passo 1.** `Dockerfile` su `python:3.13-slim`, dipendenze con `uv`, sorgente in
       **bind-mount** durante lo sviluppo (§6.5), così che una modifica non richieda una
       ricostruzione.
-- [ ] **Passo 2.** Il servizio si attacca alla rete Compose dello stack e si collega **per nome di
+- [x] **Passo 2.** Il servizio si attacca alla rete Compose dello stack e si collega **per nome di
       servizio**. Verificare che la scoperta funzioni davvero: la riserva dichiarata di ADR-0012
       dice che la documentazione non afferma che il driver usi gli host memorizzati nella
       configurazione del set, e che se serve affermarlo va **mostrato in demo**. Questo è il task
       che lo mostra, e l'esito è una voce in `Sources.md`.
-- [ ] **Passo 3.** `directConnection=true` **solo** per lo stack 01, dove non c'è nulla da scoprire,
+- [x] **Passo 3.** `directConnection=true` **solo** per lo stack 01, dove non c'è nulla da scoprire,
       con il commento che dice perché la differenza è voluta.
-- [ ] **Passo 4.** L'immagine dell'applicazione entra nell'elenco di quelle da avere in cache prima
+- [x] **Passo 4.** L'immagine dell'applicazione entra nell'elenco di quelle da avere in cache prima
       del talk ([ADR-0009](../Decision.md#adr-0009)): `images.env`, `pull-images.sh` e il controllo
       di `preflight.sh`. Un'immagine che si scarica la mattina del talk è un'immagine che non c'è.
-- [ ] **Passo 5.** `make stack-check` verde — se `check_stack.py` ha una regola che il servizio nuovo
+- [x] **Passo 5.** `make stack-check` verde — se `check_stack.py` ha una regola che il servizio nuovo
       viola, la regola ha ragione finché non si dimostra il contrario.
-- [ ] **Passo 6.** Commit: `feat: l'applicazione in container, sulla rete dove la scoperta funziona`.
+- [x] **Passo 6.** Commit: `feat: l'applicazione in container, sulla rete dove la scoperta funziona`.
 
 ---
 

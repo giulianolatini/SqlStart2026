@@ -24,6 +24,7 @@ affermazione in **cronaca in diretta**.
 | 10 | [10-processi-esterni-e-il-verdetto-che-manca.md](10-processi-esterni-e-il-verdetto-che-manca.md) | che cosa cambia quando l'adattatore lancia un processo invece di chiamare una libreria, e dove mettere la password |
 | 11 | [11-tre-rese-e-un-solo-thread-che-disegna.md](11-tre-rese-e-un-solo-thread-che-disegna.md) | tre modi di guardare lo stesso flusso di eventi, il budget di sala, e una promessa architetturale che si è scoperta falsa mentre la si manteneva |
 | 12 | [12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md) | chi conosce le classi concrete, e che cosa si scopre la prima volta che si esegue davvero contro un MongoDB acceso |
+| 13 | [13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md](13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md) | perché lo stesso stack ha due indirizzi, e come si dimostra che un client non parla con l'indirizzo che gli hai dato |
 
 Si leggono in ordine, ma nessuna dipende dalle altre per essere comprensibile. Chi arriva da una
 domanda precisa può entrare dal punto giusto.

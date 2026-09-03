@@ -10,11 +10,19 @@ un valore di ritorno, e il verdetto è un numero intero che lo strumento decide 
 `comando_dump` e `comando_restore` arrivano dal costruttore, ed è la stessa scelta che in
 `PymongoStore` fa arrivare una `Collection` già fatta: **questo oggetto non ha una politica
 di esecuzione**. Dall'host, dove `mongodump` non è installato, il comando è
-`("docker", "exec", "-i", "mongo-rs-1", "mongodump")`; dall'interno della rete Compose al
-Task 12 sarà `("mongodump",)` e basta. Se la politica stesse qui, l'applicazione
-containerizzata di [ADR-0012](../../../../docs/Decision.md#adr-0012) si porterebbe dietro
-una dipendenza dal socket Docker per fare una cosa — un dump — che dal suo container sa
-già fare da sé.
+`("docker", "exec", "-i", "mongo-rs-1", "mongodump")`. Se la politica stesse qui,
+l'applicazione containerizzata di
+[ADR-0012](../../../../docs/Decision.md#adr-0012) si porterebbe dietro una dipendenza dal
+socket Docker per fare una cosa — un dump — che dal suo container potrebbe fare da sé.
+
+La prima stesura di queste righe prevedeva che «dall'interno della rete Compose al Task 12
+sarà `("mongodump",)` e basta». Il Task 12 è passato e quella previsione **non è stata
+onorata**: l'immagine dell'applicazione contiene l'interprete e `mongolab`, non gli
+strumenti da riga di comando di MongoDB ([M-039](../../../../app/docs/Sources.md#m-039)).
+Oggi non fa danno, perché nessun comando della CLI collega questa porta; la scelta fra
+installarli e restare su `docker exec` è del Task 14, che è dove la scena del backup entra
+in scaletta. Che l'oggetto riceva il comando invece di sceglierlo è ciò che permette di
+decidere allora, e non adesso.
 
 Il `-i` in quel prefisso non è decorativo: senza, `docker exec` non collega lo `stdin` del
 client al processo dentro il container, e la password non arriva a destinazione.

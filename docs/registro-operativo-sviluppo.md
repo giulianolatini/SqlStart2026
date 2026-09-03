@@ -5864,3 +5864,137 @@ Stato aggiornato: decisioni fino ad **ADR-0089**, verifiche fino a **V-074**, no
 alla **185**. Le suite: **143** prove per gli strumenti, **425** per l'applicazione più **43** di
 integrazione, `mypy --strict` verde su 57 file. Prossimo passo: **Task 12** del
 [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).
+
+---
+
+## 2026-09-03 — `feature/04`, Task 12: la riserva di ADR-0012 chiusa due volte, e una motivazione che era falsa
+
+Il Task 12 mette `mongolab` dentro la rete Compose degli stack, che è il motivo per cui
+[ADR-0012](Decision.md#adr-0012) esiste da due mesi: da fuori, un replica set con tre membri sani si
+legge `ReplicaSetNoPrimary` ([M-019](../app/docs/Sources.md#m-019)), e per farlo funzionare bisogna
+spegnere la scoperta — cioè spegnere la cosa che il talk deve mostrare. Ne escono un
+[`app/Dockerfile`](../app/Dockerfile), un servizio `app` in ognuno dei tre `compose.yaml` sotto il
+profilo `strumenti`, una variabile d'ambiente che dice da che parte si sta, e quattro ADR. Le prove
+unitarie passano da **425 a 462**, quelle d'integrazione da **43 a 47**, quelle degli strumenti da
+**143 a 166**; `mypy --strict` da 57 a **58** file; `make stack-check` dice «Stack conformi: 3.» e
+il preflight chiude «Superati: 9 · Avvisi: 1 · Errori: 0 · Pronto.»
+
+**La riserva di ADR-0012 si è chiusa due volte, e nessuna delle due nel posto in cui la cercava.**
+L'ADR dichiarava che la documentazione di PyMongo non afferma che il driver usi gli host
+memorizzati nella configurazione del set, e che per affermarlo bisognava mostrarlo in demo. È
+ancora vero del manuale di PyMongo. Non è vero della specifica *Server Discovery And Monitoring* di
+`mongodb/specifications` ([A-016](../app/docs/Sources.md#a-016)), che tutti i driver ufficiali
+implementano e che lo prescrive in maiuscolo: «While no known primary, client MUST **add** servers
+non-primaries' host lists, but MUST NOT remove». La stessa specifica definisce la *seed list* come
+«server addresses provided client in initial configuration» — da dove si parte, non dove si arriva.
+Un driver non implementa il proprio manuale: implementa una specifica scritta una volta per tutti i
+linguaggi, e quella specifica sta in un repository pubblico che non ha l'aria della documentazione.
+
+La seconda chiusura è una misura, e ha richiesto un disegno. La configurazione di produzione passa
+**tre** semi al replica set, e con tre semi trovarne tre non dimostra niente. La prova parte da
+**uno**, e non dal primario: `mongo-rs-2:27017`. Il client ha trovato tre membri e ha scritto su
+`mongo-rs-1`, un nome che nessuno gli aveva mai dato ([M-036](../app/docs/Sources.md#m-036)). Resta
+fuori il caso senza primario, che la specifica tratta a parte e che si vedrà al Task 13.
+
+**Una decisione ha dovuto correggere la propria motivazione.**
+[ADR-0093](Decision.md#adr-0093) stabilisce che un servizio che dichiara `build:` è esente dalla
+regola sull'immagine pinnata e soggetto alla stessa regola un livello più in basso: le righe `FROM`
+del suo Dockerfile devono essere pinnate per digest, e per un digest che `tools/images.env` conosce.
+La regola regge. L'argomento con cui era stata scritta no: diceva che «un'immagine costruita in
+locale non ha un digest», che suona ovvio ed è falso. Con l'archivio immagini di containerd —
+quello attivo su questa Docker Desktop — l'`Id` di un'immagine **è** il digest del suo manifesto
+anche per ciò che nessuno ha mai pubblicato, e `docker image inspect mongolab@sha256:…` la trova
+([M-037](../app/docs/Sources.md#m-037)). Il punto vero è che quel digest **nessun registro l'ha mai
+servito**: non è verificabile da fuori e cambia a ogni ricostruzione, quindi in `images.env` darebbe
+a `pull-images.sh --verify` una cosa da cercare in rete che in rete non c'è. Quando la misura è
+arrivata, la premessa sbagliata era già scritta in cinque posti.
+
+**Un difetto trovato da un dato nuovo, non da una svista.** La prima esecuzione dal container ha
+stampato `mongo-standalone:27017standalone`: `_riga_server` impaginava l'indirizzo su ventidue
+colonne, e `mongo-standalone:27017` ne misura esattamente ventidue
+([M-038](../app/docs/Sources.md#m-038)). Il modulo aveva ventuno prove verdi, e nessuna poteva
+vederlo perché tutte usavano `localhost:<porta>`, che di colonne ne prende quindici. La larghezza
+adesso si calcola sul più lungo degli indirizzi di quella fotografia, con ventidue come minimo.
+
+**Un punto aperto che sembrava chiudersi, e non si è chiuso.** Il registro dell'applicazione
+elencava «uccidere il client `docker exec` non uccide `mongodump` dentro il container», con Task 12
+come scadenza e la motivazione che dal container non ci sarebbe più stato nessun `docker exec` in
+mezzo. Prima di segnarlo chiuso è stato guardato: l'immagine contiene l'interprete e `mongolab`,
+non gli strumenti da riga di comando di MongoDB ([M-039](../app/docs/Sources.md#m-039)). Oggi non fa
+danno, perché nessun comando della CLI collega la porta `BackupTool`; la scelta fra installarli — con
+una terza base da pinnare e un'immagine più pesante — e restare su `docker exec` è del Task 14.
+
+### Note di metodo
+
+186. **Quando una fonte tace, la risposta può stare a un livello diverso di quello in cui si
+     cerca.** La riserva di ADR-0012 era formulata contro la documentazione di PyMongo, e contro
+     quella era corretta. La frase che serviva stava nella specifica *cross-driver* che PyMongo
+     implementa: un livello sopra, in un repository che nessuno apre perché non sembra
+     documentazione. La regola pratica: prima di dichiarare che una cosa non è affermata da
+     nessuna parte, chiedersi **di che cosa** quello strumento è un'implementazione, e andare a
+     leggere quella.
+
+187. **Una prova che non potrebbe fallire non dimostra niente, anche quando passa.** Misurare la
+     scoperta dei membri con i tre semi della configurazione di produzione sarebbe stato circolare:
+     trovare tre server avendone dati tre è compatibile con un driver che non scopre nulla. Il
+     disegno che dimostra è un seme solo, scelto fra i **non** primari, e la verifica che il client
+     finisca per parlare con un indirizzo che non gli è mai stato dato. La regola pratica: prima di
+     scrivere l'asserzione, chiedersi quale osservazione la falsificherebbe — se non ce n'è una,
+     l'esperimento è decorativo.
+
+188. **Una premessa plausibile e mai verificata sopravvive a tutte le revisioni.** «Un'immagine
+     costruita in locale non ha un digest» è falsa, ed è rimasta in piedi attraverso una decisione,
+     una docstring, tre file Compose e un commento di preflight, perché nessuno mette in dubbio
+     ciò che suona ovvio. A smentirla è bastato un `docker image inspect`. E c'è un'aggravante che
+     vale come avvertimento: con il vecchio archivio a grafo di Docker quella premessa sarebbe
+     stata **vera per caso**, il che l'avrebbe resa ancora più difficile da cogliere. La regola
+     pratica: le frasi che iniziano con «ovviamente» sono candidate a diventare una misura.
+
+189. **Una regola del repository che vieta qualcosa di legittimo si sposta di livello, non si
+     eccettua.** Il controllo degli stack pretendeva un digest per ogni servizio, e il servizio
+     dell'applicazione non poteva averne uno utile. L'eccezione avrebbe lasciato le sue basi libere
+     di essere tag mobili — cioè avrebbe abbandonato lo scopo per salvare la lettera. Spostare la
+     regola sulle righe `FROM` del Dockerfile la mantiene intera: nessun bit arriva dalla rete senza
+     che qualcuno l'abbia fissato. La regola pratica: davanti a un divieto scomodo, chiedersi che
+     cosa protegge, e cercare il livello a cui quella protezione continua a valere.
+
+190. **Una guardia che passa alla prima esecuzione non è ancora una prova.** Le cinque prove nuove
+     su `tools/tests/test_coerenza_repo.py` sorvegliano una configurazione già corretta, quindi
+     erano verdi appena scritte — cioè indistinguibili da cinque prove che non controllano niente.
+     Ognuna è stata mutata: si perturba il file sorvegliato, si verifica che la guardia scatti con
+     un messaggio leggibile, si ripristina e si riverifica il verde. La regola pratica: per ogni
+     guardia scritta su uno stato già conforme, la mutazione fa parte della scrittura, non della
+     revisione.
+
+191. **Tradurre uno strumento in un altro linguaggio ne cambia la semantica, e la mutazione lo
+     scopre.** La prova che verifica il `sed` del preflight ne riscriveva l'espressione in Python
+     con `[^ ]*`, che in Python attraversa gli a capo mentre `sed` lavora **una riga per volta**.
+     L'asserzione falliva con `'mongolab:0.1.0\n\n' == 'mongolab:0.1.0'`: la prima delle cinque
+     guardie, mutandola, ha trovato un difetto in sé stessa. La regola pratica: quando una prova
+     riscrive in un linguaggio ciò che un altro strumento fa, la differenza da cercare non è nella
+     sintassi dell'espressione, è nell'unità su cui lo strumento lavora.
+
+192. **Un'asserzione banalmente vera passa con qualunque risultato.** La prova sullo sharded
+     cercava `"sharded" in uscita`, e l'uscita comincia con il titolo `sharded (docker/03-sharded)`:
+     sarebbe passata anche se la topologia letta fosse stata un'altra. Adesso prende la riga
+     `topologia` e ne confronta le parole. La regola pratica: se la stringa cercata compare anche
+     nell'intestazione, nel nome del bersaglio o nel comando, non sta provando ciò che sembra.
+
+193. **Prima di segnare chiuso un punto aperto, guardare se lo è.** Il registro dava per chiuso al
+     Task 12 il limite del `docker exec` sul dump, con una motivazione scritta tre task prima e mai
+     riverificata. Un comando ha mostrato che nell'immagine `mongodump` non c'è. Un punto aperto
+     chiuso per inerzia è peggio di un punto aperto: sparisce dall'elenco e riappare in sala. La
+     regola pratica: le scadenze scritte nei registri sono previsioni, e alla data prevista si
+     verificano come qualunque altra affermazione.
+
+194. **Un dato nuovo trova i difetti che nessuna prova cercava.** L'indirizzo incollato al ruolo
+     stava in un modulo con ventuno prove verdi, ed è comparso al primo indirizzo lungo ventidue
+     caratteri — che dall'host non poteva esistere. Non è un buco nella copertura: è che il valore
+     non era mai passato di lì. La regola pratica: quando cambia la **provenienza** dei dati — non
+     il codice — vale la pena rieseguire a occhio le uscite che nessuno ha più guardato da quando
+     erano corrette.
+
+Stato aggiornato: decisioni fino ad **ADR-0093**, verifiche fino a **V-074**, note di metodo fino
+alla **194**. Le suite: **166** prove per gli strumenti, **462** per l'applicazione più **47** di
+integrazione, `mypy --strict` verde su 58 file. Prossimo passo: **Task 13** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).
