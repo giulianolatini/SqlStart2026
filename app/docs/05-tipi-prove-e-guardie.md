@@ -147,6 +147,30 @@ Gli esperimenti fatti finora, con l'esito:
 | eventi tutti slottati | un evento in più `frozen=True` senza `slots=True` | fallisce, nominando la classe |
 | la base congelata e slottata | tolto `slots=True` a `Evento` | fallisce su due prove |
 
+### Fare una tornata di rotture: tre trappole dell'arnese
+
+Rompere una cosa alla volta e pretendere che una prova **nominata in anticipo** diventi rossa è il
+modo più economico di misurare la differenza fra «le prove che ci sono passano» e «le prove che
+servono esistono». Lo script che lo fa è di venti righe, si scrive ogni volta da capo, e ogni volta
+inciampa negli stessi tre posti. Stanno scritti qui perché è qui che li si rilegge — un registro
+ricorda a chi lo apre, e chi scrive venti righe di utilità non lo apre.
+
+**Il codice d'uscita di `pytest` non è un booleano.** Esce **4** su errore d'uso e **5** quando non
+ha raccolto nessuna prova: un nome di prova scritto male produce «diverso da zero», che uno script
+ingenuo legge come «la mutazione è stata vista». Il rapporto risulta perfetto, ed è perfetto perché
+non ha eseguito niente. Il segnale è sempre lo stesso — **un rapporto troppo pulito**.
+
+**Due modifiche della stessa lunghezza nello stesso secondo sono la stessa modifica.** Python decide
+se ricompilare confrontando data di modifica **al secondo** e dimensione **in byte**; il contenuto
+non lo guarda. Sostituire `1024**2` con `1000**2` non cambia né l'una né l'altra, e la corsa esegue
+il bytecode di quella prima. `PYTHONDONTWRITEBYTECODE=1` nell'ambiente dei sottoprocessi, e
+`__pycache__` cancellati prima di cominciare.
+
+**Una mutazione che resta verde non è sempre una prova che manca.** Può essere una riscrittura
+**equivalente** sotto un invariante che il codice attorno garantisce già. Prima di aggiungere una
+guardia si verifica l'invariante alla fonte; se c'è, la mutazione non era una rottura e va tolta
+dall'elenco invece che coperta.
+
 ## Il terzo esito
 
 La riga in grassetto nella tabella è quella che ha insegnato qualcosa di nuovo.

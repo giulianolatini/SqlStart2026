@@ -5497,12 +5497,19 @@ moltiplicatore non entra mai in gioco. Le due prove nate da lì giudicano contro
 del file, letta con `stat` dentro il container: `6094260` byte annunciati come `5.81MB`, che in base
 1000 farebbero `6.09`.
 
-**Un falso rosso durante la verifica della verifica.** Alla prima esecuzione della sesta mutazione
-`pytest` riportava un numero che nel sorgente su disco non c'era. La causa: `1024**2` e `1000**2`
-hanno la **stessa lunghezza in byte**, lo script riscriveva il file entro lo stesso secondo, e
-l'invalidazione della cache dei bytecode di Python guarda l'orario di modifica al secondo e la
-dimensione del sorgente — due valori identici, quindi il `.pyc` mutato è stato considerato valido.
-`PYTHONDONTWRITEBYTECODE=1` nell'ambiente dei sottoprocessi ha chiuso il caso.
+**La nota 158 si è ripresentata identica, e questo è il fatto interessante.** Alla prima esecuzione
+della sesta mutazione `pytest` riportava un numero che nel sorgente su disco non c'era: `1024**2` e
+`1000**2` hanno la **stessa lunghezza in byte**, lo script riscriveva il file entro lo stesso
+secondo, e il `.pyc` vecchio è stato considerato valido. È esattamente la **nota 158**, scritta al
+Task 5 di questo stesso branch, con la sua regola pratica già formulata —
+`PYTHONDONTWRITEBYTECODE=1` e pulizia dei `__pycache__`. Non ha impedito niente, perché lo script
+delle mutazioni del Task 9 è stato scritto da capo e nessuno rilegge le note di metodo prima di
+scrivere venti righe di utilità. Vale la pena registrarlo così com'è: una lezione scritta protegge
+chi la ricorda, e uno strumento nuovo non la eredita. La conseguenza è che le tre trappole
+dell'arnese — il codice d'uscita che non è un booleano, il `.pyc` condiviso, e la mutazione verde
+che era equivalente invece che scoperta — hanno adesso una sede versionata in
+[`app/docs/05-tipi-prove-e-guardie.md`](../app/docs/05-tipi-prove-e-guardie.md), accanto alle prove,
+che è dove si va a guardare prima di scrivere lo script e non dopo.
 
 ### Note di metodo
 
@@ -5528,15 +5535,29 @@ dimensione del sorgente — due valori identici, quindi il `.pyc` mutato è stat
      con `stat`. Vale ogni volta che una prova contiene una costante che il codice contiene uguale:
      quella costante non sta verificando niente.
 
-171. **Una cache che decide da sé quando è valida può rendere verde una prova rossa.** Python
-     invalida i bytecode confrontando orario di modifica **al secondo** e dimensione del sorgente.
-     Una modifica della stessa lunghezza fatta entro lo stesso secondo passa inosservata, e il
-     `.pyc` vecchio viene eseguito al posto del codice nuovo. È un caso stretto e reale, e si
-     incontra esattamente dove fa più danno: negli strumenti che modificano il codice per verificare
-     le prove, dove un falso verde è indistinguibile dal risultato che si sta cercando. Chi scrive
-     uno strumento del genere disattiva la cache, e non si fida di averla vista funzionare.
+171. **La docstring di una prova è un'asserzione, e può essere lei la parte sbagliata.** Il verso
+     abituale è che la prova giudica il codice, e quando una prova diventa rossa la prima ipotesi è
+     sempre che il codice sia da correggere. Qui è successo l'opposto: `RestoreIncompleto` ha
+     bocciato una premessa scritta nella docstring della prova — «il restore è idempotente sulla
+     stessa destinazione» — che era falsa e che nessuno avrebbe rimesso in discussione, perché il
+     testo di una prova è la parte del repository che meno persone rileggono. La regola pratica:
+     davanti a una prova rossa scritta contro codice nuovo, prima di correggere il codice si legge
+     ad alta voce che cosa la prova **afferma**, e ci si chiede chi l'ha verificato. La **nota 164**
+     dice che una seconda implementazione corretta rivela il difetto della prima; questa è il caso
+     ulteriore, in cui a rivelare il difetto della prova è il codice che la prova doveva giudicare.
+
+172. **Una lezione scritta protegge chi la ricorda, non chi scrive lo strumento dopo.** La **nota
+     158** — due modifiche della stessa dimensione nello stesso secondo condividono il `.pyc` — è
+     stata scritta al Task 5 e reincontrata identica al Task 9, sullo stesso branch, dalla stessa
+     persona. Non ha impedito niente, perché lo script delle mutazioni è stato riscritto da capo e
+     nessuno rilegge il registro prima di scrivere venti righe di utilità. La conseguenza operativa
+     non è «rileggere di più»: è che una lezione utile va messa **dove verrà letta** — accanto al
+     codice a cui si applica, non solo nel registro che la spiega. Le tre trappole delle rotture
+     deliberate stanno ora in `app/docs/05-tipi-prove-e-guardie.md`, che è la pagina che si apre
+     prima di scrivere una prova. Il registro resta la sede del *perché*; la sede del *promemoria* è
+     un'altra, e vanno tenute distinte.
 
 Stato aggiornato: decisioni fino ad **ADR-0084**, verifiche fino a **V-074**, note di metodo fino
-alla **171**. Le suite: **143** prove per gli strumenti, **243** per l'applicazione più **43** di
+alla **172**. Le suite: **143** prove per gli strumenti, **243** per l'applicazione più **43** di
 integrazione, `mypy --strict` verde su 42 file. Prossimo passo: **Task 10** del
 [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).

@@ -332,7 +332,9 @@ ricevuto una chiamata.
 ### Sei mutazioni, e la sesta che nessuno vedeva
 
 L'adattatore è stato rotto sei volte di seguito, una alla volta, per verificare che una prova
-precisa se ne accorgesse: la password rimessa in `argv`, il sommario ridotto ad avviso, `dump`
+precisa se ne accorgesse — con le tre trappole dell'arnese elencate nel
+[capitolo 5](05-tipi-prove-e-guardie.md#fare-una-tornata-di-rotture-tre-trappole-dellarnese), di cui
+qui è tornata la seconda — il `.pyc` condiviso fra due mutazioni della stessa lunghezza: la password rimessa in `argv`, il sommario ridotto ad avviso, `dump`
 trasformata in funzione generatrice, il `kill` tolto, il codice d'uscita ignorato, la base 1024
 cambiata in 1000.
 
