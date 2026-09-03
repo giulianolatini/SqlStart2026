@@ -36,6 +36,12 @@ class RuoloServer(Enum):
     È una distinzione che il talk mostra: il client conosce la topologia perché la
     **scopre**, e per un istante durante un'elezione la sua idea è diversa da quella del
     cluster. Questi valori sono ciò che il client crede in un dato momento.
+
+    I primi tre stati dell'assenza vanno letti insieme, perché sono tre cose diverse.
+    `SCONOSCIUTO` è **l'assenza di un'osservazione**: il client non ha ancora guardato,
+    o ha guardato e non ha capito. `IRRAGGIUNGIBILE` è **un'osservazione**: il client ha
+    provato, e non è riuscito. `ALTRO` è il contrario di tutti e due: il client sa
+    benissimo che cosa ha davanti, ed è qualcosa che questa scena non nomina.
     """
 
     SCONOSCIUTO = "sconosciuto"
@@ -45,6 +51,14 @@ class RuoloServer(Enum):
     ARBITRO = "arbitro"
     ROUTER = "router"
     IRRAGGIUNGIBILE = "irraggiungibile"
+    ALTRO = "altro"
+    """Riconosciuto dal client, estraneo al talk.
+
+    Il caso che capita davvero è un membro del replica set che sta ripartendo: per
+    qualche secondo è in `RECOVERING` o in `STARTUP2`, e il driver lo chiama `RSOther`.
+    Sono i secondi della dimostrazione del failover, cioè l'unico momento in cui la sala
+    sta guardando quella riga. Mandarlo su `SCONOSCIUTO` scriverebbe «non so» proprio lì.
+    """
 
 
 class TipoTopologia(Enum):

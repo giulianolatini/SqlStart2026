@@ -3,11 +3,11 @@
 > Il principio in una riga: **il driver ti parla sul suo thread, e ti aspetta.** Chi ascolta ha un
 > solo dovere: depositare e ritornare.
 
-> **Stato:** questa pagina descrive un principio già deciso e già vincolante, ma il codice che lo
-> attua — `SdamBridge` — arriva al Task 7 del
-> [piano](../../docs/00-progetto/2026-09-02-piano-feature-04-app-python.md). Ciò che esiste oggi
-> sono gli eventi e le porte che quel codice riempirà. Dove questa pagina descrive il futuro, lo
-> dice.
+> **Stato:** il codice che attua questo principio — `SdamBridge` — **esiste dal Task 7**, e
+> [08-il-ponte-sdam-e-i-thread-del-driver.md](08-il-ponte-sdam-e-i-thread-del-driver.md) racconta
+> com'è venuto. Quella pagina corregge anche un punto di questa: il driver non consegna tutti gli
+> eventi sul thread che li ha generati ([M-014](Sources.md#m-014)). Resta vero, e più interessante,
+> che il thread su cui il callback gira non è affar suo.
 
 ## La cosa che il talk vuole mostrare
 
@@ -176,13 +176,21 @@ Task 16.
 
 ## Che cosa non è ancora verificato
 
-Onestà sullo stato: quanto sopra è **deciso e documentato**, non ancora **misurato qui**. Le
-affermazioni sul comportamento di PyMongo vengono dalla sua documentazione
-([S-010](../../docs/Sources.md#s-010)), non da un esperimento di questo repository.
+Questa sezione diceva, fino al Task 7, che tutto quanto sopra era **deciso e documentato** e non
+ancora **misurato qui**. Metà di quel debito è stata pagata, e conviene essere precisi su quale.
 
-La verifica arriva al Task 7, quando `SdamBridge` esisterà e si potrà osservare la cronaca vera
-contro uno stack vero. Se qualcosa non tornasse, la conseguenza sarebbe una voce in `Sources.md` e
-un ADR — non una riga di codice che aggira il problema in silenzio.
+**Misurato.** Da quale thread arriva ciascuna famiglia di eventi ([M-014](Sources.md#m-014)), in
+che unità sono le durate — con un errore trovato nella documentazione di PyMongo
+([M-012](Sources.md#m-012)) — che fine fa un'eccezione sollevata dentro un listener
+([M-015](Sources.md#m-015)), e quanto costa davvero un callback che disobbedisce
+([M-013](Sources.md#m-013)). Le sedi sono `Sources.md` e
+[08](08-il-ponte-sdam-e-i-thread-del-driver.md), come promesso: nessuna riga di codice ha aggirato
+niente in silenzio.
+
+**Non ancora misurato.** Niente di tutto questo ha parlato con un cluster: i client delle prove
+nascono con `connect=False`. Un battito che fallisce mentre il primario cade, e il
+`ServerStateChanged` verso `PRIMARIO` che arriva su un altro nodo, nessuno li ha ancora visti
+arrivare. La sede è il **Task 8**, contro gli stack veri.
 
 C'è un caso già segnalato come dubbio, e vale la pena saperlo in anticipo: `ChunkMigrated` è
 l'unico dei nove eventi che potrebbe risultare **non osservabile dal client**. Un client parla con
@@ -193,10 +201,13 @@ disegno.
 ---
 
 **Da leggere dopo:** [05-tipi-prove-e-guardie.md](05-tipi-prove-e-guardie.md), che spiega come si
-verifica tutto questo senza aspettare che accada.
+verifica tutto questo senza aspettare che accada, e
+[08-il-ponte-sdam-e-i-thread-del-driver.md](08-il-ponte-sdam-e-i-thread-del-driver.md), che è
+questa decisione diventata codice.
 
 **Fonti:** [S-010](../../docs/Sources.md#s-010), [S-018](../../docs/Sources.md#s-018),
-[A-010](Sources.md#a-010), [M-010](Sources.md#m-010).
+[A-010](Sources.md#a-010), [M-010](Sources.md#m-010), [M-012](Sources.md#m-012),
+[M-013](Sources.md#m-013), [M-014](Sources.md#m-014), [M-015](Sources.md#m-015).
 **Decisioni:** [ADR-0006](../../docs/Decision.md#adr-0006),
 [ADR-0007](../../docs/Decision.md#adr-0007), [ADR-0019](../../docs/Decision.md#adr-0019),
 [ADR-0050](../../docs/Decision.md#adr-0050).

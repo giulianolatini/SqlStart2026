@@ -266,22 +266,22 @@ Qui il repository incontra la conseguenza che [ADR-0006](../Decision.md#adr-0006
 piccola» e che [ADR-0019](../Decision.md#adr-0019) risolve. La regola sta nei vincoli globali;
 questo task la rende codice e prova.
 
-- [ ] **Passo 1.** Le quattro classi di listener del §6.3 — `ServerListener`, `TopologyListener`,
+- [x] **Passo 1.** Le quattro classi di listener del §6.3 — `ServerListener`, `TopologyListener`,
       `ServerHeartbeatListener`, `CommandListener` — implementate in modo che **ogni callback faccia
       tre cose**: costruire un evento congelato, metterlo in coda, ritornare. Niente altro, e in
       particolare nessuna formattazione di stringhe costosa.
-- [ ] **Passo 2.** Una prova che il callback ritorni entro il tempo di un inserimento in coda. Non è
+- [x] **Passo 2.** Una prova che il callback ritorni entro il tempo di un inserimento in coda. Non è
       una prova di prestazioni travestita: è la verifica del vincolo che rende oneste tutte le
       misure del Task 6, perché un listener lento rallenta il driver e allunga proprio il failover
       che si sta cronometrando.
-- [ ] **Passo 3.** La traduzione da evento pymongo a evento di dominio si prova **senza** pymongo
+- [x] **Passo 3.** La traduzione da evento pymongo a evento di dominio si prova **senza** pymongo
       vivo, costruendo a mano gli oggetti che il driver passerebbe. Il contratto da fissare è la
       mappatura, non il driver.
-- [ ] **Passo 4.** Il `MongoClient` riceve i listener **per singolo client**
+- [x] **Passo 4.** Il `MongoClient` riceve i listener **per singolo client**
       (`MongoClient(event_listeners=[...])`), non globalmente: è la forma scelta da
       [ADR-0006](../Decision.md#adr-0006), e permette a due client nella stessa esecuzione di avere
       cronache separate.
-- [ ] **Passo 5.** `make app-test`, `make app-check`. Commit:
+- [x] **Passo 5.** `make app-test`, `make app-check`. Commit:
       `feat: il ponte SDAM — il listener costruisce, deposita e ritorna`.
 
 ---

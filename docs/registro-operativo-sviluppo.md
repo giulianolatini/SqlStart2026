@@ -5179,3 +5179,122 @@ alla **160**. Le suite: **143** prove per gli strumenti, **153** per l'applicazi
 verde su 28 file. Prossimo passo: **Task 7** del
 [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), `SdamBridge` — dove le topologie
 smetteranno di essere finte, e i callback di PyMongo andranno **osservati**, non solo letti.
+
+## 2026-09-03 — `feature/04`, Task 7: il ponte SDAM, una documentazione che sbaglia un'unità, e una rottura che non rompe
+
+`SdamBridge` è il primo modulo che importa PyMongo davvero, e il punto in cui l'applicazione smette
+di **interrogare** il cluster e comincia ad **ascoltarlo**. Quattro ascoltatori — server, topologia,
+battiti, comandi — una coda sola, e una regola sola: ogni callback costruisce un evento congelato, lo
+deposita, ritorna. Le prove dell'applicazione passano da **153 a 193**, `mypy --strict` verde su 30
+file.
+
+La regola non è igiene. La documentazione di PyMongo dice che «Application threads block waiting for
+event handlers … to return» ([S-010](Sources.md#s-010)): il thread che aspetta è il monitor del
+driver, quello che si accorge della caduta del primario. Un callback che disegna una tabella allunga
+**proprio il failover che si sta cronometrando**. Il numero sulla slide diventerebbe più grande per
+colpa dello strumento che lo misura — non una degradazione, una falsificazione.
+
+**Quattro classi non sono una scelta di stile.** `ServerListener` e `TopologyListener` dichiarano gli
+stessi tre metodi, e il driver smista per `isinstance`. Una classe che le implementasse entrambe
+riceverebbe due tipi di evento sulla stessa firma, e dovrebbe distinguerli a mano nel percorso caldo
+— esattamente ciò che [ADR-0019](Decision.md#adr-0019) vieta. Separate, la distinzione la fa il
+driver, gratis.
+
+**Diversamente dal previsto — la documentazione di PyMongo sbaglia un'unità di misura, e sarebbe
+costata una tabella di zeri.**
+
+La docstring di `ServerHeartbeatSucceededEvent.duration` dice «The duration of this heartbeat in
+microseconds». Il valore che ci arriva è `round_trip_time`, che viene da `_monotonic_duration`, che
+restituisce `max(0.0, time.monotonic() - start)`: **secondi**. Tre passaggi nel sorgente installato,
+nessuna lettura alternativa possibile. L'altro evento, `CommandSucceededEvent.duration_micros`, è
+invece davvero in microsecondi: due famiglie, due unità, e solo una documentata bene.
+
+Credere alla docstring avrebbe prodotto latenze di battito nell'ordine di 10⁻⁶ ms, che nel riepilogo
+dei percentili sarebbero comparse come **zeri**. È la nota 155 — uno zero inventato è la peggiore
+risposta mancante — fatta scattare non da una scelta nostra ma da una riga di documentazione altrui.
+Il patto di lettura di `app/docs` prevedeva questo caso in astratto («dove le due non concordano, la
+riserva è scritta»); è la prima volta che capita, ed è registrato in
+[`app/docs/Sources.md`, M-012](../app/docs/Sources.md#m-012) con i tre punti del sorgente.
+
+**Il driver applica a sé stesso la regola di ADR-0019.** Misurando da quale thread arriva ciascun
+callback si scopre che server e topologia **non** sono consegnati dal codice che scopre il
+cambiamento: quel codice fa `self._events.put(...)`, e un thread di nome `pymongo_events_thread`
+drena la coda e chiama i listener. Battiti e comandi invece arrivano sul thread del monitor e su
+quello applicativo. Metà dei listener di PyMongo passano quindi dalla stessa forma — coda più
+drenatore — che ADR-0019 impone all'applicazione, e nessuna pagina di documentazione lo dice
+([M-014](../app/docs/Sources.md#m-014)). Vale come conferma indipendente della decisione, ed è un
+punto che il talk può usare: non è un'idea del relatore, è quello che fa il driver.
+
+La regola non cambia per questo. Quel thread è **uno solo**: un callback lento lì accoda tutti gli
+altri cambi di topologia, compreso quello che annuncia il primario nuovo.
+
+**Un valore nuovo nel dominio, e stavolta senza ADR.** `RuoloServer.ALTRO`. Il driver conosce
+`RSOther`, `RSGhost`, `LoadBalancer`; mandarli su `SCONOSCIUTO` è una traduzione sbagliata proprio
+nel momento della demo, perché un membro che riparte sta qualche secondo in `RECOVERING` e il driver
+lo chiama `RSOther`. «Sconosciuto» direbbe *il client non ha capito*, mentre il client ha capito
+benissimo. I tre stati dell'assenza sono ora distinti: `SCONOSCIUTO` è l'assenza di un'osservazione,
+`IRRAGGIUNGIBILE` è un'osservazione, `ALTRO` è il contrario di entrambi. Nessun ADR perché
+`RuoloServer` non è enumerato nel design — a differenza dei nove eventi, che al Task 6 avevano
+richiesto [ADR-0082](Decision.md#adr-0082) per diventare nove. La guardia esiste dove il design
+enumera; dove non enumera, la sede è il registro.
+
+**I tipi hanno impedito una stringa sbagliata a schermo.** I callback non sono tipizzati con le
+classi di PyMongo ma con sei `Protocol` scritti qui, che dichiarano solo gli attributi letti. Serve a
+provare la traduzione **senza PyMongo vivo**; ma siccome le classi ereditano davvero da quelle del
+driver, `mypy --strict` deve dimostrare che le classi vere soddisfino i nostri `Protocol` — un
+controllo di compatibilità gratuito, a ogni `make app-check`. Ed è servito subito: la prima stesura
+dichiarava `address: tuple[str, int]`, mypy ha rifiutato perché in PyMongo la porta è opzionale, e
+senza quel rifiuto la cronaca avrebbe mostrato `mongo-1:None` — che nessun doppio scritto a mano
+avrebbe colto, perché chi scrive il doppio la porta ce la mette sempre.
+
+**Ventotto rotture, ventisette rosse, e nessuna prova nuova.** È il contrario del Task 6, dove
+quattro guardie su ventuno mancavano: qui le prove erano state scritte contro un contratto già
+**misurato**, non contro un'idea del comportamento. La ventottesima è quella che vale: una tabella di
+Rich dentro il callback fa fallire la prova cronometrata con tre ordini di grandezza di margine. Il
+vincolo di ADR-0019 non è un principio, è una cosa che si vede.
+
+La quindicesima resta verde, e la prima ipotesi è sbagliata. Vedi la nota 161.
+
+**Le protezioni delle note 157–159 c'erano dall'inizio, e la 153 è arrivata lo stesso.** Prima
+batteria di rotture costruita con gli arnesi già a posto: esito letto dal codice di uscita mappato
+per nome, bytecode disattivato, `__pycache__` cancellati, e la verifica che ogni sostituzione cambi
+davvero il file. Nessun falso rapporto. Ma la rottura «`drena` guarda ma non svuota», nella sua prima
+forma, era un ciclo infinito: la batteria si è piantata dopo sette minuti senza dire niente. Da lì
+una quarta protezione — limite di 90 secondi per corsa, con un esito `APPESO` che ha un nome proprio
+e non si confonde con un fallimento.
+
+### Note di metodo
+
+161. **Prima di concludere che manca una guardia, va escluso che manchi la differenza.** Una
+     modifica deliberata ha lasciato la suite verde: leggere l'indirizzo del server dalla descrizione
+     *di prima* invece che da quella *di dopo*. L'ipotesi ovvia — una guardia scoperta, come nella
+     nota 159 — era falsa. Il driver pubblica quel cambio in un punto solo di tutto il suo codice, e
+     ricava la descrizione vecchia indicizzando per l'indirizzo di quella nuova: i due lati portano
+     **sempre** lo stesso indirizzo, per costruzione. Non sono due letture di cui una giusta, sono la
+     stessa lettura scritta in due modi. Le tre uscite della nota 144, e la quarta della 153, danno
+     tutte per scontato che una modifica cambi il comportamento; questa è la quinta, e va cercata
+     per prima quando una rottura tace. La cura non è inventare una prova: costruire a mano il caso
+     che il driver non può produrre farebbe passare la rottura da verde a rossa e sembrerebbe una
+     guardia, ma aggiungerebbe copertura senza aggiungere verità. La cura è **verificare
+     l'invariante alla fonte e scriverlo dove il codice lo usa**, con file e riga, così che chi
+     rifarà la stessa domanda trovi la risposta invece di riscoprirla.
+162. **Una soglia si misura prima di scriverla, e si dichiara che cosa non prende.** La prova che
+     verifica il vincolo di ADR-0019 confronta il costo di un callback con quello di un inserimento
+     in coda, e chiede che il rapporto stia sotto dieci. Il dieci non è un numero tondo scelto a
+     occhio: viene da tre misure. Il callback onesto sta a 2,9, stabile su cinque ripetizioni; una
+     tabella di Rich lo porta a 883. In mezzo c'è una `f-string`, che arriva a 5,5 e **passa** — cioè
+     la prova non prende un caso che il codice vieta. Una soglia a quattro lo prenderebbe, e
+     fallirebbe anche su una macchina carica, con un messaggio indistinguibile dal rumore; una prova
+     che fallisce a caso viene disattivata da qualcuno, prima o poi. La regola ha due metà, e la
+     seconda è quella che di solito manca: si sceglie la soglia dove il vincolo diventa un **danno
+     misurabile** — a ottocento comandi al secondo, 386 µs per evento sono 0,31 secondi di CPU per
+     ogni secondo di orologio — e si scrive accanto alla prova **che cosa resta fuori**, invece di
+     lasciar credere che la copertura arrivi fino al divieto. Una soglia che non dichiara il proprio
+     buco è una riserva non scritta, e la nota 152 dice che una riserva è un'asserzione.
+
+Stato aggiornato: decisioni fino ad **ADR-0082**, verifiche fino a **V-074**, note di metodo fino
+alla **162**. Le suite: **143** prove per gli strumenti, **193** per l'applicazione, `mypy --strict`
+verde su 30 file. Prossimo passo: **Task 8** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), gli adattatori veri contro uno stack
+vero — dove i battiti e i cambi di ruolo, finora costruiti a mano, dovranno arrivare da un cluster
+che cade sul serio.

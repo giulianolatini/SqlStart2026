@@ -718,6 +718,256 @@ misure valgono per l'ambiente descritto in [M-001](#m-001) e per nessun altro.
   improbabile; due mutazioni distinte catturate dalla stessa identica prova era un'impossibilità
   logica travestita da conferma.
 
+<a id="m-012"></a>
+### M-012 — La documentazione dice microsecondi, il codice passa secondi
+
+- **Data:** 2026-09-03
+- **Comando:** lettura del sorgente di PyMongo 4.17.0 installato nel `.venv` del progetto, ai tre
+  punti che decidono l'unità di misura di `ServerHeartbeatSucceededEvent.duration`.
+- **Output:**
+  ```
+  monitoring.py:1361            @property
+  monitoring.py:1362            def duration(self) -> float:
+  monitoring.py:1363                """The duration of this heartbeat in microseconds."""
+
+  synchronous/monitor.py:326    response, round_trip_time = self._check_with_socket(conn)
+  synchronous/monitor.py:334    self._listeners.publish_server_heartbeat_succeeded(
+  synchronous/monitor.py:335        address, round_trip_time, response, response.awaitable
+
+  synchronous/monitor.py:357    start = time.monotonic()
+  synchronous/monitor.py:372    duration = _monotonic_duration(start)
+  synchronous/monitor.py:57     def _monotonic_duration(start: float) -> float:
+  synchronous/monitor.py:63         return max(0.0, time.monotonic() - start)
+  ```
+- **Che cosa dice:** la docstring di `duration` afferma «in microseconds», e il valore che arriva
+  lì è `round_trip_time`, cioè il ritorno di `_monotonic_duration`, cioè una **differenza di
+  `time.monotonic()`**: secondi. Sono tre passaggi, tutti nello stesso file tranne l'ultimo, e la
+  conclusione non ammette letture alternative. La docstring sbaglia.
+
+  Il confronto con l'altro evento chiude il quadro. `CommandSucceededEvent` riceve un
+  `datetime.timedelta` (`monitoring.py:672`) e lo converte a `monitoring.py:466` con
+  `int(dur.total_seconds() * 10e5)`: `duration_micros` è **davvero** in microsecondi. Le due
+  famiglie di eventi usano quindi unità diverse, e solo una delle due è documentata correttamente.
+- **Conseguenza qui:** `AscoltatoreHeartbeat.succeeded` moltiplica per 1000, `AscoltatoreComandi.succeeded`
+  divide per 1000, e le due conversioni hanno ciascuna la sua prova. Credere alla docstring avrebbe
+  prodotto latenze di battito nell'ordine di 10⁻⁶ ms: nel riepilogo dei percentili sarebbero
+  comparse come **zeri**, che la nota di metodo 155 chiama la peggiore risposta mancante possibile.
+  Un errore di documentazione sarebbe diventato una tabella di zeri sulla slide.
+- **Riserve:** la conclusione è tratta dal sorgente, non da un battito osservato: nessun cluster ha
+  ancora prodotto un `ServerHeartbeatSucceededEvent` in questo repository. La verifica contro un
+  valore vero — un battito su rete locale deve stare fra 0,2 e 5 ms, non fra 200 e 5000 — arriva al
+  Task 8. Se il numero misurato smentisse questa lettura, la voce va corretta, non difesa.
+- **Usata da:** [08-il-ponte-sdam-e-i-thread-del-driver.md](08-il-ponte-sdam-e-i-thread-del-driver.md),
+  `src/mongolab/infrastructure/sdam.py`, `tests/unit/test_sdam.py`
+
+<a id="m-013"></a>
+### M-013 — Quanto costa un callback che non si limita a depositare
+
+- **Data:** 2026-09-03
+- **Comando:** due sonde, duemila giri ciascuna. La prima confronta il callback vero di
+  `AscoltatoreServer.description_changed` con un `put_nowait` nudo, ripetuta cinque volte; la
+  seconda misura tre modi di scrivere lo stesso callback, dal più sobrio al più costoso.
+- **Output:**
+  ```
+  1: put_nowait  0.440 us/giro | callback  1.344 us/giro | rapporto   3.06
+  2: put_nowait  0.453 us/giro | callback  1.282 us/giro | rapporto   2.83
+  3: put_nowait  0.480 us/giro | callback  1.334 us/giro | rapporto   2.78
+  4: put_nowait  0.479 us/giro | callback  1.268 us/giro | rapporto   2.65
+  5: put_nowait  0.451 us/giro | callback  1.260 us/giro | rapporto   2.79
+
+  callback onesto      :     1.473 us/giro | rapporto      3.37
+  + una frase formattata:     2.397 us/giro | rapporto      5.48
+  + una tabella di Rich :   385.942 us/giro | rapporto    882.70
+  ```
+- **Che cosa dice:** il callback che rispetta [ADR-0019](../../docs/Decision.md#adr-0019) costa
+  **meno di tre volte** un inserimento in coda nudo, e la misura è stabile su cinque ripetizioni
+  (2,65–3,06). Aggiungere una `f-string` porta il rapporto a 5,5, cioè **un microsecondo in più**.
+  Disegnare una tabella di Rich lo porta a 883, cioè 386 µs: tre ordini di grandezza.
+
+  La distanza fra i due errori è il punto. A ottocento comandi al secondo — una scala plausibile per
+  la demo — 386 µs per evento sono **0,31 secondi di CPU per ogni secondo di orologio**, sottratti
+  al thread che il driver stava usando per accorgersi del failover. Il microsecondo della frase
+  formattata, alla stessa scala, è 0,0008 secondi.
+- **Conseguenza qui:** la soglia della prova `test_il_callback_costa_quanto_un_inserimento_in_coda`
+  è **10**, scritta dopo la misura e non prima. Il valore lascia più del triplo di margine sul caso
+  buono, così una macchina carica non fa fallire la suite, e prende comunque l'errore che ADR-0019
+  ha scartato per nome con ottantotto volte di margine.
+- **Riserve:** la soglia **non** prende la frase formattata, che pure il codice vieta. È una rinuncia
+  consapevole: una soglia a 4 renderebbe il fallimento indistinguibile dal rumore di una macchina
+  occupata, e una prova che fallisce a caso viene disattivata da qualcuno, prima o poi. Il divieto
+  della formattazione nel callback resta affidato al codice e alla decisione, non a questa prova.
+  Va detto anche che i numeri vengono da una macchina scarica (l'ambiente di [M-001](#m-001)): il
+  rapporto è più robusto del valore assoluto, ed è per questo che la prova misura un rapporto.
+- **Usata da:** [08-il-ponte-sdam-e-i-thread-del-driver.md](08-il-ponte-sdam-e-i-thread-del-driver.md),
+  `tests/unit/test_sdam.py`
+
+<a id="m-014"></a>
+### M-014 — Gli eventi non arrivano tutti dallo stesso thread, e il driver usa la coda anche lui
+
+- **Data:** 2026-09-03
+- **Comando:** un listener che registra `threading.current_thread().name` a ogni callback, su un
+  `MongoClient` costruito con `connect=False` verso un replica set che non esiste, seguito dai tre
+  punti del sorgente che spiegano il risultato.
+- **Output:**
+  ```
+  il thread che costruisce e chiude: MainThread
+  --- dopo la costruzione ---
+    TopologyOpenedEvent                <- pymongo_events_thread
+    TopologyDescriptionChangedEvent    <- pymongo_events_thread
+    ServerOpeningEvent                 <- pymongo_events_thread
+    ServerOpeningEvent                 <- pymongo_events_thread
+  --- i thread vivi mentre il client e' aperto ---
+    MainThread
+    pymongo_events_thread
+  --- durante close() ---
+    TopologyDescriptionChangedEvent    <- MainThread
+    TopologyClosedEvent                <- MainThread
+
+  synchronous/topology.py:514   self._events.put(
+  synchronous/topology.py:516       self._listeners.publish_server_description_changed,
+  synchronous/topology.py:201   "pymongo_events_thread"        (il PeriodicExecutor che la drena)
+  synchronous/monitor.py:271    self._listeners.publish_server_heartbeat_failed(...)
+  synchronous/monitor.py:306    self._listeners.publish_server_heartbeat_started(...)
+  synchronous/monitor.py:334    self._listeners.publish_server_heartbeat_succeeded(...)
+  ```
+- **Che cosa dice:** «Events are delivered synchronously» ([S-010](../../docs/Sources.md#s-010)) è
+  vero, ma non vuol dire *sullo stesso thread che ha generato il fatto*. Le due famiglie più
+  rumorose — server e topologia — non vengono consegnate dal codice che scopre il cambiamento: quel
+  codice fa `self._events.put(...)`, e un thread dedicato di nome `pymongo_events_thread` drena la
+  coda e chiama i listener. Battiti e comandi invece arrivano davvero sul thread del monitor e su
+  quello applicativo, perché lì il `publish_*` è chiamato direttamente.
+
+  **Il driver applica a sé stesso lo schema che ADR-0019 impone all'applicazione.** Metà dei suoi
+  listener passano da una coda drenata da un thread solo, che è esattamente la forma scelta qui.
+  Nessuna pagina di documentazione lo dice, e vale come conferma indipendente della decisione.
+
+  Un dettaglio secondario ma utile: `connect=False` non impedisce la pubblicazione di un
+  `TopologyDescriptionChangedEvent` alla costruzione, e durante `close()` gli stessi callback
+  girano sul thread **chiamante**, non più su quello degli eventi.
+- **Conseguenza qui:** nessuna, ed è il punto. Il ponte non tiene stato e non ha lucchetti: che il
+  callback arrivi da uno di quattro thread diversi non cambia una riga, perché la coda tiene i suoi
+  lucchetti ([A-010](#a-010)). La regola resta valida anche per gli eventi che passano dalla coda
+  del driver: quel thread è **uno solo**, e un callback lento lì accoda tutti gli altri cambi di
+  topologia, compreso quello che annuncia il primario nuovo.
+- **Riserve:** la misura è stata fatta senza cluster, quindi il thread dei battiti e quello dei
+  comandi sono dedotti dal sorgente e non osservati. Il nome `pymongo_events_thread` è un dettaglio
+  interno di PyMongo 4.17, non un'interfaccia pubblica: nessun codice di `mongolab` lo nomina, e
+  questa voce lo cita solo come prova di dove il callback sia stato eseguito.
+- **Usata da:** [08-il-ponte-sdam-e-i-thread-del-driver.md](08-il-ponte-sdam-e-i-thread-del-driver.md)
+
+<a id="m-015"></a>
+### M-015 — Un'eccezione dentro un listener non arriva a nessuno
+
+- **Data:** 2026-09-03
+- **Comando:** un `TopologyListener` il cui `opened` solleva `RuntimeError`, registrato su un
+  `MongoClient` con `connect=False`, con `stderr` catturato.
+- **Output:**
+  ```
+  il codice che costruisce il client e' arrivato fin qui: nessuna eccezione propagata
+  su stderr sono finite 7 righe:
+    | Traceback (most recent call last):
+    |   File ".../site-packages/pymongo/monitoring.py", line 1752, in publish_topology_opened
+    |     subscriber.opened(event)
+    |     ~~~~~~~~~~~~~~~~~^^^^^^^
+    |   File ".../probe/eccezione.py", line 12, in opened
+    |     raise RuntimeError("il listener e' rotto, e nessuno lo sa")
+    | RuntimeError: il listener e' rotto, e nessuno lo sa
+  ```
+- **Che cosa dice:** PyMongo avvolge ogni chiamata a un listener in un `try/except Exception` e
+  passa il controllo a `_handle_exception`, che stampa il traceback su `stderr` e ritorna. Il
+  driver continua, il codice chiamante non vede niente, e il listener rotto **resta registrato**:
+  solleverà di nuovo al prossimo evento, altre sette righe, all'infinito.
+- **Conseguenza qui:** è la seconda ragione, indipendente dalla velocità, per cui questi callback
+  fanno tre cose sole. Meno codice gira dentro un listener, meno cose possono sollevare senza che
+  nessuno se ne accorga. E l'accorgersene, durante il talk, è impossibile: la TUI di Rich
+  ([ADR-0050](../../docs/Decision.md#adr-0050)) tiene il terminale, e un traceback che arriva sotto
+  un `Live` viene sovrascritto al primo aggiornamento. Un ponte rotto si presenterebbe come una
+  cronaca che smette di aggiornarsi, senza messaggi, davanti a una sala.
+- **Riserve:** il buco è **dichiarato, non chiuso**. Nessun meccanismo di `mongolab` oggi si accorge
+  che un listener sta sollevando. La sede in cui si può chiudere è il Task 11, dove il composition
+  root vede sia il ponte sia la TUI e può controllare che la cronaca stia procedendo; questa voce
+  esiste perché al Task 11 la domanda non venga dimenticata.
+- **Usata da:** [08-il-ponte-sdam-e-i-thread-del-driver.md](08-il-ponte-sdam-e-i-thread-del-driver.md)
+
+<a id="m-016"></a>
+### M-016 — Ventotto rotture deliberate sul ponte SDAM, e una che non era una rottura
+
+- **Data:** 2026-09-03
+- **Comando:** ventotto modifiche al solo `src/mongolab/infrastructure/sdam.py`, una alla volta,
+  ciascuna seguita da `pytest -q tests/unit` e dal ripristino da copia. Lo script porta le tre
+  protezioni che le note 157–159 hanno imposto dopo [M-011](#m-011): esito letto dal **codice di
+  uscita mappato per nome**, `PYTHONDONTWRITEBYTECODE=1` con i `__pycache__` rimossi prima di ogni
+  corsa, e la verifica che ogni sostituzione cambi davvero il file. Ne ha aggiunta una quarta, e il
+  perché sta nelle riserve: un **limite di 90 secondi** per corsa.
+- **Output:**
+  ```
+  BASE   VERDE  193 passed
+   1. un errore non fa irraggiungibile              ROSSO   2 failed, 191 passed
+   2. il ripiego e' irraggiungibile                 ROSSO   1 failed, 192 passed
+   3. nessun ripiego, solo la chiave                ROSSO   1 failed, 192 passed
+   4. RSOther diventa sconosciuto                   ROSSO   1 failed, 192 passed
+   5. un tipo di server non mappato                 ROSSO   2 failed, 191 passed
+   6. una forma di topologia non mappata            ROSSO   1 failed, 192 passed
+   7. il ritardo assente diventa zero               ROSSO   1 failed, 192 passed
+   8. il ritardo resta in secondi                   ROSSO   1 failed, 192 passed
+   9. l'errore perde il nome della classe           ROSSO   1 failed, 192 passed
+  10. la porta assente diventa None a schermo       ROSSO   1 failed, 192 passed
+  11. i server non si riordinano                    ROSSO   2 failed, 191 passed
+  12. il nome del set si perde                      ROSSO   1 failed, 192 passed
+  13. un ruolo immutato emette lo stesso            ROSSO   1 failed, 192 passed
+  14. un ruolo cambiato non emette                  ROSSO   5 failed, 188 passed
+  15. l'indirizzo viene da prima                    VERDE  193 passed        <- non e' una rottura
+  16. prima e dopo si scambiano                     ROSSO   1 failed, 192 passed
+  17. una topologia identica emette                 ROSSO   3 failed, 190 passed
+  18. il battito in attesa e' un campione           ROSSO   1 failed, 192 passed
+  19. il battito resta in secondi                   ROSSO   1 failed, 192 passed
+  20. il battito ha un altro nome                   ROSSO   1 failed, 192 passed
+  21. tutti i comandi passano                       ROSSO   2 failed, 191 passed
+  22. i microsecondi diventano millisecondi al contrario  ROSSO 2 failed, 191 passed
+  23. il battito fallito parla                      ROSSO   1 failed, 192 passed
+  24. l'apertura di un server parla                 ROSSO   1 failed, 192 passed
+  25. drena guarda ma non svuota                    ROSSO   1 failed, 192 passed
+  26. gli ascoltatori sono tre                      ROSSO   1 failed, 192 passed
+  27. ogni ascoltatore ha la sua coda               ROSSO   4 failed, 189 passed
+  28. il callback disegna una tabella               ROSSO   1 failed, 192 passed
+  FINE   VERDE  193 passed
+  ```
+- **Che cosa dice:** ventisette su ventotto catturate, **senza prove nuove aggiunte dopo**. È il
+  contrario di [M-011](#m-011), dove quattro guardie su ventuno mancavano: la differenza è che qui
+  le prove sono state scritte contro un contratto già misurato (le unità di [M-012](#m-012), il
+  costo di [M-013](#m-013)) invece che contro un'idea del comportamento.
+
+  La rottura 28 merita una riga a sé, perché è quella che l'ADR-0019 ha scartato per nome: mettere
+  una tabella di Rich dentro il callback fa fallire la prova cronometrata, e la fa fallire con tre
+  ordini di grandezza di margine. Il vincolo non è un principio, è una cosa che si vede.
+- **Riserve — la quindicesima rottura non era una rottura, e serve una nota nuova.**
+
+  Scambiando `new_description.address` con `previous_description.address` la suite resta verde. La
+  prima ipotesi — manca una guardia, come nella 4 di M-011 — è **sbagliata**. Il driver pubblica
+  quel cambio in un punto solo di tutto il suo codice (`synchronous/topology.py:516`), e la
+  descrizione vecchia la ricava indicizzando per l'indirizzo di quella nuova
+  (`synchronous/topology.py:495`, `sd_old = td_old._server_descriptions[server_description.address]`).
+  I due lati portano **sempre** lo stesso indirizzo, per costruzione: non sono due letture di cui
+  una giusta, sono la stessa lettura scritta in due modi.
+
+  La cura non è una prova. Una prova che costruisse a mano un cambio con due indirizzi diversi
+  passerebbe da rossa a verde e sembrerebbe una guardia, ma difenderebbe un caso che il driver non
+  può produrre: copertura senza verità. La cura è verificare l'invariante alla fonte e scriverlo
+  dove il codice lo usa, che è quello che il docstring di `description_changed` adesso fa.
+
+  **Nota di metodo 161:** le tre uscite della nota 144 e la quarta della 153 danno per scontato che
+  una modifica cambi il comportamento. Prima di concludere che manca una guardia, va escluso che
+  manchi la **differenza**.
+
+  **La quarta protezione, e perché è servita.** La rottura 25 nella sua prima forma — «`drena`
+  guarda ma non svuota», scritta come *riprendi dalla coda e rimettici dentro quello che prendi* —
+  è un ciclo infinito. La batteria si è piantata dopo sette minuti senza dire niente: è la nota 153,
+  arrivata al primo colpo su questo file. Da lì il limite di 90 secondi per corsa, con un esito
+  `APPESO` che ha un nome suo e non si confonde con un fallimento. La rottura è stata poi riscritta
+  in una forma che termina (`return list(self._coda.queue)`) e catturata.
+- **Usata da:** [08-il-ponte-sdam-e-i-thread-del-driver.md](08-il-ponte-sdam-e-i-thread-del-driver.md),
+  [registro-sviluppo-app.md](registro-sviluppo-app.md)
+
 ---
 
 ## Fonti canoniche che l'applicazione usa senza copiarle

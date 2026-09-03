@@ -1969,3 +1969,104 @@ Fonte: [`app/docs/07-topologia-failover-e-i-due-numeri.md`](../app/docs/07-topol
 della latenza che vale `None` invece di zero, applicata a un `enum`. Un tipo che ha uno stato per «non
 lo so» permette di non mentire; uno che non ce l'ha costringe a scegliere una bugia plausibile. Dal
 palco vale come domanda al pubblico: **quanti dei vostri `enum` hanno lo stato per «non lo so»?**
+
+---
+
+### Un listener lento non rallenta la grafica: rallenta il driver
+
+> «Events are delivered synchronously. Application threads block waiting for event handlers to
+> return.» Il thread che aspetta è il monitor, cioè quello che deve accorgersi che il primario è
+> caduto. Un callback che disegna una tabella allunga **proprio il failover che sta cronometrando**:
+> il numero sulla slide diventa più grande per colpa dello strumento che lo misura.
+
+Fonte: [S-010](Sources.md#s-010), [ADR-0019](Decision.md#adr-0019),
+[`app/docs/08-il-ponte-sdam-e-i-thread-del-driver.md`](../app/docs/08-il-ponte-sdam-e-i-thread-del-driver.md).
+
+**Perché una slide:** perché rovescia l'intuizione. Tutti sanno che un'interfaccia lenta è
+sgradevole; quasi nessuno si aspetta che una riga di stampa dentro un callback **falsifichi una
+misura**. Non è una degradazione delle prestazioni, è un dato sbagliato. Dal palco vale come regola
+in tre parole: costruisci, deposita, ritorna.
+
+---
+
+### Il driver fa già quello che ci siamo imposti di fare
+
+> Metà dei listener di PyMongo non vengono chiamati dal codice che scopre il cambiamento: quel
+> codice mette in coda, e un thread di nome `pymongo_events_thread` drena e consegna. Lo schema che
+> abbiamo scelto per l'applicazione è quello che il driver applica a sé stesso — e nessuna pagina di
+> documentazione lo dice.
+
+Fonte: [`app/docs/Sources.md`, M-014](../app/docs/Sources.md#m-014),
+[ADR-0019](Decision.md#adr-0019).
+
+**Perché una slide:** perché trasforma una scelta di disegno in una conferma indipendente. Non è il
+relatore che consiglia una coda: è quello che fa il codice di chi ha scritto il driver, sotto lo
+stesso vincolo. Vale anche come invito: la documentazione di una dipendenza dice che cosa promette,
+il suo sorgente dice come vive.
+
+---
+
+### La documentazione diceva microsecondi. Il codice passava secondi
+
+> La docstring dell'evento afferma «the duration of this heartbeat in microseconds». Il valore che
+> arriva è una differenza di `time.monotonic()`. Se ci avessimo creduto, ogni battito sarebbe finito
+> nella cronaca come 0,000002 ms, e la tabella dei percentili avrebbe mostrato **zeri** — la peggiore
+> risposta mancante, prodotta non da una nostra scelta ma da una riga scritta da altri.
+
+Fonte: [`app/docs/Sources.md`, M-012](../app/docs/Sources.md#m-012), che continua la
+[nota 155](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché è il caso concreto della regola «la misura e la fonte si tengono
+distinte». Il repository lo prevedeva in astratto da settimane; è la prima volta che la fonte
+ufficiale sbaglia davvero. La domanda al pubblico si scrive da sé: **quante delle unità di misura
+che usate le avete lette, e quante verificate?**
+
+---
+
+### Una rottura che non rompe
+
+> Abbiamo cambiato una riga apposta, e la suite è rimasta verde. La prima ipotesi — manca una prova —
+> era falsa: le due scritture erano **la stessa lettura per due strade**, perché il driver garantisce
+> che quei due valori coincidano. Inventare una prova per farla fallire avrebbe aggiunto copertura
+> senza aggiungere verità.
+
+Fonte: [registro operativo, nota 161](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md`, M-016](../app/docs/Sources.md#m-016).
+
+**Perché una slide:** perché è la trappola del testing per mutazione, e chi usa quegli strumenti la
+incontrerà. Una mutazione sopravvissuta non significa sempre «prova mancante»: può significare
+«mutazione equivalente», e la differenza è tutta. La riga da tenere: **prima di concludere che manca
+una guardia, escludi che manchi la differenza.**
+
+---
+
+### Una soglia che non dichiara che cosa non prende è una riserva non scritta
+
+> La prova chiede che il callback costi meno di dieci volte un inserimento in coda. Il caso onesto
+> sta a 2,9; una tabella di Rich arriva a 883. In mezzo c'è una `f-string` a 5,5, che il codice
+> vieta e la prova **lascia passare**. È scritto accanto alla prova, perché una soglia scelta e non
+> spiegata lascia credere che la copertura arrivi fino al divieto.
+
+Fonte: [registro operativo, nota 162](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md`, M-013](../app/docs/Sources.md#m-013).
+
+**Perché una slide:** perché ogni progetto ha una soglia scritta a occhio, e nessuno ricorda più da
+dove venga. Le due metà della regola stanno in una frase: si misura prima di scriverla, e si
+dichiara che cosa resta fuori. Il resto è il motivo per cui non si stringe: una prova che fallisce a
+caso viene disattivata da qualcuno, prima o poi.
+
+---
+
+### Il terzo stato dell'assenza: quando il client sa benissimo, e la scena non lo nomina
+
+> `SCONOSCIUTO` è l'assenza di un'osservazione. `IRRAGGIUNGIBILE` è un'osservazione. `ALTRO` è il
+> contrario di entrambi: il client ha capito perfettamente che cosa ha davanti, ed è qualcosa che
+> questa storia non racconta. Un membro che riparte è `RSOther` per qualche secondo — e sono
+> esattamente i secondi in cui la sala guarda quella riga.
+
+Fonte: [`app/docs/08-il-ponte-sdam-e-i-thread-del-driver.md`](../app/docs/08-il-ponte-sdam-e-i-thread-del-driver.md).
+
+**Perché una slide:** perché completa la coppia della slide precedente e mostra che gli stati «non
+so» sono più di uno. Il valore di ripiego di una traduzione è una decisione, non un dettaglio:
+mandare l'ignoto e il fuori-scena nello stesso posto fa scrivere «non so» proprio nel momento in cui
+si sapeva.

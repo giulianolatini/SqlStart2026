@@ -429,14 +429,108 @@ callback di PyMongo, che riferiscono il cambiamento quando accade. Nessun `Clust
 esiste ancora, e per il `TopologyWatcher` non c'è l'invariante di thread che il Task 5 ha dato al
 generatore di carico: oggi lo si usa da un thread solo, ma nessuna prova lo dice.
 
+## Task 7 — Il ponte SDAM: quattro ascoltatori, una coda
+
+**Data:** 2026-09-03 · **Commit:** `feat: il ponte SDAM — il listener costruisce, deposita e ritorna`
+
+Il primo modulo di `infrastructure/` che importa PyMongo davvero, e il primo punto in cui
+l'applicazione smette di interrogare il cluster e comincia ad ascoltarlo. Il racconto per esteso è
+in [08-il-ponte-sdam-e-i-thread-del-driver.md](08-il-ponte-sdam-e-i-thread-del-driver.md); qui c'è
+quello che il piano non prevedeva.
+
+**Quattro classi non sono una scelta di stile.** Il piano diceva «le quattro classi di listener del
+§6.3», e la tentazione di farne una sola che le implementa tutte è forte: la coda sarebbe
+naturalmente unica. Non si può. `ServerListener` e `TopologyListener` dichiarano gli stessi tre
+metodi — `opened`, `closed`, `description_changed` — e il driver smista per `isinstance`. Una classe
+che eredita da entrambi finirebbe in due elenchi, e il suo unico `description_changed` riceverebbe
+due tipi di evento diversi sulla stessa firma. La separazione la fa il driver, gratis.
+
+**I `Protocol` hanno pagato due volte, e la seconda non era prevista.** La prima è quella per cui
+sono stati scritti: le prove costruiscono a mano gli oggetti che il driver passerebbe, e la
+traduzione si verifica senza PyMongo vivo — quaranta prove in meno di un secondo. La seconda è che
+`mypy --strict`, dovendo dimostrare che i metodi accettano un tipo **più largo** di quello della
+classe base ereditata, verifica che le classi vere di PyMongo soddisfino i nostri `Protocol`. Il
+controllo di compatibilità col driver arriva a ogni `make app-check`, senza che nessuno lo scriva.
+
+Ed è servito subito. La prima stesura dichiarava `address: tuple[str, int]`; mypy ha rifiutato,
+perché in PyMongo la porta è opzionale. Senza quel rifiuto, `indirizzo_di` avrebbe scritto
+`mongo-1:None` in una riga della cronaca, e nessun doppio scritto a mano se ne sarebbe accorto —
+perché chi scrive il doppio la porta ce la mette sempre. Non un crash evitato: **una stringa
+sbagliata a schermo durante il talk**.
+
+**La documentazione di PyMongo sbaglia un'unità, e sarebbe costata una tabella di zeri.** La
+docstring di `ServerHeartbeatSucceededEvent.duration` dice «in microseconds»; il valore che ci
+arriva è una differenza di `time.monotonic()`, cioè **secondi** ([M-012](Sources.md#m-012)).
+`CommandSucceededEvent.duration_micros`, invece, è davvero in microsecondi. Credere alla docstring
+avrebbe prodotto battiti nell'ordine di 10⁻⁶ ms, che nel riepilogo dei percentili sarebbero comparsi
+come zeri: la **nota 155** fatta scattare da una riga di documentazione altrui. È il caso che il
+patto di lettura di `app/docs` prevede — dove la misura e la fonte non concordano, la riserva si
+scrive — e stavolta è capitato sul serio.
+
+**Un valore nuovo nel dominio, e la ragione per cui non è un ADR.** `RuoloServer.ALTRO`. Il driver
+conosce `RSOther`, `RSGhost`, `LoadBalancer`, e mandarli tutti su `SCONOSCIUTO` è una traduzione
+sbagliata proprio nel momento della demo: un membro che riparte sta qualche secondo in `RECOVERING`,
+il driver lo chiama `RSOther`, e la sala sta guardando quella riga. «Sconosciuto» direbbe *il client
+non ha capito*, mentre il client ha capito benissimo. I tre stati dell'assenza sono ora tre cose
+distinte: `SCONOSCIUTO` è l'assenza di un'osservazione, `IRRAGGIUNGIBILE` è un'osservazione, `ALTRO`
+è il contrario di entrambi. Nessun ADR perché `RuoloServer` non è enumerato nel design, a differenza
+dei nove eventi — se lo fosse stato, questa riga sarebbe costata una decisione come è costata a
+`PrimaryWaitAbandoned`.
+
+**Il driver fa quello che ADR-0019 impone a noi.** Misurando da quale thread arrivano i callback si
+scopre che server e topologia **non** vengono consegnati dal codice che scopre il cambiamento: quel
+codice fa `self._events.put(...)`, e un thread di nome `pymongo_events_thread` drena e chiama i
+listener ([M-014](Sources.md#m-014)). Battiti e comandi invece arrivano davvero sul thread del
+monitor e su quello applicativo. Metà dei listener di PyMongo passano quindi dalla stessa forma —
+coda più drenatore — che ADR-0019 impone all'applicazione, e nessuna pagina di documentazione lo
+dice. La regola non cambia: quel thread è uno solo, e un callback lento lì accoda anche l'evento che
+annuncia il primario nuovo.
+
+**La soglia della prova cronometrata è stata misurata prima di essere scritta.** Il callback onesto
+costa 1,3 µs contro 0,45 µs di un `put_nowait` nudo: 2,9 volte, stabile su cinque ripetizioni. Una
+tabella di Rich dentro il callback porta il rapporto a 883, cioè 386 µs — a ottocento comandi al
+secondo sono 0,31 secondi di CPU per ogni secondo di orologio, rubati al thread del driver. La
+soglia sta a **10** ([M-013](Sources.md#m-013)). Va detto che non prende una `f-string`, che pure il
+codice vieta: a 5,5 resterebbe sotto. È una rinuncia dichiarata, perché una soglia a 4 fallirebbe su
+una macchina carica, e una prova che fallisce a caso prima o poi viene disattivata.
+
+**Ventotto rotture, ventisette rosse, e una che non era una rottura.** Nessuna prova nuova è stata
+necessaria: il contrario di [M-011](Sources.md#m-011), dove quattro guardie su ventuno mancavano. La
+differenza è che qui le prove sono state scritte contro un contratto già **misurato**, non contro
+un'idea del comportamento.
+
+La quindicesima resta verde, e la prima ipotesi — manca una guardia — è sbagliata. Il driver
+pubblica quel cambio in un punto solo, e ricava la descrizione vecchia indicizzando per l'indirizzo
+di quella nuova: i due lati portano sempre lo stesso indirizzo, per costruzione. Non sono due
+letture di cui una giusta, sono la stessa lettura scritta in due modi. Inventare una prova con due
+indirizzi diversi aggiungerebbe copertura senza aggiungere verità, perché difenderebbe un caso che
+il driver non può produrre; la cura è verificare l'invariante alla fonte e scriverlo dove il codice
+lo usa. **Nota 161:** prima di concludere che manca una guardia, va escluso che manchi la differenza.
+
+**La nota 153 è arrivata al primo colpo.** La rottura «`drena` guarda ma non svuota», nella sua prima
+forma, era un ciclo infinito: la batteria si è piantata dopo sette minuti senza dire niente. Da lì
+un limite di 90 secondi per corsa e un esito `APPESO` che ha un nome suo. Le protezioni delle note
+157–159 erano già nello script fin dall'inizio, ed è la prima volta che una batteria di rotture
+parte con gli arnesi già a posto.
+
+**Che cosa resta aperto.** Nessuna di queste misure ha parlato con un cluster: i client delle prove
+nascono con `connect=False`, e i due eventi che contano per il talk — un battito che fallisce mentre
+il primario cade, un `ServerStateChanged` verso `PRIMARIO` su un altro nodo — nessuno li ha visti
+arrivare. È il Task 8. Resta aperto anche il buco dichiarato in [M-015](Sources.md#m-015): PyMongo
+ingoia le eccezioni dei listener stampandole su `stderr`, e sotto un `Live` di Rich quelle righe non
+si vedono. Un ponte rotto si presenterebbe come una cronaca che smette di aggiornarsi. La sede in
+cui si può chiudere è il Task 11.
+
+---
+
 ---
 
 ## Che cosa manca
 
-I task dal 7 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
-futuro, che lo stanno facendo — in particolare
-[04-eventi-del-driver-e-concorrenza.md](04-eventi-del-driver-e-concorrenza.md), che porta in testa un
-avviso di stato.
+I task dall'8 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
+futuro, che lo stanno facendo. L'avviso di stato in testa a
+[04-eventi-del-driver-e-concorrenza.md](04-eventi-del-driver-e-concorrenza.md) è stato riscritto al
+Task 7, perché quella pagina descriveva un codice che adesso esiste.
 
 I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 
@@ -448,12 +542,15 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | L'invariante del §6.3 è difeso *per quello che è* da una sola prova | [registro, Task 5](#task-5--il-generatore-di-carico-i-tentativi-le-latenze) | se i conteggi lasciassero il ciclo di drenaggio |
 | `$group` non è nel dialetto di `InMemoryStore` | il messaggio di `NonSupportato`, e [02](02-porte-e-doppi.md#dove-il-doppio-non-sa-solleva) | la prima prova che lo chiederà |
 | Il rifiuto dei booleani in `_come_intero` non è coperto da nessuna prova | [M-006, riserve](Sources.md#m-006) | la prima prova che dipenderà da lui |
-| `SdamBridge` e la coda: il comportamento di PyMongo va **osservato**, non solo letto | [04](04-eventi-del-driver-e-concorrenza.md#che-cosa-non-è-ancora-verificato) | Task 7 |
-| Nessun `ClusterInspector` reale: il `TopologyWatcher` ha visto solo topologie finte | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | Task 7 |
-| L'osservatore interroga invece di ascoltare: la risoluzione è l'intervallo | [07](07-topologia-failover-e-i-due-numeri.md#il-limite-di-questo-osservatore-dichiarato) | Task 7 |
-| L'intervallo predefinito di 500 ms è scelto, non misurato | [07](07-topologia-failover-e-i-due-numeri.md#il-limite-di-questo-osservatore-dichiarato) | Task 7 |
+| ~~`SdamBridge` e la coda: il comportamento di PyMongo va **osservato**, non solo letto~~ | [08](08-il-ponte-sdam-e-i-thread-del-driver.md) | **chiuso** al Task 7, per la parte che non richiede un cluster |
+| Nessun `ClusterInspector` reale: il `TopologyWatcher` ha visto solo topologie finte | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | Task 8 |
+| ~~L'osservatore interroga invece di ascoltare: la risoluzione è l'intervallo~~ | [08](08-il-ponte-sdam-e-i-thread-del-driver.md) | **chiuso** al Task 7: il ponte riceve i cambiamenti quando accadono |
+| L'intervallo predefinito di 500 ms è scelto, non misurato | [07](07-topologia-failover-e-i-due-numeri.md#il-limite-di-questo-osservatore-dichiarato) | Task 8 |
 | Il `TopologyWatcher` non ha un invariante di thread: oggi lo usa un thread solo | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | Task 10, con la TUI |
-| `ChunkMigrated` potrebbe non essere osservabile da un client di `mongos` | [04](04-eventi-del-driver-e-concorrenza.md#che-cosa-non-è-ancora-verificato) | Task 7 |
+| `ChunkMigrated` potrebbe non essere osservabile da un client di `mongos` | [08](08-il-ponte-sdam-e-i-thread-del-driver.md#che-cosa-non-è-ancora-verificato) | Task 15 |
+| Un'eccezione dentro un listener finisce su `stderr`, e sotto un `Live` non si vede | [M-015](Sources.md#m-015) | Task 11 |
+| La soglia della prova cronometrata non prende una `f-string` nel callback | [M-013, riserve](Sources.md#m-013) | dichiarata, non si chiude |
+| Le unità delle durate sono lette nel sorgente di PyMongo, non viste su un battito vero | [M-012, riserve](Sources.md#m-012) | Task 8 |
 | Come le prove di integrazione ricevono la credenziale senza violare ADR-0054 | [decisioni](decisioni-che-vincolano-app.md#adr-0054) | Task 8 |
 | `refresh_per_second` dichiarato invece che ereditato | [04](04-eventi-del-driver-e-concorrenza.md) | Task 10 |
 | L'immagine dell'applicazione fra quelle da avere in cache offline | [decisioni](decisioni-che-vincolano-app.md#adr-0009) | Task 12 |
@@ -465,4 +562,4 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 
 **Il registro completo del repository**, che copre anche le altre feature, è
 [`docs/registro-operativo-sviluppo.md`](../../docs/registro-operativo-sviluppo.md). Le note di metodo
-citate qui (137–160) stanno lì per esteso.
+citate qui (137–161) stanno lì per esteso.
