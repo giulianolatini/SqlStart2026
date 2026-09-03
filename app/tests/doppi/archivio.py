@@ -49,7 +49,7 @@ class InMemoryStore:
     che nessuno abbia scritto una riga di codice difettoso. Un doppio che tace su ciò che
     non sa è più pericoloso di uno che non c'è.
 
-    **Due casi in cui l'ovvio diverge da MongoDB**, e le due risposte sono diverse perché
+    **Tre casi in cui l'ovvio diverge da MongoDB**, e le risposte sono diverse perché
     diverse sono le domande:
 
     - `{"campo": None}` lo **sa fare**, e apposta. In MongoDB corrisponde sia ai documenti
@@ -60,7 +60,13 @@ class InMemoryStore:
     - `{"campo": {...}}` senza operatori, cioè il confronto con un sottodocumento intero,
       lo **rifiuta**. MongoDB lo risolve «including the field order» e l'uguaglianza fra
       `dict` di Python l'ordine lo ignora: nessuna implementazione ovvia è quella giusta,
-      e imitare male è peggio che dichiarare di non saper fare (A-007).
+      e imitare male è peggio che dichiarare di non saper fare (A-007);
+    - `$count` su **zero** documenti in ingresso non emette niente, e non emette lo zero.
+      È la divergenza che il doppio aveva davvero, scoperta al Task 8 dal contratto
+      condiviso e corretta con la misura in mano (M-017). Val la pena di rileggerla come
+      un caso della [nota 155](../../../docs/registro-operativo-sviluppo.md): lì il
+      difetto era una risposta mancante scambiata per uno zero, qui è uno zero inventato
+      dove la risposta manca. Lo stesso errore, dai due lati.
 
     **Una divergenza che resta, e va conosciuta**: i documenti tornano nell'ordine in cui
     sono stati inseriti, mentre MongoDB senza `sort` esplicito non promette **nessun**
@@ -167,7 +173,17 @@ class InMemoryStore:
             case "$limit":
                 return documenti[: self._come_intero(nome, argomento)]
             case "$count":
-                return [{self._come_testo(nome, argomento): len(documenti)}]
+                nome_campo = self._come_testo(nome, argomento)
+                # Su zero documenti in ingresso, MongoDB non emette **niente**: né `$count`
+                # né `$group {_id: null}` producono la riga con lo zero che SQL darebbe.
+                # Misurato contro lo stack 01 al Task 8 ([M-017](../../docs/Sources.md#m-017)),
+                # perché fin lì il doppio restituiva `[{campo: 0}]` e il contratto
+                # condiviso l'ha smentito alla prima esecuzione. La differenza non è
+                # accademica: chi legge `risultato[0]["quanti"]` passa nella suite veloce
+                # e solleva `IndexError` contro il cluster.
+                if not documenti:
+                    return []
+                return [{nome_campo: len(documenti)}]
         raise NonSupportato(
             f"InMemoryStore non conosce lo stadio {nome}: insegnaglielo insieme alla prova "
             "che lo verifica. Conosce $match, $limit e $count."

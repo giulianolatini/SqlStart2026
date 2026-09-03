@@ -44,18 +44,16 @@ app-test: ## Esegue la suite unitaria dell'applicazione (senza Docker)
 app-check: ## Verifica i tipi dell'applicazione con mypy --strict
 	uv run --directory app mypy
 
-# Finché `tests/integration` è vuota pytest esce **5**, che significa «non ho raccolto
-# niente». È il codice giusto e va tradotto, non nascosto: lasciarlo passare come errore
-# manderebbe a cercare Docker chi non ha ancora nulla da eseguire, e sopprimerlo in
-# silenzio insegnerebbe che un verde qui non vuol dire niente. Dal Task 8 in poi la
-# condizione non si presenta più, e il ramo resta a costo zero.
-app-test-integration: ## Esegue la suite di integrazione dell'applicazione (richiede Docker)
-	@uv run --directory app pytest -q tests/integration; esito=$$?; \
-	if [ $$esito -eq 5 ]; then \
-		echo "Nessuna prova di integrazione: arrivano al Task 8 del piano."; \
-	else \
-		exit $$esito; \
-	fi
+# Dal Task 8 questo target è vero: accende gli stack che le prove chiedono — con questi
+# stessi `up-01`, `up-02`, `up-03`, non con un facsimile (ADR-0020) — e ci gira contro.
+# Non li spegne alla fine: fermare uno stack che l'operatore aveva già su sarebbe un
+# effetto che le prove non hanno causato. Ciò che smontano sono i **dati**, e lo fanno
+# con un database usa-e-getta per prova.
+#
+# Il ramo che traduceva l'uscita 5 di pytest — «non ho raccolto niente» — non serve più e
+# non va rimesso: adesso un 5 vorrebbe dire che le prove sono sparite, ed è una notizia.
+app-test-integration: ## Esegue la suite di integrazione dell'applicazione (accende gli stack; richiede Docker)
+	uv run --directory app pytest -q tests/integration
 
 docs-check: ## Verifica il legame fra ADR e fonti, e i collegamenti fra le pagine
 	uv run --project tools python tools/check_citations.py docs/Decision.md docs/Sources.md

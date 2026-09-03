@@ -295,22 +295,22 @@ Prima esecuzione con Docker acceso. [ADR-0020](../Decision.md#adr-0020) è la re
 stack del repository, non un facsimile, così i test verificano l'artefatto che il pubblico eseguirà
 davvero.
 
-- [ ] **Passo 1.** `PymongoStore` che implementa `DocumentStore`, e `PymongoInspector` che
+- [x] **Passo 1.** `PymongoStore` che implementa `DocumentStore`, e `PymongoInspector` che
       implementa `ClusterInspector` leggendo `serverStatus`, `dbStats` e — sullo sharded — la
       distribuzione per shard. Nessuno dei due conosce il sink: emettono ritornando dati.
-- [ ] **Passo 2.** `DataGenerator` deterministico: lo stesso seme produce lo stesso dataset. È la
+- [x] **Passo 2.** `DataGenerator` deterministico: lo stesso seme produce lo stesso dataset. È la
       condizione perché una misura di oggi e una di giovedì siano confrontabili, e perché la prova
       generale non scopra numeri diversi da quelli provati.
-- [ ] **Passo 3.** I test di integrazione avviano lo stack con i `make up-0X` esistenti e ci girano
+- [x] **Passo 3.** I test di integrazione avviano lo stack con i `make up-0X` esistenti e ci girano
       contro. Il target `app-test-integration` diventa vero, resta **separato** dagli unitari, e la
       sua descrizione dice che richiede Docker: la suite veloce deve restare veloce, altrimenti
       smette di essere eseguita.
-- [ ] **Passo 4.** Gli stessi test che il Task 4 ha scritto contro `InMemoryStore` girano contro
+- [x] **Passo 4.** Gli stessi test che il Task 4 ha scritto contro `InMemoryStore` girano contro
       `PymongoStore` dove il contratto è identico. Un doppio che si comporta diversamente
       dall'originale è un doppio che mente, e questo passo è il modo di accorgersene.
-- [ ] **Passo 5.** Ogni test di integrazione smonta ciò che ha acceso e non lascia dati: una misura
+- [x] **Passo 5.** Ogni test di integrazione smonta ciò che ha acceso e non lascia dati: una misura
       che sporca lo stack fa fallire la prova dopo, per un motivo che sembra un altro.
-- [ ] **Passo 6.** Commit: `feat: gli adattatori pymongo, provati contro gli stack del repository`.
+- [x] **Passo 6.** Commit: `feat: gli adattatori pymongo, provati contro gli stack del repository`.
 
 ---
 

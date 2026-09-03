@@ -328,6 +328,97 @@ misure valgono per l'ambiente descritto in [M-001](#m-001) e per nessun altro.
 
 ---
 
+<a id="a-011"></a>
+### A-011 — MongoDB: `limit(0)` non vuol dire «nessun documento», vuol dire «nessun limite»
+
+- **URL:** https://www.mongodb.com/docs/manual/reference/method/cursor.limit/
+- **Editore:** MongoDB, Inc. — Database Manual 8.3
+- **Consultata:** 2026-09-03
+- **Verdetto:** conferma piena, e conferma un'inversione: la lettura ovvia del valore è quella sbagliata
+- **Cosa afferma:** «A `limit()` value of 0 (i.e. `.limit(0)`) is equivalent to setting no limit». La
+  pagina aggiunge due cose che valgono per `find_page`: un limite **negativo** «closes the cursor
+  after returning a single batch of results», quindi non è semplicemente «zero documenti»; e
+  l'ordine di concatenazione non conta, perché «the server always applies skip before limit».
+- **Conseguenza qui:** `PymongoStore.find_page` intercetta `quanti <= 0` **prima** di chiamare il
+  driver e restituisce la tupla vuota. Senza quella riga, chi chiede zero documenti riceve la
+  collezione intera — e a `quanti=0` non ci si arriva digitandolo, ci si arriva per sottrazione
+  (quante righe restano nella finestra, quanti mancano alla fine dell'elenco), cioè nel caso limite
+  di un calcolo, che è precisamente quello che nessuno prova a mano. La verifica corrispondente sta
+  nel contratto condiviso, dove passa contro `InMemoryStore` e falliva contro MongoDB: vedi
+  [M-022](#m-022).
+- **Usata da:** [09-adattatori-veri-e-contratto-condiviso.md](09-adattatori-veri-e-contratto-condiviso.md)
+
+<a id="a-012"></a>
+### A-012 — MongoDB: `$shardedDataDistribution`, l'unico conteggio per shard che non interroga gli shard
+
+- **URL:** https://www.mongodb.com/docs/manual/reference/operator/aggregation/shardedDataDistribution/
+- **Editore:** MongoDB, Inc. — Database Manual
+- **Versione documentata:** stadio «New in version 6.0.3»
+- **Consultata:** 2026-09-03
+- **Verdetto:** conferma piena, con **due riserve che la pagina stessa dichiara**
+- **Cosa afferma:** «Returns information on the distribution of data in sharded collections». Dove si
+  esegue: «This aggregation stage is only available on `mongos`» e «This aggregation stage must be run
+  on the `admin` database. The user must have the `shardedDataDistribution` privilege action». I due
+  campi che contano: `numOwnedDocuments` è il «Number of documents owned by the shard»,
+  `numOrphanedDocs` il «Number of orphaned documents in the shard».
+  Le due riserve: «Starting in MongoDB 8.0, `$shardedDataDistribution` only returns output for a
+  collection's primary shard if the primary shard has chunks or orphaned documents»; e «After an
+  unclean shutdown of a `mongod` using the Wired Tiger storage engine, size and count statistics
+  reported by `$shardedDataDistribution` may be inaccurate».
+- **Conseguenza qui:** `PymongoInspector.shard_distribution` somma `numOwnedDocuments` e **non** gli
+  orfani, perché contarli farebbe superare al totale il numero di documenti che esistono e il conto
+  non tornerebbe con `count()`. La seconda riserva pesa sulla scena del guasto: il Blocco 3 spegne
+  uno shard con un `docker kill`, che è per definizione un arresto sporco, e la pagina dice che
+  proprio dopo quello i conteggi possono essere imprecisi. Va detto dal palco invece di essere
+  scoperto.
+- **Usata da:** [09-adattatori-veri-e-contratto-condiviso.md](09-adattatori-veri-e-contratto-condiviso.md)
+
+<a id="a-013"></a>
+### A-013 — MongoDB: i chunk di una collezione si trovano per `uuid`, e il manuale lo prescrive
+
+- **URL:** https://www.mongodb.com/docs/manual/reference/config-database/
+- **Editore:** MongoDB, Inc. — Database Manual
+- **Consultata:** 2026-09-03
+- **Verdetto:** conferma **parziale**, e la parte che manca è quella che si sarebbe voluta citare
+- **Cosa afferma:** «The `config.chunks` collection stores a document for each chunk in the cluster»,
+  e il documento d'esempio ha `_id`, `uuid`, `min`, `max`, `shard`, `lastmod`, `history` — nessun
+  `ns`. Il modo di interrogarla è prescritto: «To find the chunks in a collection, retrieve the
+  collection's `uuid` identifier from the `config.collections` collection. Then, use the `uuid` to
+  retrieve the document with the same `uuid` from the `config.chunks` collection». La pagina premette
+  che «The config database is internal. Applications and administrators should not modify or depend
+  on its content during normal operation».
+- **Conseguenza qui:** `_chunk_per_shard` fa esattamente i due passaggi del Tip. La parte che **non**
+  si può citare è la sparizione del campo `ns`: la pagina non la afferma da nessuna parte e non
+  nomina la 5.0 a questo proposito, quindi il codice non lo dice — lo dice la misura
+  [M-020](#m-020), che è una constatazione sul 7.0.40 di questo repository e non una regola di
+  versione. L'avvertimento sull'uso di `config` è invece una riserva vera: questo ispettore legge un
+  database interno, e lo fa perché non esiste altro modo di contare i chunk. Se un giorno il formato
+  cambia, la prova di integrazione sul 03 diventa rossa — che è la ragione per cui esiste.
+- **Usata da:** [09-adattatori-veri-e-contratto-condiviso.md](09-adattatori-veri-e-contratto-condiviso.md)
+
+<a id="a-014"></a>
+### A-014 — PyMongo: `insert_one` scrive l'`_id` dentro il documento che riceve
+
+- **URL:** https://pymongo.readthedocs.io/en/stable/api/pymongo/collection.html
+- **Editore:** MongoDB, Inc. — documentazione di PyMongo (stable)
+- **Consultata:** 2026-09-03
+- **Verdetto:** conferma **parziale**, e la parte mancante è stata misurata invece che letta
+- **Cosa afferma:** di `insert_one`, che il documento «Must be a mutable mapping type. If the document
+  does not have an `_id` field one will be added automatically». Di `ordered` in `insert_many`: «If
+  `True` (the default) documents will be inserted on the server serially, in the order provided» e in
+  caso di errore «all remaining inserts are aborted»; con `False` i documenti vanno «in arbitrary
+  order, possibly in parallel, and all document inserts will be attempted».
+- **Conseguenza qui:** la frase sul `mutable mapping` è la ragione formale per cui `PymongoStore`
+  copia: la porta dichiara `Mapping`, il driver vuole qualcosa di mutabile. La conseguenza che la
+  pagina **non** enuncia per `insert_many` — che l'`_id` finisca nel dizionario **del chiamante** —
+  è quella che pesa davvero sul generatore di carico, e non essendo scritta è stata provata: la
+  verifica `test_l_adattatore_non_scrive_l_id_nel_documento_di_chi_lo_ha_chiamato` chiama prima
+  l'adattatore, poi il driver nudo, e mostra la differenza. Su `ordered` la pagina descrive due
+  comportamenti senza promettere prestazioni: il confronto è [M-021](#m-021).
+- **Usata da:** [09-adattatori-veri-e-contratto-condiviso.md](09-adattatori-veri-e-contratto-condiviso.md)
+
+---
+
 ## Misure fatte qui
 
 <a id="m-001"></a>
@@ -967,6 +1058,214 @@ misure valgono per l'ambiente descritto in [M-001](#m-001) e per nessun altro.
   in una forma che termina (`return list(self._coda.queue)`) e catturata.
 - **Usata da:** [08-il-ponte-sdam-e-i-thread-del-driver.md](08-il-ponte-sdam-e-i-thread-del-driver.md),
   [registro-sviluppo-app.md](registro-sviluppo-app.md)
+
+---
+
+<a id="m-017"></a>
+### M-017 — `$count` su zero documenti non risponde zero: non risponde
+
+- **Data:** 2026-09-03
+- **Comando:** un `MongoClient` verso lo stack 01, una collezione appena creata e poi una con due
+  documenti e un filtro che non prende niente.
+- **Output:**
+  ```
+  collezione inesistente:
+    $count            -> []
+    $match+$count     -> []
+    $group _id:null   -> []
+    count_documents   -> 0
+  con due documenti, ma filtro che non prende niente:
+    $match+$count     -> []
+    $count            -> [{'quanti': 2}]
+  ```
+- **Che cosa dimostra:** uno stadio di aggregazione che non riceve documenti non ne emette. Non è una
+  particolarità di `$count`: anche `$group` con `_id: null`, che in SQL corrisponderebbe a un
+  `COUNT(*)` su zero righe e darebbe zero, qui tace. L'unico che risponde zero è `count_documents`,
+  che non è una pipeline.
+- **Perché è stata fatta:** perché il contratto condiviso del Task 8 ha smentito il doppio alla prima
+  esecuzione. `InMemoryStore` restituiva `[{"quanti": 0}]`, ed è stato scritto così senza malizia:
+  `len(documenti)` di una lista vuota fa zero, e la riga sembrava giusta. La misura ha detto chi
+  aveva ragione, e il doppio è stato corretto.
+- **Riserve:** la differenza è pericolosa proprio perché nessuno solleva da nessuna delle due parti.
+  Chi legge `risultato[0]["quanti"]` passa nella suite veloce e prende `IndexError` contro il
+  cluster — nella scena in cui la collezione è vuota, cioè al primo fotogramma. Vale la pena leggerla
+  accanto alla **nota 155**: lì il difetto era una risposta mancante scambiata per uno zero, qui è
+  uno zero inventato dove la risposta manca. Lo stesso errore, dai due lati.
+- **Usata da:** [09-adattatori-veri-e-contratto-condiviso.md](09-adattatori-veri-e-contratto-condiviso.md),
+  [registro-sviluppo-app.md](registro-sviluppo-app.md)
+
+<a id="m-018"></a>
+### M-018 — La credenziale passata come argomento non compare in nessuno dei tre posti in cui la si cercava
+
+- **Data:** 2026-09-03
+- **Comando:** una sonda che si collega allo stack 02 con `username=`/`password=`, poi con una
+  password sbagliata, e in tutti i casi cerca la stringa del segreto dentro il messaggio d'errore e
+  dentro `repr(client)`. La sonda non stampa mai il valore vero.
+- **Output:**
+  ```
+  === 02 replica set, dall'host, replicaSet=rs0 — la trappola ===
+  la password compare nel messaggio? False
+  === password sbagliata: il messaggio la contiene? ===
+  tipo: OperationFailure
+  la password compare nel messaggio? False
+  messaggio: Authentication failed., full error: {'ok': 0.0, 'errmsg': 'Authentication failed.',
+             'code': 18, 'codeName': 'AuthenticationFailed', ...}
+  === e nel repr del client? ===
+  la password compare nel repr? False
+  repr (primi 300): MongoClient(host=['localhost:27021'], document_class=dict, tz_aware=False,
+                                connect=True, authsource='admin', directconnection=True)
+  ```
+- **Che cosa dimostra:** passata come argomento — non dentro l'URI — la password non esce da PyMongo
+  né in un `ServerSelectionTimeoutError`, né in un `OperationFailure`, né nel `repr` del client. Il
+  `repr` mostra `authsource` e `directconnection` e non mostra `password`. La misura dice anche
+  un'altra cosa, che si legge nella riga stessa: `tz_aware=False` è l'impostazione **predefinita**.
+- **Perché è stata fatta:** era un punto aperto dichiarato — «come le prove di integrazione ricevono
+  la credenziale senza violare ADR-0054». La risposta è che la ricevono come argomento, e che il
+  punto scoperto non era PyMongo ma il codice delle prove: da lì `Credenziali` con `field(repr=False)`.
+- **Riserve:** vale per la versione di PyMongo installata qui (4.17) e per questi tre percorsi. Non è
+  una promessa dell'API e non è scritta in nessuna pagina: se un giorno un messaggio d'errore
+  includesse la stringa di connessione completa, questa misura non lo intercetterebbe. E resta il buco
+  dichiarato in `Credenziali`: `credenziali.password` stampato a mano si vede, perché non può essere
+  altrimenti.
+- **Usata da:** [09-adattatori-veri-e-contratto-condiviso.md](09-adattatori-veri-e-contratto-condiviso.md)
+
+<a id="m-019"></a>
+### M-019 — Un replica set sano, visto dall'host, si legge `ReplicaSetNoPrimary`
+
+- **Data:** 2026-09-03
+- **Comando:** `MongoClient("mongodb://localhost:27021/", replicaSet="rs0", …)` dall'host, contro lo
+  stack 02 avviato e sano, con `serverSelectionTimeoutMS=4000`.
+- **Output:**
+  ```
+  FALLITA dopo 4.2s
+  tipo: ServerSelectionTimeoutError
+  mongo-rs-2:27017: [Errno 8] nodename nor servname provided, or not known …,
+  mongo-rs-1:27017: [Errno 8] nodename nor servname provided, or not known …,
+  mongo-rs-3:27017: [Errno 8] nodename nor servname provided, or not known …,
+  Timeout: 4.0s, Topology Description: <TopologyDescription topology_type: ReplicaSetNoPrimary, …>
+  topology_type_name: ReplicaSetNoPrimary
+    server: ('mongo-rs-2', 27017) Unknown errore: AutoReconnect
+    server: ('mongo-rs-1', 27017) Unknown errore: AutoReconnect
+    server: ('mongo-rs-3', 27017) Unknown errore: AutoReconnect
+  ```
+  Con `directConnection=True` sulla stessa porta, invece:
+  ```
+  topology_type_name: Single
+  replica_set_name: None
+    server: ('localhost', 27021) RSPrimary 0.0017071250003937166
+  hello.setName: rs0
+  hello.hosts: ['mongo-rs-1:27017', 'mongo-rs-2:27017', 'mongo-rs-3:27017']
+  hello.me: mongo-rs-1:27017
+  conta lab.ordini: 50000
+  ```
+- **Che cosa dimostra:** è ADR-0012 e ADR-0021 visti dal lato che fa male. Il client si collega alla
+  porta pubblicata, chiede la configurazione del set, e la configurazione gli risponde con i nomi di
+  servizio Compose — che dentro la rete esistono e sull'host no. Tutti e tre i membri falliscono la
+  risoluzione DNS, e la topologia che ne risulta è **indistinguibile da un replica set che ha perso il
+  primario**: stesso nome, stessi tre server sconosciuti, stesso errore di selezione. Quattro secondi
+  e due decimi per scoprirlo.
+- **Perché è stata fatta:** per decidere come le prove di integrazione del Task 8 si collegano al 02.
+  La risposta è `directConnection=True`, e la conseguenza è una riserva: il **ruolo** si legge giusto
+  (`RSPrimary` → `PRIMARIO`), la **forma** no (`Single` → `SINGOLA`). `REPLICA_SET_CON_PRIMARIO` non è
+  verificabile dall'host, e lo sarà al Task 12 dall'interno della rete.
+- **Riserve:** la misura è fatta su macOS con Docker Desktop, dove la rete Compose non è raggiungibile
+  dall'host. Su Linux con `network_mode: host`, o con voci in `/etc/hosts`, i nomi risolverebbero e il
+  fenomeno non si presenterebbe — il che lo rende **peggiore**, non migliore: chi prova su una
+  macchina e non sull'altra vede due comportamenti diversi senza aver cambiato una riga.
+- **Usata da:** [09-adattatori-veri-e-contratto-condiviso.md](09-adattatori-veri-e-contratto-condiviso.md)
+
+<a id="m-020"></a>
+### M-020 — Su 7.0.40 nessun chunk ha il campo `ns`, e cercarlo restituisce zero senza protestare
+
+- **Data:** 2026-09-03
+- **Comando:** attraverso il mongos dello stack 03, un documento qualunque di `config.chunks` e tre
+  conteggi.
+- **Output:**
+  ```
+  versione mongos: 7.0.40
+  un chunk qualunque, campi: ['_id', 'history', 'lastmod', 'max', 'min', 'onCurrentShardSince',
+                              'shard', 'uuid']
+  quanti chunk hanno il campo ns? 0
+  chunk totali: 5
+  query per ns='lab.ordini': 0
+  ```
+  E l'unione fatta nei due modi, sulla stessa collezione:
+  ```
+  join su uuid: [{'_id': 'shard1rs', 'chunk': 2}, {'_id': 'shard2rs', 'chunk': 2}]
+  join su _id:  []
+  ```
+- **Che cosa dimostra:** l'unione va fatta su `uuid`, come prescrive [A-013](#a-013), e ogni altra
+  chiave dà la lista vuota. Il punto non è che sia vuota: è che è vuota **in silenzio**. Nessuna
+  eccezione, nessun avvertimento, un numero plausibile — zero chunk — al posto di quattro.
+- **Perché è stata fatta:** perché la scena del Blocco 3 poggia sul fatto che chunk e documenti non si
+  deducono l'uno dall'altro, e un ispettore che riportasse zero chunk direbbe «i dati non sono
+  distribuiti» esattamente nel momento in cui lo sono.
+- **Riserve:** è una constatazione su 7.0.40, non una regola di versione: il manuale non afferma da
+  nessuna parte che `ns` sia stato tolto, e la pagina di `config` avverte che «The config database is
+  internal. Applications and administrators should not modify or depend on its content during normal
+  operation». Questo ispettore ci dipende, perché non c'è altro modo di contare i chunk. La difesa è
+  la prova di integrazione sullo stack 03, che diventa rossa il giorno in cui il formato cambia.
+- **Usata da:** [09-adattatori-veri-e-contratto-condiviso.md](09-adattatori-veri-e-contratto-condiviso.md)
+
+<a id="m-021"></a>
+### M-021 — `ordered=False` non fa guadagnare niente su questo carico
+
+- **Data:** 2026-09-03
+- **Comando:** stack 01, lotti da 500 documenti del `DataGenerator`, 40 lotti per configurazione
+  (ventimila documenti), tre giri alternando `ordered=True` e `ordered=False`, ogni corsa su un
+  database proprio poi cancellato.
+- **Output:**
+  ```
+  giro 0  ordered=True   totale   123.1 ms  mediana lotto   2.63 ms  p95   4.70 ms   162426 doc/s
+  giro 0  ordered=False  totale   115.9 ms  mediana lotto   2.70 ms  p95   3.59 ms   172497 doc/s
+  giro 1  ordered=True   totale   134.0 ms  mediana lotto   2.69 ms  p95  11.27 ms   149307 doc/s
+  giro 1  ordered=False  totale   113.7 ms  mediana lotto   2.54 ms  p95   3.81 ms   175855 doc/s
+  giro 2  ordered=True   totale   115.1 ms  mediana lotto   2.48 ms  p95   6.18 ms   173779 doc/s
+  giro 2  ordered=False  totale   118.0 ms  mediana lotto   2.55 ms  p95   7.56 ms   169500 doc/s
+  ```
+- **Che cosa dimostra:** le mediane per lotto stanno fra 2,48 e 2,70 ms in **entrambe** le
+  configurazioni, e i totali si sovrappongono — al giro 2 l'ordinato è perfino più veloce del non
+  ordinato. Su questo carico la scelta non si vede. Il p95 è più mosso in tutti e due i sensi, e con
+  tre giri non basta a dire niente.
+- **Perché è stata fatta:** `ordered=False` è la scelta abituale per il caricamento massivo, e stava
+  per essere adottata per abitudine. La regola del repository è che una scelta di prestazioni si
+  misura prima di scriverla (**nota 162**): misurata, non c'era niente da guadagnare, e
+  `ordered=True` — il predefinito — ha in cambio un errore più semplice da leggere.
+- **Riserve:** è un'istanza singola su loopback, senza rete, senza `w: majority` e senza contesa. Le
+  tre condizioni in cui il confronto può ribaltarsi sono tutte fuori da questa misura: una rete vera
+  con latenza, un replica set che aspetta la maggioranza, e soprattutto uno **sharded cluster**, dove
+  un lotto si spezza fra shard e `ordered=True` costringe a rispettarne la sequenza. Se il Blocco 3
+  mostrerà scritture lente, questa è la prima riga da rimisurare.
+- **Usata da:** [09-adattatori-veri-e-contratto-condiviso.md](09-adattatori-veri-e-contratto-condiviso.md)
+
+<a id="m-022"></a>
+### M-022 — La stessa verifica, verde sul doppio e rossa contro MongoDB
+
+- **Data:** 2026-09-03
+- **Comando:** `una_pagina_di_zero_documenti_e_vuota`, aggiunta al contratto condiviso ed eseguita
+  dalle due parti prima di scrivere la guardia in `find_page`.
+- **Output:**
+  ```
+  ### DOPPIO ###
+  2 passed, 10 deselected in 0.02s
+  ### ORIGINALE ###
+  >       assert archivio.find_page({}, quanti=0) == ()
+  E       AssertionError
+  FAILED tests/integration/test_contratto_archivio.py::
+         test_l_adattatore_rispetta_il_contratto[una_pagina_di_zero_documenti_e_vuota]
+  ```
+- **Che cosa dimostra:** è il Passo 4 del Task 8 che funziona, colto nell'atto. La stessa funzione,
+  lo stesso corpo, due implementazioni della stessa porta: una passa e l'altra no, e la differenza è
+  che `limit(0)` per MongoDB significa «nessun limite» ([A-011](#a-011)) mentre per una lista Python
+  `[salta:salta+0]` significa «niente». Senza la coppia, il difetto sarebbe stato scoperto in scena,
+  su una schermata che mostra cinquantamila righe dove ne erano state chieste zero.
+- **Perché è stata fatta:** per scrivere la guardia dopo averla vista servire, non prima. È la
+  **nota 159** applicata all'unico caso in cui è facile applicarla: quando esiste già una seconda
+  implementazione che si comporta bene, il caso in cui la guardia manca non va costruito — c'è.
+- **Riserve:** la coppia non è simmetrica. Una verifica che passa da entrambe le parti non dimostra
+  che il doppio sia fedele: dimostra che lo è **su quel caso**. Il contratto ha dodici funzioni, e
+  il numero di comportamenti di MongoDB è molto più grande di dodici.
+- **Usata da:** [09-adattatori-veri-e-contratto-condiviso.md](09-adattatori-veri-e-contratto-condiviso.md)
 
 ---
 

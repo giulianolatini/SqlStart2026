@@ -525,6 +525,79 @@ cui si può chiudere è il Task 11.
 
 ---
 
+## Task 8 — Gli adattatori veri, e il contratto che li tiene onesti
+
+**Data:** 2026-09-03 · **Commit:** `feat: gli adattatori pymongo, provati contro gli stack del repository`
+
+Il primo task in cui l'applicazione parla con un MongoDB. `PymongoStore`, `PymongoInspector`, il
+`DataGenerator` deterministico, e una seconda suite che accende gli stack di questo repository e ci
+gira contro. Il racconto per esteso è in
+[09-adattatori-veri-e-contratto-condiviso.md](09-adattatori-veri-e-contratto-condiviso.md); qui c'è
+quello che il piano non prevedeva.
+
+**Il contratto ha trovato il primo bugiardo prima che l'adattatore esistesse.** Il Passo 4 chiedeva
+di far girare le prove del Task 4 anche contro l'originale, e l'ordine naturale sarebbe stato:
+scrivo l'adattatore, poi condivido le prove. È stato fatto al contrario — prima il file condiviso,
+eseguito **solo** contro `InMemoryStore` — e la prima esecuzione ha dato `1 failed, 10 passed`. Il
+doppio rispondeva `[{"quanti": 0}]` a un `$count` su zero documenti, e MongoDB non risponde niente
+([M-017](Sources.md#m-017)). Un difetto che esisteva da quattro task, invisibile perché nessuna
+prova aveva mai chiesto quel caso, e trovato da un file che non conteneva ancora una riga di
+integrazione. **Estrarre il contratto è già una prova**, indipendentemente da dove poi lo si esegue.
+
+**Il secondo bugiardo era l'originale, e la fonte inverte l'ovvio.** `find_page(quanti=0)`
+restituisce la lista vuota sul doppio e la collezione intera contro MongoDB, perché «A `limit()`
+value of 0 (i.e. `.limit(0)`) is equivalent to setting no limit» ([A-011](Sources.md#a-011)). La
+guardia è stata scritta dopo aver visto la prova fallire ([M-022](Sources.md#m-022)), che è la
+**nota 159** applicata al caso più facile: quando esiste già una seconda implementazione che si
+comporta bene, il caso in cui la guardia manca non va costruito, c'è.
+
+**`ordered=False` è stata la prima scelta di prestazioni rifiutata da una misura.** Ogni guida al
+caricamento massivo la consiglia, e stava per essere adottata per abitudine. Misurata su ventimila
+documenti per configurazione in tre giri alternati, la differenza non c'è: mediane fra 2,48 e
+2,70 ms da entrambe le parti, e al terzo giro l'ordinato è più veloce ([M-021](Sources.md#m-021)).
+Resta il predefinito, e la **nota 162** ha funzionato su qualcosa che nessuno avrebbe pensato di
+verificare perché «si sa».
+
+**Due trappole della connessione che nessuna documentazione dichiara.** La prima: `replicaSet=rs0`
+dall'host contro lo stack 02 sano dà `ReplicaSetNoPrimary` dopo 4,2 secondi, con tutti e tre i
+membri irrisolvibili — perché il set si annuncia con i nomi di servizio Compose
+([M-019](Sources.md#m-019)). È indistinguibile da un primario caduto davvero, cioè dalla diagnosi
+che il Blocco 2 esiste per mostrare. La seconda: `tz_aware` è predefinito a `False`, e il difetto
+che ne segue non fallisce — le date tornano ingenue, il confronto riesce lo stesso, e lo sbaglio si
+vede come un orario storto sullo schermo. È l'unica cosa del client su cui `PymongoStore` si
+permette di avere voce, e la guardia sta nel costruttore.
+
+**La credenziale è stata cercata invece che dedotta.** Il punto aperto diceva «come le prove di
+integrazione ricevono la credenziale senza violare ADR-0054». Passata come argomento, non compare né
+nel messaggio di `ServerSelectionTimeoutError`, né in quello di `OperationFailure`, né nel `repr` del
+client ([M-018](Sources.md#m-018)). Il posto scoperto non era PyMongo: era il `dataclass` delle
+prove, il cui `repr` sarebbe finito in ogni traceback — da lì `field(repr=False)`.
+
+**Una regola del repository ostacolava una cosa legittima, e la sede mancava.** Le prove accendono
+gli stack, `make up-02` legge il `.env`, e [ADR-0056](../../docs/Decision.md#adr-0056) dice che quei
+file vivono nel checkout principale. Copiarli avrebbe creato un segreto che invecchia in silenzio.
+Invece di aggirare la regola si è aperta la sede: [ADR-0083](../../docs/Decision.md#adr-0083), il
+collegamento simbolico — il file resta uno, il versionamento non lo vede.
+
+**Il manuale non diceva quello che stavo per fargli dire.** La prima stesura di `_chunk_per_shard`
+spiegava che «dalla 5.0 `config.chunks` non contiene più il campo `ns`». La pagina del manuale non
+lo afferma da nessuna parte e non nomina la 5.0 a questo proposito: prescrive l'unione per `uuid`
+([A-013](Sources.md#a-013)) e basta. La docstring è stata riscritta separando le due cose — il Tip
+è del manuale, l'assenza di `ns` è una misura sul 7.0.40 di questo repository
+([M-020](Sources.md#m-020)). La differenza fra le due formulazioni è la differenza fra una riserva
+onesta e una leggenda tramandata.
+
+**Il commento sul `pyproject.toml` prometteva più di quanto `--strict-markers` mantenga.** Diceva
+che protegge dagli errori di battitura nei marcatori. Verificato: `@pytest.mark.stack3` in un
+decoratore è intercettato, ma `pytest -m stack3` sulla riga di comando deseleziona trentatré prove
+ed esce zero, senza una parola. Il commento adesso dice entrambe le cose, compreso il buco che
+resta.
+
+**Numeri.** 214 prove unitarie in 0,79 s, 33 di integrazione in 1,46 s su tre stack accesi,
+`mypy --strict` verde su 39 file. Da stack spento a diciannove prove verdi in 8,1 secondi, perché
+`sveglia()` esegue `make up-01` da sé — che è [ADR-0020](../../docs/Decision.md#adr-0020) applicato:
+si prova l'artefatto che il pubblico eseguirà, non un facsimile.
+
 ## Che cosa manca
 
 I task dall'8 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
@@ -543,17 +616,22 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | `$group` non è nel dialetto di `InMemoryStore` | il messaggio di `NonSupportato`, e [02](02-porte-e-doppi.md#dove-il-doppio-non-sa-solleva) | la prima prova che lo chiederà |
 | Il rifiuto dei booleani in `_come_intero` non è coperto da nessuna prova | [M-006, riserve](Sources.md#m-006) | la prima prova che dipenderà da lui |
 | ~~`SdamBridge` e la coda: il comportamento di PyMongo va **osservato**, non solo letto~~ | [08](08-il-ponte-sdam-e-i-thread-del-driver.md) | **chiuso** al Task 7, per la parte che non richiede un cluster |
-| Nessun `ClusterInspector` reale: il `TopologyWatcher` ha visto solo topologie finte | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | Task 8 |
+| ~~Nessun `ClusterInspector` reale: il `TopologyWatcher` ha visto solo topologie finte~~ | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | **chiuso** al Task 8: quattordici prove di integrazione guardano tre topologie vere |
 | ~~L'osservatore interroga invece di ascoltare: la risoluzione è l'intervallo~~ | [08](08-il-ponte-sdam-e-i-thread-del-driver.md) | **chiuso** al Task 7: il ponte riceve i cambiamenti quando accadono |
-| L'intervallo predefinito di 500 ms è scelto, non misurato | [07](07-topologia-failover-e-i-due-numeri.md#il-limite-di-questo-osservatore-dichiarato) | Task 8 |
+| L'intervallo predefinito di 500 ms è scelto, non misurato | [07](07-topologia-failover-e-i-due-numeri.md#il-limite-di-questo-osservatore-dichiarato) | il primo failover cronometrato: serve il Blocco 2 in funzione, non un ispettore |
 | Il `TopologyWatcher` non ha un invariante di thread: oggi lo usa un thread solo | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | Task 10, con la TUI |
 | `ChunkMigrated` potrebbe non essere osservabile da un client di `mongos` | [08](08-il-ponte-sdam-e-i-thread-del-driver.md#che-cosa-non-è-ancora-verificato) | Task 15 |
 | Un'eccezione dentro un listener finisce su `stderr`, e sotto un `Live` non si vede | [M-015](Sources.md#m-015) | Task 11 |
 | La soglia della prova cronometrata non prende una `f-string` nel callback | [M-013, riserve](Sources.md#m-013) | dichiarata, non si chiude |
-| Le unità delle durate sono lette nel sorgente di PyMongo, non viste su un battito vero | [M-012, riserve](Sources.md#m-012) | Task 8 |
-| Come le prove di integrazione ricevono la credenziale senza violare ADR-0054 | [decisioni](decisioni-che-vincolano-app.md#adr-0054) | Task 8 |
+| Le unità delle durate sono lette nel sorgente di PyMongo, non viste su un battito vero | [M-012, riserve](Sources.md#m-012) | il primo battito su un cluster in movimento: il Task 8 ha collegato l'ispettore, non il ponte |
+| ~~Come le prove di integrazione ricevono la credenziale senza violare ADR-0054~~ | [decisioni](decisioni-che-vincolano-app.md#adr-0054) | **chiuso** al Task 8: [M-018](Sources.md#m-018) e [ADR-0083](../../docs/Decision.md#adr-0083) |
 | `refresh_per_second` dichiarato invece che ereditato | [04](04-eventi-del-driver-e-concorrenza.md) | Task 10 |
 | L'immagine dell'applicazione fra quelle da avere in cache offline | [decisioni](decisioni-che-vincolano-app.md#adr-0009) | Task 12 |
+| Il contratto condiviso copre **dodici** comportamenti: la fedeltà del doppio oltre quelli non è misurata | [09](09-adattatori-veri-e-contratto-condiviso.md#che-cosa-questo-capitolo-ha-chiuso-e-che-cosa-no) | non si chiude: si riduce, una verifica alla volta |
+| `REPLICA_SET_CON_PRIMARIO` non è verificabile dall'host: `directConnection` legge la forma `SINGOLA` | [M-019, riserve](Sources.md#m-019) | Task 12, dall'interno della rete Compose |
+| Dopo un arresto sporco, `$shardedDataDistribution` può riportare conteggi imprecisi | [A-012, riserve](Sources.md#a-012) | dichiarata: il Blocco 3 fa un `docker kill`, e va detto dal palco |
+| L'ispettore dipende da `config`, che il manuale dichiara interno | [A-013, riserve](Sources.md#a-013) | dichiarata: la difesa è la prova sullo stack 03, che diventa rossa se il formato cambia |
+| `ordered=False` è stato misurato solo su istanza singola in loopback | [M-021, riserve](Sources.md#m-021) | se il Blocco 3 mostrerà scritture lente |
 | Il sink testuale per le registrazioni di riserva | [decisioni](decisioni-che-vincolano-app.md#adr-0050) | Task 18 |
 
 ---

@@ -20,6 +20,7 @@ affermazione in **cronaca in diretta**.
 | 6 | [06-carico-tentativi-e-latenze.md](06-carico-tentativi-e-latenze.md) | perché i percentili e non la media, e perché i worker non toccano il sink |
 | 7 | [07-topologia-failover-e-i-due-numeri.md](07-topologia-failover-e-i-due-numeri.md) | come si riconosce un failover, e dove si calcolano durata dell'interruzione e scritture perse |
 | 8 | [08-il-ponte-sdam-e-i-thread-del-driver.md](08-il-ponte-sdam-e-i-thread-del-driver.md) | chi chiama i listener, da quale thread, e quanto costa scrivere una riga di troppo dentro un callback |
+| 9 | [09-adattatori-veri-e-contratto-condiviso.md](09-adattatori-veri-e-contratto-condiviso.md) | che cosa si rompe quando i doppi incontrano MongoDB vero, e il contratto che li tiene onesti |
 
 Si leggono in ordine, ma nessuna dipende dalle altre per essere comprensibile. Chi arriva da una
 domanda precisa può entrare dal punto giusto.

@@ -2070,3 +2070,142 @@ Fonte: [`app/docs/08-il-ponte-sdam-e-i-thread-del-driver.md`](../app/docs/08-il-
 so» sono più di uno. Il valore di ripiego di una traduzione è una decisione, non un dettaglio:
 mandare l'ignoto e il fuori-scena nello stesso posto fa scrivere «non so» proprio nel momento in cui
 si sapeva.
+
+---
+
+### Un doppio che si comporta diversamente dall'originale è un doppio che mente
+
+> Ogni volta che una prova passa contro il doppio, chi la legge conclude qualcosa sul comportamento
+> contro il database vero. Quella conclusione vale quanto la somiglianza fra i due — e la
+> somiglianza non l'aveva mai misurata nessuno.
+
+Fonte: [`app/docs/09-adattatori-veri-e-contratto-condiviso.md`](../app/docs/09-adattatori-veri-e-contratto-condiviso.md).
+
+**Perché una slide:** perché in sala c'è chi ha una suite verde di doppi e la considera una
+garanzia. La frase non dice di buttarli: dice che la fedeltà è una quantità, che oggi vale un
+numero — dodici comportamenti verificati da entrambe le parti — e che senza quel numero la suite
+verde è una fiducia, non una misura.
+
+---
+
+### Il contratto ha trovato il bugiardo prima che l'originale esistesse
+
+> Il file condiviso è stato scritto per girare in due posti, ed è bastato eseguirlo in **uno**.
+> Prima esecuzione, contro il solo doppio: `1 failed, 10 passed`. Un difetto che stava lì da quattro
+> task, invisibile perché nessuna prova aveva mai chiesto quel caso.
+
+Fonte: [registro operativo, nota 163](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md`, M-017](../app/docs/Sources.md#m-017).
+
+**Perché una slide:** perché ribalta l'aspettativa. Ci si prepara al confronto con il server vero e
+il difetto salta fuori prima, per una ragione che vale in generale: scrivere una verifica pensando
+«deve valere anche contro l'originale» costringe a formularla in termini di comportamento
+osservabile, e le domande che ne escono sono diverse da quelle che si pongono guardando il doppio.
+
+---
+
+### `$count` su zero documenti non risponde zero: non risponde
+
+> `risultato[0]["quanti"]` dà **0** sul doppio e **`IndexError`** contro MongoDB. La suite veloce
+> resta verde. La demo si rompe al primo fotogramma, quando la collezione è ancora vuota.
+
+Fonte: [`app/docs/Sources.md`, M-017](../app/docs/Sources.md#m-017).
+
+**Perché una slide:** perché è la trappola SQL più economica da mostrare. `COUNT(*)` su zero righe
+dà zero; una pipeline di aggregazione su zero documenti non emette niente, e nemmeno `$group` con
+`_id: null` lo fa. Chi arriva da SQL scrive la riga sbagliata al primo tentativo, e non se ne accorge
+finché la collezione non è vuota davvero.
+
+---
+
+### `limit(0)` non vuol dire «nessun documento», vuol dire «nessun limite»
+
+> «A `limit()` value of 0 (i.e. `.limit(0)`) is equivalent to setting no limit.» Il valore non lo
+> digita nessuno: ci si arriva per sottrazione — quanti mancano alla fine dell'elenco — cioè nel
+> caso limite di un calcolo, che è quello che nessuno prova a mano.
+
+Fonte: [`app/docs/Sources.md`, A-011](../app/docs/Sources.md#a-011) e
+[M-022](../app/docs/Sources.md#m-022).
+
+**Perché una slide:** perché è una fonte che inverte l'ovvio in una riga, e la conseguenza è
+spettacolare: cinquantamila righe che scorrono dove ne erano state chieste zero. In più mostra la
+tecnica — la guardia è stata scritta dopo aver visto la stessa verifica passare da una parte e
+fallire dall'altra.
+
+---
+
+### Un replica set sano, guardato da fuori, si legge «nessun primario»
+
+> Quattro secondi e due decimi, `ReplicaSetNoPrimary`, tutti e tre i membri irrisolvibili. Il set
+> risponde con i nomi di servizio della rete Compose, che dentro esistono e fuori no. È
+> indistinguibile da un primario caduto davvero.
+
+Fonte: [`app/docs/Sources.md`, M-019](../app/docs/Sources.md#m-019),
+[ADR-0021](Decision.md#adr-0021).
+
+**Perché una slide:** perché è ADR-0021 visto dal lato che fa male, ed è l'errore che chiunque
+provi un replica set in Docker incontra il primo giorno. La parte che la rende una slide e non un
+aneddoto: la diagnosi sbagliata **è la stessa** che il talk mostra come diagnosi giusta nel Blocco 2.
+Stesso messaggio, due cause opposte.
+
+---
+
+### Il difetto che non fallisce è l'unico che giustifica una guardia
+
+> `tz_aware` è predefinito a `False`. Le date tornano ingenue, il confronto con quelle scritte
+> riesce lo stesso, e lo sbaglio si vede come un orario storto sullo schermo — sbagliato di quante
+> ore vale il fuso.
+
+Fonte: [`app/docs/09-adattatori-veri-e-contratto-condiviso.md`](../app/docs/09-adattatori-veri-e-contratto-condiviso.md).
+
+**Perché una slide:** perché dà un criterio, non un consiglio. Le guardie difensive si moltiplicano
+finché non si sa quando smettere; la regola per smettere è questa — si mette una guardia dove
+l'alternativa non è un errore ma un risultato plausibile e sbagliato.
+
+---
+
+### Zero chunk su uno shard che ne ha due
+
+> Su 7.0.40 nessun chunk ha il campo `ns`, e cercarlo restituisce zero **senza sollevare**. Zero
+> chunk è la conclusione «i dati non sono distribuiti», detta esattamente nel momento in cui lo sono.
+
+Fonte: [`app/docs/Sources.md`, M-020](../app/docs/Sources.md#m-020) e
+[A-013](../app/docs/Sources.md#a-013).
+
+**Perché una slide:** perché è il difetto silenzioso in forma pura, sul tema del Blocco 3. E perché
+la correzione è didattica quanto il difetto: il manuale prescrive di unire per `uuid`, e non afferma
+da nessuna parte che `ns` sia stato tolto — la prima cosa è una fonte, la seconda una misura, e
+scriverle come se fossero la stessa cosa è come nascono le leggende.
+
+---
+
+### Misurare quello che tutti consigliano
+
+> `ordered=False` è la raccomandazione standard per il caricamento massivo. Ventimila documenti per
+> configurazione, tre giri alternati: mediane fra 2,48 e 2,70 ms **da entrambe le parti**. Due
+> minuti per misurarlo. Una riga che nessuno avrebbe più rimesso in discussione, per non misurarlo.
+
+Fonte: [registro operativo, nota 165](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md`, M-021](../app/docs/Sources.md#m-021).
+
+**Perché una slide:** perché il caso della soglia inventata a occhio è noto, e questo è quello
+complementare e più insidioso: non c'è un numero da inventare, c'è un consenso da ereditare. Vale
+anche la riserva, che è metà della slide: la misura è su loopback e istanza singola, e le tre
+condizioni in cui potrebbe ribaltarsi — rete, `w: majority`, sharding — sono tutte fuori.
+
+---
+
+### Le prove accendono lo stack che il pubblico eseguirà, non un facsimile
+
+> Da `make down-01` a diciannove prove verdi in 8,1 secondi, senza che nessuno digiti `make up-01`.
+> E alla fine gli stack restano accesi: fermare uno stack che l'operatore aveva già su sarebbe un
+> effetto che le prove non hanno causato.
+
+Fonte: [ADR-0020](Decision.md#adr-0020),
+[`app/docs/09-adattatori-veri-e-contratto-condiviso.md`](../app/docs/09-adattatori-veri-e-contratto-condiviso.md).
+
+**Perché una slide:** perché la scelta di non usare testcontainers va giustificata, e la
+giustificazione è di una riga: un container di prova configurato altrove sarebbe verde mentre lo
+stack del lab è rotto. La seconda metà — quello che le prove smontano sono i **dati**, non
+l'infrastruttura — è la regola pratica che rende sopportabile la prima.
+

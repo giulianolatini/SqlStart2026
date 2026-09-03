@@ -41,6 +41,7 @@ from mongolab.domain.porte import (
     EventSink,
 )
 
+from tests.contratto_archivio import ordini
 from tests.doppi import (
     ArchivioCheRompe,
     ArchivioLento,
@@ -197,81 +198,14 @@ def test_il_raccoglitore_passa_per_la_porta() -> None:
 # --- InMemoryStore --------------------------------------------------------------------
 
 
-def ordini() -> list[Documento]:
-    """Tre documenti che bastano a distinguere «filtra» da «restituisce tutto»."""
-    return [
-        {"_id": 1, "stato": "confermato", "importo": 10},
-        {"_id": 2, "stato": "annullato", "importo": 20},
-        {"_id": 3, "stato": "confermato", "importo": 30},
-    ]
-
-
-def test_l_archivio_conferma_quanti_ne_ha_inseriti_e_li_conserva() -> None:
-    """Il conteggio di ritorno e ciò che resta dentro devono raccontare la stessa cosa.
-
-    È la coppia di numeri su cui poggia la misura del Blocco 2 — confermate contro
-    ritrovate — e un doppio che restituisse `len(documenti)` senza conservarli le farebbe
-    coincidere sempre, cioè renderebbe la scritture perse impossibile da provare.
-    """
-    archivio = InMemoryStore()
-    assert archivio.insert_many(ordini()) == 3
-    assert archivio.count({}) == 3
-
-
-def test_l_archivio_non_tiene_il_documento_di_chi_lo_ha_chiamato() -> None:
-    """Inserire è consegnare, non condividere.
-
-    Il carico del Task 5 riuserà lo stesso dizionario cambiandogli un campo a ogni giro,
-    perché è così che si scrive un generatore di documenti. Se l'archivio ne tenesse il
-    riferimento, i documenti «inseriti» cambierebbero dopo l'inserimento e la prova
-    vedrebbe tre volte l'ultimo — con l'adattatore vero, che serializza in BSON al
-    momento della chiamata, non succede.
-    """
-    documento: dict[str, object] = {"_id": 1, "stato": "confermato"}
-    archivio = InMemoryStore()
-    archivio.insert_many([documento])
-
-    documento["stato"] = "annullato"
-
-    assert archivio.count({"stato": "confermato"}) == 1
-    assert archivio.count({"stato": "annullato"}) == 0
-
-
-def test_l_archivio_filtra_per_uguaglianza_invece_di_contare_tutto() -> None:
-    archivio = InMemoryStore()
-    archivio.insert_many(ordini())
-
-    assert archivio.count({"stato": "confermato"}) == 2
-    assert archivio.count({"stato": "annullato"}) == 1
-    assert archivio.count({"stato": "in dubbio"}) == 0
-    # Due condizioni si sommano, e un campo che il documento non ha non corrisponde.
-    assert archivio.count({"stato": "confermato", "importo": 30}) == 1
-    assert archivio.count({"spedito": True}) == 0
-
-
-def test_l_archivio_cerca_i_campi_assenti_come_fa_mongodb() -> None:
-    """`{"campo": None}` corrisponde a chi ha `null` **e** a chi il campo non ce l'ha.
-
-    Il manuale è esplicito: «The `{ metacritic : null }` query matches documents that
-    contain the `metacritic` field with a `null` value **or** do not contain the
-    `metacritic` field» (`app/docs/Sources.md`, A-006). È il punto in cui due
-    implementazioni ugualmente ovvie danno risposte diverse: `documento.get(chiave)`
-    indovina la semantica di MongoDB, `chiave in documento and documento[chiave] == atteso`
-    la sbaglia perdendo i documenti senza il campo. Averla scritta apposta, con questa
-    prova accanto, è ciò che distingue l'averla capita dall'esserci arrivati per caso.
-    """
-    archivio = InMemoryStore()
-    archivio.insert_many(
-        [
-            {"_id": 1, "annullato_il": None},
-            {"_id": 2},
-            {"_id": 3, "annullato_il": "2026-09-03"},
-        ]
-    )
-
-    trovati = archivio.find_page({"annullato_il": None})
-
-    assert [documento["_id"] for documento in trovati] == [1, 2]
+# Le prove che valgono **anche** contro l'adattatore vero non stanno più qui: il Task 8 le
+# ha spostate in `tests/contratto_archivio.py`, da dove le esegue la suite veloce
+# (`test_contratto_archivio.py`) e quella di integrazione contro uno stack acceso. Erano
+# già il contratto, scritte in un posto che ne conosceva una sola implementazione.
+#
+# Qui restano le prove che riguardano il **doppio in quanto doppio**: ciò che dichiara di
+# non saper fare, e che l'originale invece fa. Metterle nel contratto vorrebbe dire
+# chiedere alle due implementazioni di divergere, che è il contrario del suo mestiere.
 
 
 def test_l_archivio_non_confronta_sottodocumenti() -> None:
@@ -292,54 +226,6 @@ def test_l_archivio_non_confronta_sottodocumenti() -> None:
         archivio.count({"misura": {"h": 14, "w": 21}})
 
 
-def test_l_archivio_impagina_saltando_e_limitando() -> None:
-    archivio = InMemoryStore()
-    archivio.insert_many(ordini())
-
-    prima = archivio.find_page({}, salta=0, quanti=2)
-    seconda = archivio.find_page({}, salta=2, quanti=2)
-
-    assert [documento["_id"] for documento in prima] == [1, 2]
-    assert [documento["_id"] for documento in seconda] == [3]
-    # La pagina è una tupla perché lo dice la porta: chi la riceve non deve poterla
-    # allungare credendo di aver caricato di più.
-    assert isinstance(prima, tuple)
-
-
-def test_l_archivio_impagina_quello_che_il_filtro_ha_scelto() -> None:
-    """Filtro e pagina si compongono, e nell'ordine giusto.
-
-    Un doppio che impaginasse prima e filtrasse poi restituirebbe pagine più corte del
-    dovuto e, con `salta`, salterebbe documenti che il filtro avrebbe tenuto: un errore
-    che non si vede finché tutte le prove chiedono la prima pagina di tutto.
-    """
-    archivio = InMemoryStore()
-    archivio.insert_many(ordini())
-
-    pagina = archivio.find_page({"stato": "confermato"}, salta=1, quanti=10)
-
-    assert [documento["_id"] for documento in pagina] == [3]
-
-
-def test_l_archivio_restituisce_documenti_nuovi_a_ogni_lettura() -> None:
-    """Leggere non dà accesso a ciò che sta dentro.
-
-    `pymongo` costruisce un dizionario nuovo a ogni documento che decodifica, quindi una
-    prova che modificasse il risultato di una lettura non toccherebbe il database. Se
-    qui restituissimo l'oggetto memorizzato, quella stessa prova passerebbe contro il
-    doppio e fallirebbe contro l'adattatore vero — o peggio, corromperebbe l'archivio
-    facendone passare un'altra.
-    """
-    archivio = InMemoryStore()
-    archivio.insert_many(ordini())
-
-    prima = archivio.find_page({})
-    seconda = archivio.find_page({})
-
-    assert prima == seconda
-    assert prima[0] is not seconda[0]
-
-
 def test_un_filtro_che_l_archivio_non_sa_applicare_solleva() -> None:
     """Il punto di tutta la faccenda: non sapere si dice, non si nasconde.
 
@@ -353,18 +239,6 @@ def test_un_filtro_che_l_archivio_non_sa_applicare_solleva() -> None:
 
     with pytest.raises(NonSupportato, match=r"\$gt"):
         archivio.count({"importo": {"$gt": 15}})
-
-
-def test_l_aggregazione_esegue_gli_stadi_che_conosce() -> None:
-    archivio = InMemoryStore()
-    archivio.insert_many(ordini())
-
-    assert archivio.aggregate([{"$match": {"stato": "confermato"}}, {"$count": "quanti"}]) == (
-        {"quanti": 2},
-    )
-    assert [
-        documento["_id"] for documento in archivio.aggregate([{"$limit": 2}])
-    ] == [1, 2]
 
 
 def test_uno_stadio_sconosciuto_solleva_invece_di_essere_saltato() -> None:

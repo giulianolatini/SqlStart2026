@@ -5310,3 +5310,69 @@ appiccicherebbe una decisione del client a un evento che riferisce il cluster, e
 
 **Fonti:** nessuna (decisione di disegno interna, che emenda il §6.3 di
 [`docs/00-progetto/2026-08-24-design.md`](00-progetto/2026-08-24-design.md))
+
+---
+
+<a id="adr-0083"></a>
+## ADR-0083 — I `.env` del laboratorio raggiungono un worktree per collegamento, non per copia
+
+**Data:** 2026-09-03 · **Stato:** Accettata
+
+**Contesto:** [ADR-0056](#adr-0056) stabilisce che la casa dei file `.env` del laboratorio è il
+checkout principale, e che un worktree non ne ha una propria: sono ignorati dal versionamento,
+quindi `worktree add` non li porta, e chi lavora in un worktree si trova gli stack che non partono.
+Fin qui la conseguenza era sopportabile, perché nei worktree si scriveva codice e gli stack si
+accendevano dal checkout principale.
+
+Il Task 8 di `feature/04` rompe quella sopportabilità. Le prove di integrazione accendono gli stack
+**da sole** — è il Passo 3, ed è [ADR-0020](#adr-0020) applicato: si usano i `make up-0X` di questo
+repository, non un facsimile — e si eseguono dal worktree, che è il posto in cui il codice che
+provano esiste. `make up-02` e `make up-03` leggono `PASSWORD_AMMINISTRATORE` da
+`docker/0X-.../.env`. Dal worktree quel file non c'è, e la prova fallisce per un motivo che non ha
+niente a che vedere con ciò che verifica.
+
+Tre modi di uscirne, e due sono sbagliati in modo interessante. **Copiare** il file nel worktree
+crea una seconda copia di un segreto: si rigenera la password nel checkout principale e il worktree
+continua a usare la vecchia, con uno stack che non si autentica e nessun indizio sul perché.
+**Leggere il file dal checkout principale** attraverso un percorso assoluto scritto nel codice delle
+prove significherebbe mettere il percorso della macchina di chi sviluppa dentro un file versionato,
+e costringerebbe `ambiente.py` a sapere che esiste un checkout principale — cioè a sapere del
+versionamento, per collegarsi a MongoDB.
+
+**Decisione:** un worktree che deve accendere gli stack crea un **collegamento simbolico** al `.env`
+del checkout principale, nella stessa posizione relativa:
+
+```
+docker/02-replicaset/.env -> /percorso/del/checkout/principale/docker/02-replicaset/.env
+docker/03-sharded/.env    -> /percorso/del/checkout/principale/docker/03-sharded/.env
+```
+
+Il collegamento si crea a mano quando serve, non da uno script: sono due comandi, e uno script che
+li facesse dovrebbe indovinare quale sia il checkout principale.
+
+Tre proprietà rendono questa la scelta giusta e non un ripiego. Il file **resta uno**: chi rigenera
+la password la rigenera per tutti, e non esiste una seconda copia che invecchia. Il versionamento
+non lo vede — `docker/*/.env` è gia ignorato da [ADR-0014](#adr-0014), e la regola vale per il
+collegamento come per il file, verificato guardando lo stato del repository dopo averli creati. E
+`make up-02` eseguito dal worktree funziona senza sapere niente di tutto questo, perché Compose apre
+un percorso e il sistema operativo lo segue.
+
+Il prezzo, dichiarato: il collegamento **penzola** se il checkout principale si sposta o si
+rinomina, e il messaggio che ne esce parla di un file che non c'è mentre il file c'è, altrove.
+È lo stesso genere di errore contro cui ADR-0056 già mette in guardia, e la difesa è la stessa:
+prima di rimuovere un worktree si elencano da dentro i file ignorati e si guarda che cosa non si
+rigenera. Un collegamento simbolico si rigenera; ciò a cui punta, no.
+
+Questo ADR **estende** ADR-0056, non lo contraddice: la casa dei `.env` resta il checkout
+principale, e il worktree non ne ha una propria — ha una porta che dà su quella.
+
+**Alternative scartate:** **copiare il file** — due copie di un segreto che divergono in silenzio.
+**Un percorso assoluto nel codice delle prove** — la macchina di chi sviluppa dentro un file
+versionato. **Passare la password con `-e` a `docker`** — vietato da [ADR-0054](#adr-0054), e in
+ogni caso non risolverebbe: `make up-0X` non è un `exec`, è un `compose up` che legge il `.env` da
+sé. **Un `.env` con una password diversa nel worktree** — funzionerebbe, e vorrebbe dire provare
+contro uno stack configurato diversamente da quello che il pubblico eseguirà, cioè il contrario di
+ADR-0020.
+
+**Fonti:** nessuna (decisione operativa interna, che estende [ADR-0056](#adr-0056) e serve
+[ADR-0020](#adr-0020))

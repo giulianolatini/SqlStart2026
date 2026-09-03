@@ -27,6 +27,22 @@ packages = ["src/mongolab"]
 # nudo — quello che si digita distrattamente — accenderebbe Docker dal Task 8 in poi, e
 # la suite veloce smetterebbe di esserlo senza che nessuno l'abbia deciso.
 testpaths = ["tests/unit"]
+# `--strict-markers` trasforma un marcatore non dichiarato da avvertimento in **errore di
+# raccolta**: `@pytest.mark.stack3`, la lettera che manca, ferma pytest con «'stack3' not
+# found in `markers` configuration option» invece di applicare un marcatore che nessun
+# `-m` selezionerà mai. Verificato eseguendolo al Task 8.
+#
+# Quello che **non** copre, e va saputo: un errore di battitura nella riga di comando.
+# `pytest -m stack3` deseleziona tutto e esce zero — trentatré prove saltate, nessuna
+# protesta. Non c'è un'opzione che lo impedisca; l'unica difesa è che il numero di prove
+# raccolte si legge sempre, ed è per questo che sta scritto qui invece di essere scoperto
+# il giorno in cui una suite «verde» non aveva eseguito niente.
+addopts = ["--strict-markers"]
+markers = [
+  "stack01: richiede lo stack 01 (istanza singola). Si accende in pochi secondi.",
+  "stack02: richiede lo stack 02 (replica set). Chiede il .env, e ci mette qualche decina di secondi.",
+  "stack03: richiede lo stack 03 (sharded cluster). Il più lento: due shard, tre config server, un mongos.",
+]
 # Nessun `pythonpath = ["."]` qui, ed è voluto: `tools/` ne ha bisogno perché gli
 # strumenti stanno nella radice del progetto, mentre questo usa il layout `src/` e il
 # pacchetto arriva a pytest perché è **installato** nell'ambiente. Chi copia il file di

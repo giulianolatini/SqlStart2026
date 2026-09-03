@@ -5298,3 +5298,130 @@ verde su 30 file. Prossimo passo: **Task 8** del
 [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), gli adattatori veri contro uno stack
 vero — dove i battiti e i cambi di ruolo, finora costruiti a mano, dovranno arrivare da un cluster
 che cade sul serio.
+
+---
+
+## 2026-09-03 — `feature/04`, Task 8: il contratto che ha trovato il bugiardo prima che l'originale esistesse
+
+Il Task 8 è il punto in cui l'applicazione incontra un MongoDB vero: `PymongoStore`,
+`PymongoInspector`, un generatore deterministico, e una seconda suite che accende gli stack di
+questo repository e ci gira contro — con i `make up-0X` che ci sono, non con un facsimile, perché
+[ADR-0020](Decision.md#adr-0020) dice che si prova l'artefatto che il pubblico eseguirà. Le prove
+dell'applicazione passano da **193 a 214** unitarie, più **33** di integrazione;
+`mypy --strict` verde su **39** file.
+
+La notizia non è che funzioni. È che cosa si è rotto, e quanto era invisibile prima.
+
+**Il primo difetto è saltato fuori senza toccare un cluster.** Il Passo 4 chiedeva di far girare le
+prove del Task 4 anche contro l'adattatore vero. L'ordine naturale sarebbe stato: scrivo
+l'adattatore, poi condivido le prove. È stato fatto al contrario — prima il file condiviso,
+`app/tests/contratto_archivio.py`, eseguito **soltanto** contro `InMemoryStore` — e la prima
+esecuzione ha dato `1 failed, 10 passed`. Il doppio rispondeva `[{"quanti": 0}]` a un `$count` su
+zero documenti; MongoDB non risponde niente, e nemmeno `$group` con `_id: null` lo fa. Un difetto
+che stava lì da quattro task, invisibile perché nessuna prova aveva mai chiesto quel caso, e trovato
+da un file che non conteneva ancora una riga di integrazione.
+
+Il modo in cui sarebbe esploso merita di essere scritto: `risultato[0]["quanti"]` dà zero sul doppio
+e `IndexError` contro il cluster, cioè la suite veloce resta verde e la demo si rompe al primo
+fotogramma, quando la collezione è ancora vuota. È la **nota 155** vista dall'altro lato — lì una
+risposta mancante scambiata per uno zero, qui uno zero inventato dove la risposta manca.
+
+**Il secondo bugiardo era l'originale.** `find_page(quanti=0)` restituisce la lista vuota sul doppio
+e la collezione intera contro MongoDB: «A `limit()` value of 0 (i.e. `.limit(0)`) is equivalent to
+setting no limit». Il valore non lo digita nessuno, ci si arriva per sottrazione — quante righe
+restano nella finestra, quanti mancano alla fine dell'elenco — cioè nel caso limite di un calcolo,
+che è quello che nessuno prova a mano. In scena sarebbero state cinquantamila righe dove ne erano
+state chieste zero.
+
+**Una scelta che tutti consigliano, rifiutata da una misura.** `ordered=False` per il caricamento
+massivo stava per essere adottato per abitudine. Ventimila documenti per configurazione, tre giri
+alternati sullo stack 01: mediane per lotto fra 2,48 e 2,70 ms **da entrambe le parti**, con il
+terzo giro in cui l'ordinato è il più veloce. Non c'è niente da guadagnare, e il predefinito dà in
+cambio un errore più semplice da leggere. La riserva è scritta accanto ai numeri: loopback, istanza
+singola, niente `w: majority`, niente sharding — le tre condizioni in cui il confronto potrebbe
+ribaltarsi sono tutte fuori dalla misura.
+
+**Due trappole della connessione che nessuna pagina dichiara.** `replicaSet=rs0` dall'host contro lo
+stack 02 **sano** fallisce dopo 4,2 secondi con `ReplicaSetNoPrimary` e tutti e tre i membri
+irrisolvibili, perché il set si annuncia con i nomi di servizio Compose:
+[ADR-0021](Decision.md#adr-0021) visto dal lato che fa male, e una diagnosi indistinguibile da un
+primario caduto davvero — cioè da quella che il Blocco 2 esiste per mostrare. La seconda è che
+`tz_aware` è predefinito a `False`: le date tornano ingenue, il confronto con quelle scritte riesce
+lo stesso, e lo sbaglio si vede come un orario storto sullo schermo. Un difetto che non fallisce è
+l'unico caso in cui una guardia nel costruttore si giustifica, e `PymongoStore` ne ha esattamente
+una.
+
+**Una regola del repository ostacolava una cosa legittima, e mancava la sede.** Le prove accendono
+gli stack, `make up-02` legge `PASSWORD_AMMINISTRATORE` dal `.env`, e
+[ADR-0056](Decision.md#adr-0056) dice che quel file vive nel checkout principale, non in un
+worktree. Copiarlo avrebbe creato una seconda copia di un segreto che invecchia in silenzio;
+scrivere un percorso assoluto nelle prove avrebbe messo la macchina di chi sviluppa dentro un file
+versionato. Invece di aggirare la regola si è aperta la sede mancante:
+[ADR-0083](Decision.md#adr-0083), il collegamento simbolico — il file resta uno, il versionamento
+non lo vede, e Compose non sa di nulla perché apre un percorso e il sistema operativo lo segue.
+
+**Il manuale non diceva quello che stavo per fargli dire.** La prima stesura di `_chunk_per_shard`
+spiegava che «dalla 5.0 `config.chunks` non contiene più il campo `ns`». Andata a controllare, la
+pagina non lo afferma da nessuna parte e non nomina la 5.0 a questo proposito: prescrive l'unione
+per `uuid`, e basta. La docstring è stata riscritta separando le due cose — il Tip è del manuale,
+l'assenza di `ns` è una constatazione sul 7.0.40 di **questo** repository, dove nessuno dei cinque
+chunk ha quel campo e cercarlo restituisce zero senza sollevare. Un difetto silenzioso perfetto:
+zero chunk su uno shard che ne ha due, cioè «i dati non sono distribuiti» detto esattamente dove lo
+sono.
+
+**Un commento prometteva più di quanto la protezione mantenga.** Il `pyproject.toml` diceva che
+`--strict-markers` protegge dagli errori di battitura nei marcatori. Eseguito: `@pytest.mark.stack3`
+in un decoratore è intercettato con un errore di raccolta, ma `pytest -m stack3` sulla riga di
+comando deseleziona trentatré prove ed esce zero, senza una parola. Il commento adesso dice
+entrambe le cose, e il buco che resta è dichiarato accanto alla protezione che non lo copre.
+
+**La rete di sicurezza che nessuno aveva chiesto.** Ogni prova di integrazione riceve un database
+usa-e-getta col prefisso `mongolab_prove_`, e `sveglia()` accende lo stack se non risponde: da
+`make down-01` a diciannove prove verdi in 8,1 secondi, senza che nessuno digiti `make up-01`. Gli
+stack alla fine **non** si spengono, ed è deliberato — fermare uno stack che l'operatore aveva già
+acceso sarebbe un effetto che le prove non hanno causato, e chi prepara la demo si troverebbe la
+scena smontata da una suite di test.
+
+### Note di metodo
+
+163. **Estrarre un contratto condiviso è già una prova, prima ancora di condividerlo.** Il file che
+     raccoglie le verifiche comuni fra un doppio e l'originale è stato scritto per essere eseguito
+     in due posti, e ha trovato il primo difetto **eseguito in uno solo**. La ragione è che scrivere
+     una verifica pensando «questa deve valere anche contro il server vero» costringe a formularla
+     in termini di comportamento osservabile invece che di implementazione, e le domande che ne
+     escono sono diverse da quelle che si pongono guardando il doppio. Il valore non sta tutto nel
+     confronto: metà sta nel cambio di punto di vista che il confronto obbliga a fare.
+
+164. **Quando esiste già una seconda implementazione corretta, il caso che giustifica una guardia
+     non si inventa: si esegue.** La **nota 159** dice che una guardia è provata solo da un caso in
+     cui la sua assenza si vedrebbe, e costruire quel caso è di solito la parte difficile. Con due
+     implementazioni della stessa porta la difficoltà sparisce: si scrive la verifica, la si fa
+     girare da entrambe le parti, e se una passa e l'altra no il caso è già lì. `find_page(quanti=0)`
+     è stato scoperto così, e la guardia è stata scritta dopo aver visto la riga rossa.
+
+165. **Una scelta che tutti consigliano va misurata come una qualsiasi.** La **nota 162** dice che
+     una soglia si misura prima di scriverla; questa è il caso complementare, ed è più insidioso,
+     perché non c'è nessun numero da inventare — c'è un consenso da ereditare. `ordered=False` è la
+     raccomandazione standard per il caricamento massivo, e su questo carico non fa differenza. Il
+     costo di misurarlo è stato di due minuti; il costo di non misurarlo sarebbe stato una riga di
+     codice che nessuno avrebbe mai rimesso in discussione, perché «si sa».
+
+166. **Una constatazione su una versione non è una regola di versione.** Misurare che il 7.0.40 non
+     ha un certo campo autorizza a scrivere «sul 7.0.40 quel campo non c'è, misurato». Non
+     autorizza a scrivere «dalla 5.0 quel campo è stato tolto», che è un'affermazione su tutte le
+     versioni e va cercata nella documentazione — dove, in questo caso, non c'è. La differenza fra
+     le due frasi non si vede leggendo, perché entrambe spiegano bene lo stesso codice; si vede il
+     giorno in cui qualcuno ci costruisce sopra una decisione su una versione che non ha mai
+     provato.
+
+167. **Un commento che descrive una protezione va verificato come la protezione.** Il commento su
+     `--strict-markers` era plausibile, utile e sbagliato per metà. Un commento del genere non è
+     documentazione: è un'asserzione su un comportamento, e nessuno la rimetterà in discussione
+     proprio perché sta accanto alla riga che dovrebbe garantirla. La **nota 152** dice che una
+     riserva è un'asserzione; questa aggiunge che anche una rassicurazione lo è, e che si eseguono
+     tutte e due.
+
+Stato aggiornato: decisioni fino ad **ADR-0083**, verifiche fino a **V-074**, note di metodo fino
+alla **167**. Le suite: **143** prove per gli strumenti, **214** per l'applicazione più **33** di
+integrazione, `mypy --strict` verde su 39 file. Prossimo passo: **Task 9** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).
