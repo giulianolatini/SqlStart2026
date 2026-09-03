@@ -5525,3 +5525,226 @@ di trattarlo come una garanzia.
 **Fonti:** [S-018](Sources.md#s-018) e [S-010](Sources.md#s-010); nel registro dell'applicazione
 [A-015](../app/docs/Sources.md#a-015), [M-027](../app/docs/Sources.md#m-027) e
 [M-028](../app/docs/Sources.md#m-028)
+
+---
+
+<a id="adr-0086"></a>
+## ADR-0086 — L'orologio si ancora al muro una volta sola, e da lì in poi conta con il monotono
+
+**Data:** 2026-09-03 · **Stato:** Accettata
+
+**Contesto:** la porta `Clock` ([ADR-0007](#adr-0007)) ha due metodi, `now()` e `sleep()`, e fino
+al Task 10 esisteva solo come doppio: `FakeClock` nelle prove, in produzione nessuno. Il Task 11
+la doveva riempire, e l'implementazione ovvia è una riga: `datetime.now().astimezone()`.
+
+Quella riga è sbagliata, e leggendola non si vede perché. `Clock` serve a due cose che sembrano
+una sola. Serve a **datare** — `WriteSucceeded.istante` finisce in cronaca al millesimo — e serve
+a **misurare**: `WorkloadRunner._scrivi` sottrae due `now()` e chiama il risultato latenza,
+`TopologyWatcher` sottrae due `now()` e decide se la pazienza è finita. Datare vuole l'ora vera;
+misurare vuole che il tempo non torni indietro. L'orologio da parete di questa macchina dichiara
+`monotonic=False`, cioè per contratto non promette la seconda
+([M-030](../app/docs/Sources.md#m-030)).
+
+Un salto all'indietro non produce un errore. Produce una latenza negativa che entra nei percentili
+e una pazienza che non scade: numeri plausibili, proiettati in sala. È la stessa forma di guasto
+di [ADR-0084](#adr-0084) — un'uscita che non si lamenta e non è vera.
+
+**Decisione:** `SystemClock` legge l'orologio da parete **una volta sola**, alla costruzione, e da
+lì in poi restituisce quell'ancora più il tempo trascorso secondo `time.monotonic()`. Gli istanti
+sono ore vere — si leggono accanto all'orologio in fondo alla sala — e le loro differenze sono
+durate vere, perché vengono tutte dallo stesso contatore che non torna indietro.
+
+L'ancora è nel **fuso locale**, non in UTC: `presentation/righe.py` stampa `%H:%M:%S.mmm` senza
+data né nome di zona, e a Ancona due ore di scarto dall'orologio della sala sarebbero la prima
+domanda del pubblico. I due orologi entrano come argomenti con valore predefinito (`muro=`,
+`monotono=`) perché la riga che distingue questa classe da `datetime.now` è verificabile solo
+facendo saltare il muro sotto di lei.
+
+**Alternative scartate.**
+
+- *`datetime.now()` a ogni chiamata.* Una riga, e corretta quasi sempre. Ma la volta che sbaglia
+  produce numeri invece che eccezioni, e la scena in cui sbaglia — la macchina che si risincronizza
+  durante un failover — è quella per cui il talk esiste.
+- *Due porte: un orologio da muro e un cronometro.* Onesta, perché separa i due usi invece di
+  riconciliarli. Costa una quinta porta, un secondo doppio in ogni prova, e a ogni chiamata una
+  domanda in più per chi scrive: «questo istante lo devo datare o misurare?». Il §6.2 nomina un
+  `SystemClock` solo, e per un'applicazione di questa dimensione il conto non torna.
+- *Controllare il segno a ogni sottrazione.* Sposta la difesa nei punti d'uso — due oggi, N domani
+  — e trasforma un'anomalia in un caso da gestire dentro codice che parla d'altro. Nasconde invece
+  di prevenire.
+- *`time.monotonic()` puro, con le date ricostruite in presentazione.* La cronaca perderebbe l'ora
+  vera, che è ciò che rende una registrazione confrontabile con i log dei container.
+
+**Riserve.** L'ancora non viene mai ricorretta: dopo un'ora di processo l'istante riportato
+differisce dal muro di quanto i due orologi divergono, che su un portatile è dell'ordine dei
+millisecondi. Per una scena di minuti è invisibile; per un demone che gira per giorni sarebbe la
+scelta sbagliata, e questo non è un demone. La riserva vera è la **sospensione**:
+`mach_absolute_time()` non conta il tempo in cui la macchina dorme, quindi un coperchio chiuso a
+metà scena lascerebbe la cronaca indietro rispetto al muro. Non è stato misurato e non lo si
+difende: chi presenta non chiude il coperchio.
+
+**Fonti:** nessuna nuova in [`Sources.md`](Sources.md) — è una decisione di disegno interna; la
+misura che la giustifica è [M-030](../app/docs/Sources.md#m-030) nel registro dell'applicazione
+
+---
+
+<a id="adr-0087"></a>
+## ADR-0087 — La mappa fra `--target` e stack sta nel codice di produzione, e il nome sbagliato muore prima della connessione
+
+**Data:** 2026-09-03 · **Stato:** Accettata
+
+**Contesto:** il §6.4 del disegno scrive `mongolab stats --target rs`. Dietro quella parola stanno
+tre fatti: una porta pubblicata sull'host, un `.env` da cui leggere la credenziale, e una decisione
+su `directConnection`. Fino al Task 10 vivevano in `tests/integration/ambiente.py`, che li aveva
+perché era l'unico codice del repository a collegarsi a qualcosa. Con l'applicazione i candidati a
+possederli diventano due, e due copie divergono al primo cambio: la seconda se ne accorge con un
+`ServerSelectionTimeoutError` di venti secondi che parla d'altro.
+
+**Decisione:** `infrastructure/bersagli.py` è l'unico posto in cui quella mappa è scritta, e le
+prove d'integrazione la importano da lì — il codice di produzione non può importare quello di
+prova, il contrario sì.
+
+Il nome è validato **al parse**: `bersaglio_di` solleva `BersaglioSconosciuto`, la CLI lo traduce
+in `typer.BadParameter`, e il processo esce con **2** senza aver aperto nessuna connessione
+([M-034](../app/docs/Sources.md#m-034)). Il messaggio elenca i tre nomi che esistono, perché chi
+sbaglia `--target` sta quasi sempre scrivendo il nome della directory (`02-replicaset`) o quello
+del set (`rs0`). Il 2 è anche il codice con cui il `Makefile` rifiuta un `TARGET` mancante: `make
+app-stats` senza argomenti e `mongolab stats --target xyz` sono lo stesso errore per chi legge un
+CI, e meritano lo stesso numero.
+
+`Bersaglio` è una dataclass congelata di `infrastructure/`, non un `Enum` del dominio: i numeri di
+porta di docker-compose sono un fatto d'ambiente, e [ADR-0007](#adr-0007) tiene `domain/` senza
+dipendenze e senza conoscenza di dove giri.
+
+**Alternative scartate.**
+
+- *Leggere la mappa dalle variabili d'ambiente.* Il laboratorio deve funzionare offline e senza
+  preparazione: se `--target rs` richiedesse un `export`, la prima cosa visibile in sala sarebbe un
+  errore di configurazione. La credenziale, che invece non può stare nel repository
+  ([ADR-0014](#adr-0014)), continua a venire dal `.env`.
+- *Un valore predefinito per `--target`.* Comodo, e capace di mandare a uno stack un comando
+  lanciato per un altro. Un carico spedito al bersaglio sbagliato non fallisce: riesce, altrove.
+- *Costruire l'URI dentro ogni comando.* Tre copie di tre righe, e la porta di `sharded` cambiata
+  in due punti su tre.
+- *Validare al momento della connessione.* Il messaggio sarebbe arrivato dopo il timeout di
+  selezione, mescolato a un errore di rete che non c'entra niente.
+
+**Riserve.** La mappa contiene le porte **predefinite**: i file Compose le scrivono
+`${PORTA_...:-27021}`, quindi un operatore che le spostasse con una variabile d'ambiente non
+verrebbe seguito. Nessuno lo fa oggi e `tools/preflight.sh` riserva gli intervalli, ma è una riga
+aperta dichiarata. `diretto=True` sul `rs` è il punto di vista dell'**host**
+([M-019](../app/docs/Sources.md#m-019)) e ha una scadenza: al Task 12 l'applicazione gira dentro la
+rete Compose e la scoperta funziona ([ADR-0012](#adr-0012)).
+
+**Fonti:** nella parte canonica nessuna nuova; nel registro dell'applicazione
+[M-034](../app/docs/Sources.md#m-034), [M-019](../app/docs/Sources.md#m-019) e
+[M-018](../app/docs/Sources.md#m-018)
+
+---
+
+<a id="adr-0088"></a>
+## ADR-0088 — Il carico ha una collezione sua, nuova a ogni corsa
+
+**Data:** 2026-09-03 · **Stato:** Accettata
+
+**Contesto:** la prima esecuzione vera di `mongolab workload` contro lo stack 01 acceso ha stampato
+`38 scritture · 0 confermate · 38 fallite`, ed è uscita con zero. Ogni inserimento tornava
+`E11000 duplicate key error collection: lab.ordini index: _id_ dup key: { _id: 0 }`
+([M-032](../app/docs/Sources.md#m-032)): `DataGenerator` numera i documenti da zero — è ciò che
+rende il dataset una funzione pura di `(seme, indice)` — e il seed occupa già gli `_id` da 0 a
+49 999.
+
+A sbagliare era il cablaggio, non il disegno. Che il carico dovesse scrivere altrove era già
+scritto in due posti: `infrastructure/generatore.py` («le due popolazioni non si incontrano mai
+nella stessa collezione, perché il carico scrive nella propria») e `tools/reset-demo.sh`
+(`const superstiti = ["ordini"]`, cioè in `lab` ogni altra collezione è residuo e viene tolta). Il
+posto c'era; la radice di composizione ci ha mandato il carico in `ordini`.
+
+Nessuna prova unitaria poteva trovarlo, e nessuna doveva: il fatto vive nel punto in cui un
+generatore che numera da zero incontra una collezione già numerata, cioè in nessuno dei due. La
+cosa che pesa di più non è l'errore, è la sua **forma** — uscita zero, cronaca che scorre, 4 833
+letture riuscite su 4 833. Dal fondo della sala è una demo che funziona.
+
+**Decisione:** `workload` scrive in `lab.carico-<AAAAMMGG-hhmmss>`, costruito da
+`collezione_di_carico()` accanto alla mappa dei bersagli, e **dice dove scrive** prima di
+cominciare: un benchmark che non nomina la propria collezione è un benchmark che non si può
+rileggere. La pulizia resta a `reset-demo`, che spazza tutto ciò che non è `ordini`.
+
+Una collezione per corsa, e non una fissa: gli `_id` ripartono da zero a ogni esecuzione, quindi la
+seconda corsa sulla stessa collezione fallirebbe come falliva contro `ordini`. In sala il carico si
+lancia più di una volta. Il timestamp nel nome è nel fuso locale, per la stessa ragione per cui lo
+è la cronaca ([ADR-0086](#adr-0086)): chi cerca la propria collezione fra tre avanzi guarda
+l'orologio della sala.
+
+**Alternative scartate.**
+
+- *Far partire il generatore dopo la fine del seed.* Accoppia il generatore a un numero che vive in
+  tre `init/*.js`, e non risolve comunque la seconda corsa.
+- *Lasciare l'`_id` a MongoDB.* Toglie la riproducibilità del dataset, che è il motivo per cui
+  `DataGenerator` esiste, e mescola due popolazioni in una collezione: il «prima e dopo» che il
+  Task 16 misura diventa illeggibile.
+- *Una collezione fissa `carico`, cancellata all'avvio.* Una `drop` implicita dentro un comando di
+  carico è un atto distruttivo nascosto in un posto in cui nessuno lo cerca.
+- *Un'opzione `--collection`.* Una manopola in più da ricordare la sera del talk, per una decisione
+  che ha una sola risposta giusta.
+
+**Riserve.** Sullo stack 03 la collezione del carico **non è distribuita**:
+`docker/03-sharded/init/30-dati-demo.js` distribuisce `lab.ordini` su `{_id: "hashed"}`, e una
+collezione creata al volo resta intera sullo shard primario del database. Il confronto fra
+architetture del Task 16 dovrà quindi o distribuire la collezione appena creata, o dichiarare che
+sta misurando un solo shard. Non è stato misurato, ed è la prima cosa che quel task deve decidere.
+
+**Fonti:** nessuna in [`Sources.md`](Sources.md) — la misura che la giustifica è
+[M-032](../app/docs/Sources.md#m-032) nel registro dell'applicazione
+
+---
+
+<a id="adr-0089"></a>
+## ADR-0089 — Su uno stesso fatto, un narratore solo: in `watch` è il ponte SDAM
+
+**Data:** 2026-09-03 · **Stato:** Accettata
+
+**Contesto:** `mongolab watch` contro lo stack 01 stampava ogni transizione **due volte**, a mezzo
+secondo di distanza. PyMongo non c'entra: un client con un ascoltatore nudo la emette una volta
+sola ([M-033](../app/docs/Sources.md#m-033)). A raddoppiarla era il cablaggio del comando, che
+aveva due narratori sullo stesso fatto — `SdamBridge`, che traduce i callback del driver (spinto),
+e `TopologyWatcher`, che rilegge la stessa `TopologyDescription` ogni mezzo secondo (tirato). Il
+ritardo di un giro fra i due rendeva la ripetizione difficile da riconoscere come tale: sembrava
+che fosse successo due volte.
+
+Un failover raccontato due volte non è rumore. Chi guarda **conta** le transizioni per capire che
+cosa è successo, e leggerne il doppio è leggere un'altra storia.
+
+**Decisione:** in `watch` resta il ponte, e `TopologyWatcher` non viene costruito. Lo prescrive il
+§6.3, che assegna al ponte «la cronaca a schermo del failover con timestamp al millisecondo»; sono
+anche gli istanti migliori, perché segnano **quando il driver ha saputo**, non quando qualcuno è
+passato a chiedere. La sentinella conserva l'altra cosa che sa fare — misurare la durata
+dell'**interruzione** — e quella misura vale accanto alle scritture perse, cioè nello scenario di
+failover del Task 13.
+
+La regola generale, che vale oltre questo comando: **su uno stesso fatto, un narratore solo.** Se
+due componenti osservano la stessa struttura, uno spinto e uno tirato, la ripetizione non è un
+rischio: è una certezza.
+
+**Alternative scartate.**
+
+- *Deduplicare nel sink.* Cura il sintomo e introduce un guasto peggiore. Due transizioni identiche
+  e ravvicinate sono anche la firma di un membro che *flappa*, cioè esattamente ciò che una demo di
+  failover deve mostrare; un filtro non sa distinguere i due casi, e sceglierebbe di nascondere
+  quello vero.
+- *Tenere la sentinella e togliere il ponte.* Si perderebbero i millisecondi veri, sostituiti
+  dall'istante in cui il ciclo è passato a guardare — mezzo secondo di incertezza su una scena che
+  dura pochi secondi.
+- *Tenerli entrambi, con parole diverse.* Due narratori su un fatto restano due narratori. Cambiare
+  il vocabolario rende il doppione più difficile da riconoscere, non meno presente.
+
+**Riserve.** Resta in cronaca una riga vera ma non utile: `TOPOLOGIA singola → singola`, che il
+ponte emette perché la *descrizione* della topologia è cambiata — dentro c'è il server che ha
+cambiato ruolo — mentre la forma no. È un punto aperto della presentazione, non del cablaggio, e si
+chiude decidendo che cosa quella riga debba dire, non aggiungendo un secondo osservatore. Il ciclo
+di `watch` vive per ora in `cli.py`, che è un po' più di quanto il §6.1 assegni a una radice di
+composizione: si sposta in `application/scenari.py` al Task 13.
+
+**Fonti:** [S-010](Sources.md#s-010), per la consegna sincrona degli eventi che è il motivo per cui
+il ponte esiste ([ADR-0019](#adr-0019)); nel registro dell'applicazione
+[M-033](../app/docs/Sources.md#m-033)

@@ -42,6 +42,7 @@ __all__ = [
     "TRONCAMENTO",
     "riga",
     "server_da_mostrare",
+    "tronca",
 ]
 
 COLONNE_SALA = 100
@@ -102,18 +103,28 @@ def riga(evento: Evento, *, larghezza: int | None = COLONNE_SALA) -> str:
     secondo. Non tagliare significa seppellire la cronaca dell'elezione sotto i messaggi
     degli errori che l'elezione provoca.
     """
-    if larghezza is not None and larghezza <= 0:
-        raise ValueError(f"la larghezza è un numero di colonne, ricevuto {larghezza}")
-
     etichetta, dettaglio = _etichetta_e_dettaglio(evento)
-    intera = (
+    return tronca(
         f"{_istante(evento.istante)}  "
         f"{etichetta:<{LARGHEZZA_ETICHETTA}}  "
-        f"{_appiattisci(dettaglio)}"
+        f"{_appiattisci(dettaglio)}",
+        larghezza,
     )
-    if larghezza is None or len(intera) <= larghezza:
-        return intera
-    return intera[: larghezza - len(TRONCAMENTO)] + TRONCAMENTO
+
+
+def tronca(testo: str, larghezza: int | None = COLONNE_SALA) -> str:
+    """Il testo tagliato alla larghezza di sala, con i puntini che dichiarano il taglio.
+
+    Estratto da `riga` al Task 11, quando il secondo consumatore è arrivato: il rapporto
+    di `stats` sta sullo stesso schermo e ha lo stesso budget, e una seconda copia di
+    queste quattro righe sarebbe stata una copia destinata a divergere — con il risultato
+    che due parti della stessa schermata avrebbero tagliato a due larghezze diverse.
+    """
+    if larghezza is not None and larghezza <= 0:
+        raise ValueError(f"la larghezza è un numero di colonne, ricevuto {larghezza}")
+    if larghezza is None or len(testo) <= larghezza:
+        return testo
+    return testo[: larghezza - len(TRONCAMENTO)] + TRONCAMENTO
 
 
 def _istante(momento: datetime) -> str:

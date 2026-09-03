@@ -22,25 +22,30 @@ in `tests/unit/test_doppi.py`.
 """
 
 from tests.doppi.archivio import (
+    ArchivioCheNonLegge,
     ArchivioCheRompe,
     ArchivioLento,
     InMemoryStore,
+    LetturaRifiutata,
     NonSupportato,
     ScritturaRifiutata,
 )
 from tests.doppi.backup import FakeBackup
 from tests.doppi.ispettore import FakeInspector
-from tests.doppi.orologio import FakeClock
+from tests.doppi.orologio import FakeClock, OrologioCheScorre
 from tests.doppi.raccoglitore import RecordingSink
 
 __all__ = [
+    "ArchivioCheNonLegge",
     "ArchivioCheRompe",
     "ArchivioLento",
     "FakeBackup",
     "FakeClock",
     "FakeInspector",
     "InMemoryStore",
+    "LetturaRifiutata",
     "NonSupportato",
+    "OrologioCheScorre",
     "RecordingSink",
     "ScritturaRifiutata",
 ]

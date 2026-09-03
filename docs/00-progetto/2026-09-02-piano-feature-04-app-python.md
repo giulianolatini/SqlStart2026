@@ -366,20 +366,24 @@ in `app/tests/integration/`.
 
 **File:** creare `app/src/mongolab/cli.py`, `app/tests/unit/test_cli.py`; modificare `Makefile`.
 
-- [ ] **Passo 1.** `cli.py` è **l'unico punto che conosce le classi concrete** (§6.1). Costruisce
+*Eseguito con un allargamento dichiarato. Oltre ai file dell'elenco sono nati `infrastructure/orologio.py` — la porta `Clock` non aveva un'implementazione di produzione, e quella ovvia è sbagliata ([ADR-0086](../Decision.md#adr-0086)) — `infrastructure/bersagli.py` per la mappa del Passo 2 ([ADR-0087](../Decision.md#adr-0087)), `infrastructure/zavorra.py` per `--doc-size`, `presentation/rapporto.py` per l'uscita di `stats`, e le prove che li accompagnano; `application/workload.py` ha ricevuto `lettori` e `durata_s`, `app/pyproject.toml` la voce `[project.scripts]`, e il `Makefile` tre target `app-stats`/`app-watch`/`app-workload`. Le quattro opzioni di `workload` sono state implementate tutte, e non solo nominate, perché il Task 16 misurerà quella riga di comando.*
+
+- [x] **Passo 1.** `cli.py` è **l'unico punto che conosce le classi concrete** (§6.1). Costruisce
       gli adattatori e li inietta; tutto il resto riceve porte. Se un `import` di `pymongo` compare
       altrove che in `infrastructure/`, è un difetto anche se funziona.
-- [ ] **Passo 2.** I tre comandi diretti del §6.4: `mongolab stats --target rs`,
+- [x] **Passo 2.** I tre comandi diretti del §6.4: `mongolab stats --target rs`,
       `mongolab watch --target rs`, e
       `mongolab workload --target rs --writers 8 --readers 4 --doc-size 2k --duration 120`. Il
       `--target` sceglie lo stack, e la mappa fra nome e URI sta in un posto solo.
-- [ ] **Passo 3.** La scelta del sink è un'opzione, non una condizione sparsa: `--sink rich`
+      *Eseguito. Due dei tre comandi erano sbagliati alla prima esecuzione contro un MongoDB vero, e le prove unitarie non potevano vederlo: `workload` scriveva nella collezione seminata e falliva ogni inserimento con `E11000` uscendo con zero ([ADR-0088](../Decision.md#adr-0088), [M-032](../../app/docs/Sources.md#m-032)); `watch` raccontava ogni transizione due volte perché aveva due narratori sullo stesso fatto ([ADR-0089](../Decision.md#adr-0089), [M-033](../../app/docs/Sources.md#m-033)). `stats` leggeva la topologia per prima e diceva `sconosciuto` di un server sano ([M-031](../../app/docs/Sources.md#m-031)).*
+- [x] **Passo 3.** La scelta del sink è un'opzione, non una condizione sparsa: `--sink rich`
       (predefinito), `plain`, `null`. È il gancio con cui il Task 18 produce le registrazioni senza
       toccare il codice.
-- [ ] **Passo 4.** Le prove della CLI verificano il **cablaggio** — che `--sink plain` produca un
+- [x] **Passo 4.** Le prove della CLI verificano il **cablaggio** — che `--sink plain` produca un
       `PlainSink`, che un `--target` sbagliato fallisca con un messaggio e un codice d'uscita diverso
       da zero — non il comportamento dei componenti, già provato altrove.
-- [ ] **Passo 5.** `make app-test`, `make app-check`. Commit:
+      *Eseguito. Il codice d'uscita è **2**, quello di `typer.BadParameter`, e il messaggio va ripulito prima di poterlo asserire: Rich lo incornicia e lo manda a capo dove finisce il riquadro, quindi un'asserzione ingenua dipenderebbe dalla larghezza del terminale di chi esegue le prove ([M-034](../../app/docs/Sources.md#m-034)).*
+- [x] **Passo 5.** `make app-test`, `make app-check`. Commit:
       `feat: la CLI Typer, unico punto che conosce le classi concrete`.
 
 ---

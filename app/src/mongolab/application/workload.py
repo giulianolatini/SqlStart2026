@@ -22,14 +22,35 @@ osservati** (vedi `percentile`).
 di sincronizzazione è uno solo, ed è la stessa disciplina che ADR-0019 impone ai listener
 di pymongo. Un `RecordingSink` in una prova conferma che i suoi chiamanti sono un thread
 solo; nella demo lo stesso invariante protegge `Live` di Rich, che non è thread-safe.
+
+**Due limiti, e mai tutti e due.** Una corsa finisce o perché ha fatto le scritture che le
+sono state chieste (`scritture=N`) o perché è scaduto il tempo (`durata_s=T`). Il §6.4
+scrive `--duration 120`, e il secondo limite esiste per quella riga: un failover si misura
+per un intervallo, non per un conteggio, perché quante scritture ci stiano dentro è
+**il risultato**, non il dato. Nessun valore predefinito: senza limiti la corsa non
+finirebbe, e con tutti e due il primo che scade smentirebbe l'altro.
+
+**I lettori (`--readers`).** Un carico di sole scritture non mostra ciò che un replica set
+esiste per fare, e una latenza di lettura durante un failover è una misura diversa da
+quella di scrittura. I lettori girano accanto agli scrittori, campionano su
+`OPERAZIONE_LETTURA` — un campione **separato**, come `OPERAZIONE_SCRITTURA` prometteva
+da prima che esistessero — e a fermarli è la scadenza, oppure la fine degli scrittori
+quando il limite è un conteggio: un lettore non ha un lavoro da esaurire, quindi deve
+esserci qualcuno che gli dice di smettere.
+
+Una riserva dichiarata: una lettura fallita viene **contata e non raccontata**. Gli otto
+eventi del dominio sono congelati e nessuno di loro descrive quel caso; inventarne un nono
+per una statistica sarebbe stato scongelarli dalla parte sbagliata. Chi legge il riepilogo
+vede `letture_fallite`; chi guarda la cronaca non vede niente.
 """
 
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 import math
 import queue
-from typing import Callable, Sequence
+import threading
+from typing import Callable, Iterator, Sequence
 
 from mongolab.domain.eventi import (
     Evento,
@@ -42,12 +63,18 @@ from mongolab.domain.modelli import Documento
 from mongolab.domain.porte import Clock, DocumentStore, EventSink
 
 __all__ = [
+    "OPERAZIONE_LETTURA",
+    "OPERAZIONE_SCRITTURA",
+    "PAGINA",
+    "PAGINE_LETTE",
     "Genera",
     "Latenze",
+    "Legge",
     "PoliticaTentativi",
     "Riepilogo",
     "WorkloadRunner",
     "documento_progressivo",
+    "pagina_ciclica",
     "percentile",
     "riassumi",
 ]
@@ -60,6 +87,11 @@ giorno in cui si campionerà anche la latenza delle letture: i due campioni vann
 separati, perché mescolare la latenza di una scrittura con quella di una `find` produce
 un percentile che non descrive nessuna delle due.
 """
+
+OPERAZIONE_LETTURA = "find_page"
+"""Quel giorno è arrivato al Task 11, e questa costante è il modo in cui i due campioni
+restano separati: il riepilogo li divide leggendo `LatencySampled.operazione`, e la
+promessa scritta sopra si mantiene senza aggiungere un evento."""
 
 UN_MILLISECONDO = timedelta(milliseconds=1)
 
@@ -77,6 +109,41 @@ duplicato o perso.
 def documento_progressivo(indice: int) -> Documento:
     """Il documento più piccolo che serva a qualcosa: solo il suo numero d'ordine."""
     return {"indice": indice}
+
+
+Legge = Callable[[DocumentStore, int], int]
+"""Che cosa fa un lettore a ogni giro, e quanti documenti ha ottenuto.
+
+Il gemello di `Genera`, dall'altro lato: riceve l'archivio e il numero d'ordine del giro,
+e restituisce il conto dei documenti letti. È il gancio con cui il Task 16 misura *la sua*
+interrogazione — un `aggregate`, una `find` con un filtro selettivo — senza che
+`WorkloadRunner` sappia niente di query.
+"""
+
+PAGINA = 20
+"""Quanti documenti legge un giro del lettore predefinito. È la pagina di `find_page`."""
+
+PAGINE_LETTE = 50
+"""Quante pagine diverse il lettore predefinito visita prima di ricominciare.
+
+La finestra è **chiusa** apposta. `skip` in MongoDB scarta i documenti uno per uno prima
+di restituire la pagina, quindi il costo cresce con il salto: un lettore che camminasse in
+avanti per sempre, dopo qualche minuto, misurerebbe il costo dello `skip` invece di quello
+della lettura, e il p95 del Task 16 salirebbe da solo senza che il cluster stia peggio.
+Cinquanta pagine da venti sono mille documenti — abbastanza da non stare tutti nella cache
+del piano, abbastanza pochi da rendere il salto trascurabile.
+"""
+
+
+def pagina_ciclica(archivio: DocumentStore, ordine: int) -> int:
+    """Legge una pagina, girando dentro le prime `PAGINE_LETTE`. Restituisce quanti.
+
+    Non filtra: `{}` è il carico di lettura più onesto per un confronto fra architetture,
+    perché non dipende da quali indici esistano su quello stack. Il giorno in cui servisse
+    misurare una query indicizzata, si passa un altro `Legge` — che è il motivo per cui
+    questa funzione è un valore predefinito e non un metodo.
+    """
+    return len(archivio.find_page({}, salta=(ordine % PAGINE_LETTE) * PAGINA, quanti=PAGINA))
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,11 +207,53 @@ class Riepilogo:
     """
 
     scritture: int
+    """Le scritture **logiche**, cioè i tentativi riusciti più le rese definitive.
+
+    Con il limite di conteggio è il numero chiesto, e si potrebbe copiare da lì; con quello
+    di durata nessuno lo conosce in anticipo. Si ricava dagli eventi in tutti e due i casi
+    — una scrittura che si arrende dopo tre tentativi ne conta **una** — perché due modi di
+    calcolare lo stesso numero sono due numeri appena uno dei due sbaglia.
+    """
+
     riuscite: int
     fallite: int
     ritentate: int
     documenti_confermati: int
     latenze: Latenze | None
+
+    # I campi delle letture arrivano con un valore predefinito, e non è solo compatibilità:
+    # una corsa di sole scritture non ha letture, e zero è la risposta giusta — mentre per
+    # le *latenze* la risposta giusta resta `None`, per la ragione scritta qui sopra.
+    letture: int = 0
+    letture_riuscite: int = 0
+    letture_fallite: int = 0
+    documenti_letti: int = 0
+    latenze_letture: Latenze | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _Lettura:
+    """Il conto di una lettura, che viaggia sulla coda ma **non** finisce sul sink.
+
+    `documenti` è quanti ne sono tornati, oppure `None` se la lettura è fallita. Esiste
+    perché la coda porta due cose diverse — la cronaca e la contabilità — e distinguerle
+    con un tipo invece che con una convenzione è ciò che rende impossibile emettere per
+    sbaglio un conteggio come se fosse un evento del dominio.
+    """
+
+    documenti: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class _Finito:
+    """Il gettone con cui un worker dichiara di aver smesso. Nemmeno questo è un evento.
+
+    Prende il posto del `None` che il Task 5 usava come sentinella, perché adesso il ciclo
+    di drenaggio ha bisogno di sapere **chi** ha finito: quando finisce l'ultimo scrittore
+    i lettori vanno fermati, e un `None` anonimo non lo direbbe.
+    """
+
+    lettore: bool
 
 
 def percentile(campioni: Sequence[float], quantile: float) -> float:
@@ -217,73 +326,169 @@ class WorkloadRunner:
         *,
         politica: PoliticaTentativi = PoliticaTentativi(),
         scrittori: int = 1,
+        lettori: int = 0,
     ) -> None:
-        if scrittori < 1:
-            raise ValueError(f"serve almeno uno scrittore, ricevuto {scrittori}")
+        if scrittori < 0:
+            raise ValueError(f"gli scrittori non sono negativi, ricevuti {scrittori}")
+        if lettori < 0:
+            raise ValueError(f"i lettori non sono negativi, ricevuti {lettori}")
+        if scrittori + lettori < 1:
+            # Zero scrittori non è più un errore da solo — `--writers 0 --readers 4` è il
+            # carico con cui si misura una replica interrogata in sola lettura. L'errore è
+            # zero worker: una corsa che non fa niente per tutto il tempo che le si dà.
+            raise ValueError(
+                "serve almeno un worker: zero scrittori e zero lettori sono una corsa "
+                "che non farebbe niente."
+            )
         self._archivio = archivio
         self._orologio = orologio
         self._sink = sink
         self._politica = politica
         self._scrittori = scrittori
+        self._lettori = lettori
 
     def esegui(
         self,
-        scritture: int,
+        scritture: int | None = None,
         *,
+        durata_s: float | None = None,
         per_scrittura: int = 1,
         genera: Genera = documento_progressivo,
+        legge: Legge = pagina_ciclica,
     ) -> Riepilogo:
-        """Esegue `scritture` inserimenti da `per_scrittura` documenti ciascuno.
+        """Una corsa, limitata da un conteggio di scritture **oppure** da una durata.
 
         Il ciclo di drenaggio è il cuore del metodo, e la sua correttezza sta in un
-        dettaglio: ogni worker, **qualunque cosa accada**, mette in coda un `None` come
-        ultimo gesto. Il chiamante conta i `None` invece di interrogare i futuri o di
+        dettaglio: ogni worker, **qualunque cosa accada**, mette in coda un `_Finito` come
+        ultimo gesto. Il chiamante conta i gettoni invece di interrogare i futuri o di
         attendere con un timeout, e così il ciclo termina anche se un worker muore per un
         errore che non riguarda le scritture. I timeout in un ciclo di consumo sono la
         via che porta a una prova che fallisce una volta su cento su una macchina carica.
+
+        Lo stesso ciclo è anche ciò che ferma i lettori: quando l'ultimo gettone di
+        scrittore è passato, alza `fine`. Farlo qui invece che in un contatore condiviso
+        fra i worker toglie un lucchetto dal cammino caldo e mette la condizione di
+        terminazione in un thread solo, che è già l'invariante del §6.3.
         """
-        if scritture < 0:
+        if (scritture is None) == (durata_s is None):
+            raise ValueError(
+                "una corsa si limita in un modo solo: o `scritture`, quante ne fa, o "
+                "`durata_s`, per quanto va avanti. Senza nessuno dei due non finirebbe; "
+                "con tutti e due il primo che scade smentirebbe l'altro."
+            )
+        if scritture is not None and scritture < 0:
             raise ValueError(f"le scritture non sono negative, ricevute {scritture}")
+        if durata_s is not None and durata_s <= 0:
+            raise ValueError(
+                f"una durata si misura in secondi positivi, ricevuti {durata_s}"
+            )
+        if scritture and self._scrittori == 0:
+            raise ValueError(
+                f"{scritture} scritture chieste a zero scrittori: nessuno le farebbe. "
+                "Un carico di sole letture si limita con `durata_s`."
+            )
 
-        coda: queue.Queue[Evento | None] = queue.Queue()
-        turni = self._riparti(scritture)
+        scadenza = (
+            self._orologio.now() + timedelta(seconds=durata_s)
+            if durata_s is not None
+            else None
+        )
+        coda: queue.Queue[Evento | _Lettura | _Finito] = queue.Queue()
+        fine = threading.Event()
+        turni = self._turni(scritture)
+
         campioni: list[float] = []
-        riuscite = ritentate = confermati = 0
+        campioni_letture: list[float] = []
+        riuscite = ritentate = confermati = cadute = 0
+        letture_riuscite = letture_fallite = documenti_letti = 0
 
-        with ThreadPoolExecutor(max_workers=max(1, len(turni))) as pool:
+        with ThreadPoolExecutor(max_workers=max(1, len(turni) + self._lettori)) as pool:
             futuri: list[Future[None]] = [
-                pool.submit(self._turno, coda, primo, quante, per_scrittura, genera)
-                for primo, quante in turni
+                pool.submit(
+                    self._turno, coda, primo, passo, quante, scadenza, per_scrittura, genera
+                )
+                for primo, passo, quante in turni
             ]
+            futuri += [
+                pool.submit(self._corsa_lettore, coda, scadenza, fine, legge)
+                for _ in range(self._lettori)
+            ]
+            scrittori_aperti = len(turni)
+            if not scrittori_aperti:
+                fine.set()
             aperti = len(futuri)
             while aperti:
                 elemento = coda.get()
-                if elemento is None:
+                if isinstance(elemento, _Finito):
                     aperti -= 1
+                    if not elemento.lettore:
+                        scrittori_aperti -= 1
+                        if not scrittori_aperti:
+                            fine.set()
+                    continue
+                if isinstance(elemento, _Lettura):
+                    if elemento.documenti is None:
+                        letture_fallite += 1
+                    else:
+                        letture_riuscite += 1
+                        documenti_letti += elemento.documenti
                     continue
                 self._sink.emit(elemento)
                 if isinstance(elemento, WriteSucceeded):
                     riuscite += 1
                     confermati += elemento.documenti
                 elif isinstance(elemento, LatencySampled):
-                    campioni.append(elemento.durata_ms)
+                    if elemento.operazione == OPERAZIONE_LETTURA:
+                        campioni_letture.append(elemento.durata_ms)
+                    else:
+                        campioni.append(elemento.durata_ms)
                 elif isinstance(elemento, RetryAttempted):
                     ritentate += 1
+                elif isinstance(elemento, WriteFailed):
+                    cadute += 1
             # Un errore che non sia un fallimento di scrittura è un difetto, non un dato:
             # arriva al chiamante invece di finire in un conteggio.
             for futuro in futuri:
                 futuro.result()
 
+        # Ogni tentativo fallito emette un `WriteFailed`, e tutti tranne l'ultimo emettono
+        # anche un `RetryAttempted`: la differenza fra i due conteggi è il numero di
+        # scritture che si sono arrese, cioè di scritture **logiche** fallite. Tre
+        # `WriteFailed` e due `RetryAttempted` sono una scrittura persa, non tre.
+        fallite = cadute - ritentate
+
         return Riepilogo(
-            scritture=scritture,
+            scritture=riuscite + fallite,
             riuscite=riuscite,
-            fallite=scritture - riuscite,
+            fallite=fallite,
             ritentate=ritentate,
             documenti_confermati=confermati,
             latenze=riassumi(campioni) if campioni else None,
+            letture=letture_riuscite + letture_fallite,
+            letture_riuscite=letture_riuscite,
+            letture_fallite=letture_fallite,
+            documenti_letti=documenti_letti,
+            latenze_letture=riassumi(campioni_letture) if campioni_letture else None,
         )
 
     # --- Il lavoro di un worker -------------------------------------------------------
+
+    def _turni(self, scritture: int | None) -> list[tuple[int, int, int | None]]:
+        """Per ogni scrittore: da quale indice parte, di quanto avanza, e quante ne fa.
+
+        I due limiti dividono il lavoro in due modi diversi, e devono. Con un conteggio si
+        sa tutto prima, quindi si taglia in blocchi contigui — `_riparti` — e ogni worker
+        conosce il proprio pezzo senza guardare l'orologio nemmeno una volta, che è ciò che
+        tiene `FakeClock.attese` pulito nelle prove del backoff.
+
+        Con una durata non si sa quante scritture ci staranno, e i blocchi non si possono
+        calcolare. Gli indici si prendono a scacchiera — il k-esimo scrittore fa k, k+n,
+        k+2n — e restano distinti senza che i worker si accordino su un contatore
+        condiviso, che sarebbe un lucchetto proprio sul cammino più caldo del carico.
+        """
+        if scritture is None:
+            return [(posto, self._scrittori, None) for posto in range(self._scrittori)]
+        return [(primo, 1, quante) for primo, quante in self._riparti(scritture)]
 
     def _riparti(self, scritture: int) -> list[tuple[int, int]]:
         """Divide le scritture fra gli scrittori: (primo indice, quante) per ciascuno.
@@ -306,24 +511,119 @@ class WorkloadRunner:
 
     def _turno(
         self,
-        coda: "queue.Queue[Evento | None]",
+        coda: "queue.Queue[Evento | _Lettura | _Finito]",
         primo: int,
-        quante: int,
+        passo: int,
+        quante: int | None,
+        scadenza: datetime | None,
         per_scrittura: int,
         genera: Genera,
     ) -> None:
         try:
-            for scrittura in range(primo, primo + quante):
+            for scrittura in self._ordini(primo, passo, quante, scadenza):
                 documenti = [
                     genera(scrittura * per_scrittura + posto)
                     for posto in range(per_scrittura)
                 ]
                 self._scrivi(coda, documenti)
         finally:
-            coda.put(None)
+            coda.put(_Finito(lettore=False))
+
+    def _ordini(
+        self, primo: int, passo: int, quante: int | None, scadenza: datetime | None
+    ) -> Iterator[int]:
+        """I numeri d'ordine che tocca a questo scrittore, finché ce ne sono o c'è tempo.
+
+        L'orologio si guarda **prima** di ogni scrittura e non dopo: una corsa che
+        cominciasse un inserimento a scadenza già passata lo porterebbe comunque a termine,
+        e con un `insert_many` lento la durata misurata supererebbe quella chiesta senza
+        che nessuno sappia di quanto.
+        """
+        ordine = primo
+        prodotti = 0
+        while quante is None or prodotti < quante:
+            if scadenza is not None and self._orologio.now() >= scadenza:
+                return
+            yield ordine
+            ordine += passo
+            prodotti += 1
+
+    # --- Il lavoro di un lettore ------------------------------------------------------
+
+    def _corsa_lettore(
+        self,
+        coda: "queue.Queue[Evento | _Lettura | _Finito]",
+        scadenza: datetime | None,
+        fine: threading.Event,
+        legge: Legge,
+    ) -> None:
+        try:
+            ordine = 0
+            while self._si_legge_ancora(scadenza, fine):
+                self._leggi(coda, ordine, legge)
+                ordine += 1
+        finally:
+            coda.put(_Finito(lettore=True))
+
+    def _si_legge_ancora(
+        self, scadenza: datetime | None, fine: threading.Event
+    ) -> bool:
+        """Le due condizioni di terminazione di un lettore, e perché non si sommano.
+
+        Con il limite di durata comanda la scadenza, e basta lei: gli scrittori finiscono
+        nello stesso istante. Con quello di conteggio non c'è scadenza, e a fermare i
+        lettori è `fine`, che il ciclo di drenaggio alza quando l'ultimo scrittore ha
+        smesso — perché un lettore non ha un lavoro da esaurire e altrimenti girerebbe per
+        sempre.
+
+        Sommarle sarebbe un difetto sottile: con `--writers 0` non c'è nessuno scrittore da
+        aspettare, `fine` è alzato dal primo istante, e una corsa di sole letture con una
+        durata di due minuti durerebbe zero.
+        """
+        if scadenza is not None:
+            return self._orologio.now() < scadenza
+        return not fine.is_set()
+
+    def _leggi(
+        self,
+        coda: "queue.Queue[Evento | _Lettura | _Finito]",
+        ordine: int,
+        legge: Legge,
+    ) -> None:
+        """Una lettura. Nessun tentativo, e nessun evento se fallisce.
+
+        **Perché non ritenta.** Gli scrittori ritentano perché una scrittura persa è un
+        dato che si vuole recuperare; una lettura persa non lascia niente da recuperare, e
+        ritentarla nasconderebbe proprio la finestra di indisponibilità che la scena esiste
+        per mostrare. Il numero che interessa è quante letture non sono passate durante il
+        failover, e lo si ottiene contandole al primo colpo.
+
+        **Perché non emette.** Una lettura fallita è contabilità, non cronaca: gli otto
+        eventi del dominio sono congelati e nessuno di loro la descrive. È una riserva
+        dichiarata — chi guarda la TUI durante un failover vede le scritture cadere e non
+        le letture — e il giorno in cui valesse il nono evento, si scongela con la prova in
+        mano invece che di sfuggita.
+        """
+        prima = self._orologio.now()
+        try:
+            quanti = legge(self._archivio, ordine)
+        except Exception:
+            coda.put(_Lettura(documenti=None))
+            return
+        dopo = self._orologio.now()
+        coda.put(_Lettura(documenti=quanti))
+        coda.put(
+            LatencySampled(
+                istante=dopo,
+                operazione=OPERAZIONE_LETTURA,
+                durata_ms=(dopo - prima) / UN_MILLISECONDO,
+            )
+        )
 
     def _scrivi(
-        self, coda: "queue.Queue[Evento | None]", documenti: Sequence[Documento]
+        self,
+        coda: "queue.Queue[Evento | _Lettura | _Finito]",
+        documenti: Sequence[Documento],
     ) -> None:
         """Una scrittura e i suoi tentativi. Emette in coda, mai sul sink.
 

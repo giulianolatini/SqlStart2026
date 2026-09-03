@@ -43,13 +43,16 @@ from mongolab.domain.porte import (
 
 from tests.contratto_archivio import ordini
 from tests.doppi import (
+    ArchivioCheNonLegge,
     ArchivioCheRompe,
     ArchivioLento,
     FakeBackup,
     FakeClock,
     FakeInspector,
     InMemoryStore,
+    LetturaRifiutata,
     NonSupportato,
+    OrologioCheScorre,
     RecordingSink,
     ScritturaRifiutata,
 )
@@ -592,3 +595,150 @@ def test_l_archivio_lento_passa_per_la_porta() -> None:
         InMemoryStore(), FakeClock(ISTANTE), costo_ms=1.0
     )
     assert archivio.insert_many([{"_id": 1}]) == 1
+
+
+# --- ArchivioCheNonLegge --------------------------------------------------------------
+#
+# Il gemello di `ArchivioCheRompe`, arrivato al Task 11 con la prova che ne aveva bisogno:
+# senza un archivio che rifiuta le letture non si può verificare che `WorkloadRunner`
+# **conti** una lettura fallita invece di lasciar cadere l'intera corsa.
+
+
+def test_l_archivio_che_non_legge_rifiuta_le_letture() -> None:
+    archivio = ArchivioCheNonLegge(InMemoryStore())
+
+    with pytest.raises(LetturaRifiutata):
+        archivio.find_page({})
+
+
+def test_l_archivio_che_non_legge_smette_dopo_i_guasti_previsti() -> None:
+    dentro = InMemoryStore()
+    dentro.insert_many([{"_id": 1}])
+    archivio = ArchivioCheNonLegge(dentro, guasti=2)
+
+    for _ in range(2):
+        with pytest.raises(LetturaRifiutata):
+            archivio.find_page({})
+    assert archivio.find_page({}) == ({"_id": 1},)
+
+
+def test_l_archivio_che_non_legge_conta_anche_le_letture_fallite() -> None:
+    archivio = ArchivioCheNonLegge(InMemoryStore(), guasti=1)
+
+    with pytest.raises(LetturaRifiutata):
+        archivio.find_page({})
+    archivio.find_page({})
+
+    assert archivio.tentate == 2
+
+
+def test_l_archivio_che_non_legge_lascia_passare_le_scritture() -> None:
+    """Il verso opposto di `ArchivioCheRompe`: qui a funzionare sono le scritture.
+
+    Serve così: un carico che continua a scrivere mentre le letture non passano è la
+    scena di un secondario che è caduto sotto un primario sano.
+    """
+    dentro = InMemoryStore()
+    archivio = ArchivioCheNonLegge(dentro)
+
+    assert archivio.insert_many([{"_id": 1}, {"_id": 2}]) == 2
+    assert archivio.count({}) == 2
+    assert dentro.count({}) == 2
+
+
+def test_l_archivio_che_non_legge_dice_perche() -> None:
+    archivio = ArchivioCheNonLegge(InMemoryStore(), motivo="il secondario non risponde")
+
+    with pytest.raises(LetturaRifiutata, match="il secondario non risponde"):
+        archivio.find_page({})
+
+
+def test_le_due_rotture_si_compongono() -> None:
+    """`ArchivioCheNonLegge(ArchivioCheRompe(...))`: un archivio in cui non passa niente.
+
+    È la ragione per cui sono due classi e non un parametro in più su una sola: nessuno
+    dei due sa dell'altro, e mypy verifica la composizione al punto di costruzione perché
+    `dentro` è annotato con la porta.
+    """
+    archivio: DocumentStore = ArchivioCheNonLegge(ArchivioCheRompe(InMemoryStore()))
+
+    with pytest.raises(ScritturaRifiutata):
+        archivio.insert_many([{"_id": 1}])
+    with pytest.raises(LetturaRifiutata):
+        archivio.find_page({})
+
+
+def test_l_archivio_che_non_legge_passa_per_la_porta() -> None:
+    archivio: DocumentStore = ArchivioCheNonLegge(InMemoryStore(), guasti=0)
+    assert archivio.find_page({}) == ()
+
+
+# --- OrologioCheScorre ----------------------------------------------------------------
+#
+# `FakeClock` non si muove da solo, ed è la sua virtù: è ciò che rende `attese` una lista
+# di numeri scelti. Ma una corsa limitata da una durata, contro un orologio immobile, non
+# finirebbe mai. Questo doppio è la risposta minima — il tempo avanza di un passo fisso a
+# ogni lettura — e la conseguenza è che «quanti giri stanno in una durata» smette di
+# dipendere dalla macchina e diventa una divisione.
+
+
+def test_l_orologio_che_scorre_avanza_a_ogni_lettura() -> None:
+    orologio = OrologioCheScorre(ISTANTE, passo_s=0.010)
+
+    assert orologio.now() == ISTANTE
+    assert orologio.now() == ISTANTE + timedelta(milliseconds=10)
+    assert orologio.now() == ISTANTE + timedelta(milliseconds=20)
+
+
+def test_l_orologio_che_scorre_conta_le_letture() -> None:
+    orologio = OrologioCheScorre(ISTANTE)
+
+    for _ in range(7):
+        orologio.now()
+
+    assert orologio.letture == 7
+
+
+def test_l_orologio_che_scorre_registra_le_attese_come_il_gemello() -> None:
+    # La stessa promessa di `FakeClock`: il backoff resta una lista di numeri, non pause
+    # vere. Qui in più l'attesa fa **anche** avanzare il tempo, perché una prova a durata
+    # deve poter scadere dormendo.
+    orologio = OrologioCheScorre(ISTANTE, passo_s=0.0)
+
+    orologio.sleep(0.05)
+    orologio.sleep(0.1)
+
+    assert orologio.attese == [0.05, 0.1]
+    assert orologio.now() == ISTANTE + timedelta(milliseconds=150)
+
+
+def test_l_orologio_che_scorre_non_torna_mai_indietro_sotto_piu_thread() -> None:
+    """Il lucchetto è ciò che rende il doppio usabile in una prova a più worker.
+
+    Senza, due thread possono leggere lo stesso istante — e una prova che divide una
+    durata per un passo si ritroverebbe più giri di quanti ne siano stati concessi, una
+    volta ogni tanto. Che è il tipo di prova peggiore.
+    """
+    orologio = OrologioCheScorre(ISTANTE, passo_s=0.001)
+    letti: list[datetime] = []
+    serratura = threading.Lock()
+
+    def legge_cento() -> None:
+        for _ in range(100):
+            adesso = orologio.now()
+            with serratura:
+                letti.append(adesso)
+
+    thread = [threading.Thread(target=legge_cento) for _ in range(4)]
+    for uno in thread:
+        uno.start()
+    for uno in thread:
+        uno.join()
+
+    assert len(set(letti)) == 400
+    assert orologio.letture == 400
+
+
+def test_l_orologio_che_scorre_passa_per_la_porta() -> None:
+    orologio: Clock = OrologioCheScorre(ISTANTE)
+    assert orologio.now().tzinfo is not None

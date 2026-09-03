@@ -23,11 +23,16 @@ import threading
 import pytest
 
 from mongolab.application.workload import (
+    OPERAZIONE_LETTURA,
+    PAGINA,
+    PAGINE_LETTE,
     Genera,
     Latenze,
+    Legge,
     PoliticaTentativi,
     Riepilogo,
     WorkloadRunner,
+    pagina_ciclica,
     percentile,
     riassumi,
 )
@@ -42,10 +47,12 @@ from mongolab.domain.porte import Clock, DocumentStore, EventSink
 
 from tests.aiutanti import specie
 from tests.doppi import (
+    ArchivioCheNonLegge,
     ArchivioCheRompe,
     ArchivioLento,
     FakeClock,
     InMemoryStore,
+    OrologioCheScorre,
     RecordingSink,
     ScritturaRifiutata,
 )
@@ -467,3 +474,261 @@ def test_il_generatore_e_una_funzione_dall_indice_al_documento() -> None:
     )
 
     assert archivio.count({"indice": 0}) == 1
+
+
+# --- Il limite di durata (Task 11) ----------------------------------------------------
+#
+# Le tre opzioni che il §6.4 scrive sulla riga del workload — `--readers`, `--duration`,
+# `--doc-size` — al Task 10 non avevano niente dietro. Queste prove sono ciò che c'è
+# dietro alle prime due; la terza sta in `test_zavorra.py`, perché la dimensione di un
+# documento è una faccenda di chi lo genera e non del generatore di carico.
+#
+# La difficoltà di provare una durata è che il tempo non si può aspettare: una prova che
+# dormisse due secondi non entrerebbe in una suite che ne dura uno. `OrologioCheScorre` la
+# risolve facendo avanzare il tempo **a ogni lettura dell'ora**, sotto lucchetto: quanti
+# giri stanno in una durata smette di dipendere dalla macchina e diventa una divisione.
+
+
+def test_una_corsa_senza_limiti_e_rifiutata() -> None:
+    # Il limite mancante non ha un valore predefinito ragionevole: sarebbe un ciclo che
+    # non finisce, cioè la stessa trappola che `TopologyWatcher.segui` evita chiedendo i
+    # giri per forza.
+    corridore = WorkloadRunner(InMemoryStore(), FakeClock(ISTANTE), RecordingSink())
+    with pytest.raises(ValueError, match="scritture|durata"):
+        corridore.esegui()
+
+
+def test_una_corsa_con_due_limiti_e_rifiutata() -> None:
+    corridore = WorkloadRunner(InMemoryStore(), FakeClock(ISTANTE), RecordingSink())
+    with pytest.raises(ValueError, match="scritture|durata"):
+        corridore.esegui(scritture=10, durata_s=1.0)
+
+
+def test_una_durata_non_positiva_e_rifiutata() -> None:
+    corridore = WorkloadRunner(InMemoryStore(), FakeClock(ISTANTE), RecordingSink())
+    with pytest.raises(ValueError, match="durata"):
+        corridore.esegui(durata_s=0.0)
+
+
+def test_un_conteggio_chiesto_a_zero_scrittori_e_rifiutato() -> None:
+    # L'alternativa sarebbe una corsa che restituisce zero scritture senza dire perché, e
+    # nessuno collegherebbe quello zero a un `--writers 0` scritto tre opzioni prima.
+    corridore = WorkloadRunner(
+        InMemoryStore(), FakeClock(ISTANTE), RecordingSink(), scrittori=0, lettori=1
+    )
+    with pytest.raises(ValueError, match="scrittori"):
+        corridore.esegui(scritture=10)
+
+
+def test_una_corsa_a_durata_scrive_finche_il_tempo_non_scade() -> None:
+    archivio = InMemoryStore()
+    orologio = OrologioCheScorre(ISTANTE, passo_s=0.001)
+
+    riepilogo = WorkloadRunner(archivio, orologio, RecordingSink()).esegui(durata_s=0.05)
+
+    assert riepilogo.scritture > 0
+    assert riepilogo.riuscite == riepilogo.scritture
+    assert archivio.count({}) == riepilogo.documenti_confermati
+    # Il tetto: ogni giro legge l'ora almeno una volta, quindi in cinquanta millesimi
+    # scanditi da un millesimo l'uno non ci stanno più di cinquanta giri.
+    assert riepilogo.scritture <= 50
+
+
+def test_una_corsa_a_durata_non_duplica_gli_indici() -> None:
+    # Con il limite di conteggio le scritture si ripartiscono in blocchi calcolati prima;
+    # con quello di durata nessuno sa quante saranno, e gli indici devono restare distinti
+    # senza che i worker si accordino su un contatore condiviso.
+    archivio = InMemoryStore()
+
+    WorkloadRunner(
+        archivio, OrologioCheScorre(ISTANTE, passo_s=0.001), RecordingSink(), scrittori=4
+    ).esegui(durata_s=0.05)
+
+    indici = [documento["indice"] for documento in archivio.find_page({}, quanti=10_000)]
+    assert len(set(indici)) == len(indici)
+
+
+def test_una_corsa_a_durata_conta_le_scritture_invece_di_saperle_prima() -> None:
+    # Con il limite di conteggio `scritture` è il numero chiesto; con quello di durata
+    # nessuno lo conosce in anticipo, e deve venire fuori dagli eventi.
+    archivio = ArchivioCheRompe(InMemoryStore(), guasti=None)
+    orologio = OrologioCheScorre(ISTANTE, passo_s=0.001)
+
+    riepilogo = WorkloadRunner(archivio, orologio, RecordingSink()).esegui(durata_s=0.05)
+
+    assert riepilogo.scritture == riepilogo.riuscite + riepilogo.fallite
+    assert riepilogo.riuscite == 0
+    assert riepilogo.fallite > 0
+
+
+def test_il_conteggio_delle_scritture_regge_i_tentativi() -> None:
+    # Tre tentativi per una sola scrittura logica: due `RetryAttempted` e tre
+    # `WriteFailed`, che devono contare **una** scrittura fallita e non tre.
+    archivio = ArchivioCheRompe(InMemoryStore(), guasti=None)
+
+    riepilogo = WorkloadRunner(archivio, FakeClock(ISTANTE), RecordingSink()).esegui(
+        scritture=1
+    )
+
+    assert riepilogo.scritture == 1
+    assert riepilogo.fallite == 1
+    assert riepilogo.ritentate == 2
+
+
+# --- I lettori ------------------------------------------------------------------------
+
+
+def test_senza_lettori_il_riepilogo_non_parla_di_letture() -> None:
+    riepilogo = WorkloadRunner(InMemoryStore(), FakeClock(ISTANTE), RecordingSink()).esegui(
+        scritture=5
+    )
+
+    assert riepilogo.letture == 0
+    assert riepilogo.letture_riuscite == 0
+    assert riepilogo.letture_fallite == 0
+    # `None` e non un oggetto di zeri: è la stessa regola delle latenze di scrittura —
+    # dove non c'è una risposta, si dichiara di non averla invece di inventarne una.
+    assert riepilogo.latenze_letture is None
+
+
+def test_un_numero_negativo_di_lettori_e_rifiutato() -> None:
+    with pytest.raises(ValueError, match="lettor"):
+        WorkloadRunner(InMemoryStore(), FakeClock(ISTANTE), RecordingSink(), lettori=-1)
+
+
+def test_senza_nessun_worker_non_c_e_corsa() -> None:
+    with pytest.raises(ValueError, match="scrittor|lettor"):
+        WorkloadRunner(InMemoryStore(), FakeClock(ISTANTE), RecordingSink(), scrittori=0)
+
+
+def test_un_carico_di_sole_letture_e_legittimo() -> None:
+    # `--writers 0 --readers 4` è una richiesta sensata: è il carico con cui si misura una
+    # replica interrogata in sola lettura. Zero scrittori non è più un errore; l'errore è
+    # zero worker.
+    archivio = InMemoryStore()
+    archivio.insert_many([{"indice": n} for n in range(100)])
+
+    riepilogo = WorkloadRunner(
+        archivio,
+        OrologioCheScorre(ISTANTE, passo_s=0.001),
+        RecordingSink(),
+        scrittori=0,
+        lettori=2,
+    ).esegui(durata_s=0.05)
+
+    assert riepilogo.scritture == 0
+    assert riepilogo.letture_riuscite > 0
+    assert riepilogo.latenze_letture is not None
+
+
+def test_le_letture_si_fermano_quando_gli_scrittori_hanno_finito() -> None:
+    # Senza questo, un `--readers 4` con il limite di conteggio non finirebbe mai: i
+    # lettori non hanno un lavoro da esaurire, quindi glielo deve dire qualcuno. Che questa
+    # prova **ritorni** è metà dell'asserzione.
+    archivio = InMemoryStore()
+
+    riepilogo = WorkloadRunner(
+        archivio, OrologioCheScorre(ISTANTE), RecordingSink(), lettori=2
+    ).esegui(scritture=20)
+
+    assert riepilogo.scritture == 20
+    assert riepilogo.letture == riepilogo.letture_riuscite + riepilogo.letture_fallite
+
+
+def test_le_latenze_di_lettura_stanno_in_un_campione_a_parte() -> None:
+    # È la promessa scritta nella docstring di `OPERAZIONE_SCRITTURA` da prima che i
+    # lettori esistessero: «il giorno in cui si campionerà anche la latenza delle letture,
+    # i due campioni vanno tenuti separati». Mescolarli darebbe un percentile che non
+    # descrive né una scrittura né una lettura.
+    archivio = InMemoryStore()
+    archivio.insert_many([{"indice": n} for n in range(50)])
+    sink = RecordingSink()
+
+    riepilogo = WorkloadRunner(
+        archivio, OrologioCheScorre(ISTANTE), sink, scrittori=0, lettori=1
+    ).esegui(durata_s=0.05)
+
+    operazioni = {campione.operazione for campione in specie(sink.eventi, LatencySampled)}
+    assert operazioni == {OPERAZIONE_LETTURA}
+    assert riepilogo.latenze is None
+    assert riepilogo.latenze_letture is not None
+    assert riepilogo.latenze_letture.campioni == riepilogo.letture_riuscite
+
+
+def test_una_lettura_fallita_si_conta_e_non_ferma_la_corsa() -> None:
+    # Il contrario — lasciar salire l'eccezione — vorrebbe dire che durante un failover il
+    # carico muore invece di raccontare che cosa sta succedendo, che è la scena.
+    archivio = ArchivioCheNonLegge(InMemoryStore(), guasti=None)
+
+    riepilogo = WorkloadRunner(
+        archivio, OrologioCheScorre(ISTANTE), RecordingSink(), scrittori=0, lettori=1
+    ).esegui(durata_s=0.05)
+
+    assert riepilogo.letture_fallite > 0
+    assert riepilogo.letture_riuscite == 0
+    assert riepilogo.latenze_letture is None
+
+
+def test_una_lettura_fallita_non_produce_un_evento() -> None:
+    # Gli otto eventi del dominio sono congelati e nessuno di loro descrive una lettura
+    # fallita. Contarla senza raccontarla è una riserva dichiarata, non una dimenticanza:
+    # questa prova la fissa, così il giorno in cui servisse il nono evento sia lei a
+    # chiedere di cambiare.
+    archivio = ArchivioCheNonLegge(InMemoryStore(), guasti=None)
+    sink = RecordingSink()
+
+    WorkloadRunner(
+        archivio, OrologioCheScorre(ISTANTE), sink, scrittori=0, lettori=1
+    ).esegui(durata_s=0.02)
+
+    assert sink.eventi == []
+
+
+def test_il_lettore_predefinito_gira_dentro_una_finestra() -> None:
+    # `skip` in MongoDB è lineare: un lettore che camminasse in avanti per sempre finirebbe
+    # per misurare il costo del salto invece di quello della lettura. La finestra è
+    # dichiarata, e questa prova la fissa.
+    saltati = {(ordine % PAGINE_LETTE) * PAGINA for ordine in range(PAGINE_LETTE * 3)}
+    assert min(saltati) == 0
+    assert max(saltati) == (PAGINE_LETTE - 1) * PAGINA
+
+
+def test_il_lettore_predefinito_legge_una_pagina() -> None:
+    archivio = InMemoryStore()
+    archivio.insert_many([{"indice": n} for n in range(PAGINA * 3)])
+
+    assert pagina_ciclica(archivio, 0) == PAGINA
+
+
+def test_il_lettore_si_puo_sostituire() -> None:
+    # Lo stesso gancio di `genera`, dall'altro lato: il Task 16 ci attacca la query che
+    # vuole misurare, senza toccare `WorkloadRunner`.
+    chiamate: list[int] = []
+
+    def conta(archivio: DocumentStore, ordine: int) -> int:
+        chiamate.append(ordine)
+        return archivio.count({})
+
+    archivio = InMemoryStore()
+    archivio.insert_many([{"indice": n} for n in range(7)])
+    legge: Legge = conta
+
+    riepilogo = WorkloadRunner(
+        archivio, OrologioCheScorre(ISTANTE), RecordingSink(), scrittori=0, lettori=1
+    ).esegui(durata_s=0.02, legge=legge)
+
+    assert chiamate
+    assert riepilogo.documenti_letti == 7 * riepilogo.letture_riuscite
+
+
+def test_anche_con_i_lettori_solo_il_thread_chiamante_tocca_il_sink() -> None:
+    # ADR-0019 non fa eccezioni per i lettori: i loro eventi passano dalla stessa coda.
+    sink = RecordingSink()
+    archivio = InMemoryStore()
+    archivio.insert_many([{"indice": n} for n in range(20)])
+
+    WorkloadRunner(
+        archivio, OrologioCheScorre(ISTANTE), sink, scrittori=2, lettori=2
+    ).esegui(scritture=20)
+
+    assert sink.chiamanti == {threading.get_ident()}

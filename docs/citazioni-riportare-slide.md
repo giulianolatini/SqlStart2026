@@ -2364,3 +2364,94 @@ molto diverse — ciò che davvero non ha senso provare, e ciò che è scomodo. 
 è *che cosa esattamente vieta il divieto*: qui vietava di guardare i pixel, non di contare i thread
 o di chiedere se una coda è vuota. Le due mutazioni sopravvissute stavano proprio lì, ed è un esito
 che si ripete: le righe senza guardia tendono a essere quelle su cui poggia la documentazione.
+
+---
+
+### Una suite verde non prova che il programma sia mai stato eseguito
+
+> 425 prove unitarie, 43 d'integrazione, `mypy --strict` su 57 file: tutto verde. Poi lo stack è
+> stato acceso, e due comandi su tre erano sbagliati. Nessuno dei due difetti apparteneva a un
+> componente: uno stava fra un generatore che numera da zero e una collezione già numerata, l'altro
+> fra due osservatori della stessa struttura. Le prove di componente non possono vedere le
+> giunture.
+
+Fonte: [`app/docs/12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md`](../app/docs/12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md),
+[registro operativo, nota 179](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché la copertura è la metrica che si mostra, e questa è la sua ombra. Un
+difetto di giuntura non ha un file in cui vive, quindi non ha un file in cui provarlo, quindi non
+compare in nessun rapporto di copertura — e resta l'unico che una demo dal vivo rivelerà, davanti a
+tutti. Il rimedio non è più prove: è mettere in conto la prima esecuzione contro l'ambiente vero
+come un **passo del lavoro**, non come una formalità dopo il commit.
+
+---
+
+### Il guasto da temere non è quello che solleva: è quello che esce con zero
+
+> Il carico rotto usciva con codice zero. La cronaca scorreva, 4 833 letture su 4 833 riuscivano,
+> lo schermo era pieno di attività. Solo una riga del consuntivo diceva la verità: «38 scritture, 0
+> confermate». Dal fondo della sala era una demo che funziona.
+
+Fonte: [`app/docs/Sources.md`, M-032](../app/docs/Sources.md#m-032),
+[ADR-0088](Decision.md#adr-0088), [registro operativo, nota 180](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché è successo tre volte in questo progetto e ogni volta con una faccia
+diversa — un `mongorestore` che perde documenti e esce zero ([ADR-0084](Decision.md#adr-0084)), una
+latenza negativa che entra nei percentili ([ADR-0086](Decision.md#adr-0086)), un carico che non
+scrive niente e sembra lavorare. Un'eccezione si vede; un numero plausibile no. La domanda pratica
+da portare via: **quale numero di questo consuntivo sarebbe zero se tutto fosse rotto?** — e poi
+guardarlo.
+
+---
+
+### Su uno stesso fatto, un narratore solo
+
+> `watch` raccontava ogni transizione due volte. PyMongo la emette una volta sola: a raddoppiarla
+> erano due osservatori nostri sulla stessa struttura, uno che riceve i callback e uno che
+> interroga ogni mezzo secondo. Uno spinto e uno tirato: non era un rischio, era una certezza.
+
+Fonte: [`app/docs/Sources.md`, M-033](../app/docs/Sources.md#m-033),
+[ADR-0089](Decision.md#adr-0089), [registro operativo, nota 182](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché la cura sbagliata è la prima che viene in mente — deduplicare a valle
+— e in un contesto di failover è peggio della malattia: due transizioni identiche e ravvicinate
+sono anche la firma di un membro che *flappa*, cioè esattamente la cosa che si sta cercando di
+mostrare. Un filtro non sa distinguere il doppione dal fatto ripetuto. Si guarisce togliendo un
+osservatore. Vale per ogni cruscotto che unisce una fonte a eventi e una fonte a polling, che è
+quasi ogni cruscotto.
+
+---
+
+### L'orologio da parete non promette di andare avanti, e lo dichiara
+
+> `time.get_clock_info("time")` risponde `monotonic=False, adjustable=True`. È scritto, si legge in
+> una riga, e quasi nessuno lo legge prima di sottrarre due `datetime.now()` e chiamare il
+> risultato «latenza». Quando NTP corregge una deriva, quella sottrazione dà un numero negativo —
+> che non solleva niente, ed entra nei percentili.
+
+Fonte: [`app/docs/Sources.md`, M-030](../app/docs/Sources.md#m-030),
+[ADR-0086](Decision.md#adr-0086), [registro operativo, nota 184](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché misurare una latenza è la cosa che chiunque in sala fa tutte le
+settimane, ed è il caso in cui l'implementazione ovvia di un'astrazione ovvia sbaglia. La domanda
+che separa i due usi è una sola: *questo istante lo devo datare o lo devo sottrarre?* Datare vuole
+l'ora vera, sottrarre vuole un contatore che non torna indietro, e un `datetime.now()` fa bene solo
+la prima. Un'ancora letta una volta più un contatore monotono fa bene entrambe.
+
+---
+
+### Un valore predefinito comodo è un errore silenzioso in attesa
+
+> `--target` non ha un predefinito, e non lo avrà. Durante il talk si cambia stack tre volte: con
+> un predefinito, una distrazione manda il carico al bersaglio sbagliato — e quel comando non
+> fallisce. **Riesce**, altrove.
+
+Fonte: [`app/docs/12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md`](../app/docs/12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md),
+[ADR-0087](Decision.md#adr-0087), [registro operativo, nota 185](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché il criterio è generale e si enuncia in una riga — *se sbagliare il
+predefinito produce un errore visibile, mettilo; se produce un risultato plausibile ma di un'altra
+cosa, non metterlo* — e perché nel mondo dei database questo caso ha una versione famosa: il
+`--host` che, mancando, punta a `localhost`. La stessa severità vale per gli strumenti attorno: qui
+`make app-stats` senza `TARGET` esce con **2** invece di indovinare, che è lo stesso codice con cui
+Typer rifiuta un parametro sbagliato.

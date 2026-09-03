@@ -9,6 +9,12 @@ dependencies = [
     "rich>=13.9",
 ]
 
+[project.scripts]
+# Il §6.4 scrive `mongolab stats --target rs`, non `python -m mongolab.cli`: questa riga è
+# ciò che rende letterale quella riga di comando. Punta a `app`, cioè all'oggetto
+# `typer.Typer`, che è chiamabile: invocarlo è ciò che Typer trasforma in un programma.
+mongolab = "mongolab.cli:app"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",

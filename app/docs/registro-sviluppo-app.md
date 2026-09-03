@@ -758,6 +758,88 @@ duplicata in due file diventa due funzioni diverse alla prima modifica.
 
 ---
 
+## Task 11 — La radice di composizione, e tre difetti che solo l'esecuzione poteva mostrare
+
+**Fatto il 3 settembre 2026.** Il capitolo che ne esce è
+[12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md).
+
+`cli.py` è l'unico punto dell'applicazione che conosce le classi concrete: costruisce
+`PymongoStore`, `PymongoInspector`, `SdamBridge`, `SystemClock` e le tre rese, e le inietta in
+componenti che continuano a vedere soltanto porte. Con lui arrivano i tre comandi diretti del §6.4
+— `stats`, `watch`, `workload` — la mappa fra `--target` e stack in un posto solo, e `--sink` come
+opzione invece che come condizione sparsa in tre punti.
+
+I file scritti sono più di quelli che il piano elenca, e l'allargamento è dichiarato:
+`infrastructure/orologio.py` (la porta `Clock` non aveva un'implementazione di produzione),
+`infrastructure/bersagli.py` (la mappa), `infrastructure/zavorra.py` (`--doc-size`),
+`presentation/rapporto.py` (l'uscita di `stats`), `--readers` e `--duration` in
+`application/workload.py`, `[project.scripts]` in `app/pyproject.toml`, tre target nel `Makefile`.
+Le quattro opzioni di `workload` sono state implementate tutte perché il Task 16 misurerà **quella**
+riga di comando del §6.4, e una riga misurata che non si può digitare non serve a niente.
+
+### Poi si è eseguito davvero, e due comandi su tre erano sbagliati
+
+Con 425 prove unitarie verdi, 43 d'integrazione e `mypy --strict` senza rilievi, lo stack 01 è stato
+acceso e i tre comandi lanciati per la prima volta contro un MongoDB vero. Nessuno dei difetti
+trovati era una svista: tutti vivevano nella **giuntura** fra componenti che, presi uno per uno,
+erano corretti e provati.
+
+**`workload` scriveva nella collezione seminata.** `38 scritture · 0 confermate · 38 fallite`, e
+uscita zero. Ogni inserimento tornava
+`E11000 duplicate key error collection: lab.ordini index: _id_ dup key: { _id: 0 }`
+([M-032](Sources.md#m-032)): `DataGenerator` numera da zero, il seed occupa gli `_id` da 0 a 49 999.
+La forma del guasto conta più del guasto — la cronaca scorreva, 4 833 letture su 4 833 riuscivano, e
+dal fondo della sala era una demo che funziona. `InMemoryStore` accetta gli `_id` che gli si danno e
+non ha un seed, quindi nessuna prova unitaria poteva vederlo, e nessuna doveva. Che il carico
+dovesse scrivere altrove era già scritto in `generatore.py` e in `tools/reset-demo.sh`: a sbagliare
+era il cablaggio. Correzione: una collezione per corsa, `lab.carico-<AAAAMMGG-hhmmss>`, e il comando
+che dice dove scrive prima di cominciare ([ADR-0088](../../docs/Decision.md#adr-0088)). Rifatta la
+corsa: **8 245 scritture, 8 245 confermate, 0 fallite.**
+
+**`watch` raccontava ogni transizione due volte.** Il driver è stato messo alla prova nudo prima di
+accusarlo, e la emette **una volta sola** ([M-033](Sources.md#m-033)). Il doppione era nostro:
+`SdamBridge` e `TopologyWatcher` guardano la stessa struttura, uno spinto e uno tirato. Correzione:
+in `watch` resta il ponte, come prescrive il §6.3; la sentinella conserva la misura
+dell'**interruzione** per lo scenario di failover del Task 13
+([ADR-0089](../../docs/Decision.md#adr-0089)). Deduplicare nel sink era la scorciatoia, ed è stata
+scartata: due transizioni identiche e ravvicinate sono anche la firma di un membro che *flappa*,
+cioè la cosa che una demo di failover deve mostrare.
+
+**`stats` diceva `sconosciuto` di un server sano.** `client.topology_description` riferisce ciò che
+il client crede *in questo istante*, e su un client appena costruito il primo battito non è ancora
+tornato ([M-031](Sources.md#m-031)). Correzione nell'ordine di lettura di `rapporto()`:
+`server_status()` per primo, perché esegue un comando e costringe il driver a guardare; `topology()`
+per ultimo. L'ordine di lettura è l'opposto di quello di stampa, e siccome è il genere di dettaglio
+che un riordino per leggibilità cancella, c'è una prova che conta l'ordine delle chiamate —
+validata con una mutazione deliberata.
+
+### L'orologio, che era una porta senza casa
+
+`Clock` esisteva come porta e come `FakeClock`; in produzione nessuno. L'implementazione ovvia —
+`datetime.now().astimezone()` — è sbagliata per l'uso che questa applicazione ne fa, perché la porta
+serve a **datare** e a **misurare**, e l'orologio da parete dichiara `monotonic=False`
+([M-030](Sources.md#m-030)). Un salto all'indietro non solleva: produce una latenza negativa che
+entra nei percentili. `SystemClock` legge il muro una volta sola e da lì somma il contatore
+monotono, nel fuso locale e non in UTC ([ADR-0086](../../docs/Decision.md#adr-0086)).
+
+### Numeri
+
+| | Prima | Dopo |
+|---|---|---|
+| Prove unitarie | 280 | **425** |
+| Prove di integrazione | 43 (29,6 s) | 43 (28,0 s) — invariate |
+| File controllati da mypy | 48 | **57** |
+| Prove degli strumenti | 143 | 143 — invariate |
+| ADR del repository | 85 | **89** |
+| Misure nel registro dell'app | 29 | **34** |
+
+Le prove della CLI verificano il **cablaggio** e non il comportamento dei componenti, già provato
+altrove: che `--sink plain` produca un `PlainSink`, che un `--target` sbagliato esca con 2, che il
+carico chieda una collezione che comincia per `carico-`, che il cliente venga chiuso. Girano offline
+in millisecondi, perché `cabla()` non apre niente.
+
+---
+
 ## Che cosa manca
 
 I task dall'11 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
@@ -779,9 +861,9 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | ~~Nessun `ClusterInspector` reale: il `TopologyWatcher` ha visto solo topologie finte~~ | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | **chiuso** al Task 8: quattordici prove di integrazione guardano tre topologie vere |
 | ~~L'osservatore interroga invece di ascoltare: la risoluzione è l'intervallo~~ | [08](08-il-ponte-sdam-e-i-thread-del-driver.md) | **chiuso** al Task 7: il ponte riceve i cambiamenti quando accadono |
 | L'intervallo predefinito di 500 ms è scelto, non misurato | [07](07-topologia-failover-e-i-due-numeri.md#il-limite-di-questo-osservatore-dichiarato) | il primo failover cronometrato: serve il Blocco 2 in funzione, non un ispettore |
-| Il `TopologyWatcher` non ha un invariante di thread: oggi lo usa un thread solo | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | Task 11: al Task 10 la TUI riceve la topologia come **evento** e non tocca l'osservatore, quindi il punto è passato intatto |
+| Il `TopologyWatcher` non ha un invariante di thread: oggi lo usa un thread solo | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | Task 13: al Task 11 la sentinella è stata **tolta** da `watch` — un secondo narratore sullo stesso fatto ([ADR-0089](../../docs/Decision.md#adr-0089)) — quindi in produzione oggi non la usa nessuno, e il punto scade quando `scenari.py` la rimetterà in servizio |
 | `ChunkMigrated` potrebbe non essere osservabile da un client di `mongos` | [08](08-il-ponte-sdam-e-i-thread-del-driver.md#che-cosa-non-è-ancora-verificato) | Task 15 |
-| Un'eccezione dentro un listener finisce su `stderr`, e sotto un `Live` non si vede | [M-015](Sources.md#m-015) | Task 11 |
+| Un'eccezione dentro un listener finisce su `stderr`, e sotto un `Live` non si vede | [M-015](Sources.md#m-015) | **aperto, e da Task 11 reale**: `watch --sink rich` mette per la prima volta un `Live` e gli ascoltatori del driver nello stesso processo. La difesa di oggi è che gli ascoltatori sono **totali** — `ruolo_di` non solleva su un nome sconosciuto — non che l'errore si veda. Task 13 |
 | La soglia della prova cronometrata non prende una `f-string` nel callback | [M-013, riserve](Sources.md#m-013) | dichiarata, non si chiude |
 | Le unità delle durate sono lette nel sorgente di PyMongo, non viste su un battito vero | [M-012, riserve](Sources.md#m-012) | il primo battito su un cluster in movimento: il Task 8 ha collegato l'ispettore, non il ponte |
 | ~~Come le prove di integrazione ricevono la credenziale senza violare ADR-0054~~ | [decisioni](decisioni-che-vincolano-app.md#adr-0054) | **chiuso** al Task 8: [M-018](Sources.md#m-018) e [ADR-0083](../../docs/Decision.md#adr-0083) |
@@ -799,10 +881,16 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | Un `BrokenPipeError` scrivendo la password a un processo già morto non è gestito | [M-023, riserve](Sources.md#m-023) | la prima volta che si riprodurrà: gestire un caso mai visto è codice che nessuna prova copre |
 | `--nsFrom`/`--nsTo` senza `--nsInclude` è stato osservato una volta e non ripetuto | [M-024, riserve](Sources.md#m-024) | dichiarata: ripeterlo significa far passare `mongorestore` sugli utenti dell'amministratore |
 | `PlainSink` non gestisce `BrokenPipeError`: chi reindirizza su `head` vede una traccia invece di una fine | [11](11-tre-rese-e-un-solo-thread-che-disegna.md#che-cosa-questo-capitolo-lascia-aperto) | la prima volta che succederà dentro una registrazione |
-| Non esiste ancora un `Orologio` di sistema: `RichTui` lo riceve, e in produzione nessuno glielo dà | [11](11-tre-rese-e-un-solo-thread-che-disegna.md#che-cosa-questo-capitolo-lascia-aperto) | Task 11, con la radice di composizione |
+| ~~Non esiste ancora un `Orologio` di sistema: `RichTui` lo riceve, e in produzione nessuno glielo dà~~ | [11](11-tre-rese-e-un-solo-thread-che-disegna.md#che-cosa-questo-capitolo-lascia-aperto) | **chiuso** al Task 11: `SystemClock` è ancorato al muro una volta sola e avanzato dal contatore monotono ([ADR-0086](../../docs/Decision.md#adr-0086), [M-030](Sources.md#m-030)) |
 | Nessuna prova guarda che cosa Rich disegna davvero: il Passo 4 lo vieta | [11](11-tre-rese-e-un-solo-thread-che-disegna.md#il-divieto-del-passo-4-letto-due-volte) | Task 18: la registrazione `.cast` **è** il controllo, e la guarda una persona |
 | Il costo di un disegno è misurato su `StringIO`, non su un terminale vero | [M-028, riserve](Sources.md#m-028) | Task 18, se la registrazione risultasse a scatti |
 | `_RefreshThread` è privato di Rich e può cambiare senza avviso | [A-015, riserve](Sources.md#a-015) | dichiarata: la difesa è la prova che conta i thread, che si accorgerebbe del cambiamento |
+| Sullo stack 03 `lab.carico-*` **non è distribuita**: `init/30-dati-demo.js` distribuisce solo `lab.ordini` su `{_id: "hashed"}` | [ADR-0088, riserve](../../docs/Decision.md#adr-0088) | Task 16, ed è la prima cosa che quel task deve decidere: o distribuire la collezione, o dichiarare che misura un solo shard |
+| `TOPOLOGIA singola → singola` è vera e non utile: cambia la *descrizione*, non la forma | [12](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md#che-cosa-questo-capitolo-lascia-aperto) | decidendo che cosa quella riga debba dire, non aggiungendo un osservatore |
+| Il ciclo di `watch` vive in `cli.py`: orchestrazione dentro la radice di composizione | [12](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md#che-cosa-questo-capitolo-lascia-aperto) | Task 13, con `application/scenari.py` |
+| Le letture fallite si contano ma non emettono nessun evento: nel consuntivo ci sono, in cronaca no | [12](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md#che-cosa-questo-capitolo-lascia-aperto) | Task 13, se la scena del failover dovrà mostrarle |
+| `rapporto()` riceve la porta invece dei valori già letti, quindi l'ordine delle interrogazioni è affar suo | [12](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md#terzo-la-fotografia-diceva-sconosciuto-di-un-server-sano) | dichiarata: chi volesse comporre un rapporto da dati raccolti altrove oggi non può |
+| La mappa dei bersagli contiene le porte **predefinite**, e i Compose le scrivono `${PORTA_...:-27021}` | [ADR-0087, riserve](../../docs/Decision.md#adr-0087) | dichiarata: la difesa sarebbe una prova che rilegge il `compose.yaml` e confronta |
 
 ---
 
@@ -810,4 +898,4 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 
 **Il registro completo del repository**, che copre anche le altre feature, è
 [`docs/registro-operativo-sviluppo.md`](../../docs/registro-operativo-sviluppo.md). Le note di metodo
-citate qui (137–178) stanno lì per esteso.
+citate qui (137–185) stanno lì per esteso.

@@ -308,7 +308,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   handler lento non rallenta solo la UI: rallenta il driver, e falsa proprio le misure di
   failover che la demo vuole mostrare. Ulteriore avvertenza se si registrano i comandi: «The
   command documents published through this API are not copies.»
-- **Usata da:** ADR-0006, ADR-0019, ADR-0085
+- **Usata da:** ADR-0006, ADR-0019, ADR-0085, ADR-0089
 
 <a id="s-011"></a>
 ### S-011 — MongoDB Database Tools: `mongodump`

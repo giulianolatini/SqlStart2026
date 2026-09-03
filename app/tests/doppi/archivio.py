@@ -15,7 +15,9 @@ from tests.doppi.orologio import FakeClock
 __all__ = [
     "ArchivioCheRompe",
     "ArchivioLento",
+    "ArchivioCheNonLegge",
     "InMemoryStore",
+    "LetturaRifiutata",
     "NonSupportato",
     "ScritturaRifiutata",
 ]
@@ -321,3 +323,59 @@ class ArchivioLento:
 
     def _costa(self) -> None:
         self._orologio.avanza(self._costo_ms / 1000)
+
+
+class LetturaRifiutata(RuntimeError):
+    """L'errore che `ArchivioCheNonLegge` solleva al posto del driver.
+
+    Distinto da `ScritturaRifiutata` perché una prova deve poter asserire *quale* delle
+    due operazioni è fallita: durante un failover con `retryWrites` acceso le due cose
+    hanno esiti diversi, e un doppio che le confondesse renderebbe la differenza
+    inosservabile.
+    """
+
+
+class ArchivioCheNonLegge:
+    """Un `DocumentStore` che rifiuta le letture, e per il resto delega.
+
+    Il gemello di `ArchivioCheRompe`, dall'altro lato. Serve dal Task 11, da quando
+    `WorkloadRunner` ha anche dei lettori: senza, non si può provare che una lettura
+    fallita venga **contata** invece di far cadere l'intera corsa — e la differenza fra le
+    due si vede solo quando qualcosa fallisce.
+
+    Si compone con l'altro, e la composizione è la ragione per cui sono due classi e non
+    un parametro in più: `ArchivioCheNonLegge(ArchivioCheRompe(InMemoryStore()))` è un
+    archivio in cui non funziona niente, e nessuno dei due sa dell'altro.
+    """
+
+    def __init__(
+        self,
+        dentro: DocumentStore,
+        guasti: int | None = None,
+        motivo: str = "il server ha rifiutato la lettura",
+    ) -> None:
+        self._dentro = dentro
+        self._rimasti = guasti
+        self._motivo = motivo
+        self.tentate = 0
+        """Quante letture sono state chieste in tutto, riuscite o no."""
+
+    def insert_many(self, documenti: Sequence[Documento]) -> int:
+        return self._dentro.insert_many(documenti)
+
+    def find_page(
+        self, filtro: Documento, salta: int = 0, quanti: int = 20
+    ) -> tuple[Documento, ...]:
+        self.tentate += 1
+        if self._rimasti is None:
+            raise LetturaRifiutata(self._motivo)
+        if self._rimasti > 0:
+            self._rimasti -= 1
+            raise LetturaRifiutata(self._motivo)
+        return self._dentro.find_page(filtro, salta, quanti)
+
+    def count(self, filtro: Documento) -> int:
+        return self._dentro.count(filtro)
+
+    def aggregate(self, pipeline: Sequence[Documento]) -> tuple[Documento, ...]:
+        return self._dentro.aggregate(pipeline)

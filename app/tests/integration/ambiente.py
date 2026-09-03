@@ -6,15 +6,16 @@ usa `testcontainers` e non si costruisce un facsimile. Le prove girano contro gl
 Un adattatore provato contro un MongoDB diverso da quello della serata è un adattatore
 provato contro qualcos'altro.
 
-## Tre cose che questo modulo decide, e perché
+## Che cosa questo modulo **non** decide più
 
-**La credenziale non si stampa.** `Credenziali` tiene la password in un campo con
-`repr=False`: `repr()` di un'istanza mostra l'utente e non il segreto. Serve perché in una
-prova fallita l'oggetto finisce nel traceback, e il traceback finisce in una `.cast` o in
-un log di CI. Misurato al Task 8: pymongo dal canto suo non la lascia uscire né in
-`ServerSelectionTimeoutError`, né in `OperationFailure`, né in `repr(MongoClient)`
-([M-018](../../docs/Sources.md#m-018)) — questo campo copre l'unico punto che restava
-scoperto, cioè noi.
+Fino al Task 10 qui dentro stavano le porte dei tre stack, i loro `.env` e la scelta di
+`directConnection`. Dal Task 11 quei fatti sono in `mongolab.infrastructure.bersagli`,
+perché adesso ha bisogno di conoscerli anche l'applicazione — e due copie della stessa
+mappa sono due mappe diverse dal primo cambio in poi. Il verso della dipendenza è l'unico
+possibile: le prove importano la produzione, mai il contrario. Qui resta ciò che è
+davvero solo delle prove — quale `make up-0X` accende cosa, e come si smontano i dati.
+
+## Due cose che questo modulo decide ancora, e perché
 
 **Lo stack si accende solo se non risponde.** Un `make up-0X` a ogni sessione sarebbe
 idempotente e costerebbe qualche secondo di `docker compose` anche quando tutto è già in
@@ -30,8 +31,7 @@ dati invece si portano via tutti, e il modo è un database intero usa-e-getta.
 """
 
 from contextlib import contextmanager
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Any, Final, Iterator, Mapping
 from uuid import uuid4
 import subprocess
@@ -40,6 +40,15 @@ from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.errors import PyMongoError
 
+from mongolab.infrastructure.bersagli import (
+    BERSAGLI,
+    Bersaglio,
+    Credenziali,
+    radice,
+)
+from mongolab.infrastructure.bersagli import connetti as _connetti
+from mongolab.infrastructure.bersagli import credenziali_di as _credenziali_di
+
 __all__ = [
     "PREFISSO_PROVE",
     "STACK",
@@ -47,6 +56,7 @@ __all__ = [
     "Stack",
     "collezione_usa_e_getta",
     "connetti",
+    "credenziali_di",
     "radice",
     "sveglia",
 ]
@@ -62,162 +72,66 @@ lo trova e lo toglie, e nessuno tocca mai un database che non abbia questo nome.
 
 
 @dataclass(frozen=True)
-class Credenziali:
-    """Utente e password, con la password fuori dal `repr`.
-
-    `field(repr=False)` non è offuscamento e non protegge da chi legge il codice: protegge
-    dalla **stampa accidentale**, che è il modo in cui i segreti escono davvero. Un oggetto
-    del genere può comparire in un `assert` fallito, in un `-vv`, in un `print` di
-    disperazione alle undici di sera, e in nessuno di quei casi mostra il segreto.
-
-    Resta un buco dichiarato: `credenziali.password` stampato a mano si vede. Non è
-    chiudibile e non vale la pena di fingere il contrario — quello che si può fare è
-    rendere difficile lo sbaglio, non impossibile il dolo.
-    """
-
-    utente: str
-    password: str = field(repr=False)
-
-
-@dataclass(frozen=True)
 class Stack:
-    """Uno dei tre stack del repository, come lo vedono le prove **dall'host**.
+    """Uno dei tre stack, come lo vedono le prove: un bersaglio più il modo di accenderlo.
 
-    `porta` è la porta pubblicata sull'host, non quella interna al container: dall'host
-    ci si arriva su `localhost:porta`, dall'interno della rete Compose per nome di
-    servizio. La seconda strada è quella dell'applicazione vera e arriva al Task 12
-    ([ADR-0012](../../../docs/Decision.md#adr-0012)); qui siamo fuori dalla rete e la
-    differenza ha una conseguenza misurata, scritta in `connetti`.
+    `quale` porta tutto ciò che serve per **collegarsi**, e lo porta dalla mappa di
+    produzione. Qui si aggiunge la sola cosa che l'applicazione non ha ragione di sapere:
+    con quale target del Makefile si tira su. Le quattro proprietà che seguono sono
+    inoltri, e non campi copiati, perché un campo copiato è una copia.
     """
 
-    nome: str
-    """Il nome della directory sotto `docker/`, che è anche quello che si legge nei log."""
-
+    quale: Bersaglio
     bersaglio: str
     """Il target del Makefile che lo accende: `up-01`, `up-02`, `up-03`."""
 
-    porta: int
-    diretto: bool
-    """Se il client deve usare `directConnection=True`. Vedi `connetti`."""
+    @property
+    def nome(self) -> str:
+        """Il nome della directory sotto `docker/`, che è anche quello nei log."""
+        return self.quale.stack
 
-    ambiente: str | None = None
-    """Il file `.env` da cui leggere la credenziale, relativo alla radice. `None`: nessuna
-    autenticazione, che è il caso dello stack 01."""
+    @property
+    def porta(self) -> int:
+        """La porta pubblicata sull'host, non quella interna al container."""
+        return self.quale.porta
+
+    @property
+    def diretto(self) -> bool:
+        return self.quale.diretto
+
+    @property
+    def ambiente(self) -> str | None:
+        return self.quale.ambiente
 
 
 STACK: Final[Mapping[str, Stack]] = {
-    "01": Stack(nome="01-standalone", bersaglio="up-01", porta=27017, diretto=True),
-    "02": Stack(
-        nome="02-replicaset",
-        bersaglio="up-02",
-        porta=27021,
-        diretto=True,
-        ambiente="docker/02-replicaset/.env",
-    ),
-    "03": Stack(
-        nome="03-sharded",
-        bersaglio="up-03",
-        porta=27117,
-        diretto=False,
-        ambiente="docker/03-sharded/.env",
-    ),
+    "01": Stack(quale=BERSAGLI["standalone"], bersaglio="up-01"),
+    "02": Stack(quale=BERSAGLI["rs"], bersaglio="up-02"),
+    "03": Stack(quale=BERSAGLI["sharded"], bersaglio="up-03"),
 }
-"""I tre stack, con le porte che i loro `compose.yaml` pubblicano.
+"""I tre stack, chiavati con il numero che le fixture usano nei marcatori.
 
-Lo `03` è l'unico con `diretto=False`, e non è un'eccezione: è il caso normale. Un mongos
-**è** il punto d'ingresso, quindi scoprire la topologia a partire da lui non porta il
-client da nessun'altra parte, e la scoperta è precisamente ciò che si vuole misurare
-quando l'ispettore chiede la distribuzione per shard.
+Le chiavi restano `01`/`02`/`03` e non i nomi di `--target`: i marcatori si chiamano
+`stack01`, `stack02`, `stack03` da prima che i bersagli esistessero, e rinominarli
+cambierebbe la riga `-m "not stack03"` che sta scritta in tre pagine di documentazione
+per risparmiare un'indirezione a chi legge questo file.
 """
 
 
-def radice() -> Path:
-    """La radice del repository, cercando all'insù il `Makefile`.
-
-    Non una costante calcolata da `__file__` con tre `.parent`: questo albero vive anche
-    dentro `.claude/worktrees/`, e un conteggio di livelli sbagliato darebbe una directory
-    che esiste, in cui `make` fallisce con un messaggio che non spiega niente.
-    """
-    for cartella in [Path(__file__).resolve(), *Path(__file__).resolve().parents]:
-        if (cartella / "Makefile").is_file():
-            return cartella
-    raise RuntimeError(
-        f"nessun Makefile risalendo da {__file__}: le prove di integrazione non sanno "
-        "dove sta il repository."
-    )
-
-
 def credenziali_di(stack: Stack) -> Credenziali | None:
-    """Legge utente e password dal `.env` dello stack, o `None` se non ne ha uno.
-
-    Il `.env` non è nel repository ([ADR-0014](../../../docs/Decision.md#adr-0014)) e la
-    sua casa è il checkout principale ([ADR-0056](../../../docs/Decision.md#adr-0056)); da
-    un worktree ci si arriva con un collegamento, mai con una copia
-    ([ADR-0083](../../../docs/Decision.md#adr-0083)). Qui non si sa niente di tutto questo:
-    si legge un percorso, e se manca si dice quale comando lo crea.
-    """
-    if stack.ambiente is None:
-        return None
-    percorso = radice() / stack.ambiente
-    if not percorso.is_file():
-        raise RuntimeError(
-            f"manca {stack.ambiente}: copia il .env.example accanto e riempilo, oppure "
-            f"— se sei in un worktree — collegalo al checkout principale (ADR-0083)."
-        )
-    valori: dict[str, str] = {}
-    for riga in percorso.read_text(encoding="utf-8").splitlines():
-        riga = riga.strip()
-        if riga and not riga.startswith("#") and "=" in riga:
-            chiave, _, valore = riga.partition("=")
-            valori[chiave.strip()] = valore.strip()
-    password = valori.get("PASSWORD_AMMINISTRATORE")
-    if not password:
-        raise RuntimeError(
-            f"{stack.ambiente} non definisce PASSWORD_AMMINISTRATORE. "
-            "Il valore non viene stampato qui e non deve comparire in nessun log."
-        )
-    return Credenziali(utente=valori.get("UTENTE_AMMINISTRATORE", "admin"), password=password)
+    """Le credenziali dello stack, lette dal `.env` che il bersaglio dichiara."""
+    return _credenziali_di(stack.quale)
 
 
 def connetti(stack: Stack, attesa_ms: int = 20_000) -> MongoClient[dict[str, Any]]:
     """Un client verso lo stack, dall'host.
 
-    Tre scelte, tutte misurate al Task 8.
-
-    **`tz_aware=True`.** L'impostazione predefinita di pymongo è `False`, e con quella un
-    `datetime` scritto consapevole del fuso torna indietro **ingenuo**. Nessuno solleva:
-    il confronto fra due ingenui passa, e sbaglia di quante ore vale il fuso di chi
-    presenta. Il dataset di demo ha un campo `data`, quindi il caso non è ipotetico
-    (M-018).
-
-    **La credenziale come argomenti, non nell'URI.** `username=`/`password=` invece di
-    `mongodb://utente:segreto@host`: nell'URI il segreto entrerebbe in `repr(client)`, nei
-    messaggi di errore e in qualunque log che stampi la stringa di connessione. Passata
-    così è stata cercata e non trovata in nessuno dei tre (M-018).
-
-    **`directConnection=True` sul 02, e la ragione è una trappola.** Con `replicaSet=rs0`
-    da un host, pymongo scopre i membri **dalla configurazione del set**, che li nomina
-    `mongo-rs-1:27017` e compagni ([ADR-0021](../../../docs/Decision.md#adr-0021)): nomi
-    che esistono nella rete Compose e non sulla macchina di chi lancia le prove. Tutti e
-    tre falliscono la risoluzione DNS, la selezione scade dopo quattro secondi, e la
-    topologia si legge `ReplicaSetNoPrimary` — cioè **un replica set sanissimo, visto da
-    fuori, è indistinguibile da uno che ha perso il primario** (M-019). Con
-    `directConnection=True` la stessa istanza risponde in millisecondi e si presenta come
-    `RSPrimary`: il *ruolo* è giusto, la *forma* si legge `SINGOLA`. È una riserva
-    dichiarata, non un difetto nascosto, e la scoperta vera arriva al Task 12 quando
-    l'applicazione girerà **dentro** la rete Compose.
+    Le tre scelte misurate al Task 8 — `tz_aware=True`, la credenziale come argomenti e
+    non nell'URI, `directConnection` secondo il punto di vista — stanno adesso in
+    `mongolab.infrastructure.bersagli.connetti`, che è ciò che usa anche l'applicazione.
+    Provarle qui contro una copia locale sarebbe stato provare l'altra implementazione.
     """
-    credenziali = credenziali_di(stack)
-    parametri: dict[str, Any] = {
-        "tz_aware": True,
-        "serverSelectionTimeoutMS": attesa_ms,
-        "directConnection": stack.diretto,
-    }
-    if credenziali is not None:
-        parametri["username"] = credenziali.utente
-        parametri["password"] = credenziali.password
-        parametri["authSource"] = "admin"
-    return MongoClient(f"mongodb://localhost:{stack.porta}/", **parametri)
+    return _connetti(stack.quale, attesa_ms=attesa_ms)
 
 
 def risponde(stack: Stack, attesa_ms: int) -> bool:

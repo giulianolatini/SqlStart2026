@@ -5709,3 +5709,158 @@ Stato aggiornato: decisioni fino ad **ADR-0085**, verifiche fino a **V-074**, no
 alla **178**. Le suite: **143** prove per gli strumenti, **280** per l'applicazione più **43** di
 integrazione, `mypy --strict` verde su 48 file. Prossimo passo: **Task 11** del
 [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).
+
+---
+
+## 2026-09-03 — `feature/04`, Task 11: la radice di composizione, e tre difetti che solo l'esecuzione poteva mostrare
+
+Il Task 11 scrive `cli.py`, cioè l'unico punto dell'applicazione che conosce le classi concrete:
+costruisce `PymongoStore`, `PymongoInspector`, `SdamBridge`, `SystemClock` e le tre rese, e le
+inietta in componenti che continuano a vedere solo porte. Con lui arrivano i tre comandi diretti del
+§6.4 — `stats`, `watch`, `workload` — la mappa fra `--target` e stack in un posto solo, e il
+`--sink` come opzione invece che come condizione sparsa. Le prove unitarie passano da **280 a 425**,
+`mypy --strict` da 48 a **57** file; le 43 d'integrazione e le 143 degli strumenti restano quelle
+che erano, e restano verdi.
+
+I file scritti sono più di quelli che il piano elenca, e l'allargamento è dichiarato:
+`infrastructure/orologio.py` (la porta `Clock` non aveva un'implementazione di produzione),
+`infrastructure/bersagli.py`, `infrastructure/zavorra.py` (`--doc-size`),
+`presentation/rapporto.py` (l'uscita di `stats`), `--readers` e `--duration` in
+`application/workload.py`, `[project.scripts]` in `app/pyproject.toml`, tre target nel `Makefile`.
+Tutte le quattro opzioni di `workload` sono state implementate perché il Task 16 misurerà
+**quella** riga di comando, e una riga misurata che non si può digitare non serve.
+
+Poi lo stack 01 è stato acceso, e i tre comandi eseguiti per la prima volta contro un MongoDB vero.
+**Due su tre erano sbagliati.** Nessuno dei due lo era per una svista: tutti e due vivevano nella
+giuntura fra componenti che, presi uno per uno, erano corretti e provati.
+
+**Il carico scriveva nella collezione seminata, e nessuno se ne accorgeva.** La prima corsa ha
+risposto `38 scritture · 0 confermate · 38 fallite`, ed è uscita con **zero**. L'errore, per
+intero: `E11000 duplicate key error collection: lab.ordini index: _id_ dup key: { _id: 0 }`
+([M-032](../app/docs/Sources.md#m-032)). `DataGenerator` numera i documenti da zero — è ciò che
+rende il dataset una funzione pura di `(seme, indice)` — e il seed occupa già gli `_id` da 0 a
+49 999. La forma del guasto pesa più del guasto: la cronaca scorreva, le letture riuscivano — 4 833
+su 4 833 — e lo schermo era pieno di attività. Dal fondo della sala è una demo che funziona.
+Nessuna prova unitaria poteva trovarlo: `InMemoryStore` accetta gli `_id` che gli si danno e non ha
+un seed, quindi il fatto vive in nessuno dei due componenti. Che il carico dovesse scrivere altrove
+era peraltro già scritto in due posti — `generatore.py` («le due popolazioni non si incontrano mai
+nella stessa collezione») e `tools/reset-demo.sh` (`const superstiti = ["ordini"]`). A sbagliare era
+il cablaggio, non il disegno. La correzione è una collezione per corsa,
+`lab.carico-<AAAAMMGG-hhmmss>`, e il comando che dice dove scrive prima di cominciare
+([ADR-0088](Decision.md#adr-0088)). Rifatta la stessa corsa: **8 245 scritture, 8 245 confermate, 0
+fallite.**
+
+**Il failover si raccontava due volte, e la colpa non era di PyMongo.** `watch` stampava ogni
+transizione due volte, a mezzo secondo di distanza. Invece di crederlo, il driver è stato messo alla
+prova nudo — un `MongoClient` con un ascoltatore che stampa, e nient'altro in mezzo: la transizione
+la emette **una volta sola** ([M-033](../app/docs/Sources.md#m-033)). Il doppione era nostro.
+`watch` aveva due narratori sullo stesso fatto: `SdamBridge`, che traduce i callback (spinto), e
+`TopologyWatcher`, che rilegge la stessa `TopologyDescription` ogni mezzo secondo (tirato). Il
+ritardo di un giro fra i due rendeva la ripetizione difficile da riconoscere come tale — sembrava
+che fosse successo due volte. Che è precisamente il danno: chi guarda **conta** le transizioni per
+capire che cosa è successo, e la scena centrale del talk avrebbe mentito. La correzione è una riga
+in meno nel cablaggio, non un filtro: il §6.3 assegna la cronaca al ponte, e la sentinella conserva
+l'altra cosa che sa fare — misurare l'interruzione — per lo scenario di failover del Task 13
+([ADR-0089](Decision.md#adr-0089)). Deduplicare nel sink era la scorciatoia ovvia, ed è stata
+scartata per un motivo che vale la pena scrivere: due transizioni identiche e ravvicinate sono anche
+la firma di un membro che *flappa*, cioè esattamente ciò che una demo di failover deve mostrare.
+
+**La fotografia diceva `sconosciuto` di un server sano.** `mongolab stats --target standalone`
+stampava `localhost:27017 sconosciuto` sopra tre righe che dimostravano il contrario.
+`client.topology_description` riferisce ciò che il client crede **in questo istante**, e su un
+client appena costruito quella credenza è «non lo so ancora»: il primo battito non è tornato
+([M-031](../app/docs/Sources.md#m-031)). Non è un difetto del driver — è la proprietà che rende
+visibile l'attimo in cui, durante un'elezione, il client non sa, cioè la scena per cui `watch`
+esiste. Diventa un difetto solo se la si legge per prima. La correzione è nell'ordine di lettura di
+`rapporto()`: `server_status()` per primo, perché esegue un comando e obbliga il driver a guardare;
+`topology()` per ultimo. L'ordine di lettura è l'opposto dell'ordine di stampa, e siccome è
+esattamente il genere di dettaglio che il prossimo refactoring cancella per errore, c'è una prova
+che conta l'ordine delle chiamate — validata con una mutazione deliberata.
+
+**L'orologio, che era una porta senza casa.** `Clock` esisteva come porta e come doppio; in
+produzione nessuno. L'implementazione ovvia è una riga, `datetime.now().astimezone()`, ed è
+sbagliata per l'uso che questa applicazione ne fa. La porta serve a **datare** e a **misurare**:
+`WorkloadRunner._scrivi` sottrae due `now()` e chiama il risultato latenza. L'orologio da parete di
+questa macchina dichiara `monotonic=False` ([M-030](../app/docs/Sources.md#m-030)), cioè per
+contratto non promette di andare avanti; un salto all'indietro non solleva niente, produce una
+latenza negativa che entra nei percentili. `SystemClock` legge il muro **una volta sola** e da lì
+somma il contatore monotono, restituendo ore vere le cui differenze sono durate vere
+([ADR-0086](Decision.md#adr-0086)). Nel fuso locale e non in UTC, perché a Ancona due ore di scarto
+dall'orologio in fondo alla sala sarebbero la prima domanda del pubblico.
+
+**Il `Makefile` non indovina.** `make app-stats` senza `TARGET` stampa «manca TARGET: make
+app-stats TARGET=rs (standalone, rs, sharded)» ed esce con **2**, che è lo stesso codice con cui
+Typer rifiuta un `--target` sbagliato ([M-034](../app/docs/Sources.md#m-034)). Sbagliare la riga di
+`make` e sbagliare la riga di `mongolab` sono lo stesso errore per chi legge un CI, e meritano lo
+stesso numero. `--target` non ha, e non avrà, un valore predefinito: durante il talk si passa da uno
+stack all'altro tre volte, e un carico mandato al bersaglio sbagliato non fallisce — riesce,
+altrove.
+
+Restano dichiarati aperti, oltre a quelli che il registro dell'applicazione già elenca: sullo stack
+03 la collezione del carico **non è distribuita**, perché `init/30-dati-demo.js` distribuisce solo
+`lab.ordini`, e il confronto fra architetture del Task 16 dovrà o distribuirla o dichiarare che sta
+misurando un solo shard — **è la prima cosa che quel task deve decidere**; la riga
+`TOPOLOGIA singola → singola` è vera e non utile; il ciclo di `watch` vive in `cli.py` fino al Task
+13; le letture fallite si contano ma non emettono nessun evento.
+
+### Note di metodo
+
+179. **Una suite verde non prova che il programma sia mai stato eseguito.** 425 prove unitarie, 43
+     d'integrazione e `mypy --strict` su 57 file non hanno impedito che il primo `workload` vero
+     fallisse ogni singola scrittura. I difetti stavano nella **giuntura** fra componenti corretti:
+     un generatore che numera da zero e una collezione già numerata; un ponte e una sentinella che
+     osservano la stessa struttura. Nessuno dei due appartiene a un componente, quindi nessuna prova
+     di componente poteva vederli. La regola pratica: la prima esecuzione contro l'ambiente vero è
+     una prova che nessuna suite contiene, e va messa in conto come un passo del lavoro, non come
+     una formalità dopo il commit.
+
+180. **Il guasto da temere non è quello che solleva: è quello che esce con zero e stampa numeri
+     plausibili.** Il carico rotto usciva zero, riempiva lo schermo di letture riuscite e mostrava un
+     consuntivo dall'aria normale. È la stessa forma dell'errore che [ADR-0084](Decision.md#adr-0084)
+     ha trovato in `mongorestore` e della latenza negativa che
+     [ADR-0086](Decision.md#adr-0086) previene: tre volte, in questo progetto, il pericolo è stato
+     un'uscita che non si lamenta e non è vera. La regola pratica: davanti a un consuntivo, chiedersi
+     quale suo numero sarebbe **zero** se tutto fosse rotto, e verificare che non lo sia.
+
+181. **Prima di accusare la libreria, misurare la libreria nuda.** Che PyMongo emettesse due volte
+     la stessa transizione era l'ipotesi più comoda: avrebbe spostato il difetto fuori dal nostro
+     codice. Cinque minuti con un `MongoClient` e un ascoltatore che stampa hanno mostrato che la
+     emette una volta sola, e da lì il colpevole era ovvio. Il costo della verifica è stato
+     inferiore al costo di scrivere il filtro che avrebbe nascosto il problema vero.
+
+182. **Su uno stesso fatto, un narratore solo.** Se due componenti osservano la stessa struttura,
+     uno spinto (i callback) e uno tirato (l'interrogazione periodica), la ripetizione non è un
+     rischio: è una certezza. Il ritardo fra i due la rende difficile da riconoscere come
+     ripetizione — sembra che il fatto sia successo due volte. E la cura sbagliata è tentante:
+     deduplicare a valle sopprime anche le ripetizioni **vere**, che in una demo di failover sono
+     proprio la cosa che si vuole vedere. Si guarisce togliendo un osservatore, non aggiungendo un
+     filtro.
+
+183. **Quando l'ordine in cui si legge non è l'ordine in cui si stampa, serve una prova che conti le
+     chiamate.** `rapporto()` interroga `server_status()` per primo perché *esegue un comando* e
+     costringe il driver a una selezione, e `topology()` per ultimo perché fino a quel momento il
+     driver non sa niente. Nel testo stampato l'ordine è l'inverso. Un dettaglio così non
+     sopravvive a un riordino fatto per leggibilità, a meno che non ci sia un doppio che annota in
+     che ordine gli è stato chiesto qualcosa. La prova è stata validata rimettendo `topology()` per
+     prima e guardandola diventare rossa: una prova che non si è mai vista fallire non protegge
+     niente.
+
+184. **L'implementazione ovvia di una porta va guardata dal verso in cui sbaglia, non da quello in
+     cui funziona.** `datetime.now()` come `Clock` è corretto quasi sempre, e la volta che non lo è
+     produce numeri invece che eccezioni. Il criterio che ha deciso non è «funziona?» ma «che cosa
+     succede quando la macchina si risincronizza mentre misuro una latenza?» — e la risposta,
+     scritta nel flag `monotonic=False`, era già lì da leggere. La regola pratica: per ogni porta,
+     enumerare gli usi (datare, misurare, ordinare) e chiedersi se una sola implementazione li
+     soddisfa davvero tutti.
+
+185. **Un valore predefinito comodo è un errore silenzioso in attesa.** `--target` senza predefinito
+     costringe a scriverlo tre volte durante il talk; con un predefinito, una sola distrazione manda
+     il carico allo stack sbagliato — e quel comando non fallisce, **riesce**, sul bersaglio
+     sbagliato. La stessa severità è nel `Makefile`, che esce con 2 invece di indovinare. Il criterio
+     per decidere se un predefinito è legittimo: se sbagliarlo produce un errore visibile, mettilo;
+     se produce un risultato plausibile ma di un'altra cosa, non metterlo.
+
+Stato aggiornato: decisioni fino ad **ADR-0089**, verifiche fino a **V-074**, note di metodo fino
+alla **185**. Le suite: **143** prove per gli strumenti, **425** per l'applicazione più **43** di
+integrazione, `mypy --strict` verde su 57 file. Prossimo passo: **Task 12** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).

@@ -57,7 +57,9 @@ from mongolab.presentation.righe import (
     RIGHE_CRONACA,
     RIGHE_SALA,
     SERVER_MOSTRATI,
+    TRONCAMENTO,
     server_da_mostrare,
+    tronca,
     riga,
 )
 from mongolab.presentation.scena import Scena
@@ -609,3 +611,30 @@ def test_i_server_in_piu_non_spariscono_in_silenzio() -> None:
 @pytest.mark.parametrize("quanti", [0, 1, 2, 3, 4, 8, 40])
 def test_la_tabella_dei_server_non_sfonda_mai_il_pannello(quanti: int) -> None:
     assert len(server_da_mostrare(_topologia_con(quanti))) <= SERVER_MOSTRATI
+
+
+# --- Il taglio, estratto al Task 11 perché i consumatori sono diventati due ------------
+
+
+def test_il_taglio_lascia_stare_ciò_che_ci_sta() -> None:
+    assert tronca("corto", 100) == "corto"
+
+
+def test_il_taglio_dichiara_di_aver_tagliato() -> None:
+    tagliato = tronca("x" * 200, 100)
+
+    assert len(tagliato) == 100
+    assert tagliato.endswith(TRONCAMENTO)
+
+
+def test_senza_larghezza_non_si_taglia() -> None:
+    # È ciò che serve a chi reindirizza su file per analizzare dopo: là le colonne di
+    # sala non contano, e un troncamento sarebbe una perdita di dati.
+    lungo = "x" * 500
+
+    assert tronca(lungo, None) == lungo
+
+
+def test_una_larghezza_non_positiva_e_rifiutata() -> None:
+    with pytest.raises(ValueError, match="colonne"):
+        tronca("qualunque", 0)

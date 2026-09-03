@@ -4,6 +4,7 @@
 .DEFAULT_GOAL := help
 .PHONY: help docs-check tools-test images-pull images-verify preflight stack-check \
         app-test app-check app-test-integration \
+        app-stats app-watch app-workload \
         up-01 down-01 reset-01 logs-01 seed-01 smoke-01 reset-demo-01 \
         up-02 down-02 reset-02 logs-02 seed-02 smoke-02 reset-demo-02 \
         failover-02 failover-02-termina failover-02-maggioranza \
@@ -54,6 +55,38 @@ app-check: ## Verifica i tipi dell'applicazione con mypy --strict
 # non va rimesso: adesso un 5 vorrebbe dire che le prove sono sparite, ed è una notizia.
 app-test-integration: ## Esegue la suite di integrazione dell'applicazione (accende gli stack; richiede Docker)
 	uv run --directory app pytest -q tests/integration
+
+# --- L'applicazione, eseguita ---------------------------------------------------------
+#
+# Tre target che non aggiungono niente alla riga di comando: la scrivono. Il §6.4 del
+# design dice `mongolab stats --target rs`, e questi target sono quella riga più il
+# `uv run --directory app` che serve a trovarla senza attivare a mano un virtualenv.
+#
+# `TARGET` non ha un valore predefinito, e la mancanza è deliberata. La CLI rifiuta di
+# indovinare quale dei tre stack intendevi — un `--target` sbagliato si ferma prima di
+# aprire un socket — e un `TARGET ?= rs` qui reintrodurrebbe dal Makefile esattamente
+# l'assunzione implicita che la CLI si rifiuta di fare. Il messaggio elenca i tre nomi,
+# perché un errore che dice solo «manca» costringe a cercare altrove ciò che serve.
+#
+# L'uscita è 2, la stessa con cui Typer respinge un parametro sbagliato: dal punto di
+# vista di chi legge un CI, sbagliare la riga di `make` e sbagliare la riga di `mongolab`
+# sono lo stesso errore, e meritano lo stesso codice.
+CHIEDI_TARGET = @[ -n "$(TARGET)" ] || { echo "manca TARGET: make $@ TARGET=rs (standalone, rs, sharded)" >&2; exit 2; }
+
+# `ARGS` è la valvola: `--sink plain`, `--writers 16`, `--duration 30` passano di lì senza
+# che il Makefile debba conoscerli. Un target per opzione invecchierebbe a ogni opzione
+# nuova, e il posto in cui le opzioni sono dichiarate è già uno solo, `cli.py`.
+app-stats: ## Fotografa uno stack: make app-stats TARGET=rs
+	$(CHIEDI_TARGET)
+	uv run --directory app mongolab stats --target $(TARGET) $(ARGS)
+
+app-watch: ## Guarda la topologia cambiare: make app-watch TARGET=rs
+	$(CHIEDI_TARGET)
+	uv run --directory app mongolab watch --target $(TARGET) $(ARGS)
+
+app-workload: ## Manda carico contro uno stack: make app-workload TARGET=rs
+	$(CHIEDI_TARGET)
+	uv run --directory app mongolab workload --target $(TARGET) $(ARGS)
 
 docs-check: ## Verifica il legame fra ADR e fonti, e i collegamenti fra le pagine
 	uv run --project tools python tools/check_citations.py docs/Decision.md docs/Sources.md

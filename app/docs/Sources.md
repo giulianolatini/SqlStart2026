@@ -1612,6 +1612,238 @@ misure valgono per l'ambiente descritto in [M-001](#m-001) e per nessun altro.
 
 ---
 
+<a id="m-030"></a>
+### M-030 — L'orologio da parete è dichiarato *aggiustabile*, quello monotono no
+
+- **Data:** 2026-09-03
+- **Comando:** chiedere all'interprete che cosa siano davvero i due orologi che `Clock`
+  userebbe:
+
+  ```python
+  import platform, sys, time
+  print(platform.platform())
+  print(sys.version.split()[0])
+  for nome in ("time", "monotonic", "perf_counter"):
+      print(nome, time.get_clock_info(nome))
+  ```
+
+- **Output:**
+
+  ```
+  macOS-26.6.2-arm64-arm-64bit-Mach-O
+  3.13.15
+  time       namespace(implementation='clock_gettime(CLOCK_REALTIME)', monotonic=False,
+                       adjustable=True,  resolution=1.0000000000000002e-06)
+  monotonic  namespace(implementation='mach_absolute_time()',          monotonic=True,
+                       adjustable=False, resolution=4.166666666666666e-08)
+  perf_counter namespace(implementation='mach_absolute_time()',        monotonic=True,
+                       adjustable=False, resolution=4.166666666666666e-08)
+  ```
+
+- **Che cosa dimostra:** che l'implementazione ovvia della porta `Clock` — `datetime.now()`
+  a ogni chiamata — è sbagliata per l'uso che questa applicazione ne fa. La porta serve a
+  due cose: **datare** un evento e **misurare** una durata sottraendo due istanti. La
+  prima vuole l'ora vera, la seconda vuole che il tempo non torni indietro. Il flag
+  che decide è `monotonic`, e sull'orologio da parete vale **False**: Python dichiara,
+  per contratto, che quell'orologio non promette di andare avanti.
+- **Perché è stata fatta:** perché `WorkloadRunner._scrivi` sottrae due `now()` e chiama
+  il risultato *latenza*, e `TopologyWatcher` sottrae due `now()` e decide se la pazienza
+  è finita. Nessuno dei due controlla il segno, e non deve: un percentile calcolato su una
+  latenza negativa non fallisce, mente. La misura ha portato a `SystemClock`, che legge il
+  muro una volta sola e da lì in poi somma il contatore monotono
+  ([ADR-0086](../../docs/Decision.md#adr-0086)).
+- **Riserve:** i numeri sono di **questa** macchina — macOS 26.6.2 su arm64, CPython
+  3.13.15. L'altro flag, `adjustable=True`, dice la stessa cosa dal verso di chi
+  corregge — la documentazione di CPython lo definisce come «l'orologio può essere
+  cambiato automaticamente (per esempio da un demone NTP) o manualmente
+  dall'amministratore» — ma quella definizione è **letta nella documentazione della
+  libreria standard, non in questo registro**, e l'argomento non ci si appoggia: basta
+  `monotonic=False`, che è misurato qui sopra.
+
+  Su Linux `time.monotonic()` è `clock_gettime(CLOCK_MONOTONIC)`, che si ferma
+  durante la sospensione come `mach_absolute_time()`; la riserva della sospensione, scritta
+  in `infrastructure/orologio.py`, resta identica e resta non misurata. Il valore di
+  `resolution` non è stato usato per nessuna decisione: le misure di questo progetto sono
+  al millisecondo, cioè tre ordini di grandezza sopra la risoluzione peggiore delle tre.
+
+<a id="m-031"></a>
+### M-031 — Il client di PyMongo è pigro: la topologia letta per prima dice `sconosciuta` anche su uno standalone sano
+
+- **Data:** 2026-09-03
+- **Comando:** eseguire il comando appena scritto contro lo stack 01 acceso — non una
+  sonda, il programma:
+
+  ```sh
+  make app-stats TARGET=standalone
+  ```
+
+  e poi, per isolare il fatto, chiedere sei volte di seguito all'ispettore che cosa vede,
+  mezzo secondo l'una dall'altra, senza eseguire nessun comando in mezzo.
+- **Output:** la prima esecuzione, con `rapporto()` che leggeva la topologia per prima:
+
+  ```
+  standalone (docker/01-standalone)
+  topologia   singola
+              localhost:27017       sconosciuto              —
+  server      mongod 7.0.40 · attivo da 7 h 20 m · connessioni 3
+  database    lab · 50000 documenti · dati 5.8 MB · indici 524.0 kB
+  ```
+
+  e i sei sguardi consecutivi:
+
+  ```
+  0 singola | [('localhost:27017', 'sconosciuto')]
+  1 singola | [('localhost:27017', 'standalone')]
+  2 singola | [('localhost:27017', 'standalone')]
+  ...
+  ```
+
+- **Che cosa dimostra:** che `client.topology_description` riferisce ciò che il client
+  **crede in questo istante**, e su un client appena costruito quella credenza è
+  «non lo so ancora»: il primo battito non è ancora tornato. Non è un difetto del driver,
+  è la proprietà che rende visibile l'attimo in cui, durante un'elezione, il client non sa
+  — cioè esattamente la scena per cui `watch` esiste. Diventa un difetto solo se la si
+  legge per prima e si stampa il risultato come una fotografia.
+- **Perché è stata fatta:** perché la fotografia diceva `sconosciuto` di un server sano, e
+  la prima riga di `mongolab stats` è ciò con cui la sala decide quanto fidarsi di tutte
+  le altre. La correzione è nell'ordine di lettura di `rapporto()`: `server_status()` per
+  primo, perché **esegue un comando** e quindi obbliga il driver a una selezione, cioè a
+  guardare; `topology()` per ultimo. L'ordine di lettura non è quello di stampa, ed è
+  protetto da una prova che conta l'ordine delle chiamate.
+- **Riserve:** il rimedio vale perché `rapporto()` esegue comunque un comando. Un comando
+  che non ne eseguisse nessuno — una fotografia della sola topologia — resterebbe esposto,
+  e la risposta giusta lì non è leggere due volte ma dichiarare `sconosciuta`, che è la
+  verità. Il numero di battiti che servono non è stato misurato: si è misurato che al
+  secondo sguardo, mezzo secondo dopo, il ruolo c'è.
+
+<a id="m-032"></a>
+### M-032 — Il carico contro la collezione seminata: `E11000` su ogni scrittura, e il consuntivo non se ne accorge
+
+- **Data:** 2026-09-03
+- **Comando:** la riga del §6.4, accorciata, contro lo stack 01 acceso:
+
+  ```sh
+  make app-workload TARGET=standalone \
+      ARGS="--sink plain --duration 3 --writers 2 --readers 1 --doc-size 1k"
+  ```
+
+- **Output:**
+
+  ```
+  47:46.007  ERRORE     BulkWriteError: batch op errors occurred, full error: {'writeErrors': [{'i…
+  carico      38 scritture · 0 confermate · 38 fallite · 76 ritentate · 0 documenti
+  letture     4833 letture · 4833 riuscite · 0 fallite · 96660 documenti
+  ```
+
+  e l'errore per intero, ottenuto rifacendo l'inserimento fuori dal carico:
+
+  ```
+  E11000 duplicate key error collection: lab.ordini index: _id_ dup key: { _id: 0 }
+  ```
+
+- **Che cosa dimostra:** due cose, e la seconda vale più della prima. La prima è il
+  difetto: `DataGenerator` numera i documenti da zero, il seed occupa già gli `_id` da 0 a
+  49 999, e la radice di composizione aveva mandato il carico in `lab.ordini`. La seconda
+  è che **il programma non si è fermato**: uscita zero, cronaca che scorre, un consuntivo
+  con numeri dall'aria plausibile. Le letture riuscivano — 4 833 su 4 833 — e riempivano
+  lo schermo mentre le scritture fallivano tutte. Dal fondo della sala quella è una demo
+  che funziona.
+- **Perché è stata fatta:** perché era il primo comando eseguito per intero dopo averlo
+  scritto, e le prove unitarie non potevano trovarlo: sono verdi, e devono esserlo. Il
+  fatto vive nel punto in cui un generatore che numera da zero incontra una collezione già
+  numerata, cioè in nessuno dei due. Che il carico dovesse scrivere altrove era già
+  scritto in due posti — `infrastructure/generatore.py` («le due popolazioni non si
+  incontrano mai nella stessa collezione, perché il carico scrive nella propria») e
+  `tools/reset-demo.sh` (`const superstiti = ["ordini"]`, tutto il resto cade). A
+  sbagliare era il cablaggio, non il disegno ([ADR-0088](../../docs/Decision.md#adr-0088)).
+- **Riserve:** la misura è dello stack 01. Sullo stack 03 la collezione del carico **non è
+  sharded** — `lab.ordini` lo è, per `{_id: "hashed"}`, ma una collezione nuova no — quindi
+  le scritture finirebbero tutte sullo shard primario del database. Non è stato misurato, e
+  pesa sul confronto fra architetture del Task 16: è un punto aperto, non una cosa risolta.
+
+<a id="m-033"></a>
+### M-033 — PyMongo emette la transizione una volta sola; a raddoppiarla erano due narratori
+
+- **Data:** 2026-09-03
+- **Comando:** prima il programma contro lo stack 01 acceso:
+
+  ```sh
+  make app-watch TARGET=standalone ARGS="--sink plain --duration 3"
+  ```
+
+  poi, per capire di chi fosse il doppione, gli eventi crudi del driver — un `MongoClient`
+  con un ascoltatore che stampa e nessun altro in mezzo — e infine il cablaggio esatto di
+  `watch`, con l'origine di ogni evento dichiarata.
+- **Output:** il programma, con la stessa transizione due volte a mezzo secondo:
+
+  ```
+  20:58:05.293  TOPOLOGIA  sconosciuta → singola
+  20:58:05.798  SERVER     localhost:27017 sconosciuto → standalone
+  20:58:06.303  SERVER     localhost:27017 sconosciuto → standalone
+  ```
+
+  PyMongo nudo, per sei sguardi di mezzo secondo:
+
+  ```
+  TOPOLOG Unknown -> Unknown
+  SERVER  Unknown -> Standalone rtt 0.0012988750022486784
+  TOPOLOG Unknown -> Single
+  (poi più niente per cinque giri)
+  ```
+
+  il cablaggio di `watch`, con l'origine:
+
+  ```
+  --- giro 1
+  [sentinella] ServerStateChanged ... SCONOSCIUTO -> STANDALONE
+  --- giro 2
+  [ponte] ServerStateChanged
+  ```
+
+- **Che cosa dimostra:** che il driver si comporta correttamente — la transizione la emette
+  **una volta sola** — e che il doppione era nostro. `watch` aveva due narratori sullo
+  stesso fatto: `SdamBridge`, che traduce i callback del driver, e `TopologyWatcher`, che
+  interroga la stessa struttura ogni mezzo secondo. Uno spinto e uno tirato, sulla stessa
+  fonte: era garantito che si ripetessero, e il ritardo di un giro fra i due rendeva la
+  ripetizione difficile da riconoscere come tale.
+- **Perché è stata fatta:** perché il doppione compariva nella scena centrale del talk. Un
+  failover raccontato due volte non è rumore: chi guarda conta le transizioni per capire
+  che cosa è successo, e leggerne il doppio è leggere un'altra storia. La correzione è nel
+  cablaggio, non nei componenti: in `watch` resta il ponte, che è il narratore che il §6.3
+  del design nomina, e `TopologyWatcher` torna a fare l'unica cosa che il ponte non sa fare
+  — misurare l'interruzione — nello scenario in cui quella misura serve
+  ([ADR-0089](../../docs/Decision.md#adr-0089)).
+- **Riserve:** resta in cronaca una riga che non è falsa ma non è utile — `TOPOLOGIA
+  singola → singola`, che il ponte emette perché la *descrizione* della topologia è
+  cambiata (dentro c'è il server che ha cambiato ruolo) benché la forma no. È un punto
+  aperto della presentazione, non del cablaggio, ed è dichiarato come tale.
+
+<a id="m-034"></a>
+### M-034 — Un parametro rifiutato da Typer esce con 2, e Rich lo incornicia
+
+- **Data:** 2026-09-03
+- **Comando:** invocare i comandi con un `--target` che non esiste, sotto `CliRunner`, e
+  guardare il codice d'uscita e il testo esatto — prima a ottanta colonne, poi a duecento.
+- **Output:** codice d'uscita **2**; il messaggio compare in `result.output`, incorniciato
+  da Rich in un riquadro con caratteri `│` e sequenze ANSI di colore, e **mandato a capo
+  dove finisce il riquadro**: a ottanta colonne una frase di ottanta caratteri arriva
+  spezzata in due righe.
+- **Che cosa dimostra:** che un'asserzione `"il bersaglio non esiste" in result.output`
+  fallisce per un motivo che non riguarda il codice — la larghezza del terminale di chi
+  esegue le prove. Ripulire l'uscita (togliere l'ANSI, togliere il bordo, ricucire gli
+  spazi) rende l'asserzione una domanda sul messaggio; verificato che la frase intera si
+  ricompone identica sia a `COLUMNS=80` sia a `COLUMNS=200`.
+- **Perché è stata fatta:** perché il Passo 4 del Task 11 chiede che un `--target` sbagliato
+  «fallisca con un messaggio e un codice d'uscita diverso da zero», e per provarlo bisogna
+  sapere quale codice e quale messaggio. Il 2 è poi diventato anche il codice con cui il
+  `Makefile` rifiuta un `TARGET` mancante: sbagliare la riga di `make` e sbagliare la riga
+  di `mongolab` sono lo stesso errore per chi legge un CI, e meritano lo stesso numero.
+- **Riserve:** misurato con typer 0.27.2, che **incorpora** click al proprio interno — in
+  questo ambiente `import click` solleva `ModuleNotFoundError`, e nessuna prova può
+  appoggiarsi a quel nome. Il riquadro è una scelta di resa di Typer, non un contratto: se
+  una versione futura smettesse di incorniciare, la ripulitura resterebbe innocua e le
+  prove continuerebbero a valere.
+
 ## Fonti canoniche che l'applicazione usa senza copiarle
 
 Queste stanno in [`docs/Sources.md`](../../docs/Sources.md) e sono citate da un ADR. Qui c'è solo
