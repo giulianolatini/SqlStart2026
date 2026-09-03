@@ -668,9 +668,99 @@ dentro un container: dieci di quelle prove eseguono `mongodump` e
 
 ---
 
+## Task 10 — Tre rese dello stesso flusso, e una promessa che era falsa
+
+**Fatto il 3 settembre 2026.** Il capitolo che ne esce è
+[11-tre-rese-e-un-solo-thread-che-disegna.md](11-tre-rese-e-un-solo-thread-che-disegna.md).
+
+Il piano chiedeva tre file — `rich_tui.py`, `plain.py`, `null.py` — e ne sono usciti cinque. I due
+in più, `righe.py` e `scena.py`, esistono per una ragione sola: il Passo 4 vieta di provare
+`RichTui`, e un divieto di provare qualcosa si onora spostando altrove ciò che va provato, non
+rinunciando a provarlo. Tutto ciò che nella presentazione è una **decisione** — la riga di un
+evento, il budget di sala, la coda, i conteggi, la cronaca, che cosa fare quando i server sono
+troppi — sta nei due moduli che non conoscono Rich e hanno le loro prove. `rich_tui.py` resta un
+ciclo di cinque righe e un disegno.
+
+### La scoperta che ha cambiato un ADR
+
+[ADR-0019](../../docs/Decision.md#adr-0019) prometteva «un solo thread tocca `Live`», e la
+prometteva perché la documentazione di Rich non nomina mai i thread
+([S-018](../../docs/Sources.md#s-018)): di fronte a una lacuna il progetto aveva cambiato disegno
+invece di indovinare. Guardando dentro `rich/live.py` si è scoperto che la lacuna nascondeva una
+risposta, e la risposta era «due»: con le impostazioni predefinite `Live.start()` avvia un
+`_RefreshThread` demone che chiama `refresh()` per conto suo ([M-027](Sources.md#m-027)).
+
+Non sarebbe stato scorretto — dentro `Live` c'è un `RLock` — ma sarebbe stato corretto per una
+ragione che il progetto non conosceva. Da lì `auto_refresh=False`, e
+[ADR-0085](../../docs/Decision.md#adr-0085), che mantiene la decisione di ADR-0019 e ne corregge il
+presupposto. È la **nota di metodo 173**: un silenzio ha due letture, «non succede» e «non
+è documentato», e la seconda è quasi sempre quella giusta. Il prezzo, misurato: `refresh_per_second` diventa inerte, e quindi non si passa a
+`Live`; il numero vive nel periodo del ciclo, dove agisce davvero. È una deviazione dalla lettera
+del Passo 1, presa per onorarne l'intento.
+
+**La prima sonda ha risposto di no alla domanda giusta.** Contava i thread *dopo* `live.stop()`, e
+ne trovava zero — vero, e inutile, perché è `stop()` a chiudere il thread che si cercava. La
+domanda «esiste un thread in più?» va posta nel momento in cui la risposta conta: **nota 176**.
+
+### Due numeri sbagliati, scoperti in due modi diversi
+
+Il primo era un **segnaposto**. La docstring che giustifica `RITMO_PREDEFINITO = 10.0` è stata
+scritta prima della misura, e diceva «0,86 ms misurati» con una citazione a una fonte che non
+esisteva ancora. È il modo in cui un repository con una regola sulle fonti la viola: non scrivendo
+un numero senza fonte, ma scrivendo un numero **con** una fonte che si ha intenzione di produrre
+dopo. Un numero assente si nota; un numero inventato accanto a un `M-0NN` ben formato no —
+**nota 174**, e la regola pratica è che la citazione si scrive dopo la fonte, mai prima.
+
+Il secondo era un **errore di modello**, ed è più interessante. `SERVER_MOSTRATI = 8` era
+giustificato con «due shard da due membri, tre config server, un `mongos`»: una frase che conta i
+container dello stack 03 — sbagliando anche quelli, perché gli shard hanno tre membri — mentre
+l'intestazione della TUI mostra la `TopologyDescription` che il driver espone. Un client di un
+`mongos` vede il `mongos`. Misurato sui tre stack accesi, il caso peggiore è **tre**
+([M-029](Sources.md#m-029)), e le cinque righe di troppo le pagava la cronaca, che passa da sedici
+a ventuno. È la **nota 175**: un numero nudo invita a chiedere da dove viene, un numero con una
+derivazione plausibile scritta accanto chiude la domanda.
+
+Corretto il layout, la misura del costo di disegno è stata rifatta: 0,76 ms invece di 1,33
+([M-028](Sources.md#m-028)). La prima correzione ha aggiustato il numero, la seconda la cosa
+misurata.
+
+Il numero resta però quello del lab, e fuori dal lab un replica set a cinque membri esiste. Per
+questo `server_da_mostrare` non taglia in silenzio ma scrive «… e altri 3»: **nota 178** — un
+elenco troncato senza dirlo non è una schermata incompleta, è una schermata che afferma il falso,
+perché si legge come un cluster più piccolo di quello che è.
+
+### Il giro di rotture, e che cosa ha insegnato sul divieto
+
+Undici mutazioni. Nove scoperte subito; due sopravvissute, tutte e due in `rich_tui.py`:
+`auto_refresh=True`, cioè la riga che tiene in piedi ADR-0019, e l'ultimo `aggiorna()` dopo il
+ciclo, cioè l'evento che chiude la scena.
+
+Sopravvivevano perché il Passo 4 era stato letto come «di `RichTui` non si prova nulla». Ma nessuna
+delle due è disegno: la prima è *quanti thread esistono*, la seconda è *se la coda è vuota quando
+il ciclo finisce*, e si osservano entrambe senza guardare un pixel — **nota 177**, un divieto
+di provare si onora spostando ciò che va provato. Con le due prove aggiunte,
+undici su undici. Le uniche due righe di quel modulo che il resto del progetto **cita** — una in un
+ADR, una in ogni scenario — erano anche le uniche senza guardia.
+
+### Numeri
+
+| | Prima | Dopo |
+|---|---|---|
+| Prove unitarie | 243 | **280** |
+| Prove di integrazione | 43 (28–40 s) | 43 (29,6 s) — invariate |
+| File controllati da mypy | 42 | **48** |
+| Prove degli strumenti | 143 | 143 — invariate |
+
+Tre file di prova sono stati toccati fuori dall'elenco del piano — `tests/aiutanti.py`,
+`test_dominio.py`, `test_scheletro.py` — per spostare `moduli_importati`, `estranei` e
+`sottoclassi_di_evento` in una sede condivisa: adesso servono a due guardie, e una funzione
+duplicata in due file diventa due funzioni diverse alla prima modifica.
+
+---
+
 ## Che cosa manca
 
-I task dal 10 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
+I task dall'11 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
 futuro, che lo stanno facendo. L'avviso di stato in testa a
 [04-eventi-del-driver-e-concorrenza.md](04-eventi-del-driver-e-concorrenza.md) è stato riscritto al
 Task 7, perché quella pagina descriveva un codice che adesso esiste.
@@ -689,25 +779,30 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | ~~Nessun `ClusterInspector` reale: il `TopologyWatcher` ha visto solo topologie finte~~ | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | **chiuso** al Task 8: quattordici prove di integrazione guardano tre topologie vere |
 | ~~L'osservatore interroga invece di ascoltare: la risoluzione è l'intervallo~~ | [08](08-il-ponte-sdam-e-i-thread-del-driver.md) | **chiuso** al Task 7: il ponte riceve i cambiamenti quando accadono |
 | L'intervallo predefinito di 500 ms è scelto, non misurato | [07](07-topologia-failover-e-i-due-numeri.md#il-limite-di-questo-osservatore-dichiarato) | il primo failover cronometrato: serve il Blocco 2 in funzione, non un ispettore |
-| Il `TopologyWatcher` non ha un invariante di thread: oggi lo usa un thread solo | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | Task 10, con la TUI |
+| Il `TopologyWatcher` non ha un invariante di thread: oggi lo usa un thread solo | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | Task 11: al Task 10 la TUI riceve la topologia come **evento** e non tocca l'osservatore, quindi il punto è passato intatto |
 | `ChunkMigrated` potrebbe non essere osservabile da un client di `mongos` | [08](08-il-ponte-sdam-e-i-thread-del-driver.md#che-cosa-non-è-ancora-verificato) | Task 15 |
 | Un'eccezione dentro un listener finisce su `stderr`, e sotto un `Live` non si vede | [M-015](Sources.md#m-015) | Task 11 |
 | La soglia della prova cronometrata non prende una `f-string` nel callback | [M-013, riserve](Sources.md#m-013) | dichiarata, non si chiude |
 | Le unità delle durate sono lette nel sorgente di PyMongo, non viste su un battito vero | [M-012, riserve](Sources.md#m-012) | il primo battito su un cluster in movimento: il Task 8 ha collegato l'ispettore, non il ponte |
 | ~~Come le prove di integrazione ricevono la credenziale senza violare ADR-0054~~ | [decisioni](decisioni-che-vincolano-app.md#adr-0054) | **chiuso** al Task 8: [M-018](Sources.md#m-018) e [ADR-0083](../../docs/Decision.md#adr-0083) |
-| `refresh_per_second` dichiarato invece che ereditato | [04](04-eventi-del-driver-e-concorrenza.md) | Task 10 |
+| ~~`refresh_per_second` dichiarato invece che ereditato~~ | [04](04-eventi-del-driver-e-concorrenza.md) | **chiuso** al Task 10, al contrario: [M-027](Sources.md#m-027) mostra che con `auto_refresh=False` il parametro è **inerte**, e il ritmo vive nel periodo del ciclo ([ADR-0085](../../docs/Decision.md#adr-0085)) |
 | L'immagine dell'applicazione fra quelle da avere in cache offline | [decisioni](decisioni-che-vincolano-app.md#adr-0009) | Task 12 |
 | Il contratto condiviso copre **dodici** comportamenti: la fedeltà del doppio oltre quelli non è misurata | [09](09-adattatori-veri-e-contratto-condiviso.md#che-cosa-questo-capitolo-ha-chiuso-e-che-cosa-no) | non si chiude: si riduce, una verifica alla volta |
 | `REPLICA_SET_CON_PRIMARIO` non è verificabile dall'host: `directConnection` legge la forma `SINGOLA` | [M-019, riserve](Sources.md#m-019) | Task 12, dall'interno della rete Compose |
 | Dopo un arresto sporco, `$shardedDataDistribution` può riportare conteggi imprecisi | [A-012, riserve](Sources.md#a-012) | dichiarata: il Blocco 3 fa un `docker kill`, e va detto dal palco |
 | L'ispettore dipende da `config`, che il manuale dichiara interno | [A-013, riserve](Sources.md#a-013) | dichiarata: la difesa è la prova sullo stack 03, che diventa rossa se il formato cambia |
 | `ordered=False` è stato misurato solo su istanza singola in loopback | [M-021, riserve](Sources.md#m-021) | se il Blocco 3 mostrerà scritture lente |
-| Il sink testuale per le registrazioni di riserva | [decisioni](decisioni-che-vincolano-app.md#adr-0050) | Task 18 |
+| Il sink testuale per le registrazioni di riserva | [decisioni](decisioni-che-vincolano-app.md#adr-0050) | il sink **c'è** dal Task 10 ([`PlainSink`](11-tre-rese-e-un-solo-thread-che-disegna.md#plainsink-il-flush-non-è-prudenza-è-il-contenuto)); resta collegarlo a `tools/registra-terminale.py`, al Task 18 |
 | Uccidere il client `docker exec` non uccide `mongodump` dentro il container | [10](10-processi-esterni-e-il-verdetto-che-manca.md#literatore-abbandonato-e-un-limite-che-va-detto) | Task 12: dal container non c'è più nessun `docker exec` in mezzo |
-| `Progress.completati` non porta l'unità: documenti per il dump, byte per il restore | [10](10-processi-esterni-e-il-verdetto-che-manca.md#un-inconveniente-dichiarato-completati-non-porta-con-sé-lunità) | Task 10, se la TUI dovrà stampare il numero e non solo la percentuale |
+| `Progress.completati` non porta l'unità: documenti per il dump, byte per il restore | [10](10-processi-esterni-e-il-verdetto-che-manca.md#un-inconveniente-dichiarato-completati-non-porta-con-sé-lunità) | Task 10 è passato senza chiederlo: la TUI stampa la percentuale, non il numero. Torna al Task 18 se una registrazione mostrerà il conteggio |
 | Il formato del testo di `mongodump`/`mongorestore` è quello della 100.18.0 | [M-024, riserve](Sources.md#m-024) | dichiarata: la difesa è la suite di integrazione, che diventa rossa se il formato cambia |
 | Un `BrokenPipeError` scrivendo la password a un processo già morto non è gestito | [M-023, riserve](Sources.md#m-023) | la prima volta che si riprodurrà: gestire un caso mai visto è codice che nessuna prova copre |
 | `--nsFrom`/`--nsTo` senza `--nsInclude` è stato osservato una volta e non ripetuto | [M-024, riserve](Sources.md#m-024) | dichiarata: ripeterlo significa far passare `mongorestore` sugli utenti dell'amministratore |
+| `PlainSink` non gestisce `BrokenPipeError`: chi reindirizza su `head` vede una traccia invece di una fine | [11](11-tre-rese-e-un-solo-thread-che-disegna.md#che-cosa-questo-capitolo-lascia-aperto) | la prima volta che succederà dentro una registrazione |
+| Non esiste ancora un `Orologio` di sistema: `RichTui` lo riceve, e in produzione nessuno glielo dà | [11](11-tre-rese-e-un-solo-thread-che-disegna.md#che-cosa-questo-capitolo-lascia-aperto) | Task 11, con la radice di composizione |
+| Nessuna prova guarda che cosa Rich disegna davvero: il Passo 4 lo vieta | [11](11-tre-rese-e-un-solo-thread-che-disegna.md#il-divieto-del-passo-4-letto-due-volte) | Task 18: la registrazione `.cast` **è** il controllo, e la guarda una persona |
+| Il costo di un disegno è misurato su `StringIO`, non su un terminale vero | [M-028, riserve](Sources.md#m-028) | Task 18, se la registrazione risultasse a scatti |
+| `_RefreshThread` è privato di Rich e può cambiare senza avviso | [A-015, riserve](Sources.md#a-015) | dichiarata: la difesa è la prova che conta i thread, che si accorgerebbe del cambiamento |
 
 ---
 
@@ -715,4 +810,4 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 
 **Il registro completo del repository**, che copre anche le altre feature, è
 [`docs/registro-operativo-sviluppo.md`](../../docs/registro-operativo-sviluppo.md). Le note di metodo
-citate qui (137–161) stanno lì per esteso.
+citate qui (137–178) stanno lì per esteso.

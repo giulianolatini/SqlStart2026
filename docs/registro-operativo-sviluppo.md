@@ -5561,3 +5561,151 @@ Stato aggiornato: decisioni fino ad **ADR-0084**, verifiche fino a **V-074**, no
 alla **172**. Le suite: **143** prove per gli strumenti, **243** per l'applicazione più **43** di
 integrazione, `mypy --strict` verde su 42 file. Prossimo passo: **Task 10** del
 [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).
+
+---
+
+## 2026-09-03 — `feature/04`, Task 10: una promessa mantenuta per caso, e otto righe riservate a server che non esistono
+
+Il Task 10 costruisce la presentazione: `RichTui` per la sala, `PlainSink` per le registrazioni e
+per chi reindirizza su file, `NullSink` per le prove e per le misure del Task 16. Tre rese dello
+stesso flusso di eventi, e un solo thread che disegna. I file previsti dal piano erano tre, quelli
+scritti sono cinque: `presentation/righe.py` e `presentation/scena.py` esistono perché il Passo 4
+vieta di provare `RichTui`, e tutto ciò che nella presentazione è una **decisione** — la riga di un
+evento, il budget di sala, la coda, la cronaca — è stato spostato dove una prova può guardarlo. Le
+prove unitarie passano da **243 a 280**, `mypy --strict` da 42 a **48** file; le 43 di integrazione
+e le 143 degli strumenti restano quelle che erano, e restano verdi.
+
+Quattro cose sono state scoperte eseguendo. Due sono errori del progetto, e sono le più utili.
+
+**La promessa di ADR-0019 era falsa, e lo era da quando è stata scritta.** [ADR-0019](Decision.md#adr-0019)
+prometteva «un solo thread tocca `Live`», e la prometteva sulla base di
+[S-018](Sources.md#s-018): la documentazione di Rich non nomina mai i thread. Il progetto aveva
+trattato quel silenzio come una garanzia — se non se ne parla, non ce ne sono — e aveva scelto il
+disegno giusto per una ragione che nessuno aveva verificato. Aprendo `rich/live.py` della 15.0.0
+installata si legge che con le impostazioni predefinite `Live.start()` avvia un `_RefreshThread`
+demone che chiama `refresh()` per conto suo ([M-027](../app/docs/Sources.md#m-027)). Non sarebbe
+stato scorretto: dentro `Live` c'è un `RLock`, e la libreria è pensata per reggerlo. Ma «corretto
+per caso» e «corretto per costruzione» sono due cose diverse, e la seconda è l'unica che si può
+scrivere in un ADR. Da lì `auto_refresh=False` e [ADR-0085](Decision.md#adr-0085), che mantiene la
+decisione di ADR-0019 e ne sostituisce il presupposto con una misura.
+
+**La prima sonda ha risposto di no alla domanda giusta.** Il primo tentativo di contare i thread
+chiamava `threading.enumerate()` **dopo** `live.stop()`, trovava zero thread in più e concludeva
+che non ce n'erano. La risposta era vera e inutile: il `_RefreshThread` viene fermato e unito
+proprio da `stop()`. La domanda «esiste un thread in più?» ha senso solo nell'istante in cui la
+risposta conta, cioè dentro il `with`. La prova che ora difende ADR-0085 confronta
+`set(threading.enumerate())` prima e durante, e fallisce nominando il thread che ha trovato.
+
+**Il prezzo si è potuto misurare, e il piano andava disatteso alla lettera per rispettarlo.** Il
+Passo 1 chiede che `refresh_per_second` sia «passato esplicitamente, con il valore scritto accanto
+alla ragione per cui è quello». Con `auto_refresh=False` quel parametro diventa **inerte**: mille
+al secondo per mezzo secondo scrivono sette byte, cioè quelli dell'unico `refresh()` chiesto a mano
+([M-027](../app/docs/Sources.md#m-027)). Passarlo a `Live` avrebbe messo nel codice un numero che
+non fa niente, con accanto una motivazione che descrive un comportamento che non avviene: la forma
+più difficile da smentire di una spiegazione sbagliata. Il numero vive quindi nel periodo del ciclo,
+`self._periodo = 1.0 / ritmo`, dove agisce davvero. La deviazione è dichiarata in ADR-0085 e nella
+pagina [11](../app/docs/11-tre-rese-e-un-solo-thread-che-disegna.md).
+
+**Dieci al secondo, e il costo non è la ragione.** Un disegno della schermata più cara costa
+**0,76 ms** ([M-028](../app/docs/Sources.md#m-028)): a dieci giri al secondo è lo 0,8% di un core,
+e anche a sessanta si resterebbe sotto il 5%. Il ritmo lo decide l'altro lato — il ritardo massimo
+fra un fatto e la sua comparsa, cento millisecondi a dieci, duecentocinquanta ai quattro
+predefiniti di Rich. In una scena in cui i tempi **sono** il contenuto, quel quarto di secondo si
+vede.
+
+**Il numero che giustificava il ritmo era stato scritto prima di misurarlo.** La docstring di
+`RITMO_PREDEFINITO` diceva «0,86 ms misurati» e citava un codice `M-0NN` di una misura che non
+esisteva ancora: un segnaposto che avevo intenzione di sostituire dopo. È il modo in cui un
+repository con una regola severa sulle fonti la viola senza rumore. Un numero senza fonte si nota
+subito, perché la regola esiste apposta; un numero **con** una fonte ben formata attraversa ogni
+rilettura. La misura vera, quando è arrivata, lo smentiva del 35%.
+
+**Otto righe riservate a server che non esistono.** `SERVER_MOSTRATI = 8` era giustificato così:
+«due shard da due membri, tre config server, un `mongos`». Sono due errori in una frase sola. Il
+primo è di conteggio — gli shard dello stack 03 hanno **tre** membri ciascuno, e i container
+`mongo` di quello stack sono undici. Il secondo riguarda il **modello**, ed è quello che conta: la
+tabella dell'intestazione non elenca i container dello stack, elenca la `TopologyDescription` che
+il driver espone, e **un client di un `mongos` vede il `mongos`**. Chiesto ai tre stack accesi, il
+caso peggiore è **tre**: il replica set scoperto ([M-029](../app/docs/Sources.md#m-029)). Le
+cinque righe di troppo non erano gratis — `ALTEZZA_INTESTAZIONE = 4 + SERVER_MOSTRATI`, e in una
+schermata alta trenta ogni riga dell'intestazione è una riga tolta alla cronaca, che è passata da
+sedici a ventuno. Corretto il layout, la misura del costo è stata rifatta: la prima correzione ha
+aggiustato il numero, la seconda la cosa misurata.
+
+**Il taglio non è silenzioso, e questa è una decisione.** Un replica set a cinque membri esiste
+legittimamente fuori da questo lab. `server_da_mostrare` mostra i primi due e scrive «… e altri 3»:
+un elenco troncato in silenzio non è una schermata incompleta, è una schermata che **afferma il
+falso** — si legge come un cluster più piccolo di quello che è, e nessuno ha modo di accorgersene.
+
+**Undici rotture, due sopravvissute, e il divieto del Passo 4 letto due volte.** Rompendo il codice
+una riga alla volta, nove mutazioni su undici sono diventate rosse subito. Le due superstiti erano
+tutte e due in `rich_tui.py`: `auto_refresh=True` — cioè la riga su cui poggia ADR-0085 — e
+l'ultimo `aggiorna()` dopo il ciclo, cioè l'evento che chiude la scena e che nessuno vedrebbe mai.
+Sopravvivevano perché il Passo 4 era stato letto come «di `RichTui` non si prova niente». Ma
+nessuna delle due **è** disegno: la prima è quanti thread esistono, la seconda è se la coda è vuota
+quando il ciclo finisce, e si osservano entrambe senza guardare un pixel. Con le due prove
+aggiunte, undici su undici. Il fatto da tenere: le uniche due righe di quel modulo che il resto del
+progetto **cita** — una in un ADR, una in ogni scenario del talk — erano anche le uniche senza
+guardia.
+
+Restano dichiarati aperti: `PlainSink` non gestisce `BrokenPipeError`; non esiste ancora un
+`Orologio` di sistema, e sarà il Task 11 a fornirlo; nessuna prova guarda che cosa Rich disegna
+davvero, e il controllo sarà la registrazione del Task 18; il costo di un disegno è misurato su
+`StringIO` e non su un terminale vero; `_RefreshThread` è privato di Rich e può cambiare, e la
+difesa è la prova che conta i thread.
+
+### Note di metodo
+
+173. **Quando una decisione si giustifica con il silenzio di una documentazione, quel silenzio va
+     misurato prima di trattarlo come una garanzia.** ADR-0019 aveva fatto la cosa prudente —
+     davanti a una lacuna, cambiare disegno invece di indovinare — e aveva scritto la prudenza come
+     se fosse una proprietà della libreria. Ma un silenzio ha due letture, «non succede» e «non è
+     documentato», e la seconda è quasi sempre quella giusta. La regola pratica: se una lacuna è
+     abbastanza importante da entrare in un ADR, è abbastanza importante da andare a guardare nel
+     sorgente installato, che è lì, sul disco, e risponde in cinque minuti. Il disegno scelto era
+     giusto; la ragione scritta accanto era falsa, e sarebbe rimasta scritta.
+
+174. **Un numero inventato accanto a una fonte ben formata è invisibile.** Un repository con una
+     regola sulle fonti si difende bene dal numero **senza** citazione: la regola esiste, chi
+     rilegge la conosce, la mancanza salta all'occhio. Non si difende affatto dal numero scritto
+     insieme a un codice `M-0NN` sintatticamente perfetto che rimanda a una misura che si ha
+     intenzione di fare dopo. La forma è quella conforme, e la conformità della forma è esattamente
+     ciò che ferma la rilettura. La regola pratica è che la citazione si scrive **dopo** aver
+     scritto la fonte, mai prima, e che un segnaposto, se proprio deve esistere, va scritto in una
+     forma che non passa un controllo automatico.
+
+175. **Una giustificazione plausibile è la forma più duratura di un errore di modello.**
+     `SERVER_MOSTRATI = 8` non era un numero buttato lì: aveva accanto una frase che elencava
+     shard, config server e `mongos`, cioè aveva l'aspetto di un numero derivato. Sbagliava il
+     conteggio, ma soprattutto contava la cosa sbagliata — i container dello stack invece di ciò
+     che il driver espone. Un numero nudo invita a chiedere «da dove viene?»; un numero con una
+     derivazione plausibile scritta accanto chiude la domanda. La regola pratica: quando una
+     costante descrive **quello che un sistema esterno mostrerà**, la si chiede al sistema esterno,
+     e la prosa accanto riporta la misura, non il ragionamento che l'ha anticipata.
+
+176. **Una sonda può rispondere di no alla domanda giusta.** Contare i thread dopo `live.stop()` è
+     una misura corretta, ripetibile e priva di significato, perché è `stop()` a chiudere il thread
+     che si stava cercando. Un risultato negativo va letto sempre due volte: la prima per il
+     risultato, la seconda per chiedersi se lo strumento era acceso nel momento in cui il fenomeno
+     accade. Vale in particolare per tutto ciò che nasce e muore dentro un blocco `with`.
+
+177. **Un divieto di provare qualcosa si onora spostando altrove ciò che va provato, non
+     rinunciando a provarlo.** «Non provare la TUI» significa «non provare Rich», e Rich ha già le
+     sue prove. Non significa che le decisioni prese dentro quel modulo restino senza guardia: la
+     riga di un evento, il budget di sala, la coda, il taglio dell'elenco sono decisioni del
+     progetto e vanno in moduli che non conoscono Rich. Quello che resta dentro va guardato per
+     ciò che **è osservabile senza disegnare**: un thread esiste o no, una coda è vuota o no. La
+     regola pratica: davanti a un divieto di provare, chiedersi *che cosa* esattamente vieta, e
+     spostare tutto il resto fuori.
+
+178. **Un elenco troncato in silenzio non è una schermata incompleta: è una schermata che afferma
+     il falso.** Mostrare tre server su cinque senza dirlo produce una lettura precisa e sbagliata
+     — «il cluster ha tre membri» — e chi guarda non ha modo di sospettarlo. Il costo di dirlo è
+     una riga, «… e altri 2». Vale per ogni resa che ha un budget di spazio: la parte omessa va
+     dichiarata, e il numero degli omessi è il dato più importante fra quelli che stanno per essere
+     nascosti.
+
+Stato aggiornato: decisioni fino ad **ADR-0085**, verifiche fino a **V-074**, note di metodo fino
+alla **178**. Le suite: **143** prove per gli strumenti, **280** per l'applicazione più **43** di
+integrazione, `mypy --strict` verde su 48 file. Prossimo passo: **Task 11** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).

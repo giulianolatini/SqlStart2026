@@ -65,16 +65,48 @@ il thread chiamante: un listener che disegna rallenta il driver e falsa le misur
 per mostrare. La documentazione di Rich non nomina mai i thread: non c'è risposta documentata sulla
 sicurezza di `Live`, in nessuna delle due direzioni. Un solo thread rende la domanda inutile.
 
-**Dove si vede.** Tutti e otto gli eventi sono `@dataclass(frozen=True, slots=True)` in
+**Dove si vede.** Tutti gli eventi sono `@dataclass(frozen=True, slots=True)` in
 `domain/eventi.py`, e la ragione è scritta nella docstring del modulo. La docstring di
 `EventSink.emit` dice che il metodo non deve bloccare. Le prove
 `test_un_evento_non_si_puo_modificare` e `test_ogni_evento_ha_i_propri_slot` lo verificano. La coda
-e il ciclo arrivano ai Task 7 e 10.
+è arrivata al Task 7 con `SdamBridge`, il ciclo al Task 10 con `Scena` e `RichTui`.
 
 **È il vincolo più facile da dimenticare del progetto**, perché non si vede finché non fa danno: il
 codice funziona lo stesso, e a sbagliare sono soltanto i numeri.
 
-**Stato:** **applicata** per l'immutabilità, **in attesa** per la coda.
+**E infatti è stato dimenticato, dal codice che credeva di applicarlo.** Il Task 10 ha scoperto che
+`Live`, con le impostazioni predefinite, avvia un `_RefreshThread` demone che chiama `refresh()`
+per conto suo ([M-027](Sources.md#m-027)): i thread che toccavano Rich sarebbero stati due. La
+lacuna della documentazione che aveva motivato questo ADR nascondeva, oltre alla risposta, anche il
+fatto che la domanda avesse già una risposta sbagliata. Si applica con `auto_refresh=False`, e da
+lì [ADR-0085](../../docs/Decision.md#adr-0085), che ne è il seguito: la decisione resta, il
+presupposto è corretto, e una prova conta i thread invece di fidarsi.
+
+**Stato:** **applicata** — immutabilità dal Task 2, coda dal Task 7, ciclo e thread unico dal
+Task 10.
+
+<a id="adr-0085"></a>
+### [ADR-0085](../../docs/Decision.md#adr-0085) — `auto_refresh=False`, e il ritmo nel ciclo
+
+**Che cosa impone.** `RichTui` costruisce `Live` con `auto_refresh=False` e chiama `refresh()` dal
+proprio ciclo. `refresh_per_second` **non** si passa a `Live`, perché in quella configurazione è
+inerte; il numero vive nel periodo del ciclo, `RITMO_PREDEFINITO = 10.0`.
+
+**Perché.** Perché è la sola riga che rende vero [ADR-0019](#adr-0019) invece che sperato. Con le
+impostazioni predefinite `Live.start()` avvia un `_RefreshThread` demone: i thread che toccano Rich
+sarebbero due, e la correttezza dipenderebbe da un `RLock` privato che nessuno ha promesso
+([M-027](Sources.md#m-027), [A-015](Sources.md#a-015)).
+
+**Dove si vede.** `presentation/rich_tui.py`, il `with Live(...)` dentro `acceso()`. La guardia è
+`test_mentre_la_tui_e_accesa_non_nasce_nessun_altro_thread`, che conta i thread vivi mentre il
+display è acceso — conta invece di nominare la classe privata, così che a fallire sia un
+cambiamento di comportamento e non un cambiamento di nome.
+
+**Vale anche per chi verrà dopo.** Un `Live` costruito altrove nel progetto, un giorno, senza
+`auto_refresh=False`, non farebbe fallire nessuna prova esistente: la guardia è su `RichTui`. È il
+motivo per cui questa pagina lo scrive.
+
+**Stato:** **applicata** dal Task 10.
 
 <a id="adr-0012"></a>
 ### [ADR-0012](../../docs/Decision.md#adr-0012) — Applicazione containerizzata sulla rete degli stack

@@ -22,6 +22,7 @@ affermazione in **cronaca in diretta**.
 | 8 | [08-il-ponte-sdam-e-i-thread-del-driver.md](08-il-ponte-sdam-e-i-thread-del-driver.md) | chi chiama i listener, da quale thread, e quanto costa scrivere una riga di troppo dentro un callback |
 | 9 | [09-adattatori-veri-e-contratto-condiviso.md](09-adattatori-veri-e-contratto-condiviso.md) | che cosa si rompe quando i doppi incontrano MongoDB vero, e il contratto che li tiene onesti |
 | 10 | [10-processi-esterni-e-il-verdetto-che-manca.md](10-processi-esterni-e-il-verdetto-che-manca.md) | che cosa cambia quando l'adattatore lancia un processo invece di chiamare una libreria, e dove mettere la password |
+| 11 | [11-tre-rese-e-un-solo-thread-che-disegna.md](11-tre-rese-e-un-solo-thread-che-disegna.md) | tre modi di guardare lo stesso flusso di eventi, il budget di sala, e una promessa architetturale che si è scoperta falsa mentre la si manteneva |
 
 Si leggono in ordine, ma nessuna dipende dalle altre per essere comprensibile. Chi arriva da una
 domanda precisa può entrare dal punto giusto.

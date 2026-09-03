@@ -419,6 +419,33 @@ misure valgono per l'ambiente descritto in [M-001](#m-001) e per nessun altro.
 
 ---
 
+<a id="a-015"></a>
+### A-015 — Rich: `auto_refresh` è documentato, il thread che lo attua no
+
+- **URL:** https://rich.readthedocs.io/en/stable/reference/live.html — letta però sul pacchetto
+  installato, `rich` **15.0.0**, in `app/.venv/lib/python3.13/site-packages/rich/live.py`, perché
+  la pagina pubblicata è generata da quelle stesse docstring e il repository deve poter essere
+  verificato senza rete.
+- **Editore:** Will McGugan e i contributori di Rich
+- **Consultata:** 2026-09-03
+- **Verdetto:** conferma **parziale** — il parametro c'è, il meccanismo non è detto
+- **Cosa afferma:** di `Live`, che `auto_refresh` è «Enable auto refresh. If disabled, you will
+  need to call `refresh()` or `update()` with refresh flag. Defaults to True», e che
+  `refresh_per_second` è il «Number of times per second to refresh the live display. Defaults to
+  4». Nessuna delle due righe dice **chi** aggiorna: la frase è scritta al passivo, e un lettore
+  che non apra il modulo può concludere che il ridisegno avvenga dentro le chiamate che fa lui.
+- **Conseguenza qui:** è la stessa lacuna già dichiarata da [S-018](../../docs/Sources.md#s-018),
+  vista adesso da un metro più vicino — e la lacuna non è cosmetica, perché
+  [ADR-0019](../../docs/Decision.md#adr-0019) aveva promesso «un solo thread tocca `Live`» proprio
+  appoggiandosi al silenzio della documentazione. Il thread esiste, e si chiama `_RefreshThread`:
+  la misura è [M-027](#m-027), la decisione che ne discende è
+  [ADR-0085](../../docs/Decision.md#adr-0085). Il nome con la sottolineatura davanti è l'unica cosa
+  che Rich dice sul suo conto, ed è la cosa giusta da dire: è privato, e appoggiarcisi sarebbe
+  stato un errore anche se fosse stato documentato.
+- **Usata da:** [11-tre-rese-e-un-solo-thread-che-disegna.md](11-tre-rese-e-un-solo-thread-che-disegna.md)
+
+---
+
 ## Misure fatte qui
 
 <a id="m-001"></a>
@@ -1440,6 +1467,148 @@ misure valgono per l'ambiente descritto in [M-001](#m-001) e per nessun altro.
   con sé l'unità: per un dump sono documenti, per un restore byte, e chi legge deve saperlo dal
   contesto.
 - **Usata da:** [10-processi-esterni-e-il-verdetto-che-manca.md](10-processi-esterni-e-il-verdetto-che-manca.md)
+
+---
+
+<a id="m-027"></a>
+### M-027 — `Live` di Rich avvia un thread demone, e `refresh_per_second` smette di contare quando lo si spegne
+
+- **Data:** 2026-09-03
+- **Comando:** contare i thread vivi **mentre** il display è acceso — la prima sonda li ha contati
+  dopo `stop()` e ne ha trovati zero, che è vero e inutile:
+  ```python
+  prima = set(threading.enumerate())
+  with Live("x", console=console) as live:          # e poi: auto_refresh=False
+      nuovi = set(threading.enumerate()) - prima
+      print([(t.name, type(t).__name__, t.daemon) for t in nuovi])
+      print(nuovi == {live._refresh_thread})
+  ```
+  e, per il secondo pezzo, `Live(..., auto_refresh=False, refresh_per_second=1000)` lasciato mezzo
+  secondo senza chiamare niente, misurando i byte scritti sulla console.
+- **Output:**
+  ```
+  predefinito:      [('Thread-1', '_RefreshThread', True)]   identico a live._refresh_thread: True
+  auto_refresh=False: []
+  auto_refresh=False, refresh_per_second=1000, 0.5 s di attesa: 7 byte scritti
+  ```
+- **Che cosa dimostra:** due cose, e la seconda è la sorpresa. La prima: con le impostazioni
+  predefinite `Live.start()` avvia un `_RefreshThread` demone che gira per conto suo — il sorgente
+  lo mostra chiamare `self.live.refresh()` dentro `with self.live._lock:`. Quindi
+  [ADR-0019](../../docs/Decision.md#adr-0019), che prometteva «un solo thread tocca `Live`», **non
+  sarebbe stata mantenuta** dal codice che credeva di mantenerla. Non è insicuro: il lucchetto c'è.
+  È però esattamente la condizione da cui ADR-0019 voleva stare alla larga — una correttezza che
+  poggia su un dettaglio privato e non documentato ([A-015](#a-015),
+  [S-018](../../docs/Sources.md#s-018)). La seconda: spento `auto_refresh`, `refresh_per_second`
+  non ha più nessun effetto. Mille al secondo per mezzo secondo scrivono sette byte, cioè niente:
+  nessuno legge più quel numero. Anche `update()` senza `refresh=True` non disegna.
+- **Perché è stata fatta:** perché il Passo 1 del Task 10 chiedeva di passare `refresh_per_second`
+  «esplicitamente, con il valore scritto accanto alla ragione», e prima di scrivere una ragione
+  accanto a un numero conviene accertarsi che il numero faccia qualcosa. Non lo faceva.
+- **Riserve:** vale per `rich` 15.0.0. `_RefreshThread` è privato e può cambiare o sparire in una
+  versione qualunque: è la ragione per cui la guardia in
+  `test_mentre_la_tui_e_accesa_non_nasce_nessun_altro_thread` conta i thread invece di nominare la
+  classe — se Rich cambiasse il nome la prova continuerebbe a valere, se cambiasse il
+  **comportamento** fallirebbe, che è l'ordine giusto. Non è stato verificato se un terminale vero
+  (qui la console scriveva su `StringIO` con `force_terminal=True`) cambi il conteggio dei byte;
+  cambierebbe il numero, non il fatto che sia sostanzialmente zero.
+- **Usata da:** [11-tre-rese-e-un-solo-thread-che-disegna.md](11-tre-rese-e-un-solo-thread-che-disegna.md)
+
+---
+
+<a id="m-028"></a>
+### M-028 — Un disegno della schermata costa 0,76 ms nel caso peggiore
+
+- **Data:** 2026-09-03
+- **Comando:** cinquecento giri di `RichTui.aggiorna()` sulla scena più cara che il progetto
+  produce — tre server, cioè il replica set scoperto ([M-029](#m-029)), e la cronaca piena a
+  ventuno righe — con il primo giro scartato perché paga la costruzione dei renderable:
+  ```python
+  console = Console(file=io.StringIO(), force_terminal=True, width=100, height=30)
+  tui = RichTui(OrologioFermo(), console=console)
+  tui.emit(TopologyChanged(ISTANTE, TRE, TRE))
+  for i in range(RIGHE_CRONACA):
+      tui.emit(WriteSucceeded(ISTANTE, i, 12.345))
+  with tui.acceso():
+      tui.aggiorna()
+      for giro in range(500):
+          tui.emit(LatencySampled(ISTANTE, "insert_many", 12.0 + giro % 7))
+          prima = time.perf_counter()
+          tui.aggiorna()
+          misure.append((time.perf_counter() - prima) * 1000.0)
+  ```
+- **Output:** tre esecuzioni di seguito, su Apple M1 Pro, Python 3.13.15, `rich` 15.0.0:
+  ```
+  giri=500  mediana_ms=0.778  minimo_ms=0.732  massimo_ms=9.078  p95_ms=1.032
+  giri=500  mediana_ms=0.764  minimo_ms=0.734  massimo_ms=1.409  p95_ms=0.837
+  giri=500  mediana_ms=0.742  minimo_ms=0.729  massimo_ms=0.969  p95_ms=0.827
+  ```
+  Sulla schermata sbagliata di prima — otto server e sedici righe — le stesse tre esecuzioni
+  davano `1.327`, `1.323` e `1.331` ms: un pannello più alto costa quasi il doppio, il che è
+  coerente e non sorprendente.
+- **Che cosa dimostra:** che il ritmo di disegno non è un vincolo economico. A 0,76 ms per giro,
+  dieci giri al secondo costano lo **0,8% di un core**; anche a sessanta si resta sotto il 5%. Il
+  costo quindi non decide `RITMO_PREDEFINITO = 10.0` — lo decide l'altro lato, il ritardo massimo
+  fra un fatto e la sua comparsa, che a dieci al secondo è di cento millisecondi e ai quattro
+  predefiniti di Rich sarebbe di duecentocinquanta. In una scena in cui i tempi **sono** il
+  contenuto, quel quarto di secondo si vede.
+- **Perché è stata fatta:** perché la docstring che giustifica il numero era già scritta con dentro
+  un costo di «0,86 ms misurati» che nessuno aveva misurato. Il segnaposto era plausibile, e la
+  prima misura vera — sulla schermata di allora — lo smentiva del 35%. Poi si è scoperto che anche
+  la schermata era sbagliata ([M-029](#m-029)) e la misura è stata rifatta. Vale la pena che
+  entrambi i giri restino scritti: la prima correzione ha aggiustato il numero, la seconda ha
+  aggiustato la cosa misurata.
+- **Riserve:** la mediana è stabile su tre esecuzioni, il massimo no — 9,1, 1,4 e 1,0 ms, cioè il
+  rumore del sistema operativo su un portatile, non del codice. È la ragione per cui la cifra
+  riportata è la mediana e non la media. La misura scrive su `StringIO`: un terminale vero aggiunge
+  il costo di `write` sul tty, che non è stato misurato e che al Task 18 varrà la pena guardare se
+  la registrazione risultasse a scatti. La larghezza è quella di sala: una console più larga
+  costerebbe di più.
+- **Usata da:** [11-tre-rese-e-un-solo-thread-che-disegna.md](11-tre-rese-e-un-solo-thread-che-disegna.md)
+
+---
+
+<a id="m-029"></a>
+### M-029 — Un client vede tre server nel replica set e uno soltanto attraverso un `mongos`
+
+- **Data:** 2026-09-03
+- **Comando:** chiedere al driver, sui tre stack accesi, quanti server contiene la sua
+  `TopologyDescription` — cioè esattamente la lista che finisce nell'intestazione della TUI:
+  ```python
+  topologia = descrivi_topologia(cliente.topology_description)
+  print(f"stack {codice}: tipo={topologia.tipo.value} server={len(topologia.server)}")
+  ```
+  eseguito prima come lo fanno le prove d'integrazione (`directConnection=True` su 01 e 02, un
+  `mongos` su 03) e poi, sullo stack 02, lasciando che il driver **scopra** il set.
+- **Output:**
+  ```
+  stack 01: tipo=singola  server=1     localhost:27017   standalone
+  stack 02: tipo=singola  server=1     localhost:27021   primario
+  stack 03: tipo=sharded  server=1     localhost:27117   router
+  ```
+  e, sullo stack 02 con la scoperta attiva, la topologia scoperta contiene tre server —
+  `mongo-rs-1:27017`, `mongo-rs-2:27017`, `mongo-rs-3:27017` — che dall'host non sono
+  raggiungibili per nome, come già dichiarato in `tests/integration/ambiente.py` e come risolve
+  [ADR-0012](../../docs/Decision.md#adr-0012) portando l'applicazione dentro la rete Compose.
+- **Che cosa dimostra:** che il caso peggiore per l'intestazione della TUI è **tre**, e non otto.
+  La prima stesura di `presentation/righe.py` riservava otto righe con questa giustificazione:
+  «due shard da due membri, tre config server, un `mongos`». Sono due errori in una frase. Il
+  primo è di conteggio — gli shard dello stack 03 hanno tre membri ciascuno, non due, e i
+  container `mongo` dello stack sono undici. Il secondo è più interessante e riguarda il modello:
+  **la topologia che il driver espone attraverso un `mongos` non contiene i membri degli shard**.
+  Un client di un `mongos` vede il `mongos`. I documenti per shard si contano con
+  `$shardedDataDistribution` ([A-012](#a-012)), che produce `ContoShard` — un modello diverso, che
+  non passa da `DescrizioneServer` e non finisce in quell'elenco.
+- **Perché è stata fatta:** perché `SERVER_MOSTRATI` non è un numero di comodo: entra in
+  `ALTEZZA_INTESTAZIONE = 4 + SERVER_MOSTRATI`, e ogni riga riservata all'intestazione è una riga
+  tolta alla cronaca in una schermata alta trenta. Otto invece di tre significava cinque righe di
+  cronaca perse per sempre, per fare spazio a server che non sarebbero mai comparsi.
+- **Riserve:** vale per gli stack di questo repository. Un replica set a cinque membri
+  esisterebbe legittimamente altrove, ed è la ragione per cui `server_da_mostrare` non taglia in
+  silenzio ma scrive «… e altri N»: il numero è misurato sul lab, la funzione regge anche fuori.
+  Sullo stack 03 il `compose.yaml` definisce due `mongos`: un client che li seminasse entrambi ne
+  vedrebbe due, e resterebbe sotto il tre. Non è stato verificato che cosa esponga la topologia di
+  un client collegato **direttamente** a un config server, perché nessuna scena del talk lo fa.
+- **Usata da:** [11-tre-rese-e-un-solo-thread-che-disegna.md](11-tre-rese-e-un-solo-thread-che-disegna.md)
 
 ---
 

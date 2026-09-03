@@ -5455,3 +5455,73 @@ cui si ripara.
 [ADR-0077](#adr-0077)); le misure che la giustificano sono
 [M-024](../app/docs/Sources.md#m-024) e [M-023](../app/docs/Sources.md#m-023) nel registro
 dell'applicazione
+
+---
+
+<a id="adr-0085"></a>
+## ADR-0085 — La promessa di un solo thread si mantiene spegnendo `auto_refresh`, e il ritmo si sposta nel ciclo
+
+**Data:** 2026-09-03 · **Stato:** Accettata
+
+**Contesto:** [ADR-0019](#adr-0019) ha deciso che gli eventi del driver non toccano lo schermo:
+l'ascoltatore di PyMongo costruisce un fatto congelato, lo mette in coda e ritorna, perché la
+consegna è sincrona e blocca il thread del driver ([S-010](Sources.md#s-010)). La conseguenza
+scritta nell'ADR era «il ciclo di disegno gira sul thread principale», e la ragione dichiarata per
+non fare altrimenti era una lacuna: la documentazione di `Live` di Rich non nomina mai i thread
+([S-018](Sources.md#s-018)). Di fronte a una lacuna il progetto ha cambiato disegno invece di
+indovinare.
+
+Scrivendo il Task 10 la lacuna è stata guardata da vicino, ed è peggio di una lacuna. Con le
+impostazioni predefinite `Live.start()` avvia un `_RefreshThread` **demone** che chiama `refresh()`
+per conto suo quattro volte al secondo ([M-027](../app/docs/Sources.md#m-027)). La docstring del
+parametro `auto_refresh` dice «Enable auto refresh» e non dice chi lo attui
+([A-015](../app/docs/Sources.md#a-015)): la frase è al passivo, e un lettore ragionevole può
+concludere che il ridisegno avvenga dentro le chiamate che fa lui. Non avviene.
+
+Il codice non sarebbe stato scorretto — dentro `Live` c'è un `RLock`, e i due thread non si
+sarebbero pestati i piedi. Sarebbe stato però **corretto per una ragione che il progetto non
+conosceva**, appoggiata a un attributo privato di una libreria, in un ADR che diceva testualmente
+di non volersi appoggiare a niente del genere. Una promessa mantenuta per caso non è mantenuta: è
+una promessa che nessuno sta controllando.
+
+**Decisione:** `RichTui` costruisce `Live` con `auto_refresh=False` e chiama `refresh()` dal proprio
+ciclo. Questo rende vera, e non solo dichiarata, la frase di ADR-0019.
+
+Il prezzo è misurato e va detto per intero: con `auto_refresh=False` il parametro
+`refresh_per_second` diventa **inerte**. Mille aggiornamenti al secondo per mezzo secondo scrivono
+sette byte, cioè niente ([M-027](../app/docs/Sources.md#m-027)). Il Task 10 chiedeva di passarlo
+«esplicitamente, con il valore scritto accanto alla ragione per cui è quello»: passarlo sarebbe
+stato scrivere una ragione accanto a un numero che nessuno legge, cioè la forma dell'esplicitezza
+senza la sostanza. Il numero vive quindi nel **periodo del ciclo** — `RITMO_PREDEFINITO = 10.0`, e
+`self._periodo = 1.0 / ritmo` — che è il posto in cui agisce davvero, e resta regolabile dal
+composition root come chiedeva l'intento del passo.
+
+Dieci al secondo, e non altro, per due misure che guardano da lati opposti. Verso il basso il ritmo
+è il ritardo massimo fra un fatto e la sua comparsa: cento millisecondi a dieci, duecentocinquanta
+ai quattro predefiniti di Rich, e in una scena in cui i tempi sono il contenuto quel quarto di
+secondo si vede. Verso l'alto un disegno costa 0,76 ms nel caso peggiore — tre server e cronaca
+piena — cioè lo 0,8% di un core a dieci giri al secondo
+([M-028](../app/docs/Sources.md#m-028)). Il costo non è il vincolo; il ritardo sì.
+
+La promessa non resta affidata alla riga di codice che la mantiene. Una prova conta i thread vivi
+mentre il display è acceso e pretende che non ne sia nato nessuno. Conta i thread invece di
+nominare `_RefreshThread` apposta: se Rich rinominasse la classe privata la prova continuerebbe a
+valere, se ne cambiasse il **comportamento** fallirebbe. È l'ordine giusto fra le due cose.
+
+**Alternative scartate.** **Lasciare `auto_refresh=True` e fidarsi del lucchetto interno** — è la
+scelta che funziona oggi e che rende ADR-0019 una frase non verificabile; il giorno in cui Rich
+cambiasse il lucchetto, il difetto comparirebbe in sala e non nelle prove. **Passare comunque
+`refresh_per_second` per rispettare la lettera del passo** — decorazione: un parametro inerte
+accanto a un commento che ne spiega il valore è peggio dell'assenza, perché chi legge crede di aver
+capito da dove viene il ritmo. **Tenere il ciclo di disegno su un thread suo** — è la simmetrica
+dell'errore che ADR-0019 aveva evitato, e riporterebbe due thread su `Live` per scelta invece che
+per distrazione.
+
+Questo ADR **non modifica** ADR-0019: ne mantiene la decisione e ne corregge il presupposto. La
+regola sottostante è la stessa che il progetto applica altrove, e vale la pena enunciarla: quando
+una decisione si giustifica con il silenzio di una documentazione, quel silenzio va misurato prima
+di trattarlo come una garanzia.
+
+**Fonti:** [S-018](Sources.md#s-018) e [S-010](Sources.md#s-010); nel registro dell'applicazione
+[A-015](../app/docs/Sources.md#a-015), [M-027](../app/docs/Sources.md#m-027) e
+[M-028](../app/docs/Sources.md#m-028)

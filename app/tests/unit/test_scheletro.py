@@ -7,38 +7,11 @@ varrà molto, perché il momento in cui la regola si rompe è quello in cui serv
 adattatore «solo per un attimo» e nessuno se ne accorge rileggendo il diff.
 """
 
-import ast
-import sys
-from pathlib import Path
-
 import mongolab
 
-SORGENTI = Path(__file__).resolve().parents[2] / "src" / "mongolab"
+from tests.aiutanti import SORGENTI, estranei
+
 STRATI_INTERNI = ("domain", "application")
-PACCHETTO = "mongolab"
-
-
-def moduli_importati(sorgente: str) -> set[str]:
-    """I nomi di primo livello importati da un sorgente.
-
-    Gli import relativi non compaiono: `from .eventi import X` ha `level > 0` e per
-    costruzione resta dentro il pacchetto, quindi non è una dipendenza verso l'esterno.
-    """
-    trovati: set[str] = set()
-    for nodo in ast.walk(ast.parse(sorgente)):
-        if isinstance(nodo, ast.Import):
-            for alias in nodo.names:
-                trovati.add(alias.name.split(".")[0])
-        elif isinstance(nodo, ast.ImportFrom):
-            if nodo.level == 0 and nodo.module is not None:
-                trovati.add(nodo.module.split(".")[0])
-    return trovati
-
-
-def estranei(sorgente: str) -> set[str]:
-    """I moduli importati che non sono né la libreria standard né il pacchetto."""
-    ammessi = sys.stdlib_module_names | {PACCHETTO}
-    return moduli_importati(sorgente) - ammessi
 
 
 def test_il_pacchetto_e_importabile_e_dichiara_la_versione() -> None:

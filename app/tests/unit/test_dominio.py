@@ -13,7 +13,6 @@ from typing import Sequence
 
 import pytest
 
-from mongolab.domain import eventi as modulo_eventi
 from mongolab.domain.eventi import (
     BackupProgressed,
     ChunkMigrated,
@@ -42,31 +41,12 @@ from mongolab.domain.porte import (
     DocumentStore,
     EventSink,
 )
+from tests.aiutanti import sottoclassi_di_evento
 
 ISTANTE = datetime(2026, 9, 18, 9, 30, 0, tzinfo=UTC)
 
 
 # --- Gli eventi -----------------------------------------------------------------------
-
-
-def sottoclassi_di_evento() -> list[type[Evento]]:
-    """Gli eventi dichiarati nel modulo, scoperti invece che elencati.
-
-    Elencarli a mano qui vorrebbe dire che una decima classe aggiunta domani sfugge a
-    ogni regola di questo file, e sfugge in silenzio: le prove continuerebbero a passare
-    parlando delle nove che già conoscevano.
-
-    La nona è arrivata davvero, al Task 6, ed è andata come doveva: la guardia sotto ha
-    fallito, e per farla tornare verde è servito un ADR (l'0082) invece di una riga
-    in più in un insieme.
-    """
-    return [
-        valore
-        for valore in vars(modulo_eventi).values()
-        if isinstance(valore, type)
-        and issubclass(valore, Evento)
-        and valore is not Evento
-    ]
 
 
 def test_gli_eventi_del_design_sono_nove_e_sono_quelli() -> None:

@@ -2255,3 +2255,112 @@ Fonte: [registro operativo, Task 9](registro-operativo-sviluppo.md),
 l'altro verso, che capita più spesso di quanto si ammetta. Una docstring di prova è un'asserzione
 come le altre, scritta nel punto in cui nessuno la rilegge, e un codice che solleva quando non te lo
 aspetti è la cosa più vicina a una revisione paritaria che si possa avere alle undici di sera.
+
+---
+
+### Una promessa mantenuta per caso è una promessa che nessuno sta controllando
+
+> Un ADR di questo repository prometteva «un solo thread tocca `Live`». Con le impostazioni
+> predefinite di Rich i thread erano **due**: `Live.start()` ne avvia uno demone che ridisegna per
+> conto suo. Non succedeva niente di male — dentro `Live` c'è un lucchetto — e proprio per questo
+> la promessa sarebbe rimasta scritta, falsa, finché qualcosa non avesse smesso di funzionare.
+
+Fonte: [`app/docs/Sources.md`, M-027](../app/docs/Sources.md#m-027) e
+[A-015](../app/docs/Sources.md#a-015), [ADR-0085](Decision.md#adr-0085).
+
+**Perché una slide:** perché è il caso peggiore di tutti — l'assunzione sbagliata che *funziona*.
+Un'assunzione sbagliata che rompe qualcosa si scopre da sola; una che regge grazie a una protezione
+altrui, di cui non si sapeva niente, si scopre solo andando a guardare. E ci si va a guardare
+soltanto se si prende sul serio l'idea che «corretto per caso» e «corretto per costruzione» siano
+due stati diversi del software, non due modi di dire la stessa cosa.
+
+---
+
+### Quando una decisione si giustifica con un silenzio, quel silenzio va misurato
+
+> La documentazione di Rich non nomina mai i thread. Il progetto aveva letto quel silenzio come
+> «non ce ne sono» e ci aveva costruito sopra un ADR. Le due letture di un silenzio sono «non
+> succede» e «non è documentato», e la seconda è quasi sempre quella giusta.
+
+Fonte: [`docs/Sources.md`, S-018](Sources.md#s-018),
+[`app/docs/Sources.md`, A-015](../app/docs/Sources.md#a-015),
+[registro operativo, nota 173](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché la reazione prudente a una lacuna — cambiare disegno invece di
+indovinare — era quella giusta, e non è bastata. Quello che è stato scritto accanto alla scelta non
+era prudenza, era una proprietà attribuita a una libreria senza verificarla. Se una lacuna è
+abbastanza importante da entrare in una decisione, è abbastanza importante da farsi cinque minuti
+di sorgente installato: sta sul disco, si apre, risponde.
+
+---
+
+### Il numero c'era. La misura no
+
+> Nella docstring che giustificava il ritmo di aggiornamento avevo scritto «0,86 ms misurati», con
+> accanto un codice `M-0NN` perfettamente formato che rimandava a una misura che non esisteva
+> ancora. Quando l'ho fatta davvero, la misura smentiva il segnaposto del 35%.
+
+Fonte: [`app/docs/Sources.md`, M-028](../app/docs/Sources.md#m-028),
+[registro operativo, nota 174](registro-operativo-sviluppo.md).
+
+**Perché una slide:** è il seguito esatto di *«Una citazione plausibile è più pericolosa di una
+mancante»*, un giro più in là. Un repository con una regola severa sulle fonti si difende benissimo
+dal numero **senza** citazione: la mancanza salta all'occhio, perché la regola esiste apposta. Non
+si difende affatto dal numero scritto insieme a una citazione conforme che si ha intenzione di
+onorare dopo. La conformità della forma è precisamente ciò che ferma la rilettura — la disciplina
+delle fonti costruisce, come effetto collaterale, il nascondiglio migliore per un dato inventato.
+La regola pratica sta in una riga: la citazione si scrive **dopo** la fonte, mai prima.
+
+---
+
+### Otto righe riservate a server che non esistono
+
+> Avevo riservato otto righe della schermata all'elenco dei server, giustificandole così: «due
+> shard da due membri, tre config server, un `mongos`». Gli shard di membri ne hanno tre. E
+> soprattutto: la tabella non elenca i container dello stack, elenca quello che il **driver** vede,
+> e un client collegato a un `mongos` vede il `mongos`. Il numero vero è tre.
+
+Fonte: [`app/docs/Sources.md`, M-029](../app/docs/Sources.md#m-029),
+[registro operativo, nota 175](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché mostra la differenza fra un errore di conteggio e un errore di
+modello, e quale dei due sopravvive. Un numero nudo invita a chiedere «da dove viene?»; un numero
+con una derivazione plausibile scritta accanto **chiude** la domanda, e la chiude per anni. Vale
+anche come promemoria su MongoDB sharded, che è il punto in cui l'intuizione tradisce più spesso:
+la topologia che il client conosce non è la topologia del cluster, ed è per questo che i conteggi
+per shard si chiedono a `$shardedDataDistribution` e non alla lista dei server.
+
+---
+
+### Un elenco troncato in silenzio si legge come un cluster più piccolo di quello che è
+
+> Mostrare tre server su cinque senza dirlo non produce una schermata incompleta: produce una
+> schermata che afferma il falso. Chi guarda legge «il cluster ha tre membri», e non ha modo di
+> sospettare il contrario. Il costo di dirlo è una riga: «… e altri 2».
+
+Fonte: [`app/docs/11-tre-rese-e-un-solo-thread-che-disegna.md`](../app/docs/11-tre-rese-e-un-solo-thread-che-disegna.md),
+[registro operativo, nota 178](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché ogni cruscotto, ogni `top`, ogni pagina di risultati ha un budget di
+spazio e quindi tronca, e quasi nessuno dichiara di averlo fatto. In una dimostrazione dal vivo
+questo conta il doppio: la schermata proiettata è l'unica prova che il pubblico ha, e un'omissione
+non dichiarata diventa un'affermazione. Il dato più importante fra quelli che stanno per essere
+nascosti è **quanti** ne vengono nascosti.
+
+---
+
+### Un divieto di provare si onora spostando ciò che va provato, non rinunciando a provarlo
+
+> «Non provare la TUI» significa «non provare Rich», e Rich ha già le sue prove. Non significa che
+> le decisioni prese lì dentro restino senza guardia. Rompendo il codice una riga alla volta, le
+> due sole mutazioni sopravvissute su undici erano nel modulo che il divieto proteggeva — ed erano
+> le due righe che il resto del progetto cita.
+
+Fonte: [`app/docs/11-tre-rese-e-un-solo-thread-che-disegna.md`](../app/docs/11-tre-rese-e-un-solo-thread-che-disegna.md),
+[registro operativo, nota 177](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché «questo non si prova» è una frase che in ogni progetto copre due cose
+molto diverse — ciò che davvero non ha senso provare, e ciò che è scomodo. La domanda che le separa
+è *che cosa esattamente vieta il divieto*: qui vietava di guardare i pixel, non di contare i thread
+o di chiedere se una coda è vuota. Le due mutazioni sopravvissute stavano proprio lì, ed è un esito
+che si ripete: le righe senza guardia tendono a essere quelle su cui poggia la documentazione.

@@ -342,18 +342,22 @@ in `app/tests/integration/`.
 **File:** creare `app/src/mongolab/presentation/rich_tui.py`, `presentation/plain.py`,
 `presentation/null.py`, `app/tests/unit/test_presentazione.py`.
 
-- [ ] **Passo 1.** `RichTui` implementa `EventSink`. Il ciclo `Live` gira sul **thread principale**,
+- [x] **Passo 1.** `RichTui` implementa `EventSink`. Il ciclo `Live` gira sul **thread principale**,
       drena la coda a ogni giro e aggiorna. `refresh_per_second` è passato esplicitamente, con il
       valore scritto accanto alla ragione per cui è quello.
-- [ ] **Passo 2.** Testo grande e leggibile dall'ultima fila: è un requisito di sala, non di gusto,
+      *Eseguito con una deviazione dichiarata: con `auto_refresh=False`, che è ciò che rende
+      vero «un solo thread», `refresh_per_second` è **inerte** e non viene passato a `Live`; il
+      numero vive nel periodo del ciclo. [ADR-0085](../Decision.md#adr-0085),
+      [M-027](../../app/docs/Sources.md#m-027).*
+- [x] **Passo 2.** Testo grande e leggibile dall'ultima fila: è un requisito di sala, non di gusto,
       e va deciso adesso perché condiziona quante righe stanno in una schermata.
-- [ ] **Passo 3.** `PlainSink` (righe di testo, per le registrazioni asciinema e per chi reindirizza
+- [x] **Passo 3.** `PlainSink` (righe di testo, per le registrazioni asciinema e per chi reindirizza
       su file) e `NullSink` (niente, per le prove e per le misure del Task 16). Sono tre rese dello
       stesso flusso di eventi: se una ha bisogno di un dato che le altre non ricevono, il difetto è
       nell'evento, non nel sink.
-- [ ] **Passo 4.** Le prove della presentazione si fanno su `PlainSink` e `RecordingSink`, mai su
+- [x] **Passo 4.** Le prove della presentazione si fanno su `PlainSink` e `RecordingSink`, mai su
       `RichTui`: provare il disegno significa provare Rich, che ha già le sue prove.
-- [ ] **Passo 5.** `make app-test`, `make app-check`. Commit:
+- [x] **Passo 5.** `make app-test`, `make app-check`. Commit:
       `feat: tre rese dello stesso flusso di eventi, e un solo thread che disegna`.
 
 ---
