@@ -6929,3 +6929,109 @@ toccata: la modifica sta in `tools/`, e i tre documenti che la descrivono sono a
 citazione nuova per le slide — il rilievo riguarda il metodo di lavoro e non il contenuto del talk.
 Prossimo passo: chiusura del thread di Copilot sulla PR #5 con la motivazione misurata, poi la
 review di `codex` sulla stessa PR.
+
+## 2026-09-04 — La review di `codex` sulla PR #5: quattro rilievi, quattro veri
+
+Dopo Copilot, la stessa PR è stata data a `codex exec` in sandbox di sola lettura, con un prompt che
+dichiarava il contesto — materiale didattico, non software di produzione —, i file da saltare (i
+`.cast`, due dei quali pesano megabyte) e le scelte già decise che non sono rilievi. Ha prodotto
+**quattro rilievi**, tre P1 e un P2, e il verdetto «modifiche da richiedere prima del merge».
+
+Arbitrati uno per uno, eseguendo. **Nessuno è un'allucinazione, e nessuno è un falso positivo.** È
+la differenza che conta rispetto alla review precedente: là un rilievo su uno, con dentro un rimedio
+che rompeva lo strumento e un riferimento a una riga inesistente; qui quattro su quattro, con il
+percorso di verifica scritto accanto a ciascuno.
+
+**1. `--tetto` ferma il carico, non la scena.** `ScenarioBackup._con_dump` passa `tetto_s` a
+`WorkloadRunner` e poi resta, sul thread principale, dentro `for avanzamento in
+self._strumento.dump(...)`. Se `mongodump` si pianta, il carico molla al tetto e la scena no.
+Misurato con un iteratore che non torna mai e `tetto_s = 0,05 s`: dopo **15 secondi**, cioè
+trecento volte il tetto, `esegui()` non era ancora tornata. Il punto che lo rende un difetto e non
+una scomodità è che [ADR-0101](Decision.md#adr-0101) e `app/docs/15-…` promettono l'opposto — «il
+tetto resta, come rete di sicurezza», «terminare la scena anche se il dump non torna più» — e il
+caso che descrivono è precisamente quello che questa sonda ha riprodotto: «uno schermo fermo davanti
+a duecento persone».
+
+**2. Se l'elezione salta, il nodo resta a terra.** In `ScenarioFailover.esegui`, `rompe(...)` sta
+alla riga 371 e `ripara(...)` alla 377, senza niente in mezzo che le leghi. Misurato con un carico
+che solleva alla seconda fase: la regia riceve `[('ferma', 'mongo-rs-1')]` e basta, per tutti e due
+i modi del guasto. Nel modo `sospendi` il container resta **congelato**. Il `finally` che c'è in
+`cli.py` chiude il client e non tocca lo stack.
+
+La correzione è meno ovvia di quanto sembri, ed è la ragione per cui questo punto va al Product
+Owner e non risolto d'ufficio: dentro la rete Compose la regia è `RegiaAnnunciata`, che *annuncia*
+il comando e si ferma su un `input()`. Un `finally` che ripara annuncerebbe la riparazione e
+aspetterebbe l'Invio **proprio mentre qualcuno sta interrompendo la scena**, cioè trasformerebbe un
+Ctrl-C in un blocco. La domanda vera è cosa deve fare il laboratorio quando la scena si rompe a metà:
+rimettere in piedi, o lasciare com'è per farlo guardare.
+
+**3. Il registratore conferma il guasto anche quando il comando è fallito.** `seconda_finestra`
+esegue la riga annunciata, stampa il codice di uscita su `stderr` e poi manda l'Invio —
+**sempre**. Misurato: con un comando annunciato che esce con **7**, la scena riparte, il `.cast`
+contiene una scena in cui il primario non è mai caduto, e il registratore esce **0**. Il rilievo
+è forte perché il repository ha già scritto perché questo è grave, nel docstring di `RegiaCompose`:
+«un `stop` fallito lascerebbe il primario in piedi, e i due numeri finali sarebbero zero
+millisecondi di interruzione e zero scritture perse — cioè un failover perfetto. La sala vedrebbe la
+slide sbagliata senza che nessuno abbia modo di accorgersene.» L'adattatore dell'applicazione alza
+`ComandoFallito` apposta; il percorso della registrazione, che sta al suo posto, non lo fa. È lo
+stesso difetto, reintrodotto dall'altra parte.
+
+**4. Un'eccezione dentro il generatore non ferma il dump — ma il caso grave è più stretto di come è
+descritto.** In `_avanzamento`, `processo.kill()` sta solo nell'`except GeneratorExit`; un
+`KeyboardInterrupt` sollevato mentre il generatore è fermo a leggere `stderr` passa dal solo
+`finally`, che chiude la pipe. Qui l'esecuzione ha aggiunto una distinzione che il rilievo non
+faceva, e che cambia la gravità:
+
+- se l'interruzione arriva **solo al processo Python** — un supervisore, `interrupt_main()`, o una
+  qualunque eccezione sollevata dentro il generatore — il figlio resta **vivo davvero**, stato `S`;
+- se arriva al **gruppo di processi**, cioè il Ctrl-C vero digitato in un terminale, il figlio
+  riceve `SIGINT` per conto suo e muore: quello che resta è uno **zombie non raccolto**, che il
+  sistema riprende quando il processo padre esce.
+
+La prima misura era sbagliata e va detto: `os.kill(pid, 0)` riesce anche su uno zombie, e leggendo
+solo quella la sonda avrebbe dichiarato «vivo» in tutti e due i casi. La distinzione è venuta da
+`ps -o state=`. Il difetto resta — due righe lo chiudono, e comprende il limite di `docker exec` che
+il docstring già dichiara — ma «Ctrl-C dal palco lascia un `mongodump` orfano» non è quello che
+succede.
+
+**Che cosa si è fatto e che cosa no.** I quattro punti sono entrati nella tabella dei punti aperti
+di `app/docs/registro-sviluppo-app.md`, ciascuno con la misura che lo dimostra. Nessuno è stato
+corretto: tre stanno in `app/src/`, cioè nel codice che la PR sottopone al Product Owner, e due di
+quei tre — il tetto sulla scena e la riparazione nel `finally` — sono scelte di disegno e non
+sviste. Correggerli d'ufficio dentro una PR già consegnata vorrebbe dire decidere al posto di chi
+deve fondere.
+
+### Note di metodo
+
+234. **Un recensore a cui si dichiara il contesto sbaglia meno di uno a cui non si dichiara
+    niente.** Le due review della stessa PR sono confrontabili: una ha visto 74 file su 129 senza
+    sapere che cos'è il repository, e ha prodotto un rilievo su uno con dentro un rimedio rotto;
+    l'altra ha ricevuto tre paragrafi di contesto, l'elenco di ciò che è già deciso e la regola «cinque
+    rilievi veri valgono più di venti plausibili», e ha prodotto quattro rilievi veri su quattro. La
+    regola pratica: prima di chiedere una review automatica si scrive **che cosa non è un difetto**
+    in questo progetto — le scelte deliberate, i debiti già registrati, i file generati da saltare —
+    perché il costo di una review non è quello che trova, è quello che fa verificare per niente.
+235. **Una sonda può dare la risposta giusta per una domanda che non è quella che si stava
+    facendo.** Per sapere se un `Ctrl-C` lascia il `mongodump` orfano, la prima sonda ha usato
+    `os.kill(pid, 0)` — che riesce anche su un processo già morto e non ancora raccolto. Rispondeva
+    «vivo» in tutti e due i casi, e uno dei due era uno zombie innocuo. Con `ps -o state=` i due
+    casi si separano, e il rilievo si ridimensiona da «il dump continua a girare» a «il dump continua
+    a girare **se il segnale non arriva al gruppo di processi**». La regola pratica: quando la sonda
+    conferma il sospetto al primo colpo, si controlla che stia misurando la cosa e non un suo
+    surrogato — la conferma facile è il momento in cui si smette di guardare.
+236. **Il difetto che un progetto ha già saputo descrivere può ricomparire dall'altra parte del
+    confine.** Il docstring di `RegiaCompose` spiega, con precisione, perché un comando di guasto
+    fallito e ignorato produce «un failover perfetto» che nessuno può smascherare — e alza
+    un'eccezione. Il registratore, che quando si registra sta esattamente al posto di quella regia,
+    manda l'Invio comunque. Nessuno ha sbagliato a ragionare: il ragionamento non ha attraversato il
+    confine fra l'applicazione e gli strumenti. La regola pratica: quando si scrive un secondo
+    pezzo di codice che **fa la stessa cosa** di uno esistente in un altro contesto — un doppio, un
+    ponte, uno strumento da palco — si rileggono le invarianti scritte nel primo e ci si chiede una
+    per una se valgono anche qui.
+
+Stato aggiornato: decisioni fino ad **ADR-0116**, verifiche fino a **V-089**, note di metodo fino
+alla **236**. Controlli: `make tools-test` **174**, `make app-test` **639**, `make docs-check`
+verde. Nessuna riga di `app/src/` e di `tools/` è stata cambiata da questa voce: i quattro rilievi
+sono **registrati, misurati e aperti**. Prossimo passo: la decisione del Product Owner su quali
+correggere prima della fusione — la raccomandazione è di correggere subito il terzo e il quarto, che
+non hanno alternative di disegno, e di discutere i primi due.
