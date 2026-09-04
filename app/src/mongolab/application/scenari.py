@@ -32,7 +32,10 @@ cluster (ADR-0096, e prima ancora ADR-0089, che di narratori ne aveva tolto uno)
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
+from datetime import datetime
 from enum import Enum
+from pathlib import Path
+import threading
 from typing import Callable, Final
 
 from mongolab.application.topologia import (
@@ -41,22 +44,42 @@ from mongolab.application.topologia import (
     Interruzione,
 )
 from mongolab.application.workload import (
+    Continua,
     Genera,
     Riepilogo,
     WorkloadRunner,
     documento_progressivo,
 )
-from mongolab.domain.eventi import Evento, FaseIniziata, TopologyChanged
-from mongolab.domain.porte import Clock, DocumentStore, EventSink, Regia
+from mongolab.domain.eventi import (
+    BackupProgressed,
+    Evento,
+    FaseIniziata,
+    TopologyChanged,
+)
+from mongolab.domain.modelli import Progress
+from mongolab.domain.porte import (
+    BackupTool,
+    Clock,
+    DocumentStore,
+    EventSink,
+    Regia,
+)
 
 __all__ = [
     "Attesa",
     "Copione",
+    "CopioneBackup",
+    "CopioneRestore",
     "CronometroInterruzione",
     "Drena",
+    "EsitoBackup",
     "EsitoFailover",
+    "EsitoRestore",
     "ModoGuasto",
+    "Ritmo",
+    "ScenarioBackup",
     "ScenarioFailover",
+    "ScenarioRestore",
     "senza_attesa",
     "sorveglia",
 ]
@@ -109,6 +132,16 @@ perché la scena deve mostrare anche il **ritorno** del ritmo, non solo la sua c
 
 DURATA_RECUPERO_S: Final = 15.0
 """Quanto si resta a guardare dopo il riavvio, mentre il nodo rientra nel replica set."""
+
+TETTO_DUMP_S: Final = 300.0
+"""Il tetto della fase del dump, e si spera che non serva mai.
+
+A fermare il carico dev'essere il `mongodump` che finisce, non un cronometro: è tutta la
+ragione per cui `WorkloadRunner.esegui` ha imparato `finche` al Task 14. Ma `finche` non
+garantisce la terminazione — se il dump si pianta resta vero per sempre — e `esegui` per
+questo esige comunque un limite. Cinque minuti: molto più dei 476 ms misurati contro lo
+stack 02 con la collezione della demo ([M-045](../../../docs/Sources.md#m-045)), e
+abbastanza poco da non lasciare il carico a scrivere per un'ora se qualcosa si blocca."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -424,3 +457,369 @@ def _verbi(
         lambda regia, nodo: regia.riavvia(nodo),
         "fermo",
     )
+
+
+# --- L'Atto III: il backup a caldo ------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Ritmo:
+    """Un riepilogo e la finestra in cui è stato raccolto. Insieme fanno un throughput.
+
+    `Riepilogo` da solo non basta: conta le scritture ma non sa in quanto tempo, e il
+    numero che l'Atto III deve mostrare è **al secondo**. Tenerli separati e accostarli qui
+    evita di aggiungere a `Riepilogo` una durata che le corse a conteggio non hanno.
+
+    La finestra è misurata con l'orologio della scena, non chiesta al copione: il tetto
+    dice quanto **al massimo**, e usarlo come denominatore darebbe un throughput diviso per
+    cinque minuti quando il dump ne è durato mezzo secondo.
+    """
+
+    riepilogo: Riepilogo
+    durata_s: float
+
+    @property
+    def documenti_al_secondo(self) -> float | None:
+        """Il numero che va sulla slide. `None` se la finestra è nulla o negativa."""
+        if self.durata_s <= 0:
+            return None
+        return self.riepilogo.documenti_confermati / self.durata_s
+
+    @property
+    def scritture_al_secondo(self) -> float | None:
+        """L'altro verso dello stesso dato: operazioni invece di documenti.
+
+        Con `--per-write 1` i due numeri coincidono; con un `insert_many` da cento
+        documenti divergono di cento, e chi confronta con un benchmark altrui deve sapere
+        quale dei due sta guardando.
+        """
+        if self.durata_s <= 0:
+            return None
+        return self.riepilogo.scritture / self.durata_s
+
+
+@dataclass(frozen=True, slots=True)
+class CopioneBackup:
+    """I parametri dell'Atto III. Due durate e una destinazione.
+
+    Manca `scritture`, che il copione del failover ha: qui non servirebbe a niente e
+    confonderebbe. Delle due fasi, una sola potrebbe limitarsi a conteggio — quella del
+    dump deve finire **quando finisce il dump**, e un conteggio la farebbe smettere prima o
+    dopo. Un parametro che vale per metà scena è un parametro che qualcuno userà per
+    l'altra metà.
+    """
+
+    destinazione: Path
+    carico_s: float = DURATA_CARICO_S
+    tetto_s: float = TETTO_DUMP_S
+    intervallo_ms: float = INTERVALLO_PREDEFINITO_MS
+
+
+@dataclass(frozen=True, slots=True)
+class EsitoBackup:
+    """I due ritmi accostati, che sono la tesi dell'Atto III messa alla prova.
+
+    «Il dump non fa crollare il throughput» è una promessa del copione, e il Passo 1 del
+    Task 14 chiede che si veda invece di affermarla. Si vede così: il ritmo di prima, il
+    ritmo di durante, e il loro rapporto.
+    """
+
+    fasi: tuple[str, ...]
+    prima: Ritmo
+    durante: Ritmo
+    destinazione: Path
+    avanzamenti: tuple[Progress, ...]
+    documenti: int
+
+    @property
+    def tenuta(self) -> float | None:
+        """Quanto del ritmo di prima resta durante il dump. Uno è nessun calo.
+
+        `None` quando il ritmo di prima è zero o sconosciuto: un rapporto con lo zero al
+        denominatore non è «calo infinito», è un dato che non c'è.
+        """
+        prima = self.prima.documenti_al_secondo
+        durante = self.durante.documenti_al_secondo
+        if prima is None or durante is None or prima <= 0:
+            return None
+        return durante / prima
+
+    @property
+    def calo_percentuale(self) -> float | None:
+        """La stessa cosa detta come la dice la slide. Negativo se il ritmo è salito."""
+        tenuta = self.tenuta
+        return None if tenuta is None else (1.0 - tenuta) * 100.0
+
+
+class ScenarioBackup:
+    """`demo backup-live`: carico, dump a carico acceso, bilancio.
+
+    **Perché il carico e il dump devono coprire la stessa finestra.** Il numero che la
+    scena mostra è una media, e una media si può diluire fino a nascondere qualsiasi cosa.
+    Contro lo stack 02 il `mongodump` della collezione della demo dura 476 ms (M-045): se
+    la fase durasse i venti secondi scelti a tavolino, il dump occuperebbe il due per cento
+    del campione, e un crollo totale del throughput durante quel due per cento comparirebbe
+    come un calo del due per cento. La promessa del copione risulterebbe verificata da una
+    misura incapace di smentirla. Per questo il carico si ferma **quando si ferma il dump**,
+    e non un istante dopo.
+
+    **Chi fa che cosa, e su quale thread.** Il carico va sul pool, come in
+    `ScenarioFailover`; il dump resta sul thread chiamante, che lo consuma avanzamento per
+    avanzamento e fra uno e l'altro drena il ponte. Sono due e non tre perché il dump *è*
+    un iteratore: consumarlo è già un ciclo, e metterlo su un thread suo vorrebbe dire
+    aggiungere una coda per riportare qui gli avanzamenti che il thread chiamante ha già
+    sotto mano.
+
+    **`mongodump` non gira dentro l'applicazione.** Non è una scelta di questo modulo — lo
+    scenario riceve un `BackupTool` e non sa dove esegua — ma è la ragione per cui la porta
+    esiste in questa forma: i binari non stanno nell'immagine dell'applicazione e non ci
+    staranno (M-044, ADR-0100), quindi il comando che li esegue entra nel nodo, e la riga
+    per entrarci la costruisce `ComandiCompose.dentro`.
+    """
+
+    __slots__ = (
+        "_archivio",
+        "_copione",
+        "_corsa",
+        "_drena",
+        "_genera",
+        "_orologio",
+        "_scarto",
+        "_sink",
+        "_strumento",
+    )
+
+    def __init__(
+        self,
+        archivio: DocumentStore,
+        corsa: WorkloadRunner,
+        strumento: BackupTool,
+        orologio: Clock,
+        sink: EventSink,
+        drena: Drena,
+        *,
+        copione: CopioneBackup,
+        genera: Genera = documento_progressivo,
+    ) -> None:
+        self._archivio = archivio
+        self._corsa = corsa
+        self._strumento = strumento
+        self._orologio = orologio
+        self._sink = sink
+        self._drena = drena
+        self._copione = copione
+        self._genera = genera
+        self._scarto = 0
+
+    def esegui(self, *, attesa: Attesa = senza_attesa) -> EsitoBackup:
+        """Gira la scena e restituisce i due ritmi. `attesa` è `--step`, come sempre."""
+        copione = self._copione
+        fasi: list[str] = []
+
+        def annuncia(fase: str, descrizione: str) -> None:
+            evento = FaseIniziata(self._orologio.now(), fase, descrizione)
+            self._sink.emit(evento)
+            fasi.append(fase)
+            attesa(evento)
+
+        annuncia("carico", "il carico gira, e nessuno sta copiando niente")
+        prima = self._con_carico()
+
+        annuncia("dump", f"copia a caldo verso {copione.destinazione}, a carico acceso")
+        durante, avanzamenti = self._con_dump()
+
+        annuncia("bilancio", "il ritmo di prima accanto al ritmo di durante")
+        return EsitoBackup(
+            fasi=tuple(fasi),
+            prima=prima,
+            durante=durante,
+            destinazione=copione.destinazione,
+            avanzamenti=avanzamenti,
+            documenti=self._archivio.count({}),
+        )
+
+    def _con_carico(self) -> Ritmo:
+        """La fase sana: il carico da solo, per il tempo scritto nel copione."""
+        inizio = self._orologio.now()
+        with ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="mongolab-carico"
+        ) as pool:
+            futuro = pool.submit(self._una_corsa, self._copione.carico_s, None)
+            while not futuro.done():
+                self._raccogli()
+                self._orologio.sleep(self._copione.intervallo_ms / 1000.0)
+            self._raccogli()
+            riepilogo = futuro.result()
+        return self._chiudi(riepilogo, inizio)
+
+    def _con_dump(self) -> tuple[Ritmo, tuple[Progress, ...]]:
+        """La fase interessante: il dump sul thread di qui, il carico sul pool.
+
+        Lo spegnimento sta in un `finally` e non dopo il ciclo, ed è la riga che tiene in
+        piedi il caso brutto: se il dump solleva — un `mongodump` che esce con uno, cioè
+        `ComandoFallito` — il carico deve fermarsi **prima** che l'eccezione risalga. Senza,
+        l'uscita dal `with` aspetterebbe il pool, il pool aspetterebbe il tetto, e l'errore
+        arriverebbe a chi l'ha causato cinque minuti dopo il fatto: in sala, uno schermo
+        fermo senza spiegazione.
+        """
+        finito = threading.Event()
+        avanzamenti: list[Progress] = []
+        inizio = self._orologio.now()
+        with ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="mongolab-carico"
+        ) as pool:
+            futuro = pool.submit(self._una_corsa, self._copione.tetto_s, finito)
+            try:
+                for avanzamento in self._strumento.dump(self._copione.destinazione):
+                    avanzamenti.append(avanzamento)
+                    self._sink.emit(BackupProgressed(self._orologio.now(), avanzamento))
+                    self._raccogli()
+            finally:
+                finito.set()
+            self._raccogli()
+            riepilogo = futuro.result()
+        return self._chiudi(riepilogo, inizio), tuple(avanzamenti)
+
+    def _chiudi(self, riepilogo: Riepilogo, inizio: datetime) -> Ritmo:
+        """Aggiorna lo scarto degli indici e misura la finestra appena passata."""
+        self._scarto += riepilogo.scritture
+        return Ritmo(riepilogo, (self._orologio.now() - inizio).total_seconds())
+
+    def _una_corsa(self, durata_s: float, finito: threading.Event | None) -> Riepilogo:
+        """La corsa di una fase, con gli indici che riprendono da dove l'altra ha smesso.
+
+        Lo scarto è lo stesso accorgimento di `ScenarioFailover`, e per la stessa ragione:
+        due fasi sono due chiamate a `esegui`, ciascuna riparte da zero, e senza scarto la
+        collezione finirebbe con due serie di `indice` sovrapposte.
+        """
+        genera = self._genera
+        scarto = self._scarto
+        spostato: Genera = lambda indice: genera(indice + scarto)  # noqa: E731
+        finche: Continua | None = None
+        if finito is not None:
+            fermata = finito
+            finche = lambda: not fermata.is_set()  # noqa: E731
+        return self._corsa.esegui(durata_s=durata_s, finche=finche, genera=spostato)
+
+    def _raccogli(self) -> None:
+        """Un giro di drenaggio verso il sink. Qui non c'è nessun cronometro da nutrire:
+        la topologia non cambia durante un dump, e se cambiasse sarebbe una notizia che va
+        vista a schermo, non misurata."""
+        for evento in self._drena():
+            self._sink.emit(evento)
+
+
+# --- L'Atto III, seconda metà: il restore e i due conteggi ------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class CopioneRestore:
+    """Da dove si restaura e dove si scrive. Il secondo non è mai il primo.
+
+    `database` è un database **di destinazione**, diverso da quello di partenza, e la
+    ragione è che la scena si deve poter rifare: un restore sopra l'originale
+    sovrascriverebbe proprio i documenti la cui assenza nella copia è ciò che l'Atto III
+    mostra, e il secondo giro racconterebbe una storia diversa dal primo.
+    """
+
+    sorgente: Path
+    database: str
+
+
+@dataclass(frozen=True, slots=True)
+class EsitoRestore:
+    """I due conteggi accostati, e la loro differenza.
+
+    **La differenza non è un errore, ed è il punto della scena.** Il dump è stato preso a
+    caldo: `mongodump --oplog` porta via anche l'oplog della finestra, ma restaurare su un
+    database diverso richiede di rinominare i namespace, e `--oplogReplay` con la rinomina
+    è incompatibile (M-024 e la docstring di `SubprocessBackup.restore`). Ciò che manca
+    è esattamente quanto è stato scritto **durante** il dump, ed è il prezzo di non aver
+    fermato il servizio. Mostrarlo è metà della lezione; chiamarlo fallimento sarebbe
+    l'altra metà, sbagliata.
+    """
+
+    fasi: tuple[str, ...]
+    sorgente: Path
+    destinazione: str
+    documenti_origine: int
+    documenti_destinazione: int
+    avanzamenti: tuple[Progress, ...]
+
+    @property
+    def differenza(self) -> int:
+        """Quanti documenti l'originale ha in più. Negativo sarebbe una notizia grossa."""
+        return self.documenti_origine - self.documenti_destinazione
+
+    @property
+    def combaciano(self) -> bool:
+        return self.differenza == 0
+
+
+class ScenarioRestore:
+    """`demo restore`: restaura la copia altrove e accosta i due conteggi.
+
+    **Due archivi e non uno.** Il conteggio di partenza e quello di arrivo vengono da due
+    database diversi, quindi da due `DocumentStore` diversi: la porta è per collezione, e
+    un solo adattatore non può contare in due database. Costruirli è faccenda della radice
+    di composizione, che è l'unica a sapere che dietro c'è un `MongoClient` solo.
+
+    **Nessun `drena`, a differenza delle altre due scene.** Durante un restore la topologia
+    non ha niente da raccontare, e un parametro aggiunto per simmetria è un parametro che
+    qualcuno dovrà passare a vuoto. Se un giorno servisse — un restore che innesca
+    un'elezione perché satura il primario — sarebbe una notizia che merita il suo ADR, non
+    un argomento già lì per caso.
+    """
+
+    __slots__ = (
+        "_copione",
+        "_destinazione",
+        "_orologio",
+        "_origine",
+        "_sink",
+        "_strumento",
+    )
+
+    def __init__(
+        self,
+        origine: DocumentStore,
+        destinazione: DocumentStore,
+        strumento: BackupTool,
+        orologio: Clock,
+        sink: EventSink,
+        *,
+        copione: CopioneRestore,
+    ) -> None:
+        self._origine = origine
+        self._destinazione = destinazione
+        self._strumento = strumento
+        self._orologio = orologio
+        self._sink = sink
+        self._copione = copione
+
+    def esegui(self, *, attesa: Attesa = senza_attesa) -> EsitoRestore:
+        """Restaura, poi conta. Le due fasi si annunciano come nelle altre scene."""
+        copione = self._copione
+        fasi: list[str] = []
+
+        def annuncia(fase: str, descrizione: str) -> None:
+            evento = FaseIniziata(self._orologio.now(), fase, descrizione)
+            self._sink.emit(evento)
+            fasi.append(fase)
+            attesa(evento)
+
+        annuncia("restore", f"da {copione.sorgente} verso il database {copione.database}")
+        avanzamenti: list[Progress] = []
+        for avanzamento in self._strumento.restore(copione.sorgente, copione.database):
+            avanzamenti.append(avanzamento)
+            self._sink.emit(BackupProgressed(self._orologio.now(), avanzamento))
+
+        annuncia("verifica", "quanti ce n'erano, quanti ne sono tornati")
+        return EsitoRestore(
+            fasi=tuple(fasi),
+            sorgente=copione.sorgente,
+            destinazione=copione.database,
+            documenti_origine=self._origine.count({}),
+            documenti_destinazione=self._destinazione.count({}),
+            avanzamenti=tuple(avanzamenti),
+        )

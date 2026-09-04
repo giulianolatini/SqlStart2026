@@ -39,10 +39,20 @@ Dove il numero manca compare `IGNOTO`, che si legge come «non c'era» e non com
 
 from typing import Mapping, Sequence
 
-from mongolab.application.scenari import EsitoFailover
+from mongolab.application.scenari import (
+    EsitoBackup,
+    EsitoFailover,
+    EsitoRestore,
+    Ritmo,
+)
 from mongolab.application.topologia import Interruzione
 from mongolab.application.workload import Latenze, Riepilogo
-from mongolab.domain.modelli import ContoShard, DescrizioneServer, DescrizioneTopologia
+from mongolab.domain.modelli import (
+    ContoShard,
+    DescrizioneServer,
+    DescrizioneTopologia,
+    Progress,
+)
 from mongolab.domain.porte import ClusterInspector
 from mongolab.presentation.righe import COLONNE_SALA, tronca
 
@@ -51,9 +61,11 @@ __all__ = [
     "IGNOTO",
     "INDIRIZZO",
     "SEPARATORE",
+    "copia",
     "cronaca",
     "rapporto",
     "riassunto",
+    "ripristino",
 ]
 
 IGNOTO = "—"
@@ -186,6 +198,77 @@ def cronaca(scena: EsitoFailover, *, larghezza: int | None = COLONNE_SALA) -> st
     if scena.fasi:
         linee.append(_voce("fasi", *scena.fasi))
     return "\n".join(tronca(linea, larghezza) for linea in linee)
+
+def copia(scena: EsitoBackup, *, larghezza: int | None = COLONNE_SALA) -> str:
+    """Come è andato il backup a caldo: il ritmo di prima accanto al ritmo di durante.
+
+    **I due ritmi stanno sulla prima riga**, per la stessa ragione per cui i due numeri
+    del failover stanno sulla prima riga di `cronaca`: la tesi dell'Atto III è che il dump
+    non faccia crollare il throughput, e una tesi che si verifica confrontando due numeri
+    va letta con i due numeri vicini. Separati da tre righe, la sottrazione toccherebbe
+    alla sala mentre la scena è già passata.
+
+    **Il calo è una percentuale con segno, non un giudizio.** Questa funzione non scrive
+    «il dump non ha impatto»: scrive di quanto è calato, e chi guarda decide se è poco.
+    Una riga che concludesse al posto del pubblico sarebbe la stessa cosa che il §6.3
+    rimprovera ai benchmark altrui.
+
+    L'ultima riga di `mongodump` compare per intero perché è la conferma che lo strumento
+    dà di sé — «done dumping lab.carico (4460 documents)» — e riportarla è la differenza
+    fra dire che il dump è andato bene e mostrarlo.
+    """
+    linee = [
+        _voce(
+            "ritmo",
+            f"prima {_al_secondo(scena.prima)}",
+            f"durante {_al_secondo(scena.durante)}",
+            f"calo {_percentuale(scena.calo_percentuale)}",
+        ),
+        _voce(
+            "dump",
+            str(scena.destinazione),
+            f"{scena.documenti} documenti in collezione",
+        ),
+    ]
+    linee += _ultimo_avanzamento(scena.avanzamenti)
+    linee += _fase("carico", scena.prima.riepilogo)
+    linee += _fase("sotto dump", scena.durante.riepilogo)
+    if scena.fasi:
+        linee.append(_voce("fasi", *scena.fasi))
+    return "\n".join(tronca(linea, larghezza) for linea in linee)
+
+
+def ripristino(scena: EsitoRestore, *, larghezza: int | None = COLONNE_SALA) -> str:
+    """I due conteggi del restore, e la differenza detta per quello che è.
+
+    **La differenza non si chiama «perse».** Le scritture perse sono la voce del Blocco 2,
+    e sono un'altra cosa: là il client aveva ricevuto una conferma e il documento non
+    c'era più. Qui i documenti ci sono ancora, tutti, nel database di partenza: mancano
+    **nella copia**, perché sono stati scritti mentre la copia veniva presa. Usare la
+    stessa parola per i due fenomeni sarebbe l'errore più costoso che questo rapporto
+    possa fare, perché arriverebbe nel momento in cui la sala sta imparando la differenza.
+    """
+    linee = [
+        _voce(
+            "restore",
+            f"{scena.documenti_origine} all'origine",
+            f"{scena.documenti_destinazione} nella copia",
+            f"differenza {scena.differenza}",
+        ),
+        _sotto(f"{scena.sorgente} → {scena.destinazione}"),
+    ]
+    if not scena.combaciano:
+        linee.append(
+            _sotto(
+                f"{scena.differenza} scritti mentre il dump era in corso: "
+                "stanno nell'oplog, che il restore non riapplica"
+            )
+        )
+    linee += _ultimo_avanzamento(scena.avanzamenti)
+    if scena.fasi:
+        linee.append(_voce("fasi", *scena.fasi))
+    return "\n".join(tronca(linea, larghezza) for linea in linee)
+
 
 # --- Le voci del rapporto ---------------------------------------------------------------
 
@@ -320,6 +403,35 @@ def _fase(etichetta: str, corsa: Riepilogo) -> list[str]:
     if corsa.latenze is not None:
         voci.append(f"p95 {corsa.latenze.p95_ms:.1f} ms")
     return [_voce(etichetta, *voci)]
+
+def _ultimo_avanzamento(avanzamenti: Sequence[Progress]) -> list[str]:
+    """L'ultima riga che lo strumento ha detto di sé, se ne ha detta almeno una.
+
+    Solo l'ultima: le altre sono già scorse a schermo come eventi mentre l'operazione
+    andava, e ristamparle tutte nel consuntivo raddoppierebbe una cronaca invece di
+    riassumerla.
+    """
+    if not avanzamenti:
+        return []
+    messaggio = avanzamenti[-1].messaggio.strip()
+    return [_sotto(messaggio)] if messaggio else []
+
+
+def _al_secondo(ritmo: Ritmo) -> str:
+    """Un throughput in documenti al secondo, o il segno del mancante."""
+    quanti = ritmo.documenti_al_secondo
+    return IGNOTO if quanti is None else f"{quanti:.0f}/s"
+
+
+def _percentuale(quanta: float | None) -> str:
+    """Un calo in punti percentuali. `IGNOTO` quando non c'era niente da confrontare.
+
+    Non `0%`: uno zero in quella casella si leggerebbe come «il dump non ha avuto nessun
+    impatto», che è precisamente la conclusione che il rapporto non deve suggerire quando
+    il dato manca.
+    """
+    return IGNOTO if quanta is None else f"{quanta:.1f}%"
+
 
 # --- I formati ---------------------------------------------------------------------------
 

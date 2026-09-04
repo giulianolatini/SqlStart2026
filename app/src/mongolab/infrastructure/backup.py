@@ -228,6 +228,7 @@ class SubprocessBackup:
         "_comando_restore",
         "_database",
         "_database_autenticazione",
+        "_dove",
         "_host",
         "_opzioni_dump",
         "_opzioni_restore",
@@ -247,12 +248,20 @@ class SubprocessBackup:
         database: str = "lab",
         opzioni_dump: Sequence[str] = (),
         opzioni_restore: Sequence[str] = (),
+        dove: Path | None = None,
     ) -> None:
         """`database` è quello su cui il laboratorio lavora, e serve al `restore`.
 
         La porta dà a `restore` la directory di origine e il nome della destinazione, non
         quello dell'origine — che però è dentro il container e non si può guardare da qui.
         Arriva quindi dal costruttore, dove sta accanto all'host di cui è il database.
+
+        `dove` è la directory da cui il comando parte, ed è lo stesso parametro che
+        `RegiaCompose` ha per la stessa ragione: quando il comando è `docker compose -f
+        docker/02-replicaset/compose.yaml exec ...`, quel percorso è **relativo alla radice
+        del repository**, e chi lancia `mongolab` non parte per forza di lì. `None` — il
+        predefinito — vuol dire la directory di chi chiama, che è la cosa giusta quando il
+        comando è `mongodump` e basta.
         """
         self._host = host
         self._comando_dump = tuple(comando_dump)
@@ -263,10 +272,23 @@ class SubprocessBackup:
         self._database = database
         self._opzioni_dump = tuple(opzioni_dump)
         self._opzioni_restore = tuple(opzioni_restore)
+        self._dove = dove
 
-    def dump(self, destinazione: Path) -> Iterator[Progress]:
-        """Avvia `mongodump` **adesso** e restituisce l'avanzamento da scorrere."""
-        argomenti = [
+    def argomenti_dump(self, destinazione: Path) -> tuple[str, ...]:
+        """La riga esatta del dump, e si può stampare.
+
+        Si può perché la password non ci passa: viaggia su `stdin`
+        ([ADR-0054](../../../../docs/Decision.md#adr-0054),
+        [M-025](../../../../app/docs/Sources.md#m-025)), e ciò che resta qui è
+        `mongodump --host rs0/... --readPreference=secondary --oplog` — cioè esattamente
+        la riga che il Blocco 2 sta spiegando mentre la scena gira.
+
+        È la **stessa** tupla che `dump` esegue, non una sua ricostruzione: due
+        costruzioni distinte vorrebbero dire poter mostrare una riga ed eseguirne
+        un'altra, e una demo che si fa verificare su un comando diverso da quello che ha
+        dato non dimostra niente.
+        """
+        return (
             *self._comando_dump,
             "--host",
             self._host,
@@ -274,7 +296,11 @@ class SubprocessBackup:
             str(destinazione),
             *self._autenticazione(),
             *self._opzioni_dump,
-        ]
+        )
+
+    def dump(self, destinazione: Path) -> Iterator[Progress]:
+        """Avvia `mongodump` **adesso** e restituisce l'avanzamento da scorrere."""
+        argomenti = self.argomenti_dump(destinazione)
         return self._avanzamento(self._avvia(argomenti), self._comando_dump[-1])
 
     def restore(self, origine: Path, destinazione_db: str) -> Iterator[Progress]:
@@ -293,7 +319,12 @@ class SubprocessBackup:
         accanto, per confrontare i conteggi senza perdere l'originale, costa la coda
         dell'oplog. È il compromesso che il copione sceglie, e va detto in scena.
         """
-        argomenti = [
+        argomenti = self.argomenti_restore(origine, destinazione_db)
+        return self._avanzamento(self._avvia(argomenti), self._comando_restore[-1])
+
+    def argomenti_restore(self, origine: Path, destinazione_db: str) -> tuple[str, ...]:
+        """La riga esatta del restore, come sopra e per le stesse ragioni."""
+        return (
             *self._comando_restore,
             "--host",
             self._host,
@@ -306,19 +337,18 @@ class SubprocessBackup:
             f"{destinazione_db}.*",
             *self._opzioni_restore,
             str(origine),
-        ]
-        return self._avanzamento(self._avvia(argomenti), self._comando_restore[-1])
+        )
 
-    def _autenticazione(self) -> list[str]:
+    def _autenticazione(self) -> tuple[str, ...]:
         """Utente e database di autenticazione, e **mai** la password."""
         if self._utente is None:
-            return []
-        return [
+            return ()
+        return (
             "--username",
             self._utente,
             "--authenticationDatabase",
             self._database_autenticazione,
-        ]
+        )
 
     def _avvia(self, argomenti: Sequence[str]) -> "subprocess.Popen[str]":
         """Lancia il processo e gli passa la password, se c'è, chiudendo poi lo `stdin`.
@@ -330,6 +360,7 @@ class SubprocessBackup:
         """
         processo = subprocess.Popen(
             list(argomenti),
+            cwd=self._dove,
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,

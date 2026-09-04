@@ -394,6 +394,102 @@ A fine prova, `make reset-demo-02` riporta lo stack allo stato di partenza e
 
 ---
 
+## 8. Le stesse due cose, come scena: `demo backup-live` e `demo restore`
+
+Le sette sezioni sopra sono `feature/02`: comandi dati a mano, uno alla volta, per scoprire che cosa
+succede. Questa sezione è `feature/04`, ed è l'altra metà — gli stessi due strumenti dentro
+l'applicazione `mongolab`, perché in sala non c'è il tempo di incollare quattro righe e leggerne
+quattro di risposta.
+
+```bash
+uv run --directory app mongolab demo backup-live --target rs
+uv run --directory app mongolab demo restore --target rs --collection carico-…
+```
+
+La seconda riga non si scrive: la stampa la prima, già completa, nome della collezione compreso.
+
+### Che cosa mostra, e in che ordine
+
+`demo backup-live` fa girare un carico di scrittura, ne misura il ritmo, poi lancia
+`mongodump --readPreference=secondary --oplog` **senza fermare il carico** e misura il ritmo una
+seconda volta, nella finestra esatta in cui il dump gira. Alla fine mette i due numeri sulla stessa
+riga:
+
+```text
+ritmo       prima 595/s · durante 692/s · calo -16.2%
+dump        /tmp/mongolab-backup · 3908 documenti in collezione
+            dumped 72 oplog entries
+carico      3629 scritture · 3629 confermate · p95 66.3 ms
+sotto dump  279 scritture · 279 confermate · p95 68.7 ms
+```
+
+Il calo è una percentuale **con segno**, non un giudizio: qui è negativo, cioè il ritmo è salito, e
+la ragione è che la finestra del dump è mezzo secondo — su mezzo secondo il rumore pesa più del
+costo del dump. I numeri da leggere sono quelli assoluti che le stanno accanto: 279 scritture
+durante il dump, tutte confermate, con un p95 di 68,7 ms contro i 66,3 di prima
+([M-047](../../app/docs/Sources.md#m-047)). **Il servizio non si è fermato**, ed è la sola cosa che
+questa metà della scena deve dimostrare.
+
+`demo restore` rimette la copia **accanto** all'originale, in `lab_ripristinato`, e conta:
+
+```text
+restore     3908 all'origine · 3802 nella copia · differenza 106
+            /tmp/mongolab-backup → lab_ripristinato
+            106 scritti mentre il dump era in corso: stanno nell'oplog, che il
+            restore non riapplica
+```
+
+Accanto e mai sopra, e il comando rifiuta `--into lab` dicendolo: i documenti che alla copia mancano
+sono ancora nell'originale, quindi restaurarci sopra li lascerebbe dove sono, i conteggi
+combacerebbero, e la differenza sparirebbe **proprio perché** il restore è riuscito. Quei 106 sono
+la [§4](#4-il-restore-verificato) vista da un'altra angolazione: stanno nell'oplog che il dump ha
+portato via — `dumped 72 oplog entries` — ma `--oplogReplay` non convive con la rinomina dei
+namespace che serve a restaurare altrove. La §4 lo ha misurato nella forma con gli inclusi
+(`cannot use --oplogReplay with includes specified`, [V-037](../Sources.md#v-037)); l'applicazione
+lo ha incontrato in quella con le rinomine — `cannot use --oplogReplay with namespace renames
+specified`, uscita 1 ([M-024](../../app/docs/Sources.md#m-024)) — e le due forme sono la stessa
+regola ([S-059](../Sources.md#s-059)). Il prezzo di non aver fermato il servizio si legge lì, ed è
+un numero, non un errore.
+
+### La riga di comando è diversa da quella della [§7](#7-provarlo-in-due-minuti), e non per caso
+
+Messi accanto, i due blocchi mostrano una differenza che vale il paragrafo. La §7 scrive
+`-p "${PASSWORD_AMMINISTRATORE}"`; l'applicazione **non lo fa**, e la riga che stampa in scena è
+questa:
+
+```text
+docker compose --env-file tools/images.env --env-file docker/02-replicaset/.env \
+  -f docker/02-replicaset/compose.yaml exec -T mongo-rs-1 \
+  mongodump --host rs0/mongo-rs-1:27017,mongo-rs-2:27017,mongo-rs-3:27017 \
+  --out /tmp/mongolab-backup --username admin --authenticationDatabase admin \
+  --readPreference=secondary --oplog
+```
+
+Nessuna password, e la riga si può proiettare. Il segreto entra dallo `stdin` del processo, perché
+con `-p <valore>` in `argv` un `ps -eo args` dentro il container lo mostra a chiunque
+([M-025](../../app/docs/Sources.md#m-025), [ADR-0054](../Decision.md#adr-0054)). Il comando lo sanno
+costruire tutti e due; solo uno dei due si può registrare con asciinema.
+
+L'altra differenza è `docker compose exec` al posto di `docker exec`: nomina il **servizio** invece
+del container e porta con sé i due `--env-file` senza i quali lo stack non si compone
+([M-040](../../app/docs/Sources.md#m-040)).
+
+### Dove gira, e perché non dove gira il failover
+
+Le due scene si lanciano **dall'host**, e da dentro la rete Compose si rifiutano. È l'inverso della
+scena del failover, che la rete la pretende perché le serve la scoperta della topologia. La ragione
+è misurata: `mongodump` non sta nell'immagine dell'applicazione — copiarcelo produce un container
+che si ferma su `libgssapi_krb5.so.2` ([M-044](../../app/docs/Sources.md#m-044)) — e per andarlo a
+prendere dentro un nodo serve il socket del demone Docker, che il container dell'applicazione non
+ha. Il ragionamento per intero sta in [ADR-0100](../Decision.md#adr-0100).
+
+Ne segue una cosa da sapere per la scaletta: dall'host si scrive solo sul nodo pubblicato, e dopo la
+scena del failover quel nodo ci mette **quattro secondi** a riprendersi il primato
+([M-048](../../app/docs/Sources.md#m-048)). Finché non l'ha fatto, `demo backup-live` si rifiuta di
+partire invece di lanciare un carico che fallirebbe alla prima scrittura.
+
+---
+
 ## Cosa questa pagina non copre
 
 **`mongodump` non è lo strumento per un database grande, e non lo dice questa pagina: lo dice
@@ -417,9 +513,6 @@ Non è stato provato, e la pagina non ne parla:
   documentazione lo accompagna con un avviso esplicito — «might cause corruption and inconsistencies
   in the restored data» ([S-059](../Sources.md#s-059)) — e provarlo bene richiede un caso d'uso che
   qui non c'è.
-- **`--readPreference=secondary`**, che scaricherebbe il dump da un secondario invece che dal
-  primario ([S-011](../Sources.md#s-011)). È probabilmente la prima cosa da fare in produzione, e
-  non è stata misurata.
 - **Il restore su uno stack diverso da quello di origine**, che è il caso vero di un ripristino. Qui
   sorgente e destinazione sono lo stesso processo, quindi il vincolo di versione dichiarato da
   [S-059](../Sources.md#s-059) — «the same major version or feature compatibility version» — non è
@@ -441,6 +534,16 @@ Non è stato provato, e la pagina non ne parla:
   porta via anche `config`, ma che quella copia basti a ricostruire un cluster non è stato provato,
   e nessuna fonte letta lo afferma.
 
+**Un punto in meno, chiuso da `feature/04`.** In questo elenco c'era anche
+**`--readPreference=secondary`** ([S-011](../Sources.md#s-011)), con la nota «è probabilmente la
+prima cosa da fare in produzione, e non è stata misurata». Adesso è misurato, e fa quello che dice.
+Contando `serverStatus().opcounters.query` sui tre membri prima e dopo lo stesso dump: senza
+l'opzione il primario prende **+15** letture e i due secondari +1 e +0; con l'opzione il primario ne
+prende **+0**, e le quindici si spostano sui secondari, +7 e +8
+([M-046](../../app/docs/Sources.md#m-046)). È l'opzione con cui la
+[§8](#8-le-stesse-due-cose-come-scena-demo-backup-live-e-demo-restore) gira, ed è la ragione per cui
+il carico sul primario non si accorge del dump.
+
 ---
 
 **Decisioni correlate:** [ADR-0047](../Decision.md#adr-0047) (la forma di questa pagina),
@@ -448,9 +551,17 @@ Non è stato provato, e la pagina non ne parla:
 [ADR-0014](../Decision.md#adr-0014) (i segreti fuori dal repository),
 [ADR-0043](../Decision.md#adr-0043) (il dataset di demo e la sua impronta),
 [ADR-0046](../Decision.md#adr-0046) (il replica set su cui tutto questo gira),
-[ADR-0070](../Decision.md#adr-0070) (i debiti dello sharded, saldati eseguendo).
+[ADR-0070](../Decision.md#adr-0070) (i debiti dello sharded, saldati eseguendo),
+[ADR-0054](../Decision.md#adr-0054) (la password non passa da `argv`),
+[ADR-0100](../Decision.md#adr-0100) (gli strumenti restano nei nodi, la scena si gira dall'host),
+[ADR-0101](../Decision.md#adr-0101) (la finestra della seconda misura è quella del dump),
+[ADR-0102](../Decision.md#adr-0102) (il restore scrive accanto all'originale, mai sopra).
 
 **Fonti:** [S-011](../Sources.md#s-011), [S-059](../Sources.md#s-059),
 [S-060](../Sources.md#s-060), [S-073](../Sources.md#s-073), [V-034](../Sources.md#v-034),
 [V-035](../Sources.md#v-035), [V-036](../Sources.md#v-036), [V-037](../Sources.md#v-037),
-[V-065](../Sources.md#v-065)
+[V-065](../Sources.md#v-065), [M-024](../../app/docs/Sources.md#m-024),
+[M-025](../../app/docs/Sources.md#m-025),
+[M-040](../../app/docs/Sources.md#m-040), [M-044](../../app/docs/Sources.md#m-044),
+[M-045](../../app/docs/Sources.md#m-045), [M-046](../../app/docs/Sources.md#m-046),
+[M-047](../../app/docs/Sources.md#m-047), [M-048](../../app/docs/Sources.md#m-048)

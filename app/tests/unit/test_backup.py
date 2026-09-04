@@ -98,6 +98,7 @@ with open({diario!r}, "w") as diario:
     diario.write(repr(os.getpid()) + "\\n")
     diario.write(repr(sys.argv[1:]) + "\\n")
     diario.write(repr(sys.stdin.read()) + "\\n")
+    diario.write(repr(os.getcwd()) + "\\n")
 for riga in {righe!r}:
     print(riga, file=sys.stderr, flush=True)
 time.sleep({attesa!r})
@@ -129,9 +130,19 @@ def strumento_finto(
 
 
 def diario_di(percorso: Path) -> tuple[int, list[str], str]:
-    """Pid, argomenti ricevuti e testo arrivato su `stdin`, come il figlio li ha visti."""
-    pid, argomenti, ingresso = percorso.read_text().splitlines()
+    """Pid, argomenti ricevuti e testo arrivato su `stdin`, come il figlio li ha visti.
+
+    Scarta le righe in più con `*_`: il diario ne ha una quarta — la directory di
+    partenza — che interessa a una prova sola, e allargare qui la tupla vorrebbe dire
+    ritoccare sette punti di lettura per un dato che sei di loro non guardano.
+    """
+    pid, argomenti, ingresso, *_ = percorso.read_text().splitlines()
     return int(pid), list(ast.literal_eval(argomenti)), str(ast.literal_eval(ingresso))
+
+
+def partenza_di(percorso: Path) -> str:
+    """La directory da cui il figlio è partito, com'è lui a vederla."""
+    return str(ast.literal_eval(percorso.read_text().splitlines()[3]))
 
 
 def vivo(pid: int) -> bool:
@@ -145,6 +156,7 @@ def vivo(pid: int) -> bool:
 def strumento(
     comando: Sequence[str],
     password: str | None = PASSWORD_DI_PROVA,
+    dove: Path | None = None,
 ) -> SubprocessBackup:
     return SubprocessBackup(
         host="rs0/mongo-rs-1:27017",
@@ -153,6 +165,7 @@ def strumento(
         utente="admin" if password is not None else None,
         password=password,
         database="lab",
+        dove=dove,
     )
 
 
@@ -516,3 +529,108 @@ def test_un_restore_senza_perdite_non_solleva(tmp_path: Path) -> None:
     avanzamenti: Iterator[Progress] = backup.restore(tmp_path / "dump", "lab_ripristinato")
 
     assert [a.completati for a in avanzamenti] == [400_000]
+
+
+# --- Da dove parte il comando -----------------------------------------------------------
+
+
+def test_lo_strumento_parte_dalla_directory_che_gli_e_stata_detta(tmp_path: Path) -> None:
+    """`docker compose -f docker/02-replicaset/compose.yaml` è un percorso **relativo**.
+
+    Il frasario li tiene relativi apposta, perché la riga annunciata dalla scena si possa
+    incollare in un terminale aperto nella radice del repository e funzioni identica. Chi
+    la esegue però non parte per forza di lì: `mongolab demo backup-live` si lancia da
+    qualunque directory, e senza questo parametro `docker compose` risponderebbe «no
+    configuration file provided» ovunque tranne che nella radice.
+
+    È lo stesso `dove` di `RegiaCompose`, e lo stesso valore — `radice()` — glielo passa
+    la stessa riga della radice di composizione. Due nomi diversi per la stessa cosa
+    sarebbero due cose da tenere allineate.
+    """
+    comando, diario = strumento_finto(tmp_path, righe=[APERTURA])
+    partenza = tmp_path / "altrove"
+    partenza.mkdir()
+    backup = strumento(comando, dove=partenza)
+
+    list(backup.dump(tmp_path / "dump"))
+
+    assert partenza_di(diario) == str(partenza)
+
+
+def test_senza_indicazione_lo_strumento_parte_da_dove_sta(tmp_path: Path) -> None:
+    """Il predefinito è `None`, che per `Popen` vuol dire «la directory di chi chiama».
+
+    Contro `mongodump` installato e nel `PATH` non cambia niente, ed è il caso delle prove
+    d'integrazione che invocano `docker exec` per nome: chiedere una directory anche lì
+    vorrebbe dire chiedere un dato che non serve a nessuno.
+    """
+    comando, diario = strumento_finto(tmp_path, righe=[APERTURA])
+    backup = strumento(comando)
+
+    list(backup.dump(tmp_path / "dump"))
+
+    assert partenza_di(diario) == os.getcwd()
+
+
+def test_anche_il_restore_parte_da_li(tmp_path: Path) -> None:
+    """Le due righe entrano nello stesso nodo con lo stesso frasario: partono dallo stesso
+    posto, o la seconda scena fallirebbe dopo che la prima è riuscita."""
+    comando, diario = strumento_finto(tmp_path, righe=[RESTORE_CHIUSURA])
+    partenza = tmp_path / "altrove"
+    partenza.mkdir()
+    backup = strumento(comando, dove=partenza)
+
+    list(backup.restore(tmp_path / "dump", "lab_ripristinato"))
+
+    assert partenza_di(diario) == str(partenza)
+
+
+# --- La riga che si può mostrare --------------------------------------------------------
+
+
+def test_gli_argomenti_del_dump_sono_quelli_che_il_processo_riceve(tmp_path: Path) -> None:
+    """Ciò che l'adattatore dichiara di eseguire e ciò che esegue sono la stessa tupla.
+
+    Se fossero due costruzioni distinte — una per mostrare, una per eseguire — la scena
+    potrebbe mostrare una riga e lanciarne un'altra, che è il difetto peggiore che una
+    demo possa avere: il pubblico verificherebbe qualcosa che non è successo.
+    """
+    comando, diario = strumento_finto(tmp_path, righe=[APERTURA])
+    backup = strumento(comando)
+    destinazione = tmp_path / "dump"
+
+    dichiarati = backup.argomenti_dump(destinazione)
+    list(backup.dump(destinazione))
+
+    _, ricevuti, _ = diario_di(diario)
+    assert list(dichiarati) == list(comando) + ricevuti
+
+
+def test_gli_argomenti_del_restore_sono_quelli_che_il_processo_riceve(
+    tmp_path: Path,
+) -> None:
+    comando, diario = strumento_finto(tmp_path, righe=[RESTORE_CHIUSURA])
+    backup = strumento(comando)
+    origine = tmp_path / "dump"
+
+    dichiarati = backup.argomenti_restore(origine, "lab_ripristinato")
+    list(backup.restore(origine, "lab_ripristinato"))
+
+    _, ricevuti, _ = diario_di(diario)
+    assert list(dichiarati) == list(comando) + ricevuti
+
+
+def test_la_riga_da_mostrare_non_contiene_la_password() -> None:
+    """È [ADR-0054](../../../docs/Decision.md#adr-0054) diventata una proprietà leggibile.
+
+    La riga si può stampare in scena — e la scena del backup a caldo la stampa, perché
+    `mongodump --readPreference=secondary --oplog` è la cosa che il Blocco 2 sta
+    spiegando — proprio perché il segreto non ci passa: viaggia su `stdin`, e questa prova
+    è ciò che impedisce a un rifacimento di rimetterlo fra gli argomenti.
+    """
+    backup = strumento(("mongodump",))
+
+    riga = " ".join(backup.argomenti_dump(Path("/tmp/dump")))
+
+    assert PASSWORD_DI_PROVA not in riga
+    assert "--username" in riga

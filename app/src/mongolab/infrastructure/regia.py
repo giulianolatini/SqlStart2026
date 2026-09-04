@@ -99,22 +99,47 @@ class ComandiCompose:
     progetto: str | None = None
     arresto: tuple[str, ...] = ARRESTO_BRUSCO
 
-    def per(self, verbo: str, nodo: str) -> tuple[str, ...]:
-        """La riga completa per un verbo. `KeyError` su un verbo che non esiste."""
-        coda = self.arresto if verbo == "ferma" else _VERBI[verbo]
+    def _preambolo(self) -> tuple[str, ...]:
+        """Tutto ciò che viene prima del sottocomando, e che ogni riga ha uguale.
+
+        Le opzioni globali del client stanno qui in un posto solo perché il giorno in cui
+        se ne aggiunge una — un terzo `--env-file`, un `--profile` — deve comparire tanto
+        in `per` quanto in `dentro`, senza che nessuno debba ricordarsene.
+        """
         ambiente = tuple(
             pezzo for file in self.ambiente for pezzo in ("--env-file", str(file))
         )
         progetto = ("-p", self.progetto) if self.progetto is not None else ()
-        return (
-            *self.comando,
-            *ambiente,
-            *progetto,
-            "-f",
-            str(self.file_compose),
-            *coda,
-            nodo,
-        )
+        return (*self.comando, *ambiente, *progetto, "-f", str(self.file_compose))
+
+    def per(self, verbo: str, nodo: str) -> tuple[str, ...]:
+        """La riga completa per un verbo. `KeyError` su un verbo che non esiste."""
+        coda = self.arresto if verbo == "ferma" else _VERBI[verbo]
+        return (*self._preambolo(), *coda, nodo)
+
+    def dentro(self, nodo: str, *comando: str) -> tuple[str, ...]:
+        """La riga che esegue un comando **dentro** un nodo del cluster.
+
+        Serve perché `mongodump` e `mongorestore` non stanno nell'immagine
+        dell'applicazione e non ci staranno: copiare i due binari da `MONGO_IMAGE` dentro
+        `python:3.13-slim` produce un container che si ferma su
+        `libgssapi_krb5.so.2: cannot open shared object file`
+        ([M-044](../../../docs/Sources.md#m-044)). Stanno già in ogni nodo del replica set,
+        e questa è la riga per andarci.
+
+        `-T` invece di `-i`: nessun terminale allocato — Compose ne aprirebbe uno che in
+        una scena non interattiva non serve — ma lo stdin resta collegato, che è dove passa
+        la password senza comparire in `argv` (M-025, ADR-0054).
+
+        Il nodo è un **servizio** Compose, non un container: chi comanda non deve sapere
+        con quale ordinale Compose l'ha battezzato, ed è la stessa promessa di `per`.
+        """
+        if not comando:
+            raise ValueError(
+                f"entrare in {nodo} senza dire che cosa farci non è un comando: "
+                "`exec -T` da solo aprirebbe l'entrypoint del container e resterebbe lì."
+            )
+        return (*self._preambolo(), "exec", "-T", nodo, *comando)
 
     def riga(self, verbo: str, nodo: str) -> str:
         """La stessa riga, da leggere e da copiare. È ciò che `RegiaAnnunciata` stampa."""

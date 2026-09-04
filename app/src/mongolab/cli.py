@@ -43,8 +43,8 @@ l'altra cosa che la sentinella sa fare, si misura accanto alle scritture perse �
 ## I quattro comandi, e le opzioni che hanno davvero
 
 Il §6.4 elenca sette righe di comando. Tre sono dirette; le quattro `demo` sono un
-gruppo, e la prima scena — `demo failover` — è di questo file dal Task 13. Le altre tre
-arrivano ai Task 14 e 15.
+gruppo, e tre di quelle scene — `failover`, `backup-live`, `restore` — sono di questo file
+dai Task 13 e 14. `sharding` arriva al Task 15.
 
 Quella scena porta con sé l'unico pezzo di cablaggio che non riguarda MongoDB: **chi
 provoca il guasto**. Arriva dalla porta `Regia` e ha due adattatori, e a sceglierne uno è
@@ -67,10 +67,15 @@ from mongolab.application.scenari import (
     DURATA_CARICO_S,
     DURATA_ELEZIONE_S,
     DURATA_RECUPERO_S,
+    TETTO_DUMP_S,
     Attesa,
     Copione,
+    CopioneBackup,
+    CopioneRestore,
     ModoGuasto,
+    ScenarioBackup,
     ScenarioFailover,
+    ScenarioRestore,
     senza_attesa,
     sorveglia,
 )
@@ -83,17 +88,21 @@ from mongolab.infrastructure.bersagli import (
     ATTESA_SELEZIONE_MS,
     COLLEZIONE,
     DATABASE,
+    VARIABILE_PUNTO_DI_VISTA,
     Bersaglio,
     BersaglioSconosciuto,
+    Credenziali,
     PuntoDiVista,
     SenzaPrimario,
     attendi_il_primario,
     bersaglio_di,
     collezione_di_carico,
     connetti,
+    credenziali_di,
     punto_di_vista,
     radice,
 )
+from mongolab.infrastructure.backup import SubprocessBackup
 from mongolab.infrastructure.generatore import DataGenerator
 from mongolab.infrastructure.inspector import PymongoInspector
 from mongolab.infrastructure.orologio import SystemClock
@@ -107,14 +116,23 @@ from mongolab.infrastructure.regia import (
     RegiaAnnunciata,
     RegiaCompose,
 )
-from mongolab.presentation.rapporto import cronaca, rapporto, riassunto
+from mongolab.presentation.rapporto import (
+    copia,
+    cronaca,
+    rapporto,
+    riassunto,
+    ripristino,
+)
 from mongolab.presentation.rich_tui import RichTui
 
 __all__ = [
+    "DATABASE_RIPRISTINO",
+    "DESTINAZIONE_DUMP",
     "DIMENSIONE_PREDEFINITA",
     "DURATA_WATCH_S",
     "DURATA_WORKLOAD_S",
     "IMMAGINI",
+    "OPZIONI_DUMP",
     "niente_da_fermare",
     "LETTORI_PREDEFINITI",
     "SCRITTORI_PREDEFINITI",
@@ -125,11 +143,13 @@ __all__ = [
     "comandi_di",
     "demo",
     "giri_di",
+    "host_interno_di",
     "mentre_disegna",
     "nodo_di",
     "regia_di",
     "servizi_di",
     "sink_di",
+    "strumento_di",
 ]
 
 SCRITTORI_PREDEFINITI: Final = 8
@@ -154,6 +174,37 @@ tanto vale che arrivi da qualcosa che si legge: due minuti, gli stessi di `workl
 che è quanto dura la scena del failover con tutto il suo contorno.
 """
 
+
+DESTINAZIONE_DUMP: Final = Path("/tmp/mongolab-backup")
+"""Dove il dump atterra, **dentro il nodo** in cui `mongodump` gira.
+
+Un percorso fisso e non uno con la data: `demo backup-live` e `demo restore` sono due
+comandi consecutivi, e un percorso da ricopiare fra l'uno e l'altro è un percorso da
+sbagliare davanti alla sala. Chi ne vuole due li nomina con `--out`.
+
+`/tmp` e non `/data`: dentro l'immagine di MongoDB `/data/db` è il volume e il resto di
+`/data` appartiene a root, mentre `/tmp` è scrivibile da chiunque — e il dump deve
+sopravvivere solo fra i due comandi, non fra due ricostruzioni dello stack.
+"""
+
+DATABASE_RIPRISTINO: Final = f"{DATABASE}_ripristinato"
+"""Dove il restore scrive, e non è mai `lab`.
+
+Ciò che manca nella copia sono i documenti scritti **durante** il dump, e quelli stanno
+nell'originale: restaurare lì sopra li lascerebbe dove sono, il conteggio combacerebbe, e
+la differenza che l'Atto III esiste per mostrare sparirebbe proprio perché il restore è
+riuscito.
+"""
+
+OPZIONI_DUMP: Final = ("--readPreference=secondary", "--oplog")
+"""Le due opzioni che fanno la scena, e stanno qui perché la politica è della radice.
+
+`--readPreference=secondary` è la promessa da verificare — il dump legge dai secondari e
+il primario non se ne accorge — e `--oplog` è ciò che rende la copia coerente a un
+istante. Misurate insieme: senza la prima, `opcounters.query` del primario sale di dieci
+e quello dei secondari di uno; con la prima, il primario sale di **zero** e i due
+secondari di sei e quattro ([M-046](../../docs/Sources.md#m-046)).
+"""
 
 IMMAGINI: Final = Path("tools/images.env")
 """Il file che fissa le immagini, relativo alla radice del repository.
@@ -300,6 +351,58 @@ def comandi_di(bersaglio: Bersaglio) -> ComandiCompose:
     return ComandiCompose(
         file_compose=Path("docker") / bersaglio.stack / "compose.yaml",
         ambiente=tuple(ambiente),
+    )
+
+
+def host_interno_di(bersaglio: Bersaglio) -> str:
+    """L'indirizzo che `mongodump` usa, e non è quello che usa `mongolab`.
+
+    È [M-019](../../docs/Sources.md#m-019) vista dal lato degli strumenti. L'applicazione
+    gira sull'host, dove i nomi di servizio non si risolvono e si arriva a `localhost` con
+    la scoperta spenta; il processo che l'applicazione avvia gira **dentro un nodo**, dove
+    quei nomi esistono. Passargli la vista dell'host lo manderebbe a bussare a un
+    `localhost` che dentro il container è sé stesso.
+
+    La forma `rs0/uno,due,tre` è quella che gli strumenti di MongoDB chiamano *seed list*:
+    davanti il nome del set, che è la stessa dichiarazione di aspettativa di `Vista.replica`.
+    Dove il set non c'è resta il solo elenco, perché `rs0/` davanti a un mongod solo è una
+    dichiarazione falsa e lo strumento la crede.
+    """
+    vista = bersaglio.da_rete
+    elenco = ",".join(f"{nome}:{porta}" for nome, porta in vista.semi)
+    return f"{vista.replica}/{elenco}" if vista.replica is not None else elenco
+
+
+def strumento_di(
+    bersaglio: Bersaglio, nodo: str, credenziali: Credenziali | None
+) -> SubprocessBackup:
+    """`mongodump` e `mongorestore`, eseguiti dentro un nodo dello stack.
+
+    **Gli strumenti non stanno nell'immagine dell'applicazione**, e la ragione è misurata:
+    copiarci dentro i due binari dall'immagine `mongo` pinnata produce un container che si
+    ferma su `libgssapi_krb5.so.2: cannot open shared object file`
+    ([M-044](../../docs/Sources.md#m-044)). Stanno già in ogni nodo, e la riga per andarci
+    la costruisce `ComandiCompose.dentro` ([ADR-0100](../../../docs/Decision.md#adr-0100)).
+
+    `dove=radice()` non è un dettaglio: il frasario tiene i percorsi dei `compose.yaml`
+    **relativi alla radice** perché la riga si possa incollare in un terminale, e chi
+    lancia `mongolab` non parte per forza di lì.
+
+    La credenziale arriva già risolta invece di essere letta qui, e serve alle prove: il
+    `.env` dello stack è fuori dal repository ([ADR-0014](../../../docs/Decision.md#adr-0014)),
+    e una prova unitaria che dipendesse da un file che non c'è sarebbe rossa su ogni
+    macchina appena clonata.
+    """
+    comandi = comandi_di(bersaglio)
+    return SubprocessBackup(
+        host=host_interno_di(bersaglio),
+        comando_dump=comandi.dentro(nodo, "mongodump"),
+        comando_restore=comandi.dentro(nodo, "mongorestore"),
+        utente=credenziali.utente if credenziali is not None else None,
+        password=credenziali.password if credenziali is not None else None,
+        database=DATABASE,
+        opzioni_dump=OPZIONI_DUMP,
+        dove=radice(),
     )
 
 
@@ -558,10 +661,16 @@ demo = typer.Typer(
 app.add_typer(demo, name="demo")
 """Le quattro righe `demo` del §6.4 sono un gruppo, non quattro comandi con un prefisso.
 
-`failover` è di questo Task; `backup-live`, `restore` e `sharding` arrivano ai Task 14 e
-15. Un gruppo dichiarato adesso vuol dire che `mongolab demo --help` elenca ciò che
-esiste, e che aggiungere una scena è aggiungere una funzione — non ritoccare il modo in
-cui i comandi si chiamano dopo che una slide li ha già scritti.
+`failover`, `backup-live` e `restore` sono i tre Atti del Blocco 2; `sharding` arriva al
+Task 15. Un gruppo dichiarato al Task 13 ha già mantenuto la sua promessa: le due scene di
+oggi sono due funzioni in più, e nessuno ha dovuto ritoccare il modo in cui i comandi si
+chiamano dopo che una slide li aveva già scritti.
+
+**Le prime due scene girano in due posti opposti, ed è dichiarato.** `failover` vuole la
+scoperta della topologia e quindi la rete Compose; `backup-live` e `restore` vogliono
+entrare in un nodo con `docker compose exec` e quindi l'host. Non è una svista da
+uniformare: è la stessa asimmetria che ha fatto nascere la porta `Regia`, e i due comandi
+la dicono rifiutandosi dal lato sbagliato invece di fallire a metà scena.
 """
 
 
@@ -606,14 +715,7 @@ def failover(
     refused. È la differenza fra un server morto e una rete partizionata, e vale i trenta
     secondi che costa.
     """
-    if step and sink is Resa.RICH:
-        raise typer.BadParameter(
-            "--step e --sink rich vogliono lo stesso terminale: la pausa legge da stdin "
-            "mentre il Live di Rich ridisegna, e il prompt finirebbe sotto il ridisegno. "
-            "Dal palco la riga è `--step --sink plain`, la stessa con cui si girano le "
-            "registrazioni di riserva.",
-            param_hint="--step",
-        )
+    _niente_step_con_la_tui(step, sink)
     cablaggio = cabla(target, sink)
     ponte = SdamBridge(cablaggio.orologio)
     cliente = connetti(cablaggio.bersaglio, event_listeners=ponte.ascoltatori)
@@ -658,6 +760,292 @@ def failover(
     finally:
         cliente.close()
     typer.echo(cronaca(esito))
+
+
+# --- L'Atto III: il backup a caldo, e la copia rimessa altrove --------------------------
+
+
+@demo.command(name="backup-live")
+def backup_live(
+    target: Bersaglio_,
+    out: Annotated[
+        Path, typer.Option("--out", help="Dove il dump atterra, dentro il nodo.")
+    ] = DESTINAZIONE_DUMP,
+    node: Annotated[
+        str | None,
+        typer.Option("--node", help="In quale nodo eseguire mongodump."),
+    ] = None,
+    carico: Annotated[
+        float, typer.Option("--carico", help="Secondi di carico prima del dump.")
+    ] = DURATA_CARICO_S,
+    tetto: Annotated[
+        float, typer.Option("--tetto", help="Secondi oltre i quali il carico molla.")
+    ] = TETTO_DUMP_S,
+    step: Annotated[
+        bool,
+        typer.Option(
+            "--step", help="Pausa prima di ogni fase, si riparte con Invio: da palco."
+        ),
+    ] = False,
+    sink: Resa_ = Resa.RICH,
+) -> None:
+    """Il carico gira, il dump parte, e i due ritmi si guardano. È l'Atto III.
+
+    **La tesi è che il throughput non crolli**, e una tesi si mostra invece di
+    affermarla: la scena misura il carico da solo, poi lo stesso carico mentre
+    `mongodump --readPreference=secondary --oplog` copia, e mette i due numeri accanto.
+    Il calo che esce è quello che è — questa riga di comando non ha un valore soglia
+    oltre il quale si lamenta, perché a decidere se è poco è chi guarda.
+
+    **La finestra della seconda misura è quella del dump, non una durata scelta prima.**
+    Il carico si ferma quando il dump finisce: con una durata fissa un dump da mezzo
+    secondo dentro un campione da venti verrebbe diluito, e un crollo totale comparirebbe
+    come un calo del due per cento. `--tetto` resta come rete di sicurezza, per il dump
+    che si pianta.
+
+    **Si gira dall'host**, ed è l'inverso del failover. Là serve la scoperta della
+    topologia, che funziona solo da dentro la rete Compose (M-019); qui serve entrare in
+    un nodo con `docker compose exec`, e il socket del demone Docker c'è solo da fuori.
+    """
+    _niente_step_con_la_tui(step, sink)
+    cablaggio = cabla(target, sink)
+    _solo_da_un_replica_set(cablaggio.bersaglio)
+    _solo_dall_host("backup-live")
+    nodo = _nodo_degli_strumenti(cablaggio.bersaglio, node)
+    strumento = strumento_di(
+        cablaggio.bersaglio, nodo, credenziali_di(cablaggio.bersaglio)
+    )
+    ponte = SdamBridge(cablaggio.orologio)
+    cliente = connetti(cablaggio.bersaglio, event_listeners=ponte.ascoltatori)
+    try:
+        try:
+            attendi_il_primario(cliente)
+        except SenzaPrimario as senza:
+            raise _serve_il_primario(cablaggio.bersaglio) from senza
+        ispettore = PymongoInspector(cliente, DATABASE, COLLEZIONE)
+        if not ispettore.topology().ha_primario:
+            raise _serve_il_primario(cablaggio.bersaglio)
+        destinazione = collezione_di_carico(cablaggio.orologio.now())
+        typer.echo(f"backup a caldo da {nodo} · carico in {DATABASE}.{destinazione}")
+        # La riga si mostra perché si **può** mostrare: il segreto non ci passa, viaggia
+        # su stdin (ADR-0054). Ed è la riga che il Blocco 2 sta spiegando, quindi vederla
+        # per intero vale più di qualunque slide che la riassuma.
+        typer.echo(f"  {' '.join(strumento.argomenti_dump(out))}")
+        archivio = PymongoStore(cliente[DATABASE][destinazione])
+        # `--readers 0` come nel failover, per una ragione diversa: il dump legge dai
+        # secondari, e delle letture nostre sugli stessi secondari mescolerebbero due
+        # effetti in un numero solo.
+        corsa = WorkloadRunner(
+            archivio,
+            cablaggio.orologio,
+            cablaggio.sink,
+            scrittori=SCRITTORI_PREDEFINITI,
+            lettori=0,
+        )
+        scena = ScenarioBackup(
+            archivio,
+            corsa,
+            strumento,
+            cablaggio.orologio,
+            cablaggio.sink,
+            ponte.drena,
+            copione=CopioneBackup(destinazione=out, carico_s=carico, tetto_s=tetto),
+        )
+        attesa: Attesa = _invio if step else senza_attesa
+        esito = mentre_disegna(cablaggio.sink, lambda: scena.esegui(attesa=attesa))
+    finally:
+        cliente.close()
+    typer.echo(copia(esito))
+    typer.echo(_prossimo_passo(target, out, destinazione))
+
+
+@demo.command()
+def restore(
+    target: Bersaglio_,
+    da: Annotated[
+        Path, typer.Option("--from", help="La directory del dump, dentro il nodo.")
+    ] = DESTINAZIONE_DUMP,
+    into: Annotated[
+        str, typer.Option("--into", help="Il database in cui la copia rientra.")
+    ] = DATABASE_RIPRISTINO,
+    collection: Annotated[
+        str, typer.Option("--collection", help="Quale collezione contare, dai due lati.")
+    ] = COLLEZIONE,
+    node: Annotated[
+        str | None,
+        typer.Option("--node", help="In quale nodo eseguire mongorestore."),
+    ] = None,
+    step: Annotated[
+        bool,
+        typer.Option(
+            "--step", help="Pausa prima di ogni fase, si riparte con Invio: da palco."
+        ),
+    ] = False,
+    sink: Resa_ = Resa.RICH,
+) -> None:
+    """La copia rientra accanto all'originale, e i due conteggi si guardano.
+
+    **Accanto e non sopra.** Il restore scrive in un database diverso perché ciò che
+    manca nella copia — i documenti scritti mentre il dump era in corso — sta
+    nell'originale, e sovrascriverlo cancellerebbe la prova di ciò che la scena vuole
+    mostrare.
+
+    **La differenza non è un guasto.** `mongodump --oplog` porta via anche l'oplog della
+    finestra, ma `--oplogReplay` è incompatibile con la rinomina dei namespace che serve
+    a restaurare altrove (ADR-0084): il prezzo di non aver fermato il servizio si legge
+    lì, ed è un numero, non un errore.
+
+    I predefiniti sono quelli che `demo backup-live` lascia sul terminale: senza opzioni,
+    questo comando raccoglie ciò che la scena precedente ha prodotto.
+    """
+    _niente_step_con_la_tui(step, sink)
+    cablaggio = cabla(target, sink)
+    _solo_da_un_replica_set(cablaggio.bersaglio)
+    _solo_dall_host("restore")
+    if into == DATABASE:
+        raise typer.BadParameter(
+            f"«{into}» è il database di partenza. Ciò che manca nella copia sono i "
+            "documenti scritti mentre il dump era in corso, e quelli stanno lì: "
+            "restaurarci sopra li lascerebbe al loro posto, i conteggi combacerebbero, e "
+            "la differenza che questa scena esiste per mostrare sparirebbe proprio "
+            f"perché il restore è riuscito. Il predefinito è «{DATABASE_RIPRISTINO}».",
+            param_hint="--into",
+        )
+    nodo = _nodo_degli_strumenti(cablaggio.bersaglio, node)
+    strumento = strumento_di(
+        cablaggio.bersaglio, nodo, credenziali_di(cablaggio.bersaglio)
+    )
+    cliente = connetti(cablaggio.bersaglio)
+    try:
+        typer.echo(
+            f"restore da {da} in {nodo} · "
+            f"{DATABASE}.{collection} → {into}.{collection}"
+        )
+        typer.echo(f"  {' '.join(strumento.argomenti_restore(da, into))}")
+        scena = ScenarioRestore(
+            PymongoStore(cliente[DATABASE][collection]),
+            PymongoStore(cliente[into][collection]),
+            strumento,
+            cablaggio.orologio,
+            cablaggio.sink,
+            copione=CopioneRestore(sorgente=da, database=into),
+        )
+        attesa: Attesa = _invio if step else senza_attesa
+        esito = mentre_disegna(cablaggio.sink, lambda: scena.esegui(attesa=attesa))
+    finally:
+        cliente.close()
+    typer.echo(ripristino(esito))
+
+
+def _niente_step_con_la_tui(step: bool, sink: Resa) -> None:
+    """Il rifiuto che vale per ogni scena con `--step`, scritto una volta sola.
+
+    Sta qui e non dentro i comandi perché la terza copia sarebbe quella che diverge: è la
+    stessa ragione per cui `sink_di` esiste invece di tre `if` sparsi.
+    """
+    if step and sink is Resa.RICH:
+        raise typer.BadParameter(
+            "--step e --sink rich vogliono lo stesso terminale: la pausa legge da stdin "
+            "mentre il Live di Rich ridisegna, e il prompt finirebbe sotto il ridisegno. "
+            "Dal palco la riga è `--step --sink plain`, la stessa con cui si girano le "
+            "registrazioni di riserva.",
+            param_hint="--step",
+        )
+
+
+def _solo_da_un_replica_set(bersaglio: Bersaglio) -> None:
+    """L'Atto III si gira sullo stack 02, e gli altri due si rifiutano dicendo perché.
+
+    Non un controllo sul nome — `bersaglio.nome != "rs"` — ma sulla **proprietà** che
+    serve: che quel bersaglio si presenti come un replica set. Il giorno in cui il
+    repository ne avesse un secondo, la riga giusta funzionerebbe da sé.
+    """
+    if bersaglio.da_rete.replica is not None:
+        return
+    if bersaglio.da_rete.diretto:
+        raise typer.BadParameter(
+            f"«{bersaglio.nome}» è un mongod solo, e un mongod solo non ha un oplog: "
+            "`mongodump --oplog` non ha niente da copiare e la copia non è coerente a "
+            "nessun istante (ADR-0022). Il backup a caldo è la scena del replica set: "
+            "--target rs.",
+            param_hint="--target",
+        )
+    raise typer.BadParameter(
+        f"«{bersaglio.nome}» si raggiunge da un mongos, che non è membro di nessun "
+        "replica set e non ha un oplog da consegnare. Un dump preso da lì attraversa gli "
+        "shard uno per uno, senza un istante comune: non è la fotografia che questa "
+        "scena promette. Il backup a caldo si gira sul replica set: --target rs.",
+        param_hint="--target",
+    )
+
+
+def _solo_dall_host(scena: str) -> None:
+    """Le due scene dell'Atto III non girano da dentro la rete, ed è l'inverso del failover.
+
+    Là serve la scoperta della topologia, che si accende solo da dentro (M-019); qui serve
+    `docker compose exec`, e il socket del demone Docker sta solo fuori — nel container
+    dell'applicazione non c'è, perché il Task 9 ha deciso di non montarglielo. Un comando
+    che accettasse tutti e due i posti sarebbe un comando che in uno dei due mente.
+    """
+    if punto_di_vista() is PuntoDiVista.HOST:
+        return
+    raise typer.BadParameter(
+        f"«demo {scena}» si gira dall'host e non da dentro la rete Compose: mongodump "
+        "non è nell'immagine dell'applicazione (M-044) e questo container non ha il "
+        "socket del demone Docker, quindi non può entrare in un nodo per trovarcelo. "
+        "Dalla radice del repository: `uv run --directory app mongolab demo "
+        f"{scena} --target rs`.",
+        param_hint=VARIABILE_PUNTO_DI_VISTA,
+    )
+
+
+def _nodo_degli_strumenti(bersaglio: Bersaglio, detto: str | None) -> str:
+    """In quale nodo entrare a cercare `mongodump`. Predefinito: il primo dello stack.
+
+    Il primo e non il primario, e non è indifferente: il dump atterra nel filesystem del
+    nodo in cui gira, e `demo restore` deve ritrovarlo lì qualche minuto dopo. Un
+    predefinito che seguisse il primario cambierebbe nodo dopo un'elezione — cioè dopo
+    l'Atto II — e la copia si troverebbe in un container e il restore la cercherebbe in
+    un altro.
+    """
+    nodo = detto if detto is not None else servizi_di(bersaglio)[0]
+    _controlla_nodo(nodo, bersaglio)
+    return nodo
+
+
+def _serve_il_primario(bersaglio: Bersaglio) -> typer.BadParameter:
+    """Dall'host si arriva a un nodo solo, e il carico ha bisogno che sia quello giusto.
+
+    Con `directConnection` il driver non sceglie: parla con il nodo pubblicato e basta.
+    Se quel nodo è un secondario un `ping` riesce lo stesso — la lettura è ammessa — e il
+    guasto comparirebbe soltanto alla prima scrittura, con il carico già partito e una
+    collezione a metà. Meglio dirlo adesso.
+
+    Il rimedio quasi sempre è aspettare: `mongo-rs-1` ha `priority: 2` e si riprende il
+    ruolo da sé quando rientra, che è esattamente ciò che succede al termine dell'Atto II.
+    """
+    return typer.BadParameter(
+        f"su «{bersaglio.nome}» il nodo pubblicato su localhost:{bersaglio.porta} non è "
+        "il primario. Dall'host la scoperta è spenta (M-019): il carico scriverebbe su "
+        "un secondario, dove ogni scrittura fallisce. Il primo membro ha priority 2 e "
+        "riprende il ruolo da sé qualche secondo dopo essere rientrato — è ciò che "
+        f"succede a fine Atto II — oppure si riparte pulito con `make reset-"
+        f"{bersaglio.stack[:2]}`.",
+        param_hint="--target",
+    )
+
+
+def _prossimo_passo(target: str, dove: Path, collezione: str) -> str:
+    """La riga da dare dopo, già scritta. Dal palco è la differenza fra due comandi e uno.
+
+    La collezione di carico ha la data nel nome e non si indovina; ricopiarla a mano
+    davanti alla sala è il modo più prevedibile di sbagliare un comando. Qui esce già
+    completa, e chi presenta la incolla.
+    """
+    return (
+        f"prossimo: mongolab demo restore --target {target} "
+        f"--from {dove} --collection {collezione}"
+    )
 
 
 def _controlla_nodo(nodo: str, bersaglio: Bersaglio) -> None:

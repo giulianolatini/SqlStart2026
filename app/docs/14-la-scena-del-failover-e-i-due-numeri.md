@@ -469,4 +469,8 @@ abbiano un significato.
   misurato. È il supplemento del Passo 3, e la misura manca.
 - **Il numero dipende da questo replica set.** I 10 019 ms e la forbice di V-029 valgono per le
   impostazioni di elezione di questo lab; la frase in sala è «su questo lab», non «in MongoDB».
-- **`mongodump` nell'immagine** resta la decisione del Task 14 ([M-039](Sources.md#m-039)).
+- **`mongodump` nell'immagine** era la decisione del Task 14 ([M-039](Sources.md#m-039)), ed è
+  stata presa provando: la copia dei binari si costruisce e non parte
+  ([M-044](Sources.md#m-044)), quindi gli strumenti restano nei nodi
+  ([ADR-0100](../../docs/Decision.md#adr-0100)). Il seguito sta nel
+  [capitolo 15](15-il-backup-a-caldo-e-la-finestra-che-si-misura.md).

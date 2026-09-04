@@ -27,18 +27,23 @@ from mongolab.application.topologia import INTERVALLO_PREDEFINITO_MS
 import typer
 
 from mongolab.cli import (
+    DATABASE_RIPRISTINO,
+    DESTINAZIONE_DUMP,
     LETTORI_PREDEFINITI,
+    OPZIONI_DUMP,
     SCRITTORI_PREDEFINITI,
     Resa,
     app,
     cabla,
     comandi_di,
     giri_di,
+    host_interno_di,
     mentre_disegna,
     nodo_di,
     regia_di,
     servizi_di,
     sink_di,
+    strumento_di,
     niente_da_fermare,
 )
 from mongolab.domain.eventi import Evento, ServerStateChanged
@@ -53,8 +58,11 @@ from mongolab.domain.porte import Clock
 from mongolab.infrastructure.bersagli import (
     BERSAGLI,
     COLLEZIONE,
+    DATABASE,
     PREFISSO_CARICO,
+    VARIABILE_PUNTO_DI_VISTA,
     BersaglioSconosciuto,
+    Credenziali,
     PuntoDiVista,
 )
 from mongolab.infrastructure.regia import RegiaAnnunciata, RegiaCompose
@@ -766,3 +774,219 @@ def test_senza_primario_l_errore_nomina_il_bersaglio_e_il_comando_che_rimedia() 
 
     assert "rs" in detto
     assert "make up-02" in detto, "l'errore deve dire come si rimedia"
+
+
+# --- L'Atto III: `demo backup-live` e `demo restore` ------------------------------------
+#
+# Le due scene girano **dall'host** e non da dentro la rete, ed è l'inverso del failover.
+# La ragione è una sola e si ripete in tutte le prove che seguono: `mongodump` non sta
+# nell'immagine dell'applicazione (M-044) e il container dell'applicazione non ha il
+# socket del demone Docker, quindi il comando che entra nel nodo può partire solo da fuori.
+
+FINTA = Credenziali(utente="admin", password="non-e-un-segreto-e-non-lo-sara-mai")
+"""Una credenziale che non è di nessuno: queste prove la cercano dentro la riga."""
+
+
+def test_le_due_scene_dell_atto_iii_sono_nel_gruppo_demo() -> None:
+    codice, testo = esegui("demo", "--help")
+
+    assert codice == 0
+    assert "backup-live" in testo
+    assert "restore" in testo
+
+
+def test_backup_live_ha_le_opzioni_della_scena() -> None:
+    codice, testo = esegui("demo", "backup-live", "--help")
+
+    assert codice == 0
+    for opzione in ("--target", "--out", "--node", "--carico", "--step", "--sink"):
+        assert opzione in testo, opzione
+
+
+def test_restore_ha_le_opzioni_della_scena() -> None:
+    codice, testo = esegui("demo", "restore", "--help")
+
+    assert codice == 0
+    for opzione in ("--target", "--from", "--into", "--collection", "--sink"):
+        assert opzione in testo, opzione
+
+
+def test_il_backup_a_caldo_vuole_un_replica_set() -> None:
+    """`--oplog` non è un'opzione che uno standalone accetta, ed è tutta la scena.
+
+    Il dump a caldo è coerente **a un istante** perché porta via anche l'oplog della
+    finestra in cui è stato preso ([ADR-0022](../../../docs/Decision.md#adr-0022)). Senza
+    un replica set quell'oplog non esiste, e lo strumento esce con un errore dopo che il
+    carico è già partito: il rifiuto arriva prima, alla lettura degli argomenti.
+    """
+    codice, testo = esegui("demo", "backup-live", "--target", "standalone")
+
+    assert codice != 0
+    assert "oplog" in testo
+    assert "rs" in testo
+
+
+def test_attraverso_un_mongos_il_dump_non_e_una_fotografia_coerente() -> None:
+    """Lo stack 03 si raggiunge da un router, e un router non è membro di nessun set.
+
+    `mongodump` verso un `mongos` legge shard per shard, senza un istante comune: la
+    copia che ne esce non è la fotografia che l'Atto III promette. È una scena diversa e
+    non è questa, e dirlo qui costa una riga.
+    """
+    codice, testo = esegui("demo", "backup-live", "--target", "sharded")
+
+    assert codice != 0
+    assert "shard" in testo
+
+
+def test_anche_il_restore_vuole_un_replica_set() -> None:
+    """Restaura una copia che solo il replica set può aver prodotto: stesso rifiuto."""
+    codice, testo = esegui("demo", "restore", "--target", "standalone")
+
+    assert codice != 0
+    assert "oplog" in testo
+
+
+def test_dalla_rete_il_backup_a_caldo_si_rifiuta(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dentro il container non c'è né lo strumento né il socket per raggiungerlo.
+
+    È l'inverso esatto del failover, e per lo stesso motivo: la scena del guasto ha
+    bisogno della **scoperta**, che funziona solo da dentro (M-019); questa ha bisogno di
+    `docker compose exec`, che funziona solo da fuori. Un'unica riga di comando che
+    andasse bene in tutti e due i posti sarebbe una riga che in uno dei due mente.
+    """
+    monkeypatch.setenv(VARIABILE_PUNTO_DI_VISTA, "rete")
+
+    codice, testo = esegui("demo", "backup-live", "--target", "rs")
+
+    assert codice != 0
+    assert "host" in testo
+
+
+def test_dalla_rete_anche_il_restore_si_rifiuta(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(VARIABILE_PUNTO_DI_VISTA, "rete")
+
+    codice, testo = esegui("demo", "restore", "--target", "rs")
+
+    assert codice != 0
+    assert "host" in testo
+
+
+def test_step_e_la_tui_non_convivono_nemmeno_nel_backup() -> None:
+    """Lo stesso rifiuto del failover, e dalla stessa funzione: la pausa e il `Live` di
+    Rich vogliono lo stesso terminale, e ADR-0019 dice che lo tocca un thread solo."""
+    codice, testo = esegui("demo", "backup-live", "--target", "rs", "--step")
+
+    assert codice != 0
+    assert "plain" in testo
+
+
+def test_non_si_restaura_sopra_il_database_di_partenza() -> None:
+    """Sarebbe la scena che si distrugge da sé.
+
+    Ciò che manca nella copia sono i documenti scritti durante il dump, e stanno
+    nell'originale: restaurare lì sopra li lascerebbe dove sono e il conteggio
+    combacerebbe per il motivo sbagliato — la differenza che l'Atto III mostra sparirebbe
+    proprio perché il restore è andato a buon fine.
+    """
+    codice, testo = esegui("demo", "restore", "--target", "rs", "--into", DATABASE)
+
+    assert codice != 0
+    assert DATABASE in testo
+
+
+def test_i_due_predefiniti_tengono_insieme_le_due_scene() -> None:
+    """`demo restore` senza opzioni raccoglie ciò che `demo backup-live` ha lasciato.
+
+    Dal palco sono due comandi consecutivi, e un percorso da ricopiare fra l'uno e
+    l'altro è un percorso da sbagliare davanti alla sala.
+    """
+    codice, testo = esegui("demo", "restore", "--help")
+
+    assert codice == 0
+    assert str(DESTINAZIONE_DUMP) in testo
+    assert DATABASE_RIPRISTINO in testo
+    assert DATABASE_RIPRISTINO != DATABASE
+
+
+# --- Chi esegue gli strumenti, e con quale indirizzo ------------------------------------
+
+
+def test_l_indirizzo_interno_e_quello_che_lo_strumento_risolve() -> None:
+    """`mongodump` gira **dentro** la rete Compose anche quando `mongolab` gira fuori.
+
+    È la stessa asimmetria di [M-019](../../docs/Sources.md#m-019) vista dal lato degli
+    strumenti: l'applicazione, dall'host, raggiunge lo stack su `localhost` con la
+    scoperta spenta; il processo che lei avvia sta dentro un nodo, dove quei nomi
+    esistono e la scoperta funziona. Passargli la vista dell'host lo farebbe fallire con
+    un `connection refused` verso sé stesso.
+    """
+    assert host_interno_di(BERSAGLI["rs"]) == (
+        "rs0/mongo-rs-1:27017,mongo-rs-2:27017,mongo-rs-3:27017"
+    )
+
+
+def test_senza_un_replica_set_l_indirizzo_non_ne_dichiara_uno() -> None:
+    """`rs0/` davanti a un mongod solo è una dichiarazione falsa, e lo strumento la crede."""
+    assert host_interno_di(BERSAGLI["standalone"]) == "mongo-standalone:27017"
+
+
+def test_gli_strumenti_entrano_nel_nodo_con_il_frasario_dello_stack() -> None:
+    """La riga del dump è `docker compose ... exec -T mongo-rs-1 mongodump ...`.
+
+    Non `docker exec`: passare da Compose vuol dire riusare gli `--env-file` obbligatori
+    dello stack e nominare il **servizio** invece del container, che è la stessa promessa
+    che `ComandiCompose.per` fa alla regia del failover.
+    """
+    strumento = strumento_di(BERSAGLI["rs"], "mongo-rs-1", FINTA)
+
+    riga = strumento.argomenti_dump(DESTINAZIONE_DUMP)
+
+    preambolo = comandi_di(BERSAGLI["rs"]).dentro("mongo-rs-1", "mongodump")
+    assert riga[: len(preambolo)] == preambolo
+
+
+def test_la_riga_del_dump_porta_le_opzioni_del_copione() -> None:
+    """`--readPreference=secondary --oplog`: la coppia che il Blocco 2 sta spiegando."""
+    strumento = strumento_di(BERSAGLI["rs"], "mongo-rs-1", FINTA)
+
+    riga = strumento.argomenti_dump(DESTINAZIONE_DUMP)
+
+    for opzione in OPZIONI_DUMP:
+        assert opzione in riga, opzione
+    assert riga[riga.index("--host") + 1] == host_interno_di(BERSAGLI["rs"])
+    assert riga[riga.index("--out") + 1] == str(DESTINAZIONE_DUMP)
+
+
+def test_la_riga_che_la_scena_mostra_non_porta_il_segreto() -> None:
+    """La scena stampa la riga del dump, e può farlo solo perché il segreto non ci passa.
+
+    È [ADR-0054](../../../docs/Decision.md#adr-0054) al punto in cui serve davvero: la
+    riga finisce su un proiettore e dentro una registrazione asciinema del Task 18.
+    """
+    strumento = strumento_di(BERSAGLI["rs"], "mongo-rs-1", FINTA)
+
+    riga = " ".join(strumento.argomenti_dump(DESTINAZIONE_DUMP))
+    ripristino = " ".join(strumento.argomenti_restore(DESTINAZIONE_DUMP, "lab_x"))
+
+    assert FINTA.password not in riga
+    assert FINTA.password not in ripristino
+    assert "--env-file" in riga, "il frasario passa il percorso del .env, mai il valore"
+
+
+def test_senza_autenticazione_la_riga_non_chiede_un_utente() -> None:
+    """Lo stack 01 non autentica, e uno strumento che aspettasse una password lì si pianta."""
+    strumento = strumento_di(BERSAGLI["standalone"], "mongo-standalone", None)
+
+    riga = strumento.argomenti_dump(DESTINAZIONE_DUMP)
+
+    assert "--username" not in riga
+
+
+def test_il_restore_rinomina_verso_il_database_che_gli_si_chiede() -> None:
+    strumento = strumento_di(BERSAGLI["rs"], "mongo-rs-1", FINTA)
+
+    riga = strumento.argomenti_restore(DESTINAZIONE_DUMP, DATABASE_RIPRISTINO)
+
+    assert riga[riga.index("--nsTo") + 1] == f"{DATABASE_RIPRISTINO}.*"
+    assert riga[riga.index("--nsInclude") + 1] == f"{DATABASE}.*"

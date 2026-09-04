@@ -2651,3 +2651,86 @@ un numero misurato una volta, che fallisce sul portatile di qualcun altro e vien
 mese. La distinzione utile è fra ciò che la suite deve **impedire** e ciò che il registro deve
 **ricordare**: il numero preciso vive nel registro delle misure, la prova sorveglia la categoria.
 
+---
+
+### Una finestra più larga dell'evento è una misura che non può smentire la propria tesi
+
+> Il dump dura mezzo secondo. Se lo misuri su venti, un crollo totale del throughput ti compare
+> come un calo del due per cento — e la tua tesi risulta confermata da un numero incapace di
+> smentirla.
+
+Fonte: [ADR-0101](Decision.md#adr-0101),
+[`app/docs/Sources.md`, M-045](../app/docs/Sources.md#m-045),
+[`app/docs/Sources.md`, M-047](../app/docs/Sources.md#m-047),
+[registro operativo, nota 204](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché è l'errore di misura più diffuso e il meno visibile — nessuno lo
+scopre, dato che il risultato conferma quello che si sperava. La domanda che lo previene sta in
+sette parole: *quale risultato smentirebbe la mia tesi?* Se nessuno lo può, la finestra è
+sbagliata, non lo strumento. Nell'applicazione la conseguenza è concreta: la fase di carico sotto
+dump non ha una durata, **finisce quando finisce il dump**.
+
+---
+
+### Il calo ha un segno, e chi conclude al posto del pubblico ha già perso
+
+> `ritmo prima 595/s · durante 692/s · calo -16.2%`. Il calo è negativo: il ritmo è **salito**. Il
+> rapporto scrive la percentuale con il segno e non scrive «il dump non ha impatto», che pure quel
+> giorno sarebbe stato vero.
+
+Fonte: [`app/docs/Sources.md`, M-047](../app/docs/Sources.md#m-047),
+[`app/docs/Sources.md`, M-046](../app/docs/Sources.md#m-046).
+
+**Perché una slide:** perché è la stessa disciplina che il talk rimprovera ai benchmark altrui,
+applicata al proprio. I numeri da leggere sono quelli assoluti accanto — 279 scritture durante il
+dump, tutte confermate, p95 da 66,3 a 68,7 ms — e la percentuale cambia a ogni giro. C'è anche una
+ragione **misurata** per cui il primario non se ne accorge: con `--readPreference=secondary` le
+letture del dump gli passano da +15 a **+0**.
+
+---
+
+### Il `build` riesce, e il container si ferma alla prima esecuzione
+
+> Copiare `mongodump` dall'immagine `mongo` dentro quella dell'applicazione **si costruisce senza
+> un avviso**. Poi esce con 127: `libgssapi_krb5.so.2: cannot open shared object file`.
+
+Fonte: [`app/docs/Sources.md`, M-044](../app/docs/Sources.md#m-044),
+[ADR-0100](Decision.md#adr-0100),
+[registro operativo, nota 203](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché una verifica che si ferma al «compila?» avrebbe concluso l'opposto, e
+il guasto sarebbe arrivato in sala. Cinque minuti di prova hanno prodotto un fatto invece di
+un'argomentazione, e la decisione che ne segue ha una simmetria che si difende da sé: gli strumenti
+restano **dove sono già**, dentro i nodi, e la scena li raggiunge da fuori.
+
+---
+
+### Non «perse»: mancano nella copia, e sono ancora nell'originale
+
+> `restore 3908 all'origine · 3802 nella copia · differenza 106`. I 106 non sono scritture perse:
+> sono i documenti arrivati **mentre la fotografia veniva scattata**. Nel database ci sono tutti.
+
+Fonte: [ADR-0102](Decision.md#adr-0102),
+[`app/docs/Sources.md`, M-047](../app/docs/Sources.md#m-047),
+[`app/docs/Sources.md`, M-024](../app/docs/Sources.md#m-024).
+
+**Perché una slide:** perché è il prezzo di non aver fermato il servizio, detto con un numero
+invece che con un aggettivo — e perché usare «perse», la parola dell'Atto II, proprio nel momento
+in cui la sala sta imparando la differenza sarebbe l'errore più costoso possibile. Da qui anche il
+rifiuto di restaurare **sopra** l'originale: i conteggi combacerebbero, e la differenza sparirebbe
+proprio perché il restore è riuscito.
+
+---
+
+### La pulizia va scritta per il cammino che fallisce
+
+> L'helper della prova chiamava `check_returncode()` prima di restituire l'output. Ma il nome della
+> collezione da cancellare lo annuncia la scena, sulla prima riga: sollevando prima, nessuno sapeva
+> più che cosa pulire — e la collezione era già piena.
+
+Fonte: [registro operativo, nota 206](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché il fallimento è **esattamente** il caso in cui la pulizia serve di
+più, ed è l'unico che di solito non si prova. La forma che funziona è banale una volta vista: un
+helper di prova non solleva, restituisce il codice di uscita insieme all'output, e l'asserzione
+viene dopo che il chiamante ha raccolto ciò che gli serve per rimettere a posto.

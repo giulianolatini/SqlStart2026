@@ -561,6 +561,67 @@ def test_una_corsa_a_durata_conta_le_scritture_invece_di_saperle_prima() -> None
     assert riepilogo.fallite > 0
 
 
+def test_una_corsa_si_ferma_quando_la_condizione_cade() -> None:
+    # `finche` esiste per la fase del dump dell'Atto III: il carico deve coprire **quella**
+    # finestra, non una durata scelta a caso. Con una durata fissa il dump occuperebbe una
+    # frazione del campione — mezzo secondo su venti, misurato — e il crollo che la scena
+    # esiste per mostrare finirebbe diluito in una media che non lo vede.
+    archivio = InMemoryStore()
+    restano = iter([True] * 3)
+
+    riepilogo = WorkloadRunner(
+        archivio, OrologioCheScorre(ISTANTE, passo_s=0.001), RecordingSink()
+    ).esegui(durata_s=60.0, finche=lambda: next(restano, False))
+
+    assert 0 < riepilogo.scritture <= 3
+    assert archivio.count({}) == riepilogo.documenti_confermati
+
+
+def test_la_durata_resta_un_tetto_anche_con_la_condizione() -> None:
+    # Le due condizioni si sommano invece di escludersi, e il verso conta: la condizione è
+    # il limite **vero**, la durata è la rete di sicurezza. Un dump che non tornasse più
+    # lascerebbe il carico a girare davanti alla sala, e la scena non finirebbe da sé.
+    riepilogo = WorkloadRunner(
+        InMemoryStore(), OrologioCheScorre(ISTANTE, passo_s=0.001), RecordingSink()
+    ).esegui(durata_s=0.05, finche=lambda: True)
+
+    assert 0 < riepilogo.scritture <= 50
+
+
+def test_una_condizione_senza_tetto_non_e_un_limite() -> None:
+    # Una condizione che dipende da un processo esterno non è una garanzia di terminazione:
+    # se il `mongodump` si pianta, `finche` resta vero per sempre. Il tetto non è
+    # ridondante, ed esigerlo qui costa una riga e toglie una scena appesa dal palco.
+    with pytest.raises(ValueError, match="finché"):
+        WorkloadRunner(InMemoryStore(), FakeClock(ISTANTE), RecordingSink()).esegui(
+            finche=lambda: True
+        )
+
+
+def test_anche_i_lettori_si_fermano_sulla_condizione() -> None:
+    # I lettori hanno una condizione di terminazione tutta loro, `_si_legge_ancora`, e una
+    # `finche` che fermasse i soli scrittori li lascerebbe girare fino al tetto: la fase
+    # durerebbe un minuto invece del mezzo secondo del dump.
+    archivio = InMemoryStore()
+    archivio.insert_many([{"indice": posto} for posto in range(PAGINA)])
+    visti = 0
+
+    def finche() -> bool:
+        nonlocal visti
+        visti += 1
+        return visti <= 20
+
+    riepilogo = WorkloadRunner(
+        archivio,
+        OrologioCheScorre(ISTANTE, passo_s=0.001),
+        RecordingSink(),
+        scrittori=0,
+        lettori=1,
+    ).esegui(durata_s=1.0, finche=finche)
+
+    assert 0 < riepilogo.letture <= 21
+
+
 def test_il_conteggio_delle_scritture_regge_i_tentativi() -> None:
     # Tre tentativi per una sola scrittura logica: due `RetryAttempted` e tre
     # `WriteFailed`, che devono contare **una** scrittura fallita e non tre.

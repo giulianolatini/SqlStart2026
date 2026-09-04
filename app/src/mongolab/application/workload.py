@@ -67,6 +67,7 @@ __all__ = [
     "OPERAZIONE_SCRITTURA",
     "PAGINA",
     "PAGINE_LETTE",
+    "Continua",
     "Genera",
     "Latenze",
     "Legge",
@@ -118,6 +119,23 @@ Il gemello di `Genera`, dall'altro lato: riceve l'archivio e il numero d'ordine 
 e restituisce il conto dei documenti letti. È il gancio con cui il Task 16 misura *la sua*
 interrogazione — un `aggregate`, una `find` con un filtro selettivo — senza che
 `WorkloadRunner` sappia niente di query.
+"""
+
+Continua = Callable[[], bool]
+"""Si va avanti? La domanda che il carico fa a qualcun altro, prima di ogni operazione.
+
+`durata_s` sa quando finire perché glielo si è detto prima; questa condizione lo scopre
+mentre la corsa va. Serve alla scena del backup a caldo, dove il carico deve coprire
+**esattamente** la finestra del `mongodump`: una durata fissa la sceglierebbe a caso, e un
+dump da mezzo secondo dentro un campione da venti finirebbe diluito in una media che non
+mostra il crollo che la scena esiste per mostrare.
+
+Non sostituisce il limite, lo restringe: `esegui` la accetta solo insieme a `scritture` o
+a `durata_s`, perché una condizione che dipende da un processo esterno resta vera per
+sempre se quel processo si pianta.
+
+**La chiamano tutti i worker, ognuno dal proprio thread.** Chi la scrive deve reggerlo: un
+`threading.Event` va bene, un contatore incrementato a mano no.
 """
 
 PAGINA = 20
@@ -352,6 +370,7 @@ class WorkloadRunner:
         scritture: int | None = None,
         *,
         durata_s: float | None = None,
+        finche: Continua | None = None,
         per_scrittura: int = 1,
         genera: Genera = documento_progressivo,
         legge: Legge = pagina_ciclica,
@@ -369,7 +388,17 @@ class WorkloadRunner:
         scrittore è passato, alza `fine`. Farlo qui invece che in un contatore condiviso
         fra i worker toglie un lucchetto dal cammino caldo e mette la condizione di
         terminazione in un thread solo, che è già l'invariante del §6.3.
+
+        `finche` si somma al limite invece di sostituirlo, e il verso conta: la condizione
+        è il limite **vero** — la corsa finisce quando il dump finisce — e la durata resta
+        la rete di sicurezza che fa terminare la scena anche se il dump non torna più.
         """
+        if finche is not None and scritture is None and durata_s is None:
+            raise ValueError(
+                "`finché` restringe un limite, non ne fa le veci: una condizione che "
+                "dipende da un processo esterno resta vera per sempre se quel processo "
+                "si pianta. Va data insieme a `scritture` o a `durata_s`, che è il tetto."
+            )
         if (scritture is None) == (durata_s is None):
             raise ValueError(
                 "una corsa si limita in un modo solo: o `scritture`, quante ne fa, o "
@@ -405,12 +434,20 @@ class WorkloadRunner:
         with ThreadPoolExecutor(max_workers=max(1, len(turni) + self._lettori)) as pool:
             futuri: list[Future[None]] = [
                 pool.submit(
-                    self._turno, coda, primo, passo, quante, scadenza, per_scrittura, genera
+                    self._turno,
+                    coda,
+                    primo,
+                    passo,
+                    quante,
+                    scadenza,
+                    finche,
+                    per_scrittura,
+                    genera,
                 )
                 for primo, passo, quante in turni
             ]
             futuri += [
-                pool.submit(self._corsa_lettore, coda, scadenza, fine, legge)
+                pool.submit(self._corsa_lettore, coda, scadenza, finche, fine, legge)
                 for _ in range(self._lettori)
             ]
             scrittori_aperti = len(turni)
@@ -516,11 +553,12 @@ class WorkloadRunner:
         passo: int,
         quante: int | None,
         scadenza: datetime | None,
+        finche: Continua | None,
         per_scrittura: int,
         genera: Genera,
     ) -> None:
         try:
-            for scrittura in self._ordini(primo, passo, quante, scadenza):
+            for scrittura in self._ordini(primo, passo, quante, scadenza, finche):
                 documenti = [
                     genera(scrittura * per_scrittura + posto)
                     for posto in range(per_scrittura)
@@ -530,7 +568,12 @@ class WorkloadRunner:
             coda.put(_Finito(lettore=False))
 
     def _ordini(
-        self, primo: int, passo: int, quante: int | None, scadenza: datetime | None
+        self,
+        primo: int,
+        passo: int,
+        quante: int | None,
+        scadenza: datetime | None,
+        finche: Continua | None,
     ) -> Iterator[int]:
         """I numeri d'ordine che tocca a questo scrittore, finché ce ne sono o c'è tempo.
 
@@ -538,10 +581,16 @@ class WorkloadRunner:
         cominciasse un inserimento a scadenza già passata lo porterebbe comunque a termine,
         e con un `insert_many` lento la durata misurata supererebbe quella chiesta senza
         che nessuno sappia di quanto.
+
+        La condizione si guarda **prima dell'orologio**, perché è il limite vero: quando è
+        lei a fermare la corsa, la scadenza non viene nemmeno letta, e nelle prove il
+        `FakeClock` non conta un tempo che nessuno ha consumato.
         """
         ordine = primo
         prodotti = 0
         while quante is None or prodotti < quante:
+            if finche is not None and not finche():
+                return
             if scadenza is not None and self._orologio.now() >= scadenza:
                 return
             yield ordine
@@ -554,21 +603,25 @@ class WorkloadRunner:
         self,
         coda: "queue.Queue[Evento | _Lettura | _Finito]",
         scadenza: datetime | None,
+        finche: Continua | None,
         fine: threading.Event,
         legge: Legge,
     ) -> None:
         try:
             ordine = 0
-            while self._si_legge_ancora(scadenza, fine):
+            while self._si_legge_ancora(scadenza, finche, fine):
                 self._leggi(coda, ordine, legge)
                 ordine += 1
         finally:
             coda.put(_Finito(lettore=True))
 
     def _si_legge_ancora(
-        self, scadenza: datetime | None, fine: threading.Event
+        self,
+        scadenza: datetime | None,
+        finche: Continua | None,
+        fine: threading.Event,
     ) -> bool:
-        """Le due condizioni di terminazione di un lettore, e perché non si sommano.
+        """Le condizioni di terminazione di un lettore, e quali di esse si sommano.
 
         Con il limite di durata comanda la scadenza, e basta lei: gli scrittori finiscono
         nello stesso istante. Con quello di conteggio non c'è scadenza, e a fermare i
@@ -576,10 +629,16 @@ class WorkloadRunner:
         smesso — perché un lettore non ha un lavoro da esaurire e altrimenti girerebbe per
         sempre.
 
-        Sommarle sarebbe un difetto sottile: con `--writers 0` non c'è nessuno scrittore da
-        aspettare, `fine` è alzato dal primo istante, e una corsa di sole letture con una
-        durata di due minuti durerebbe zero.
+        Sommare **queste due** sarebbe un difetto sottile: con `--writers 0` non c'è
+        nessuno scrittore da aspettare, `fine` è alzato dal primo istante, e una corsa di
+        sole letture con una durata di due minuti durerebbe zero.
+
+        `finche` invece si somma a entrambe, e deve: se fermasse i soli scrittori, i
+        lettori resterebbero a girare fino al tetto, e la fase del dump durerebbe il minuto
+        della rete di sicurezza invece del mezzo secondo del `mongodump`.
         """
+        if finche is not None and not finche():
+            return False
         if scadenza is not None:
             return self._orologio.now() < scadenza
         return not fine.is_set()

@@ -26,6 +26,7 @@ affermazione in **cronaca in diretta**.
 | 12 | [12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md) | chi conosce le classi concrete, e che cosa si scopre la prima volta che si esegue davvero contro un MongoDB acceso |
 | 13 | [13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md](13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md) | perché lo stesso stack ha due indirizzi, e come si dimostra che un client non parla con l'indirizzo che gli hai dato |
 | 14 | [14-la-scena-del-failover-e-i-due-numeri.md](14-la-scena-del-failover-e-i-due-numeri.md) | la sesta porta nata da un'impossibilità, il decimo evento, e i due numeri che dicono se il failover è avvenuto davvero |
+| 15 | [15-il-backup-a-caldo-e-la-finestra-che-si-misura.md](15-il-backup-a-caldo-e-la-finestra-che-si-misura.md) | perché la finestra di una misura non si sceglie a tavolino, dove girano gli strumenti che nell'immagine non ci sono, e perché il restore scrive accanto e mai sopra |
 
 Si leggono in ordine, ma nessuna dipende dalle altre per essere comprensibile. Chi arriva da una
 domanda precisa può entrare dal punto giusto.

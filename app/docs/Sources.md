@@ -2209,3 +2209,163 @@ il puntatore e il motivo per cui riguardano `mongolab`.
 | [S-018](../../docs/Sources.md#s-018) | `Live` di Rich aggiorna quattro volte al secondo per impostazione predefinita, regolabile con `refresh_per_second` — e **non nomina mai i thread** | [04-eventi-del-driver-e-concorrenza.md](04-eventi-del-driver-e-concorrenza.md) |
 | [S-007](../../docs/Sources.md#s-007) | con `directConnection=false` «the client attempts to discover all servers in the replica set» | [01-architettura-esagonale.md](01-architettura-esagonale.md) |
 | [S-013](../../docs/Sources.md#s-013) | `testcontainers-python` non conosce i replica set | [05-tipi-prove-e-guardie.md](05-tipi-prove-e-guardie.md) |
+
+<a id="m-044"></a>
+### M-044 — Gli strumenti di backup copiati nell'immagine dell'applicazione non partono: manca `libgssapi_krb5.so.2`
+
+- **Data:** 2026-09-04
+- **Comando:** un `Dockerfile` a due stadi che prende i due binari dall'immagine `mongo` pinnata
+  e li mette in quella `python` pinnata, entrambe da `tools/images.env`:
+  ```dockerfile
+  FROM ${MONGO_IMAGE} AS strumenti
+  FROM ${PYTHON_IMAGE}
+  COPY --from=strumenti /usr/bin/mongodump /usr/bin/mongorestore /usr/bin/
+  ```
+  poi `docker run --rm --entrypoint mongodump <immagine> --version`.
+- **Output:** la costruzione **riesce** (exit 0). L'esecuzione esce con **127**:
+  ```
+  mongodump: error while loading shared libraries: libgssapi_krb5.so.2:
+  cannot open shared object file: No such file or directory
+  ```
+- **Che cosa dimostra:** che i due strumenti non sono binari statici. Sono compilati contro le
+  librerie Kerberos del sistema su cui l'immagine `mongo` è costruita, e `python:3.13-slim` —
+  che è slim proprio perché non le ha — non le fornisce. La copia riesce e il container si
+  costruisce: il guasto arriva alla prima esecuzione, cioè nel momento peggiore.
+- **Perché è stata fatta:** perché l'Atto III deve eseguire `mongodump`, e metterlo nell'immagine
+  dell'applicazione era la strada che sembrava più corta. Provarla è costato cinque minuti;
+  scoprirlo in sala sarebbe costato la scena. Il risultato è [ADR-0100](../../docs/Decision.md#adr-0100):
+  gli strumenti restano nei nodi, dove ci sono già e dove funzionano.
+- **Riserve:** la via d'uscita esiste ed è `apt-get install mongodb-database-tools`, ma aggiunge
+  all'immagine un pacchetto che nessun `FROM` dichiara — e `check_stack.py` verifica proprio che
+  ogni base sia pinnata ([ADR-0093](../../docs/Decision.md#adr-0093)) — oltre a richiedere rete
+  al `build`, che il laboratorio offline non ha. Non è stata provata perché sarebbe stata scartata
+  comunque.
+
+<a id="m-045"></a>
+### M-045 — `mongodump --readPreference=secondary --oplog` dentro un nodo, con la password su stdin: riesce in mezzo secondo
+
+- **Data:** 2026-09-04
+- **Comando:** la riga che `SubprocessBackup` costruisce ed esegue, mostrata dalla scena stessa:
+  ```
+  docker compose --env-file tools/images.env --env-file docker/02-replicaset/.env \
+    -f docker/02-replicaset/compose.yaml exec -T mongo-rs-1 \
+    mongodump --host rs0/mongo-rs-1:27017,mongo-rs-2:27017,mongo-rs-3:27017 \
+    --out /tmp/mongolab-backup --username admin --authenticationDatabase admin \
+    --readPreference=secondary --oplog
+  ```
+  La password **non c'è**: viaggia su `stdin`, come [ADR-0054](../../docs/Decision.md#adr-0054)
+  prescrive e come [M-025](#m-025) ha reso obbligatorio.
+- **Output:** exit 0, venti righe di avanzamento, e come ultima `dumped 72 oplog entries`. Durata
+  del processo misurata dal lato Python: **476, 446 e 404 ms** in tre esecuzioni su `lab` con
+  circa 54 000 documenti.
+- **Che cosa dimostra:** tre cose insieme. Che l'autenticazione su stdin funziona anche
+  attraverso `docker compose exec -T` — cioè che il metodo di M-025 regge un livello di
+  annidamento in più; che `--oplog` è accettato quando l'indirizzo è una *seed list* con il nome
+  del set davanti; e che la riga è **mostrabile**, perché ciò che resta in `argv` non contiene
+  segreti. La scena la stampa per intero, ed è la riga che il Blocco 2 sta spiegando.
+- **Perché è stata fatta:** perché `demo backup-live` doveva sapere se il comando che avrebbe
+  costruito era eseguibile prima che ci fosse una scena attorno.
+- **Riserve:** mezzo secondo è la durata su un `lab` di dimostrazione, e non dice niente su un
+  database vero — la pagina dei backup cita [S-060](../../docs/Sources.md#s-060), che quella coppia
+  di strumenti la raccomanda per «small deployments». Qui il numero serve solo a sapere quanto dura
+  la finestra che la scena misura, che è il motivo per cui quella finestra non poteva essere fissa
+  ([ADR-0101](../../docs/Decision.md#adr-0101)).
+
+<a id="m-046"></a>
+### M-046 — `--readPreference=secondary` sposta davvero le letture: il primario passa da +15 a +0
+
+- **Data:** 2026-09-04
+- **Comando:** `serverStatus().opcounters.query` letto sui tre membri — `localhost:27021/2/3` con
+  `directConnection` — prima e dopo lo stesso dump, una volta senza `--readPreference` e una volta
+  con `--readPreference=secondary`. Un secondo di attesa fra il dump e la seconda lettura, perché
+  il conteggio è aggiornato dal nodo e non dal client.
+- **Output:**
+  ```
+  senza --readPreference (446 ms)      con --readPreference=secondary (404 ms)
+    mongo-rs-1   39 →  54   (+15)        mongo-rs-1   54 →  54   (+0)
+    mongo-rs-2  293 → 294   (+1)         mongo-rs-2  294 → 301   (+7)
+    mongo-rs-3  270 → 270   (+0)         mongo-rs-3  270 → 278   (+8)
+  ```
+- **Che cosa dimostra:** che l'opzione fa quello che dice, e che la promessa dell'Atto III non è
+  retorica. Senza, tutte le letture del dump cadono sul primario — che è il nodo che sta anche
+  ricevendo il carico. Con, il primario ne prende **zero**: le quindici si spostano sui due
+  secondari, distribuite fra i due perché la *seed list* li nomina entrambi e il driver degli
+  strumenti sceglie. Questa misura chiude il punto aperto che
+  `docs/03-amministrazione/backup-restore.md` si era lasciato in fondo — «è probabilmente la prima
+  cosa da fare in produzione, e non è stata misurata».
+- **Perché è stata fatta:** perché la scena mette in fila due ritmi e dichiara che il dump non fa
+  crollare il throughput. Se le letture del dump colpissero il primario, quella dichiarazione
+  dipenderebbe dal caso; sapendo che non lo colpiscono, si sa **perché** non crolla, che è
+  un'altra cosa da sapere che non crolla.
+- **Riserve:** il `+1` su `mongo-rs-2` nella prima colonna non è del dump — è il traffico di
+  fondo del replica set, o la lettura di questa stessa sonda. Il rapporto fra 15 e 0 è così netto
+  che un'unità di rumore non cambia la conclusione, ma è la ragione per cui la misura si legge come
+  ordine di grandezza e non come conteggio esatto. La distribuzione fra i due secondari (7 e 8) non
+  è governata da niente che sia stato dichiarato qui: è la selezione del driver, e su un'altra
+  macchina può cadere diversamente.
+
+<a id="m-047"></a>
+### M-047 — L'Atto III per intero: il carico non si ferma, e nella copia mancano 106 documenti su 3 908
+
+- **Data:** 2026-09-04
+- **Comando:** le due scene di fila, dall'host, sullo stack 02:
+  ```
+  uv run --directory app mongolab demo backup-live --target rs --sink plain --carico 6
+  uv run --directory app mongolab demo restore --target rs --sink plain \
+    --from /tmp/mongolab-backup --collection carico-20260904-115619
+  ```
+  La seconda riga è quella che la prima ha stampato: `demo backup-live` la scrive già completa,
+  compreso il nome della collezione di carico.
+- **Output:**
+  ```
+  ritmo       prima 595/s · durante 692/s · calo -16.2%
+  dump        /tmp/mongolab-backup · 3908 documenti in collezione
+              dumped 72 oplog entries
+  carico      3629 scritture · 3629 confermate · p95 66.3 ms
+  sotto dump  279 scritture · 279 confermate · p95 68.7 ms
+
+  restore     3908 all'origine · 3802 nella copia · differenza 106
+              /tmp/mongolab-backup → lab_ripristinato
+              106 scritti mentre il dump era in corso: stanno nell'oplog, che il
+              restore non riapplica
+  ```
+- **Che cosa dimostra:** che le due promesse dell'Atto III reggono, e che sono due promesse
+  diverse. La prima è che **il servizio non si ferma**: durante il dump sono passate 279 scritture,
+  tutte confermate, con un p95 di 68,7 ms contro i 66,3 di prima. La seconda è che **la copia
+  a caldo è incompleta, e di quanto si vede**: dei 3 908 documenti presenti alla fine, nella copia
+  ce ne sono 3 802 — mancano i 106 arrivati dopo che `mongodump` era già passato su quella
+  collezione. Dei 279 scritti nella finestra del dump, 173 sono entrati nella copia e 106 no: la
+  fotografia è stata scattata mentre la scena si muoveva.
+- **Perché è stata fatta:** perché il Passo 1 del Task 14 chiede che il throughput «non crolli, e
+  va visto, non affermato», e il Passo 2 che la verifica dei conteggi stia a schermo.
+- **Riserve:** il `calo -16.2%` è un calo **negativo**, cioè il ritmo è salito. Non è un errore di
+  calcolo ed è la ragione per cui il rapporto scrive la percentuale con il segno invece di
+  concludere: la finestra del dump è mezzo secondo, e su mezzo secondo il rumore vale più del
+  costo del dump. Il numero da guardare non è la percentuale, sono le due conte assolute che le
+  stanno accanto — 3 629 scritture prima, 279 durante, zero rifiutate. Questa esecuzione è una
+  sola: la percentuale cambia a ogni giro e non va messa su una slide.
+
+<a id="m-048"></a>
+### M-048 — Dopo l'Atto II, `mongo-rs-1` si riprende il primato in 4,0 secondi, e finché non l'ha fatto l'Atto III si rifiuta
+
+- **Data:** 2026-09-04
+- **Comando:** i due Atti di fila, che è l'ordine in cui vanno in scena:
+  ```
+  uv run --directory app pytest tests/integration/test_scenari.py
+  ```
+  Al termine della scena del failover, `hello().isWritablePrimary` interrogato ogni secondo sul
+  nodo pubblicato all'host.
+- **Output:** **4,0 s**. Senza attendere, `demo backup-live` esce con **codice 2** e il messaggio
+  del suo guardiano: «il nodo pubblicato su localhost:27021 non è il primario».
+- **Che cosa dimostra:** che il `priority: 2` di `docker/02-replicaset/init/10-rs-initiate.js`
+  mantiene la promessa per cui è stato messo — il ruolo torna al primo membro da sé, senza che
+  nessuno intervenga — ma non la mantiene istantaneamente. Sono quattro secondi di scaletta fra
+  l'Atto II e l'Atto III, e chi presenta li deve avere.
+- **Perché è stata fatta:** perché eseguendo i due Atti di fila la prova d'integrazione è
+  diventata rossa, **e aveva ragione**: il guardiano ha rifiutato una scena che sarebbe fallita
+  alla prima scrittura. Il difetto non era nel codice, era nel momento in cui lo si chiamava. La
+  misura serve a dire quanto dura quel momento.
+- **Riserve:** quattro secondi sono ciò che si è misurato dopo una scena che comprende già una
+  fase di `recupero` di cinque secondi; a freddo, subito dopo il rientro del nodo, il tempo è
+  presumibilmente più lungo. La prova concede sessanta secondi e non quattro, perché un'attesa
+  tarata sulla misura migliore è un'attesa che fallisce sulla macchina di qualcun altro.

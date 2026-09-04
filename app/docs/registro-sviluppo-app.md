@@ -1046,6 +1046,133 @@ qui.
 | Porte del dominio | 5 | **6** |
 | Eventi del dominio | 9 | **10** |
 
+## Task 14 — Il backup a caldo, e una finestra che non si poteva scegliere a tavolino
+
+**Fatto il 4 settembre 2026.** Il capitolo che ne esce è
+[15-il-backup-a-caldo-e-la-finestra-che-si-misura.md](15-il-backup-a-caldo-e-la-finestra-che-si-misura.md).
+
+È l'Atto III del Blocco 2, quattro minuti: `mongodump --readPreference=secondary --oplog` **sotto
+carico**, con i due ritmi accostati, e poi il restore con i conteggi a schermo. Il piano lo scriveva
+in quattro passi e li ha ottenuti tutti. Quello che non poteva prevedere è che il Passo 1 avrebbe
+dovuto cominciare **da dove il comando gira**, e che la risposta non era quella che il Task 9 aveva
+lasciato in sospeso.
+
+### La strada corta si costruisce e non parte
+
+Il debito era scritto dal Task 9: nell'immagine dell'applicazione `mongodump` non c'è
+([M-039](Sources.md#m-039)), e la scelta fra installarlo e restare su `docker exec` era rimandata a
+qui. La scelta è stata fatta **provando**, e la prova è durata cinque minuti.
+
+Un `Dockerfile` a due stadi che copia i due binari dall'immagine `mongo` pinnata dentro quella
+`python` pinnata si costruisce **senza un avviso**, e poi esce con **127**:
+`libgssapi_krb5.so.2: cannot open shared object file` ([M-044](Sources.md#m-044)). I due strumenti
+non sono statici; `python:3.13-slim` è slim proprio perché non ha le librerie Kerberos contro cui
+sono compilati. Il guasto non arriva al `build`, che sarebbe il momento buono: arriva alla prima
+esecuzione, cioè il peggiore possibile — in sala.
+
+Le altre tre strade sono state scartate senza provarle, ognuna perché avrebbe disfatto una decisione
+già presa: `apt-get install mongodb-database-tools` aggiunge un pacchetto che nessun `FROM` dichiara
+e vuole rete al `build` ([ADR-0093](../../docs/Decision.md#adr-0093)); il socket Docker nel container
+rovescia la decisione da cui è nata la sesta porta ([ADR-0095](../../docs/Decision.md#adr-0095)); il
+volume condiviso non serve, perché il dump sopravvive nel filesystem del nodo fra i due comandi.
+Resta quella giusta, ed è [ADR-0100](../../docs/Decision.md#adr-0100): **gli strumenti stanno dove
+sono già**, e la riga per entrarci la costruisce `ComandiCompose.dentro`, che esisteva dal Task 12.
+
+Ne segue la cosa meno intuitiva del task: le due metà della stessa scena hanno **due indirizzi
+diversi** per lo stesso cluster. L'applicazione parla con `localhost:27021`; `mongodump`, che gira
+dentro `mongo-rs-1`, ha bisogno di `rs0/mongo-rs-1:27017,…`. È `host_interno_di`, e le due viste del
+`Bersaglio` — nate al Task 13 per un'altra ragione — servono qui **contemporaneamente**, nello
+stesso comando, per la prima volta.
+
+### La finestra non si sceglie: la detta il dump
+
+Il `mongodump` della collezione della demo dura **476 ms** ([M-045](Sources.md#m-045)). Se la fase
+«durante» durasse i venti secondi che uno sceglierebbe a tavolino, il dump occuperebbe il due per
+cento del campione: **un crollo totale del throughput per tutta la durata del dump comparirebbe come
+un calo del due per cento**, e la promessa del copione risulterebbe verificata da una misura
+incapace di smentirla.
+
+Da qui `finche: Continua | None` in `WorkloadRunner.esegui`, che **si somma** al limite invece di
+sostituirlo: la condizione è il limite vero, `durata_s` è la rete di sicurezza. E da qui il rifiuto
+di riceverlo da solo, con un `ValueError` invece di un predefinito silenzioso — una condizione che
+dipende da un processo esterno resta vera per sempre se quel processo si pianta, ed è esattamente il
+caso che rovinerebbe la scena. È [ADR-0101](../../docs/Decision.md#adr-0101).
+
+### Il calo esce negativo, e resta negativo
+
+Contro lo stack vero: `ritmo prima 595/s · durante 692/s · calo -16.2%`
+([M-047](Sources.md#m-047)). Un calo negativo, cioè un ritmo salito, perché la finestra è mezzo
+secondo e su mezzo secondo il rumore pesa più del dump. Sarebbe stato facile scrivere «il dump non
+ha impatto» e avere ragione quel giorno; il rapporto scrive la percentuale **con il segno** e lascia
+concludere alla sala. I numeri che contano sono quelli assoluti accanto: 279 scritture durante il
+dump, tutte confermate, p95 da 66,3 a 68,7 ms.
+
+C'è anche una ragione misurata per cui il primario non se ne accorge. Senza `--readPreference` il
+primario prende **+15** letture; con `--readPreference=secondary` ne prende **+0**, e le quindici
+vanno sui due secondari ([M-046](Sources.md#m-046)). La misura **chiude un punto aperto di
+`feature/02`**: `docs/03-amministrazione/backup-restore.md` elencava quell'opzione fra le cose «non
+misurate», e adesso la pagina ha la sua §8 applicativa e il punto dichiarato chiuso.
+
+### Due guardie, e l'asimmetria da mettere in scaletta
+
+`demo failover` gira dentro la rete e dall'host si rifiuta. `demo backup-live` e `demo restore` fanno
+l'esatto contrario, e non è un'incoerenza: il failover ha bisogno che il driver veda la topologia, il
+backup ha bisogno del client Docker che nel container non c'è. La seconda guardia rifiuta gli altri
+due stack **sulla proprietà** e non sul nome — `bersaglio.da_rete.replica is not None` — con due
+messaggi diversi, perché su un mongod solo l'oplog non c'è e attraverso un `mongos` c'è ma senza un
+istante comune.
+
+E c'è un terzo controllo, che sembra ridondante e non lo è: `attendi_il_primario` fa `ping`, e con
+`directConnection` un `ping` **riesce anche su un secondario**. Dopo l'Atto II il nodo pubblicato è
+ancora secondario per qualche secondo, e senza il controllo esplicito su `topology().ha_primario` il
+guasto comparirebbe alla prima scrittura, con il carico partito e la collezione a metà. Quanti
+secondi, adesso si sa: **4,0** ([M-048](Sources.md#m-048)).
+
+### Il restore accanto, e perché non è solo prudenza
+
+`--into lab` è rifiutato, e la ragione è più sottile del riflesso «non sovrascrivere». I 106
+documenti che alla copia mancano **sono ancora nell'originale**: un restore sopra `lab` li
+lascerebbe dove sono, i conteggi combacerebbero, e la differenza sparirebbe *proprio perché* il
+restore è riuscito. La scena mostrerebbe zero e insegnerebbe il contrario di quello che deve
+insegnare. È [ADR-0102](../../docs/Decision.md#adr-0102), che nello stesso passaggio decide anche
+che la riga successiva la stampa la scena precedente: la collezione di carico ha la data nel nome, e
+ricopiarla a mano davanti alla sala è il modo più prevedibile di sbagliare un comando.
+
+### Due lezioni dalle prove, e nessuna delle due sul codice di produzione
+
+**Una prova nuova che passa alla prima non ha ancora provato niente.** La prova d'integrazione è
+stata rotta apposta — `dove=None` in `strumento_di` — per vederla rossa con il messaggio giusto:
+`open …/app/docker/02-replicaset/compose.yaml: no such file or directory`. Quel messaggio è
+riportato verbatim nella docstring della prova, perché sapere come si presenta il guasto vale quanto
+sapere che la prova lo prende.
+
+**La pulizia deve sopravvivere al fallimento.** La prima stesura di `_dall_host` chiamava
+`check_returncode()` prima di restituire l'output, e lasciava spazzatura: il nome della collezione di
+carico lo annuncia la scena sulla sua prima riga, quindi se il helper solleva, il chiamante non ha
+mai saputo che cosa pulire — e la collezione era già stata creata e riempita. Il fallimento è
+esattamente il caso in cui la pulizia serve di più. La versione buona restituisce `tuple[int, str]`,
+non solleva mai, e il codice di uscita si asserisce **dopo** aver letto il nome.
+
+Fuori dai due, una terza cosa vale la riga. `test_container.py::test_dentro_la_rete_il_replica_set_ha_un_primario`
+è fallita **una volta**, con `mongo-rs-3 sconosciuto` e `mongod attivo da 1 m 14 s`. Da sola: verde.
+L'intera suite da uno stack assestato: verde. Era la scia dei failover fatti a mano poco prima — la
+scoperta SDAM incompleta in un container appena avviato — e non un difetto di questo task. Una prova
+che fallisce una volta e poi passa è una prova da **spiegare**, non da rieseguire finché non tace.
+
+### Numeri
+
+| | Prima | Dopo |
+|---|---|---|
+| Prove unitarie | 523 | **582** |
+| Prove di integrazione | 48 | **49** |
+| File controllati da mypy | 64 | 64 |
+| Prove degli strumenti | 166 | 166 |
+| ADR del repository | 99 | **102** |
+| Fonti esterne nel registro dell'app | 17 | 17 |
+| Misure nel registro dell'app | 43 | **48** |
+| Porte del dominio | 6 | 6 |
+| Eventi del dominio | 10 | 10 |
+
 ---
 
 ## Che cosa manca
@@ -1083,7 +1210,7 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | L'ispettore dipende da `config`, che il manuale dichiara interno | [A-013, riserve](Sources.md#a-013) | dichiarata: la difesa è la prova sullo stack 03, che diventa rossa se il formato cambia |
 | `ordered=False` è stato misurato solo su istanza singola in loopback | [M-021, riserve](Sources.md#m-021) | se il Blocco 3 mostrerà scritture lente |
 | Il sink testuale per le registrazioni di riserva | [decisioni](decisioni-che-vincolano-app.md#adr-0050) | il sink **c'è** dal Task 10 ([`PlainSink`](11-tre-rese-e-un-solo-thread-che-disegna.md#plainsink-il-flush-non-è-prudenza-è-il-contenuto)); resta collegarlo a `tools/registra-terminale.py`, al Task 18 |
-| Uccidere il client `docker exec` non uccide `mongodump` dentro il container | [10](10-processi-esterni-e-il-verdetto-che-manca.md#literatore-abbandonato-e-un-limite-che-va-detto) | **non chiuso al Task 12, e la scadenza si sposta**: l'immagine dell'applicazione non contiene gli strumenti da riga di comando di MongoDB ([M-039](Sources.md#m-039)), quindi dal container `mongodump` non parte affatto. Oggi non fa danno — nessun comando della CLI collega la porta `BackupTool` — e la scelta fra installarli e restare su `docker exec` è del Task 14 |
+| Uccidere il client `docker exec` non uccide `mongodump` dentro il container | [10](10-processi-esterni-e-il-verdetto-che-manca.md#literatore-abbandonato-e-un-limite-che-va-detto) | **la scelta è stata fatta al Task 14, il limite resta**: gli strumenti restano nei nodi e si raggiungono con `docker compose exec`, perché copiarli nell'immagine produce un container che non parte ([M-044](Sources.md#m-044), [ADR-0100](../../docs/Decision.md#adr-0100)). Adesso la porta `BackupTool` è collegata a due comandi veri, quindi il limite è **esposto**: un Ctrl-C durante `demo backup-live` lascia `mongodump` a girare dentro il nodo. Task 18, con la registrazione che è il controllo |
 | `Progress.completati` non porta l'unità: documenti per il dump, byte per il restore | [10](10-processi-esterni-e-il-verdetto-che-manca.md#un-inconveniente-dichiarato-completati-non-porta-con-sé-lunità) | Task 10 è passato senza chiederlo: la TUI stampa la percentuale, non il numero. Torna al Task 18 se una registrazione mostrerà il conteggio |
 | Il formato del testo di `mongodump`/`mongorestore` è quello della 100.18.0 | [M-024, riserve](Sources.md#m-024) | dichiarata: la difesa è la suite di integrazione, che diventa rossa se il formato cambia |
 | Un `BrokenPipeError` scrivendo la password a un processo già morto non è gestito | [M-023, riserve](Sources.md#m-023) | la prima volta che si riprodurrà: gestire un caso mai visto è codice che nessuna prova copre |
@@ -1107,6 +1234,11 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | Le prove d'integrazione **dichiarano** il punto di vista invece di leggerlo dall'ambiente | [ADR-0090, riserve](../../docs/Decision.md#adr-0090) | dichiarata: è una precauzione contro una `MONGOLAB_PUNTO_DI_VISTA` esportata a mano, non contro il codice |
 | La scena dal vivo richiede **due terminali**: uno mostra, l'altro esegue il guasto annunciato | [14](14-la-scena-del-failover-e-i-due-numeri.md#il-guasto-entra-da-una-porta-e-la-porta-è-nata-da-unimpossibilità) | non si chiude, si prova: è [ADR-0095](../../docs/Decision.md#adr-0095), e l'alternativa era il socket Docker nel container. Da portare al PO prima delle prove generali |
 | `--step` con `--sink rich` è **rifiutato**: dal palco la resa è `plain` | [ADR-0098, riserve](../../docs/Decision.md#adr-0098) | Task 18: se in proiezione `plain` non reggesse, la decisione va riaperta, con la sospensione del `Live` come prima candidata |
+| Le due scene dell'Atto III girano **solo dall'host** e **solo su `rs`**: è l'inverso di `demo failover` | [15](15-il-backup-a-caldo-e-la-finestra-che-si-misura.md#due-guardie-nuove-e-unasimmetria-voluta) | non si chiude, si mette in scaletta: fra Atto II e Atto III si cambia terminale, ed è [ADR-0100](../../docs/Decision.md#adr-0100). Da portare al PO con la stessa urgenza dei due terminali del failover |
+| Fra l'Atto II e l'Atto III il primario ci mette **quattro secondi** a tornare al suo posto | [M-048](Sources.md#m-048) | dichiarata: sono misurati **dopo** una scena che comprende già cinque secondi di recupero, quindi a freddo il tempo è presumibilmente più lungo. La prova concede sessanta secondi proprio per questo |
+| `--readPreference=secondary` è misurato una volta sola, e la ripartizione fra i due secondari non la governa niente di dichiarato | [M-046, riserve](Sources.md#m-046) | dichiarata: è la selezione del driver degli strumenti, e su un'altra macchina può cadere diversamente. La conclusione — il primario passa da +15 a +0 — non dipende da quella ripartizione |
+| Che davanti a un `mongodump` che esce con uno lo schermo dica la cosa giusta entro un secondo è **ragionato, non misurato** | [15](15-il-backup-a-caldo-e-la-finestra-che-si-misura.md#chi-sta-su-quale-thread-e-perché-due-e-non-tre) | il `finally` che ferma il carico è provato con i doppi; il comportamento in scena no. Task 18, insieme alle altre prove di come si presenta un guasto |
+| Il dump non esce dal nodo: `/tmp/mongolab-backup` vive dentro `mongo-rs-1` e sparisce con lui | [15](15-il-backup-a-caldo-e-la-finestra-che-si-misura.md#che-cosa-questo-capitolo-lascia-aperto) | non si chiude qui: dove vada una copia vera, con quale rotazione e quale cifratura, è la stessa lacuna che dichiara [la pagina canonica](../../docs/03-amministrazione/backup-restore.md) |
 | `--mode sospendi` non ha una prova di integrazione: che `pause` dia un **timeout** invece di un connection refused è affermato, non misurato | [14](14-la-scena-del-failover-e-i-due-numeri.md#il-supplemento-irraggiungibile-ma-vivo) | il Passo 3 del Task 13 ha prodotto il codice e non la misura. Prima delle prove generali, perché è la scena che il pubblico non si aspetta |
 | I 10 019 ms dipendono dalle impostazioni di elezione **di questo lab** | [M-043, riserve](Sources.md#m-043) | dichiarata: la frase in sala è «su questo lab», non «in MongoDB» |
 | «Zero scritture perse» dipende da un default **del server**, non da una scelta dell'applicazione | [M-041](Sources.md#m-041) | dichiarata: un `setDefaultRWConcern` più debole cambierebbe il numero, ed è una cosa da dire, non un difetto da correggere |

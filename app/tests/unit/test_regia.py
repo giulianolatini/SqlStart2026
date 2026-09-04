@@ -141,6 +141,69 @@ def test_gli_env_file_precedono_il_file_compose_e_senza_di_loro_non_si_parte() -
     assert riga.index("--env-file") < riga.index("-f")
 
 
+def test_il_frasario_sa_anche_entrare_in_un_nodo() -> None:
+    """`mongodump` non sta nell'immagine dell'applicazione, quindi si va dov'è.
+
+    Copiare i due binari da `MONGO_IMAGE` dentro `python:3.13-slim` non basta: `ldd` ne
+    trova uno solo che manca, `libgssapi_krb5.so.2`, e il container si ferma prima di
+    stampare la versione ([M-044](../../../docs/Sources.md#m-044)). La strada è entrare nel
+    nodo, e la riga per entrarci **è del frasario**: gli `--env-file` obbligatori, il file
+    compose e il progetto sono già suoi, e a scriverli una seconda volta divergerebbero.
+
+    `-T` e non `-i`: senza terminale allocato, ma con lo stdin collegato — che è dove passa
+    la password (M-025, ADR-0054).
+    """
+    comandi = ComandiCompose(
+        file_compose=COMPOSE,
+        ambiente=(Path("/lab/tools/images.env"),),
+        progetto="lab-02",
+    )
+
+    riga = comandi.dentro("mongo-rs-1", "mongodump", "--oplog")
+
+    assert riga == (
+        "docker",
+        "compose",
+        "--env-file",
+        "/lab/tools/images.env",
+        "-p",
+        "lab-02",
+        "-f",
+        "/lab/docker/02-replicaset/compose.yaml",
+        "exec",
+        "-T",
+        "mongo-rs-1",
+        "mongodump",
+        "--oplog",
+    )
+
+
+def test_entrare_in_un_nodo_e_comandarlo_condividono_il_preambolo() -> None:
+    """Le due righe divergono dopo il file compose, e mai prima.
+
+    È l'unica asserzione che tiene: il giorno in cui si aggiunge un'opzione globale — un
+    terzo `--env-file`, un `--profile` — deve comparire in tutte e due senza che nessuno se
+    ne ricordi.
+    """
+    comandi = ComandiCompose(
+        file_compose=COMPOSE,
+        ambiente=(Path("/lab/tools/images.env"), Path("/lab/docker/02-replicaset/.env")),
+    )
+
+    ferma = comandi.per("ferma", "mongo-rs-1")
+    entra = comandi.dentro("mongo-rs-1", "mongodump")
+
+    fino_al_file = ferma.index(str(COMPOSE)) + 1
+    assert ferma[:fino_al_file] == entra[:fino_al_file]
+
+
+def test_entrare_senza_dire_che_cosa_fare_non_e_un_comando() -> None:
+    """`docker compose exec -T mongo-rs-1` da solo aprirebbe l'entrypoint del container e
+    resterebbe lì: in sala, una scena appesa senza spiegazione."""
+    with pytest.raises(ValueError, match="comando"):
+        ComandiCompose(file_compose=COMPOSE).dentro("mongo-rs-1")
+
+
 def test_un_verbo_che_non_esiste_si_ferma_qui() -> None:
     with pytest.raises(KeyError):
         ComandiCompose(file_compose=COMPOSE).per("distruggi", "mongo-rs-1")

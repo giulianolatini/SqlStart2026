@@ -6253,3 +6253,182 @@ vedevano, perché i doppi rispondono subito e un cluster vero no.
 
 **Fonti:** [A-017](../app/docs/Sources.md#a-017), [M-042](../app/docs/Sources.md#m-042),
 [ADR-0007](#adr-0007), [ADR-0090](#adr-0090)
+
+---
+
+<a id="adr-0100"></a>
+## ADR-0100 — Gli strumenti di backup restano nei nodi, e l'Atto III si gira dall'host
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** la scena del backup a caldo ha bisogno di eseguire `mongodump` e `mongorestore`.
+La strada che sembrava ovvia — metterli nell'immagine dell'applicazione, così che `mongolab`
+li chiami come chiama qualunque altro sottoprocesso — è stata provata e non funziona. Copiare i
+due binari dall'immagine `mongo` pinnata dentro `python:3.13-slim` produce un container che si
+ferma su `libgssapi_krb5.so.2: cannot open shared object file`
+([M-044](../app/docs/Sources.md#m-044)): gli strumenti sono compilati contro le librerie Kerberos
+di Debian, che nell'immagine slim non ci sono. La via d'uscita apparente — `apt-get install
+mongodb-database-tools` — aggiungerebbe all'immagine un pacchetto che nessun `FROM` dichiara, e
+`check_stack.py` verifica proprio che ogni base sia pinnata ([ADR-0093](#adr-0093)); in più
+richiederebbe rete al `build`, che il laboratorio offline non ha.
+
+Ci sono già tre copie di quegli strumenti, e sono nei nodi: l'immagine `mongo` li contiene.
+Raggiungerli vuol dire `docker compose exec`, e chi lo esegue deve avere il socket del demone
+Docker. Il container dell'applicazione non ce l'ha, perché il Task 9 ha deciso di non montarglielo.
+L'host sì.
+
+**Decisione:** `mongodump` e `mongorestore` girano **dentro un nodo dello stack**, raggiunti con
+la stessa `ComandiCompose` che la regia del failover usa per fermare un container; `demo
+backup-live` e `demo restore` girano **dall'host**, e da dentro la rete si rifiutano dicendo
+perché. È l'inverso esatto di `demo failover`, che vuole la scoperta della topologia e quindi la
+rete Compose ([M-019](../app/docs/Sources.md#m-019)).
+
+Tre conseguenze sono parte della decisione:
+
+- **L'indirizzo che gli strumenti ricevono è quello di rete**, non quello dell'host: il processo
+  gira dentro un container, dove `mongo-rs-1` si risolve e `localhost` è sé stesso. Lo costruisce
+  `host_interno_di`, nella forma `rs0/uno,due,tre`.
+- **Le due scene accettano solo un bersaglio che si presenti come replica set.** `--oplog` vuole
+  un oplog, e uno standalone non ne ha ([ADR-0022](#adr-0022)); attraverso un `mongos` il dump
+  attraversa gli shard uno per uno, senza un istante comune, e non è la fotografia che la scena
+  promette. Il rifiuto guarda la proprietà — `Vista.replica is not None` — e non il nome del
+  bersaglio.
+- **Il nodo predefinito è il primo dello stack, non il primario.** Il dump atterra nel filesystem
+  del container in cui gira, e `demo restore` deve ritrovarlo lì qualche minuto dopo: un
+  predefinito che seguisse il primario cambierebbe nodo dopo l'elezione dell'Atto II, e la copia
+  finirebbe in un container mentre il restore la cercherebbe in un altro.
+
+**Conseguenze:** l'immagine dell'applicazione resta quella che è — un `FROM` pinnato e niente
+`apt` — e il Task 9 non va riaperto. Il prezzo è un'asimmetria che chi presenta deve conoscere: i
+due Atti consecutivi del Blocco 2 si lanciano da due posti diversi, e la riga
+`make ... DOVE=host` non è intercambiabile con quella di dentro. È dichiarata nella docstring del
+gruppo `demo`, nei due rifiuti, e in `docs/03-amministrazione/backup-restore.md`.
+
+Ce n'è una seconda, più sottile: dall'host il client arriva su `localhost:27021` con
+`directConnection`, quindi scrive **solo** su `mongo-rs-1`. Se l'Atto II è appena passato, quel
+nodo è rientrato da poco e non ha ancora ripreso il ruolo — `priority: 2` glielo restituisce, ma
+non istantaneamente ([M-048](../app/docs/Sources.md#m-048) misura 4,0 s). Perciò `demo
+backup-live` verifica di avere un primario **in vista** prima di far partire il carico, e non si
+accontenta del `ping`: in connessione diretta un `ping` riesce anche su un secondario, e il guasto
+comparirebbe alla prima scrittura, con la scena già cominciata.
+
+**Alternative scartate.**
+
+- *Gli strumenti nell'immagine dell'applicazione.* Misurata e fallita ([M-044](../app/docs/Sources.md#m-044)).
+- *`apt-get install mongodb-database-tools` nel `Dockerfile`.* Rompe la verifica dei `FROM`
+  pinnati di [ADR-0093](#adr-0093) e vuole rete al `build`.
+- *Montare il socket Docker nel container dell'applicazione.* Ribalterebbe una decisione del Task
+  9 per una scena sola, e darebbe al container dell'applicazione il potere di fermare l'host.
+- *`docker exec` invece di `docker compose exec`.* Nominerebbe il container invece del servizio e
+  perderebbe i due `--env-file` obbligatori ([M-040](../app/docs/Sources.md#m-040)), cioè la sola
+  cosa che fa arrivare la credenziale senza passarla in `argv` ([ADR-0054](#adr-0054)).
+- *Un volume condiviso per il dump, così che l'applicazione lo veda.* Il container
+  dell'applicazione è `--rm` e senza volumi scrivibili, e aggiungerne uno per far vedere un file
+  che nessuno legge dall'applicazione è complessità senza destinatario: fra `backup-live` e
+  `restore` il dump deve sopravvivere, e nel filesystem del nodo sopravvive già.
+
+**Fonti:** [M-019](../app/docs/Sources.md#m-019), [M-040](../app/docs/Sources.md#m-040),
+[M-044](../app/docs/Sources.md#m-044), [M-045](../app/docs/Sources.md#m-045),
+[M-048](../app/docs/Sources.md#m-048), [ADR-0022](#adr-0022), [ADR-0054](#adr-0054),
+[ADR-0093](#adr-0093), [ADR-0095](#adr-0095)
+
+---
+
+<a id="adr-0101"></a>
+## ADR-0101 — La finestra della seconda misura è quella del dump, e non una durata scelta prima
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** l'Atto III mette due ritmi accanto: il carico da solo, e lo stesso carico mentre
+`mongodump` copia. Il secondo va misurato **esattamente** nella finestra in cui il dump gira, e
+quella finestra non si sa prima: [M-045](../app/docs/Sources.md#m-045) misura 476 ms su un `lab`
+da poche migliaia di documenti, ma dipende dalla macchina e dal dataset.
+
+Con una durata fissa il conto si sfalsa in tutti e due i versi. Se la finestra è più lunga del
+dump, i secondi dopo la fine entrano nella media e diluiscono l'effetto: un crollo totale di mezzo
+secondo dentro un campione da venti comparirebbe come un calo del due per cento. Se è più corta, si
+misura un pezzo di dump e si dichiara un numero che vale per un'altra durata. In tutti e due i casi
+la scena mostra un numero che non è quello che dice di mostrare — cioè fa la cosa che il §6.3 del
+design rimprovera ai benchmark altrui.
+
+**Decisione:** `WorkloadRunner.esegui` accetta `finche: Continua | None`, una condizione che i
+worker interrogano prima di ogni operazione; la scena del backup la lega alla vita del processo
+`mongodump`, e il carico finisce quando finisce il dump.
+
+**`finche` restringe un limite, non ne fa le veci.** Passarla senza `scritture` né `durata_s` alza
+`ValueError`: una condizione che dipende da un processo esterno resta vera per sempre se quel
+processo si pianta, e una scena che non termina in sala è peggio di una scena che termina male. Il
+tetto resta, come rete di sicurezza, ed è esposto come `--tetto`.
+
+**Conseguenze:** i due numeri della prima riga sono confrontabili, e la percentuale che li separa
+significa qualcosa. Il prezzo è che la seconda finestra può essere breve — mezzo secondo — e quindi
+rumorosa: la scena lo dichiara mostrando anche le due conte assolute, così chi guarda vede su
+quante scritture il numero è stato calcolato. Il rapporto non conclude al posto del pubblico: scrive
+il calo con il segno e si ferma lì, e un calo negativo — il ritmo che sale — è un risultato
+possibile e non un errore di calcolo.
+
+**Alternative scartate.**
+
+- *Una durata fissa per la seconda fase.* È il difetto descritto sopra.
+- *Fermare il carico dall'esterno con un `Event` gestito dalla riga di comando.* Metterebbe in
+  `cli.py` la conoscenza di quando il dump finisce, che è dello scenario; e la condizione la
+  chiamano tutti i worker dai loro thread, quindi va documentata come tale — cosa che il tipo
+  `Continua` fa nel posto giusto.
+- *Misurare il ritmo campionandolo a intervalli e ritagliando la finestra dopo.* Aggiunge un
+  campionatore, un intervallo arbitrario, e l'errore di quantizzazione proprio dove la finestra è
+  più corta.
+
+**Fonti:** [M-045](../app/docs/Sources.md#m-045), [M-047](../app/docs/Sources.md#m-047),
+[ADR-0019](#adr-0019), [ADR-0100](#adr-0100)
+
+---
+
+<a id="adr-0102"></a>
+## ADR-0102 — Il restore scrive accanto all'originale, mai sopra, e la scena precedente detta la riga successiva
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** ciò che l'Atto III deve far vedere è che una copia presa **a caldo** non contiene i
+documenti scritti mentre veniva presa. Quel divario è il prezzo di non aver fermato il servizio, ed
+è l'unico numero della scena che il pubblico deve portarsi via.
+
+Restaurare sopra il database di origine lo cancella. I documenti mancanti nella copia sono ancora
+lì, nell'originale; `mongorestore` non toglie ciò che trova, quindi i conteggi combacerebbero — e
+combacerebbero **proprio perché** il restore è riuscito. La scena si distruggerebbe da sé, in
+silenzio, e sembrerebbe un successo.
+
+Il divario non si può nemmeno colmare: `mongodump --oplog` porta via l'oplog della finestra, ma
+`--oplogReplay` è incompatibile con la rinomina dei namespace che serve a restaurare altrove
+([ADR-0084](#adr-0084)). O si restaura sopra riapplicando l'oplog, o si restaura accanto e si
+guarda la differenza. La seconda è la scena.
+
+**Decisione:** `demo restore` scrive in un database diverso — predefinito `lab_ripristinato` — e
+rifiuta `--into lab` nominando la ragione. Il rifiuto guarda il nome del database di partenza, non
+una lista di nomi vietati.
+
+Le due scene sono due comandi consecutivi sul palco, e il secondo consuma ciò che il primo ha
+lasciato nel nodo. Perciò: il percorso del dump ha un predefinito fisso (`/tmp/mongolab-backup`,
+non uno con la data), il database di destinazione ne ha un altro, e `demo backup-live` **stampa
+già scritta** la riga di `demo restore` che gli va dietro, con dentro il nome della collezione di
+carico — che porta l'orario nel nome e non si indovina. Ricopiarlo a mano davanti alla sala è il
+modo più prevedibile di sbagliare un comando.
+
+**Conseguenze:** dopo la scena restano un database in più e una collezione di carico in più, che
+`make reset-02` porta via. Il rapporto scrive la differenza e ne dice la provenienza in una riga —
+«scritti mentre il dump era in corso: stanno nell'oplog, che il restore non riapplica» — perché un
+numero senza la sua causa accanto viene letto come un guasto.
+
+Misurato sullo stack vero: 3 908 documenti all'origine, 3 802 nella copia, **106** di differenza
+([M-047](../app/docs/Sources.md#m-047)).
+
+**Alternative scartate.**
+
+- *Restaurare sopra `lab`.* Descritto sopra: cancella la prova.
+- *Un percorso di dump con la data, per non sovrascrivere il precedente.* Renderebbe obbligatorio
+  ricopiarlo fra i due comandi, che è precisamente ciò che la riga suggerita evita. Chi ne vuole
+  due li nomina con `--out`.
+- *Un comando solo che faccia dump e restore di fila.* Toglierebbe la pausa in cui chi presenta
+  spiega che cosa sta per succedere, e nasconderebbe che sono due strumenti diversi con due
+  invocazioni diverse — che è metà di quello che la sezione sta insegnando.
+
+**Fonti:** [M-047](../app/docs/Sources.md#m-047), [ADR-0084](#adr-0084), [ADR-0100](#adr-0100)

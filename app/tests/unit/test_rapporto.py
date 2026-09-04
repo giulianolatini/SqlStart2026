@@ -13,20 +13,30 @@ invece di diventare zeri, e che nessuna riga sfori le cento colonne.
 
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Mapping, Sequence
 
 from mongolab.application.scenari import EsitoFailover
+from mongolab.application.scenari import EsitoBackup, EsitoRestore, Ritmo
 from mongolab.application.topologia import Bilancio, Interruzione
 from mongolab.application.workload import Latenze, Riepilogo
 from mongolab.domain.modelli import (
     ContoShard,
     DescrizioneServer,
     DescrizioneTopologia,
+    Progress,
     RuoloServer,
     TipoTopologia,
 )
 from mongolab.domain.porte import ClusterInspector
-from mongolab.presentation.rapporto import IGNOTO, cronaca, rapporto, riassunto
+from mongolab.presentation.rapporto import (
+    IGNOTO,
+    copia,
+    cronaca,
+    rapporto,
+    riassunto,
+    ripristino,
+)
 from mongolab.presentation.righe import COLONNE_SALA
 
 from tests.doppi.ispettore import FakeInspector
@@ -526,4 +536,123 @@ def test_la_cronaca_elenca_le_fasi_nell_ordine_in_cui_sono_andate() -> None:
 
 def test_la_cronaca_sta_nel_budget_di_sala() -> None:
     for linea in cronaca(SCENA).splitlines():
+        assert len(linea) <= COLONNE_SALA, linea
+
+
+# --- L'Atto III: il ritmo del dump, e i due conteggi del restore ------------------------
+
+DESTINAZIONE = Path("/lab/backup/2026-09-18")
+
+SANO = Ritmo(replace(CORSA, scritture=4000, riuscite=4000, fallite=0, documenti_confermati=4000), durata_s=4.0)
+"""Mille documenti al secondo con il cluster tranquillo."""
+
+SOTTO_DUMP = Ritmo(replace(CORSA, scritture=460, riuscite=460, fallite=0, documenti_confermati=460), durata_s=0.5)
+"""Novecentoventi al secondo durante il dump: un otto per cento in meno, che è la forma
+del numero che il copione promette — un calo che si vede e non un crollo."""
+
+COPIA = EsitoBackup(
+    fasi=("carico", "dump", "bilancio"),
+    prima=SANO,
+    durante=SOTTO_DUMP,
+    destinazione=DESTINAZIONE,
+    avanzamenti=(
+        Progress("dump", 0, None, "writing lab.carico"),
+        Progress("dump", 4460, 4460, "done dumping lab.carico (4460 documents)"),
+    ),
+    documenti=4460,
+)
+
+
+def test_la_copia_apre_con_i_due_ritmi_accostati() -> None:
+    """La tesi dell'Atto III sta sulla prima riga, come i due numeri del failover.
+
+    «Il dump non fa crollare il throughput» si verifica leggendo due numeri vicini. Se il
+    secondo stesse tre righe sotto il primo, la sala dovrebbe fare la sottrazione da sé
+    mentre la scena è già passata.
+    """
+    prima = copia(COPIA).splitlines()[0]
+
+    assert "1000" in prima
+    assert "920" in prima
+
+
+def test_la_copia_dice_di_quanto_e_calato_il_ritmo() -> None:
+    testo = copia(COPIA)
+
+    assert "8" in testo
+    assert "%" in testo
+
+
+def test_senza_un_ritmo_prima_la_copia_non_inventa_una_percentuale() -> None:
+    """Un `-inf%` sulla slide sarebbe peggio di nessun numero: `IGNOTO` si legge come
+    «non c'era»."""
+    vuoto = replace(
+        COPIA, prima=Ritmo(replace(CORSA, scritture=0, riuscite=0, fallite=0, documenti_confermati=0), 1.0)
+    )
+
+    assert IGNOTO in copia(vuoto)
+
+
+def test_la_copia_dice_dove_e_finito_il_dump() -> None:
+    """Il percorso serve per il `demo restore` che viene dopo: senza, chi guida la demo
+    deve ricordarselo."""
+    assert str(DESTINAZIONE) in copia(COPIA)
+
+
+def test_la_copia_riporta_l_ultima_riga_del_dump() -> None:
+    """`done dumping lab.carico (4460 documents)` è la conferma che `mongodump` dà di sé.
+    Riportarla è la differenza fra dire che il dump è andato bene e mostrarlo."""
+    assert "done dumping" in copia(COPIA)
+
+
+def test_la_copia_sta_nel_budget_di_sala() -> None:
+    for linea in copia(COPIA).splitlines():
+        assert len(linea) <= COLONNE_SALA, linea
+
+
+RIPRISTINO = EsitoRestore(
+    fasi=("restore", "verifica"),
+    sorgente=DESTINAZIONE,
+    destinazione="lab_restore",
+    documenti_origine=4460,
+    documenti_destinazione=4402,
+    avanzamenti=(Progress("restore", 4402, 4402, "4402 document(s) restored"),),
+)
+
+
+def test_il_ripristino_apre_con_i_due_conteggi() -> None:
+    prima = ripristino(RIPRISTINO).splitlines()[0]
+
+    assert "4460" in prima
+    assert "4402" in prima
+
+
+def test_il_ripristino_dice_la_differenza_e_non_la_chiama_errore() -> None:
+    """Cinquantotto documenti mancanti sono il prezzo del backup a caldo, non un guasto.
+
+    Sono quelli scritti **durante** la finestra del dump: stanno nell'oplog che questo
+    restore non riapplica, perché `--oplogReplay` è incompatibile con la rinomina dei
+    namespace che serve a restaurare altrove. Una riga che li chiamasse «persi» direbbe
+    una cosa falsa nel momento in cui la sala sta imparando la cosa vera.
+    """
+    testo = ripristino(RIPRISTINO)
+
+    assert "58" in testo
+    assert "perse" not in testo
+    assert "perduti" not in testo
+
+
+def test_un_ripristino_che_combacia_lo_dice() -> None:
+    intero = replace(RIPRISTINO, documenti_destinazione=4460)
+
+    assert "0" in ripristino(intero).splitlines()[0]
+
+
+def test_il_ripristino_nomina_i_due_database() -> None:
+    assert "lab_restore" in ripristino(RIPRISTINO)
+    assert str(DESTINAZIONE) in ripristino(RIPRISTINO)
+
+
+def test_il_ripristino_sta_nel_budget_di_sala() -> None:
+    for linea in ripristino(RIPRISTINO).splitlines():
         assert len(linea) <= COLONNE_SALA, linea

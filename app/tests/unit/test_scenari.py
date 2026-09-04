@@ -13,6 +13,7 @@ aritmetica, questa prova fallirebbe con un numero che qualcuno riconosce.
 """
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Sequence
 
 import pytest
@@ -20,23 +21,37 @@ import pytest
 from mongolab.application.scenari import (
     Attesa,
     Copione,
+    CopioneBackup,
+    CopioneRestore,
     CronometroInterruzione,
+    EsitoBackup,
     EsitoFailover,
+    EsitoRestore,
     ModoGuasto,
+    Ritmo,
+    ScenarioBackup,
     ScenarioFailover,
+    ScenarioRestore,
     senza_attesa,
     sorveglia,
 )
-from mongolab.application.workload import WorkloadRunner
-from mongolab.domain.eventi import Evento, FaseIniziata, TopologyChanged
+from mongolab.application.workload import Riepilogo, WorkloadRunner
+from mongolab.domain.eventi import (
+    BackupProgressed,
+    Evento,
+    FaseIniziata,
+    TopologyChanged,
+)
 from mongolab.domain.modelli import (
     DescrizioneServer,
     DescrizioneTopologia,
     Documento,
+    Progress,
     RuoloServer,
     TipoTopologia,
 )
 from tests.doppi import (
+    FakeBackup,
     InMemoryStore,
     OrologioCheScorre,
     RecordingSink,
@@ -420,3 +435,336 @@ def test_sorveglia_rifiuta_zero_giri() -> None:
     orologio = OrologioCheScorre(ISTANTE)
     with pytest.raises(ValueError, match="giri"):
         sorveglia(lambda: [], RecordingSink(), orologio, giri=0, intervallo_ms=500.0)
+
+
+# --- L'Atto III: il backup a caldo, con il ritmo accanto --------------------------------
+
+DESTINAZIONE = Path("/lab/backup/2026-09-18")
+
+AVANZAMENTI = (
+    Progress("dump", 0, None, "writing lab.carico to /lab/backup"),
+    Progress("dump", 5000, 20000, "lab.carico  5000/20000  (25.0%)"),
+    Progress("dump", 20000, 20000, "done dumping lab.carico (20000 documents)"),
+)
+"""Tre righe come quelle vere: la prima senza denominatore, perché `mongodump` annuncia
+la collezione prima di sapere quanto è grande. È il caso che tiene onesta
+`Progress.percentuale`, ed è la ragione per cui `totali` è opzionale."""
+
+
+TETTO_LARGHISSIMO = 3600.0
+"""Un'ora di tetto, che nelle prove non si raggiunge mai — ed è il punto.
+
+Con `OrologioCheScorre(passo_s=0.001)` un'ora di scadenza sono tre milioni e mezzo di
+scritture: se `finche` non arrivasse ai worker, queste prove non fallirebbero con
+un'asserzione, resterebbero appese. Il conteggio piccolo che asseriscono è la prova che il
+dump — e non il tetto — ha fermato il carico."""
+
+
+def _scena_backup(
+    strumento: FakeBackup,
+    *,
+    archivio: InMemoryStore | None = None,
+    sink: RecordingSink | None = None,
+    copione: CopioneBackup | None = None,
+) -> tuple[ScenarioBackup, InMemoryStore, RecordingSink]:
+    """Lo scenario con tutti i doppi al loro posto. Il ponte è vuoto: qui non c'è
+    topologia da raccontare, e un `PonteFinto` aggiungerebbe eventi che nessuna di queste
+    prove guarda."""
+    archivio = archivio if archivio is not None else InMemoryStore()
+    sink = sink if sink is not None else RecordingSink()
+    orologio = OrologioCheScorre(ISTANTE, passo_s=0.001)
+    scenario = ScenarioBackup(
+        archivio,
+        WorkloadRunner(archivio, orologio, sink),
+        strumento,
+        orologio,
+        sink,
+        lambda: [],
+        copione=copione
+        if copione is not None
+        else CopioneBackup(
+            destinazione=DESTINAZIONE, carico_s=0.02, tetto_s=TETTO_LARGHISSIMO
+        ),
+    )
+    return scenario, archivio, sink
+
+
+def test_la_scena_del_backup_ha_tre_fasi_nell_ordine() -> None:
+    """Carico, dump, bilancio — e il carico **prima** del dump, non insieme.
+
+    Senza la prima fase il numero della seconda non dice niente: «duemila scritture al
+    secondo durante il dump» è un dato solo se accanto c'è quante ne faceva prima. È la
+    stessa ragione per cui `ScenarioFailover` ha una fase «carico» che sembra non servire
+    a niente.
+    """
+    scenario, _, sink = _scena_backup(FakeBackup(AVANZAMENTI))
+
+    esito = scenario.esegui()
+
+    assert esito.fasi == ("carico", "dump", "bilancio")
+    annunci = [evento for evento in sink.eventi if isinstance(evento, FaseIniziata)]
+    assert [evento.fase for evento in annunci] == ["carico", "dump", "bilancio"]
+
+
+def test_il_dump_va_dove_dice_il_copione_e_una_volta_sola() -> None:
+    strumento = FakeBackup(AVANZAMENTI)
+    scenario, _, _ = _scena_backup(strumento)
+
+    esito = scenario.esegui()
+
+    assert strumento.dump_chiesti == [DESTINAZIONE]
+    assert esito.destinazione == DESTINAZIONE
+
+
+def test_ogni_avanzamento_del_dump_arriva_a_schermo_mentre_procede() -> None:
+    """Gli avanzamenti diventano eventi, e l'ultimo evento del dump precede il bilancio.
+
+    Che siano eventi e non un valore di ritorno è tutta la differenza fra mostrare il dump
+    e raccontarlo dopo: la porta promette «l'avanzamento **mentre** procede», e questa è
+    la prova che lo scenario non lo accumula per consegnarlo alla fine.
+    """
+    scenario, _, sink = _scena_backup(FakeBackup(AVANZAMENTI))
+
+    esito = scenario.esegui()
+
+    passati = [e for e in sink.eventi if isinstance(e, BackupProgressed)]
+    assert [e.avanzamento for e in passati] == list(AVANZAMENTI)
+    assert esito.avanzamenti == AVANZAMENTI
+    ultimo_dump = max(i for i, e in enumerate(sink.eventi) if isinstance(e, BackupProgressed))
+    bilancio = next(
+        i
+        for i, e in enumerate(sink.eventi)
+        if isinstance(e, FaseIniziata) and e.fase == "bilancio"
+    )
+    assert ultimo_dump < bilancio
+
+
+def test_il_carico_della_seconda_fase_finisce_quando_finisce_il_dump() -> None:
+    """Il motivo per cui `finche` esiste, verificato dove serve.
+
+    Il tetto è un'ora: se a fermare il carico fosse lui, questa prova non tornerebbe. È
+    anche la ragione per cui la finestra del dump si misura invece di sceglierla — mezzo
+    secondo di `mongodump` dentro venti secondi di carico produce una media che il crollo
+    non lo mostra nemmeno se c'è.
+    """
+    scenario, _, _ = _scena_backup(FakeBackup(AVANZAMENTI))
+
+    esito = scenario.esegui()
+
+    assert esito.durante.riepilogo.scritture < 1000
+
+
+def test_un_dump_che_si_rompe_non_lascia_il_carico_a_girare() -> None:
+    """L'errore risale, e il carico si ferma **prima** che risalga.
+
+    Senza lo spegnimento nel `finally`, l'errore del dump uscirebbe dal ciclo e il pool
+    aspetterebbe il carico fino al tetto: un'eccezione consegnata un'ora dopo il fatto. In
+    sala sarebbe uno schermo fermo senza spiegazione; qui sarebbe una prova appesa.
+    """
+    rotto = FakeBackup(AVANZAMENTI[:2], errore=RuntimeError("mongodump: exit 1"))
+    scenario, _, sink = _scena_backup(rotto)
+
+    with pytest.raises(RuntimeError, match="exit 1"):
+        scenario.esegui()
+
+    passati = [e for e in sink.eventi if isinstance(e, BackupProgressed)]
+    assert len(passati) == 2
+
+
+def test_il_bilancio_conta_i_documenti_sopravvissuti_al_dump() -> None:
+    archivio = InMemoryStore()
+    archivio.insert_many([{"indice": posto} for posto in range(7)])
+    scenario, _, _ = _scena_backup(FakeBackup(AVANZAMENTI), archivio=archivio)
+
+    esito = scenario.esegui()
+
+    assert esito.documenti == archivio.count({})
+    assert esito.documenti >= 7
+
+
+def test_anche_la_scena_del_backup_si_ferma_a_ogni_fase_con_step() -> None:
+    fermate: list[str] = []
+    attesa: Attesa = lambda evento: fermate.append(evento.fase)  # noqa: E731
+    scenario, _, _ = _scena_backup(FakeBackup(AVANZAMENTI))
+
+    scenario.esegui(attesa=attesa)
+
+    assert fermate == ["carico", "dump", "bilancio"]
+
+
+# --- Il ritmo: un riepilogo diventa un throughput solo se si sa la finestra -------------
+
+
+def _riepilogo(documenti: int) -> Riepilogo:
+    return Riepilogo(
+        scritture=documenti,
+        riuscite=documenti,
+        fallite=0,
+        ritentate=0,
+        documenti_confermati=documenti,
+        latenze=None,
+    )
+
+
+def test_il_ritmo_divide_i_documenti_per_la_finestra() -> None:
+    assert Ritmo(_riepilogo(2000), durata_s=2.0).documenti_al_secondo == 1000.0
+
+
+def test_una_finestra_nulla_non_produce_un_throughput_infinito() -> None:
+    """Zero secondi di finestra è un dump che è finito prima di cominciare — su una
+    macchina veloce con un database vuoto succede. Dividere per zero darebbe una slide con
+    `inf` sopra."""
+    assert Ritmo(_riepilogo(10), durata_s=0.0).documenti_al_secondo is None
+
+
+def test_la_tenuta_e_il_rapporto_fra_i_due_ritmi() -> None:
+    """Il numero che la promessa del copione mette alla prova: il dump non fa crollare il
+    ritmo. Uno significa nessun calo, zero virgola nove un dieci per cento."""
+    esito = _esito_backup(prima=1000.0, durante=900.0)
+
+    assert esito.tenuta == pytest.approx(0.9)
+    assert esito.calo_percentuale == pytest.approx(10.0)
+
+
+def test_senza_un_ritmo_prima_non_c_e_niente_da_confrontare() -> None:
+    esito = _esito_backup(prima=0.0, durante=900.0)
+
+    assert esito.tenuta is None
+    assert esito.calo_percentuale is None
+
+
+def _esito_backup(*, prima: float, durante: float) -> EsitoBackup:
+    return EsitoBackup(
+        fasi=("carico", "dump", "bilancio"),
+        prima=Ritmo(_riepilogo(int(prima)), durata_s=1.0),
+        durante=Ritmo(_riepilogo(int(durante)), durata_s=1.0),
+        destinazione=DESTINAZIONE,
+        avanzamenti=AVANZAMENTI,
+        documenti=int(prima) + int(durante),
+    )
+
+
+# --- L'Atto III, seconda metà: il restore e i due conteggi ------------------------------
+
+SORGENTE = Path("/lab/backup/2026-09-18")
+
+
+def _scena_restore(
+    strumento: FakeBackup,
+    *,
+    origine: InMemoryStore,
+    destinazione: InMemoryStore,
+    sink: RecordingSink | None = None,
+) -> tuple[ScenarioRestore, RecordingSink]:
+    sink = sink if sink is not None else RecordingSink()
+    scenario = ScenarioRestore(
+        origine,
+        destinazione,
+        strumento,
+        OrologioCheScorre(ISTANTE, passo_s=0.001),
+        sink,
+        copione=CopioneRestore(sorgente=SORGENTE, database="lab_restore"),
+    )
+    return scenario, sink
+
+
+def _archivio_con(quanti: int) -> InMemoryStore:
+    archivio = InMemoryStore()
+    if quanti:
+        archivio.insert_many([{"indice": posto} for posto in range(quanti)])
+    return archivio
+
+
+def test_la_scena_del_restore_ha_due_fasi_nell_ordine() -> None:
+    scenario, sink = _scena_restore(
+        FakeBackup(AVANZAMENTI),
+        origine=_archivio_con(10),
+        destinazione=_archivio_con(10),
+    )
+
+    esito = scenario.esegui()
+
+    assert esito.fasi == ("restore", "verifica")
+    annunci = [e.fase for e in sink.eventi if isinstance(e, FaseIniziata)]
+    assert annunci == ["restore", "verifica"]
+
+
+def test_il_restore_riceve_la_sorgente_e_il_database_di_destinazione() -> None:
+    """Su un database **diverso**, e non è un dettaglio di prudenza: un restore sopra
+    l'originale cancellerebbe la sola copia della differenza che la scena vuole mostrare —
+    e in sala non ci sarebbe modo di rifare la demo."""
+    strumento = FakeBackup(AVANZAMENTI)
+    scenario, _ = _scena_restore(
+        strumento, origine=_archivio_con(10), destinazione=_archivio_con(0)
+    )
+
+    esito = scenario.esegui()
+
+    assert strumento.restore_chiesti == [(SORGENTE, "lab_restore")]
+    assert esito.sorgente == SORGENTE
+    assert esito.destinazione == "lab_restore"
+
+
+def test_ogni_avanzamento_del_restore_arriva_a_schermo() -> None:
+    scenario, sink = _scena_restore(
+        FakeBackup(AVANZAMENTI),
+        origine=_archivio_con(3),
+        destinazione=_archivio_con(3),
+    )
+
+    esito = scenario.esegui()
+
+    passati = [e.avanzamento for e in sink.eventi if isinstance(e, BackupProgressed)]
+    assert passati == list(AVANZAMENTI)
+    assert esito.avanzamenti == AVANZAMENTI
+
+
+def test_i_due_conteggi_si_accostano_e_la_differenza_e_un_numero() -> None:
+    """Il dump è a caldo, quindi i due conteggi **possono** non combaciare, e lo scenario
+    non lo tratta come un errore.
+
+    `mongodump --oplog` porta via anche l'oplog della finestra, ma
+    `SubprocessBackup.restore` non lo riapplica: `--oplogReplay` è incompatibile con la
+    rinomina di namespace che serve a restaurare su un database diverso. Ciò che manca è
+    esattamente quello che è stato scritto **durante** il dump, e mostrarlo è metà della
+    lezione dell'Atto III. Dichiararlo un fallimento sarebbe l'altra metà, sbagliata.
+    """
+    scenario, _ = _scena_restore(
+        FakeBackup(AVANZAMENTI),
+        origine=_archivio_con(10),
+        destinazione=_archivio_con(7),
+    )
+
+    esito = scenario.esegui()
+
+    assert esito.documenti_origine == 10
+    assert esito.documenti_destinazione == 7
+    assert esito.differenza == 3
+    assert not esito.combaciano
+
+
+def test_un_restore_che_ritrova_tutto_combacia() -> None:
+    scenario, _ = _scena_restore(
+        FakeBackup(AVANZAMENTI),
+        origine=_archivio_con(10),
+        destinazione=_archivio_con(10),
+    )
+
+    esito = scenario.esegui()
+
+    assert esito.differenza == 0
+    assert esito.combaciano
+
+
+def test_anche_la_scena_del_restore_si_ferma_a_ogni_fase_con_step() -> None:
+    fermate: list[str] = []
+    attesa: Attesa = lambda evento: fermate.append(evento.fase)  # noqa: E731
+    scenario, _ = _scena_restore(
+        FakeBackup(AVANZAMENTI),
+        origine=_archivio_con(1),
+        destinazione=_archivio_con(1),
+    )
+
+    scenario.esegui(attesa=attesa)
+
+    assert fermate == ["restore", "verifica"]

@@ -453,14 +453,14 @@ che si rompe se l'applicazione gira sull'host e il cluster dentro Docker.
 
 Atto III del Blocco 2, quattro minuti.
 
-- [ ] **Passo 1.** `mongodump --readPreference=secondary --oplog` **sotto carico**, con il
+- [x] **Passo 1.** `mongodump --readPreference=secondary --oplog` **sotto carico**, con il
       throughput mostrato accanto: la promessa del copione è che non crolli, e va vista, non
       affermata.
-- [ ] **Passo 2.** `restore` su database di destinazione e verifica dei conteggi a schermo.
-- [ ] **Passo 3.** Saldare il rimando: `docs/04-mongosh/guida-mongosh.md` dichiara che
+- [x] **Passo 2.** `restore` su database di destinazione e verifica dei conteggi a schermo.
+- [x] **Passo 3.** Saldare il rimando: `docs/04-mongosh/guida-mongosh.md` dichiara che
       `mongodump`/`mongorestore` «sono materia di `feature/04`, insieme al backup a caldo». La
       pagina dei backup riceve la parte applicativa, e il rimando diventa un collegamento.
-- [ ] **Passo 4.** Commit: `feat: il backup a caldo come scena, e il rimando di mongosh saldato`.
+- [x] **Passo 4.** Commit: `feat: il backup a caldo come scena, e il rimando di mongosh saldato`.
 
 ---
 

@@ -6137,6 +6137,118 @@ si aspetta `giri - 1` volte e non `giri` — non aveva nessuna prova.
 
 Stato aggiornato: decisioni fino ad **ADR-0099**, verifiche fino a **V-074**, note di metodo fino
 alla **202**. Le suite: **166** prove per gli strumenti, **523** per l'applicazione più **48** di
-integrazione, `mypy --strict` verde su 64 file. Prossimo passo: **Task 14** del
-[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), che è anche dove si decide se
-`mongodump` entra nell'immagine ([M-039](../app/docs/Sources.md#m-039)).
+integrazione, `mypy --strict` verde su 64 file.
+
+---
+
+## 2026-09-04 — `feature/04`, Task 14: il backup a caldo, e una finestra che non si poteva scegliere
+
+Il Task 14 costruisce l'Atto III del Blocco 2: `mongodump --readPreference=secondary --oplog`
+**sotto carico**, con il ritmo di prima e quello di durante messi sulla stessa riga, e poi il
+restore con i conteggi a schermo. Ne escono due sottocomandi — `demo backup-live` e `demo restore`
+— tre ADR, cinque misure, e la §8 applicativa della pagina canonica dei backup. Le prove unitarie
+passano da **523 a 582**, quelle d'integrazione da **48 a 49**, `mypy --strict` resta verde su 64
+file.
+
+**Il debito del Task 9 è stato saldato provando, e la strada corta non funziona.** Nell'immagine
+dell'applicazione `mongodump` non c'è ([M-039](../app/docs/Sources.md#m-039)), e la scelta fra
+installarlo e restare su `docker exec` era rimandata a qui. Un `Dockerfile` a due stadi che copia i
+binari dall'immagine `mongo` pinnata dentro quella `python` pinnata **si costruisce senza un
+avviso**, e poi esce con **127**: `libgssapi_krb5.so.2: cannot open shared object file`
+([M-044](../app/docs/Sources.md#m-044)). I due strumenti sono compilati contro le librerie Kerberos
+del sistema dell'immagine `mongo`, e `python:3.13-slim` è slim proprio perché non le ha. Il guasto
+non arriva al `build`, che sarebbe il momento buono: arriva alla prima esecuzione.
+
+Le altre tre strade sono state scartate senza provarle, ognuna perché avrebbe disfatto una
+decisione già presa — `apt-get install mongodb-database-tools` aggiunge un pacchetto che nessun
+`FROM` dichiara e vuole rete al `build` ([ADR-0093](Decision.md#adr-0093)); il socket Docker nel
+container rovescia la decisione da cui è nata la sesta porta ([ADR-0095](Decision.md#adr-0095)); il
+volume condiviso non serve, perché il dump sopravvive nel filesystem del nodo fra i due comandi. È
+[ADR-0100](Decision.md#adr-0100): **gli strumenti restano dove sono già**, e l'Atto III si gira
+dall'host — l'esatto contrario dell'Atto II, che dall'host si rifiuta.
+
+**La finestra della seconda misura non si poteva scegliere.** Il `mongodump` della collezione della
+demo dura **476 ms** ([M-045](../app/docs/Sources.md#m-045)). Se la fase «durante» durasse i venti
+secondi che uno sceglierebbe a tavolino, il dump occuperebbe il due per cento del campione: un
+crollo totale del throughput per tutta la sua durata comparirebbe come un calo del due per cento, e
+la promessa del copione risulterebbe verificata da una misura incapace di smentirla. Da qui
+`finche` in `WorkloadRunner.esegui`, che **si somma** al limite invece di sostituirlo, e il rifiuto
+di riceverlo da solo con un `ValueError` invece che con un predefinito silenzioso
+([ADR-0101](Decision.md#adr-0101)).
+
+**Il calo esce negativo, e resta negativo.** Contro lo stack vero: `ritmo prima 595/s · durante
+692/s · calo -16.2%` ([M-047](../app/docs/Sources.md#m-047)). Il ritmo è **salito**, perché la
+finestra è mezzo secondo e su mezzo secondo il rumore pesa più del dump. Sarebbe stato facile
+scrivere «il dump non ha impatto» e avere ragione quel giorno; il rapporto scrive la percentuale con
+il segno e lascia concludere alla sala. I numeri che contano sono accanto: 279 scritture durante il
+dump, tutte confermate, p95 da 66,3 a 68,7 ms.
+
+**Un punto aperto di `feature/02` si chiude.** `docs/03-amministrazione/backup-restore.md` elencava
+`--readPreference=secondary` fra le cose non misurate — «è probabilmente la prima cosa da fare in
+produzione». Contando `serverStatus().opcounters.query` sui tre membri prima e dopo lo stesso dump:
+senza l'opzione il primario prende **+15** letture, con l'opzione ne prende **+0** e le quindici si
+spostano sui due secondari ([M-046](../app/docs/Sources.md#m-046)). La pagina riceve la sua §8
+applicativa, e il rimando che
+[`docs/04-mongosh/guida-mongosh.md`](04-mongosh/guida-mongosh.md) le faceva — «sono materia di
+`feature/04`, insieme al backup a caldo» — diventa un collegamento vero.
+
+**Un `ping` che riesce e non basta.** Dall'host si arriva a un nodo solo, con `directConnection`, e
+su un secondario un `ping` riesce lo stesso perché la lettura è ammessa: il guasto comparirebbe alla
+prima scrittura, con il carico partito e la collezione a metà. Serve un controllo esplicito su
+`topology().ha_primario`, e serve sapere quanto si aspetta: dopo l'Atto II, `mongo-rs-1` si riprende
+il ruolo in **4,0 secondi** grazie al suo `priority: 2` ([M-048](../app/docs/Sources.md#m-048)).
+Sono quattro secondi di scaletta fra un atto e l'altro, e chi presenta li deve avere.
+
+**Il restore scrive accanto, e non è solo prudenza.** `--into lab` è rifiutato perché i 106
+documenti che alla copia mancano **sono ancora nell'originale**: un restore sopra `lab` li
+lascerebbe dove sono, i conteggi combacerebbero, e la differenza sparirebbe *proprio perché* il
+restore è riuscito. La scena mostrerebbe zero e insegnerebbe il contrario di quello che deve
+insegnare ([ADR-0102](Decision.md#adr-0102)).
+
+### Note di metodo
+
+203. **Provare la strada corta costa meno che discuterla, e il risultato è più solido.** La copia
+     dei binari nell'immagine era la strada che sembrava ovvia. Provarla è costato cinque minuti e
+     ha prodotto un fatto — exit 127, con il nome della libreria mancante — invece di
+     un'argomentazione. La parte istruttiva è che **il `build` riesce**: una prova fermata al
+     «compila?» avrebbe concluso il contrario. La regola pratica: quando una scelta d'architettura
+     dipende da un fatto verificabile in cinque minuti, verificarlo, e assicurarsi che la verifica
+     arrivi fino all'**esecuzione** e non si fermi alla costruzione.
+
+204. **Una finestra di misura più larga dell'evento è una misura che non può smentire la propria
+     tesi.** Venti secondi di fase attorno a mezzo secondo di dump diluiscono un crollo totale in un
+     calo del due per cento: il numero sarebbe vero, la conclusione infondata, e nessuno se ne
+     accorgerebbe perché la tesi verrebbe confermata. La regola pratica: prima di scegliere la
+     durata di una misura, chiedersi quale risultato la smentirebbe; se nessuno lo può, la finestra
+     è sbagliata, non lo strumento.
+
+205. **Un limite che dipende da un processo esterno non è un limite.** `finche` è la condizione
+     giusta — la corsa finisce quando finisce il dump — ma se `mongodump` si pianta resta vera per
+     sempre. Riceverla da sola è un `ValueError` con la spiegazione dentro il messaggio, invece di
+     un predefinito silenzioso che avrebbe funzionato in tutte le prove e fallito una volta, dal
+     vivo. La regola pratica: ogni condizione di terminazione che interroga qualcosa fuori dal
+     processo va accompagnata da un tetto, e il codice deve **pretenderlo** invece di supplirlo.
+
+206. **La pulizia di una prova va scritta per il cammino che fallisce, non per quello che riesce.**
+     Il helper che lancia la scena chiamava `check_returncode()` prima di restituire l'output, e
+     lasciava spazzatura nel cluster: il nome della collezione da cancellare lo annuncia la scena
+     stessa, sulla prima riga, quindi sollevando prima di restituire il testo il chiamante non ha
+     mai saputo che cosa pulire — e la collezione era già stata creata e riempita. Il fallimento è
+     esattamente il caso in cui la pulizia serve di più. La regola pratica: un helper di prova non
+     solleva; restituisce il codice di uscita insieme all'output, e l'asserzione viene **dopo** che
+     il chiamante ha raccolto quello che gli serve per rimettere a posto.
+
+207. **Una prova che fallisce una volta e poi passa va spiegata, non rieseguita.** Una prova
+     d'integrazione è caduta con «`mongo-rs-3` sconosciuto» e «`mongod` attivo da 1 m 14 s». Da
+     sola: verde; l'intera suite da uno stack assestato: verde. La spiegazione è la scia dei
+     failover fatti a mano poco prima — scoperta SDAM incompleta in un container appena avviato — e
+     non un difetto del codice nuovo. Fermarsi al «ora passa» avrebbe lasciato in casa una prova
+     ritenuta capricciosa, che è il primo passo verso una suite che nessuno guarda. La regola
+     pratica: davanti a un fallimento non riproducibile, cercare **che cosa era diverso**, e
+     scriverlo; se non si trova, dirlo, ma non archiviarlo come rumore.
+
+Stato aggiornato: decisioni fino ad **ADR-0102**, verifiche fino a **V-074**, note di metodo fino
+alla **207**. Le suite: **166** prove per gli strumenti, **582** per l'applicazione più **49** di
+integrazione, `mypy --strict` verde su 64 file. Prossimo passo: **Task 15** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), `demo sharding`, dove l'evento
+`ChunkMigrated` trova finalmente chi lo emette — o si scopre che nessuno può.
