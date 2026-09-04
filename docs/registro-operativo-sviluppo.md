@@ -7117,3 +7117,91 @@ Stato aggiornato: decisioni fino ad **ADR-0117**, verifiche fino a **V-089**, no
 alla **239**. Controlli: `make tools-test` **175**, `make app-test` **640**, `make app-check`
 (mypy `--strict`, 66 file) e `make docs-check` verdi. Prossimo passo: la discussione con il Product
 Owner sui due rilievi rimasti, e la fusione della PR #5, che è sua.
+
+## 2026-09-04 — I due rilievi discussi: il tetto che arrivava a metà, e la ripresa che non stava in un `finally`
+
+I primi due rilievi di `codex` erano stati tenuti aperti perché sono scelte di disegno. Il Product
+Owner li ha decisi tutti e due nella stessa direzione, e con parole che valgono più della decisione:
+il tetto è «una guardia oltre la quale non si può andare», e sul secondo — «l'attrezzo ti fa una
+domanda invece di uscire» — «per me è accettabile e l'approvo». Entrambe le correzioni dentro la
+PR #5, per prova prima e codice poi.
+
+**Il primo: `--tetto` fermava il carico e non la scena.** La misura del rilievo era già in tabella:
+con `tetto_s = 0,05 s` e un iteratore che non torna, `ScenarioBackup.esegui()` era ancora ferma dopo
+quindici secondi, trecento volte il tetto. La correzione ovvia — un thread di guardia che allo
+scadere chiuda l'iteratore — **non esiste**, e la sonda che lo dimostra è la cosa che questa
+giornata lascia: `close()` chiamata da un altro thread mentre il consumatore è dentro il frame,
+fermo su una lettura bloccante, alza `ValueError: generator already executing`. Il dump resta vivo,
+il ciclo resta dov'è. Nella stessa corsa il thread principale è uscito **solo** quando il guardiano
+ha ucciso il processo ([M-059](../app/docs/Sources.md#m-059)).
+
+Chi chiama la porta ha in mano un iteratore; chi la implementa ha in mano il processo. Solo il
+secondo può onorare un tetto, e quindi il tetto è salito sulla porta:
+`BackupTool.dump(destinazione, *, tetto_s=None)`. `SubprocessBackup` lo fa rispettare con un
+`threading.Timer` che abbatte il figlio e alza `DumpTroppoLungo` — un'eccezione propria, perché dal
+palco «mongodump è uscito con codice -9» è il rumore del rimedio e «ha superato il tetto di 300
+secondi» è la notizia. Con lo stesso dump piantato e un tetto di due secondi, la scena esce dopo
+**2,07 s**. È [ADR-0118](Decision.md#adr-0118).
+
+Il dettaglio che si sarebbe dimenticato è il `poll()` nel guardiano. Il cronometro può scadere
+nell'attimo fra la fine del figlio e la lettura del suo codice d'uscita — un dump riuscito mentre
+chi guarda è lento a scorrere — e segnare «scaduto» lì vorrebbe dire dichiarare fallita in sala una
+scena appena riuscita. C'è una prova apposta, e discrimina fra le due implementazioni.
+
+`restore` **non** ha preso il parametro, ed è un debito dichiarato: un tetto lì vorrebbe dire un
+`--tetto` su `demo restore`, cioè superficie di riga di comando che nessuno ha chiesto. È in
+tabella.
+
+**Il secondo: `ripara()` non stava in un `finally`.** `rompe` e `ripara` erano due righe consecutive
+con in mezzo la fase più lunga della scena, e un Ctrl-C al prompt di `--step` — cioè il modo normale
+di abbandonare una scena che va lunga — lasciava il nodo a terra. Col modo `sospendi` è peggio che a
+terra: **in pausa**, cioè vivo, con la sua memoria, e senza rispondere a nessuno.
+
+Due dettagli di posizione sono la correzione vera. Il `try` si apre **dopo** `rompe`: il `finally`
+deve coprire ciò che è stato rotto, non ciò che non si è riusciti a rompere — se `ferma` solleva, il
+nodo non è mai caduto, e con la regia annunciata una ripresa chiesta lì sopra sarebbe una riga sullo
+schermo che dice a qualcuno di riavviare qualcosa che nessuno ha spento. E l'annuncio della ripresa
+resta **dentro** il `try`, con `ripara` da solo nel `finally`: sul percorso normale non cambia
+niente, su quello interrotto la riparazione avviene senza una seconda pausa. È
+[ADR-0119](Decision.md#adr-0119).
+
+Il prezzo che il Product Owner ha approvato è l'`input()` della regia annunciata su un percorso di
+uscita. Vale però solo dove un umano c'è: `_gia_fatto` assorbe l'`EOFError`, perché un'eccezione
+sollevata dentro un `finally` **prende il posto** di quella che passava, e senza terminale `input()`
+alza all'istante. Senza quell'assorbimento, chi guarda leggerebbe «EOF when reading a line» invece
+del motivo per cui la scena si è fermata.
+
+**Le prove.** Sette in più, 640 → **647**. Tre sul tetto in `test_backup.py`, di cui una — il
+predefinito `None` che non impone nessuna scadenza — era **già verde prima della correzione**: è
+tenuta come guardia contro una regressione, non contabilizzata come guida. Due sulla scena
+interrotta in `test_scenari.py`, una per modo. Una sul tetto che arriva allo strumento e non solo al
+carico. Una in `test_cli.py` sulla conferma che non deve coprire l'errore che sta risalendo.
+
+### Note di metodo
+
+240. **Prima di scrivere il rimedio, misurare se il rimedio è possibile.** Il tetto sembrava una
+    riga: un thread che allo scadere chiude l'iteratore. La sonda ha detto che quella riga alza
+    `ValueError: generator already executing`, e la decisione è cambiata di posto — dal chiamante
+    all'implementazione della porta. Trenta righe di sonda hanno risparmiato una correzione che
+    sarebbe passata in revisione e sarebbe stata falsa in sala. La regola pratica: quando il rimedio
+    ovvio tocca un meccanismo del linguaggio che non si usa tutti i giorni — generatori fra thread,
+    segnali, `fork` — la prima cosa che si scrive non è il rimedio, è la sonda che dice se funziona.
+241. **Un limite può essere onorato solo da chi tiene la risorsa, e questo decide su quale lato
+    della porta vive.** Chi chiama `dump` ha un iteratore; chi lo implementa ha un processo. Un
+    iteratore fermo dentro una lettura bloccante non si interrompe da fuori, un processo si ferma
+    sempre. Il parametro è finito sulla firma della porta non per simmetria o per eleganza, ma
+    perché di là non c'era niente su cui agire. La regola pratica: quando un parametro di controllo
+    non «attacca» sul lato del chiamante, non serve un meccanismo in più — serve spostare il
+    parametro.
+242. **Un `finally` che chiede qualcosa a un umano deve saper stare zitto quando l'umano non
+    c'è.** La ripresa del failover è finita in un `finally`, e la regia che la esegue fa una domanda
+    con `input()`. Da lì, un'eccezione sollevata **sostituisce** quella che stava risalendo: senza
+    terminale, chi guarda avrebbe letto «EOF when reading a line» al posto del vero motivo. La
+    regola pratica: ogni chiamata che può sollevare dentro un `finally` va guardata due volte, e
+    quelle che dipendono da un canale interattivo vanno rese innocue quando il canale non c'è.
+
+Stato aggiornato: decisioni fino ad **ADR-0119**, verifiche fino a **V-089**, misure fino a
+**M-059**, note di metodo fino alla **242**. Controlli: `make tools-test` **175**, `make app-test`
+**647**, `make app-check` (mypy `--strict`, 66 file) e `make docs-check` verdi. I quattro rilievi
+della review di `codex` sono chiusi. Prossimo passo: la fusione della PR #5, che è del Product
+Owner.

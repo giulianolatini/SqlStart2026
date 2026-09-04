@@ -3203,3 +3203,55 @@ contrario. Segnalare non è agire, e un difetto già descritto altrove nello ste
 docstring dell'adattatore spiegava per esteso perché un guasto fallito e ignorato produce «un
 failover perfetto» — può ricomparire intatto dall'altra parte del confine fra l'applicazione e i
 suoi strumenti.
+
+
+---
+
+### Il tetto era scritto in due documenti e valeva per metà del codice
+
+> Due pagine promettevano che `--tetto` facesse «terminare la scena anche se il dump non torna
+> più». Il numero arrivava al carico e non allo strumento: con un tetto di **0,05 secondi** e un
+> dump piantato, la scena era ancora ferma dopo **quindici**, cioè trecento volte il tetto. Il
+> carico mollava puntuale; il thread che disegna restava dentro il ciclo, fermo su una lettura che
+> non tornava.
+> Fonte: [M-059](../app/docs/Sources.md#m-059), [ADR-0118](Decision.md#adr-0118).
+
+**Perché una slide:** perché è il modo più comune in cui una rete di sicurezza smette di esserlo —
+non viene tolta, viene **collegata a metà** — e perché la metà collegata è quella che si vede nei
+log. Un timeout che ferma il produttore e non il consumatore sembra funzionare in ogni prova che non
+lo metta alla prova. La domanda che smaschera la famiglia intera è una sola: *chi tiene in mano la
+risorsa che deve smettere?* Se non è chi ha il numero, il numero non serve.
+
+---
+
+### Il rimedio ovvio alzava `ValueError: generator already executing`
+
+> Per far scadere un tetto su un iteratore, la prima idea è un thread di guardia che allo scadere lo
+> chiuda. Non funziona: il consumatore è **dentro** il frame del generatore, fermo sulla lettura di
+> un tubo, e `close()` da un altro thread trova un generatore in esecuzione. Il dump resta vivo, il
+> ciclo resta dov'è. Nella stessa sonda il thread principale è uscito solo quando il guardiano ha
+> ucciso il **processo**.
+> Fonte: [M-059](../app/docs/Sources.md#m-059).
+
+**Perché una slide:** perché mostra in dieci righe la differenza fra annullare e sbloccare. Un
+iteratore fermo su una lettura bloccante non si annulla da fuori — nessun linguaggio con thread
+nativi lo permette senza cooperazione — e l'unica leva vera è la risorsa sottostante. È la stessa
+ragione per cui un `Thread` in Python non si può uccidere e un `Popen` sì, e la stessa ragione per
+cui i timeout seri nei client di rete chiudono il socket invece di «interrompere la funzione».
+
+---
+
+### Un container spento si vede; uno in pausa si scopre la volta dopo
+
+> Nella scena del failover, `rompe` e `ripara` erano due righe consecutive con in mezzo la fase più
+> lunga della scena. Un Ctrl-C dato al prompt — cioè il modo normale di abbandonare una scena che va
+> lunga — saltava la ripresa. Col modo che **sospende** invece di fermare, il container resta vivo,
+> tiene la sua memoria e non risponde a nessuno: non compare come spento da nessuna parte, e si
+> scopre la volta dopo, quando il replica set non elegge e non si capisce perché.
+> Fonte: [ADR-0119](Decision.md#adr-0119), rilievo della review di `codex` sulla PR #5.
+
+**Perché una slide:** perché il guasto peggiore non è quello più grave, è quello che non lascia
+tracce nel posto in cui si guarda. `docker compose ps` mostra «Up» per un container in pausa
+esattamente come per uno sano. E perché la correzione ha una forma che si porta via: il `try` si
+apre **dopo** ciò che rompe, non prima — un `finally` deve coprire ciò che è stato rotto, non ciò
+che non si è riusciti a rompere.

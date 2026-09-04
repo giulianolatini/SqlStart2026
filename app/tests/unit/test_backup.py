@@ -32,6 +32,7 @@ from mongolab.domain.modelli import Progress
 from mongolab.domain.porte import BackupTool
 from mongolab.infrastructure.backup import (
     ComandoFallito,
+    DumpTroppoLungo,
     RestoreIncompleto,
     SubprocessBackup,
     leggi_avanzamento,
@@ -405,6 +406,74 @@ def test_un_eccezione_dentro_l_iteratore_ferma_il_processo(tmp_path: Path) -> No
     scadenza = time.monotonic() + 10.0
     while vivo(pid) and time.monotonic() < scadenza:
         time.sleep(0.02)
+    assert not vivo(pid)
+
+
+# --- Il tetto ---------------------------------------------------------------------------
+
+
+def test_il_tetto_abbatte_un_dump_che_non_finisce(tmp_path: Path) -> None:
+    """Il limite dichiarato deve valere sul processo, che è l'unica cosa che si può fermare.
+
+    La misura che ha aperto questa prova: con un `mongodump` piantato, il carico mollava al
+    tetto e la scena no — il thread principale restava dentro il ciclo, fermo a leggere uno
+    `stderr` che non diceva più niente. Un guardiano che chiudesse l'iteratore non servirebbe:
+    il generatore in quel momento non è sospeso ma **in esecuzione**, e `close()` da un altro
+    thread alza `ValueError: generator already executing`. Ciò che si può fermare è il figlio,
+    e chi ce l'ha in mano è questo adattatore.
+    """
+    comando, diario = strumento_finto(tmp_path, righe=[APERTURA], attesa=120.0)
+    backup = strumento(comando)
+
+    avanzamenti = backup.dump(tmp_path / "dump", tetto_s=0.3)
+    assert next(avanzamenti).fase == "lab.ordini"
+    pid, _, _ = diario_di(diario)
+
+    with pytest.raises(DumpTroppoLungo) as caduta:
+        for _ in avanzamenti:
+            pass
+
+    assert caduta.value.tetto_s == 0.3
+    assert not vivo(pid)
+
+
+def test_il_tetto_scaduto_dopo_la_fine_non_inventa_un_fallimento(tmp_path: Path) -> None:
+    """Il cronometro parte con il dump e non si ferma quando chi guarda rallenta.
+
+    Qui il figlio ha già finito, ma nessuno sta scorrendo: il generatore è sospeso fra due
+    avanzamenti e il tetto scade lì in mezzo. Un guardiano che si limitasse a segnare
+    «scaduto» dichiarerebbe fallito un dump uscito con zero, cioè trasformerebbe la rete di
+    sicurezza in un guasto inventato — e a schermo si vedrebbe fallire proprio la scena che
+    era appena riuscita.
+    """
+    comando, diario = strumento_finto(tmp_path, righe=[APERTURA, CHIUSURA])
+    backup = strumento(comando)
+
+    avanzamenti = backup.dump(tmp_path / "dump", tetto_s=0.2)
+    primo = next(avanzamenti)
+    time.sleep(0.5)
+    pid, _, _ = diario_di(diario)
+
+    assert primo.fase == "lab.ordini"
+    assert [passo.completati for passo in avanzamenti] == [2_000_000]
+    assert not vivo(pid)
+
+
+def test_senza_tetto_il_dump_non_ha_scadenza(tmp_path: Path) -> None:
+    """`None` è il predefinito, e vuol dire nessun cronometro.
+
+    La porta lo dichiara opzionale perché chi chiama può non avere un tetto da imporre — il
+    `restore` della scena, per esempio, che non ha un carico da fermare accanto. Un
+    predefinito che invece armasse un limite «ragionevole» sceglierebbe al posto di chi
+    chiama, e lo scoprirebbe in sala.
+    """
+    comando, diario = strumento_finto(tmp_path, righe=[APERTURA, CHIUSURA], attesa=0.4)
+    backup = strumento(comando)
+
+    visti = list(backup.dump(tmp_path / "dump"))
+    pid, _, _ = diario_di(diario)
+
+    assert len(visti) == 2
     assert not vivo(pid)
 
 

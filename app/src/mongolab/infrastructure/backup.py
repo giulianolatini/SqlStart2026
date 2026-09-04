@@ -63,6 +63,7 @@ solleva `RestoreIncompleto` e mette il verdetto che lo strumento non ha messo
 
 import re
 import subprocess
+import threading
 from pathlib import Path
 from typing import Iterator, Sequence
 
@@ -70,6 +71,7 @@ from mongolab.domain.modelli import Progress
 
 __all__ = [
     "ComandoFallito",
+    "DumpTroppoLungo",
     "RestoreIncompleto",
     "SubprocessBackup",
     "leggi_avanzamento",
@@ -94,6 +96,23 @@ class ComandoFallito(RuntimeError):
         self.eseguibile = eseguibile
         self.codice = codice
         self.messaggio = messaggio
+
+
+class DumpTroppoLungo(RuntimeError):
+    """Il tetto è scaduto e il processo è stato abbattuto.
+
+    Un `ComandoFallito` con codice `-9` direbbe la stessa cosa e la direbbe male: dal palco
+    si leggerebbe «mongodump è uscito con codice -9», che è il rumore del rimedio e non la
+    notizia. Qui la notizia è il tetto, e il tetto è un numero che chi guarda ha scelto —
+    quindi sta nel testo e sta anche in un attributo, perché la resa possa dirlo a modo suo.
+    """
+
+    def __init__(self, eseguibile: str, tetto_s: float) -> None:
+        super().__init__(
+            f"{eseguibile} ha superato il tetto di {tetto_s:g} secondi ed è stato fermato"
+        )
+        self.eseguibile = eseguibile
+        self.tetto_s = tetto_s
 
 
 class RestoreIncompleto(RuntimeError):
@@ -146,6 +165,19 @@ _SOMMARIO = re.compile(
     r"^(\d+) document\(s\) restored successfully\. (\d+) document\(s\) failed to restore\.$"
 )
 _FALLIMENTO = re.compile(r"^Failed: (.*)$")
+
+
+def _abbatti(processo: "subprocess.Popen[str]", scaduto: threading.Event) -> None:
+    """Il tetto è scaduto: se il processo è ancora vivo lo si ferma e si segna perché.
+
+    Il `poll()` non è una cautela di troppo. Il cronometro può scadere nell'attimo fra la
+    fine del figlio e la lettura del suo codice d'uscita — un dump che riesce mentre chi
+    guarda è lento a scorrere — e segnare «scaduto» lì vorrebbe dire dichiarare fallita la
+    scena che era appena riuscita. Un processo già uscito non ha superato nessun tetto.
+    """
+    if processo.poll() is None:
+        scaduto.set()
+        processo.kill()
 
 
 def _senza_orario(riga: str) -> str:
@@ -298,10 +330,26 @@ class SubprocessBackup:
             *self._opzioni_dump,
         )
 
-    def dump(self, destinazione: Path) -> Iterator[Progress]:
-        """Avvia `mongodump` **adesso** e restituisce l'avanzamento da scorrere."""
+    def dump(
+        self, destinazione: Path, *, tetto_s: float | None = None
+    ) -> Iterator[Progress]:
+        """Avvia `mongodump` **adesso** e restituisce l'avanzamento da scorrere.
+
+        `tetto_s` è la guardia oltre la quale non si va, ed è arrivata fin qui perché è
+        l'unico posto da cui si può onorare. Chi chiama non ha in mano il processo: ha un
+        iteratore, e un iteratore fermo dentro una lettura bloccante non si può chiudere
+        da fuori — `close()` da un altro thread trova un generatore *in esecuzione* e alza
+        `ValueError: generator already executing`. Il processo invece si ferma sempre, e
+        fermarlo fa finire la lettura, l'iterazione e la scena.
+
+        `None` vuol dire nessuna scadenza, ed è il predefinito perché non tutti i chiamanti
+        hanno un tetto da imporre. Il cronometro parte quando qualcuno comincia a scorrere,
+        che nella scena del backup è lo stesso istante in cui il dump parte.
+        """
         argomenti = self.argomenti_dump(destinazione)
-        return self._avanzamento(self._avvia(argomenti), self._comando_dump[-1])
+        return self._avanzamento(
+            self._avvia(argomenti), self._comando_dump[-1], tetto_s=tetto_s
+        )
 
     def restore(self, origine: Path, destinazione_db: str) -> Iterator[Progress]:
         """Ripristina in un database **diverso**, e per farlo servono tre opzioni.
@@ -374,7 +422,10 @@ class SubprocessBackup:
         return processo
 
     def _avanzamento(
-        self, processo: "subprocess.Popen[str]", eseguibile: str
+        self,
+        processo: "subprocess.Popen[str]",
+        eseguibile: str,
+        tetto_s: float | None = None,
     ) -> Iterator[Progress]:
         """Legge `stderr` riga per riga, produce ciò che è avanzamento, e poi giudica.
 
@@ -391,10 +442,20 @@ class SubprocessBackup:
         distingue, e quindi non si distingue neanche il rimedio. Il limite resta: quando
         il comando è `docker exec ...`, ciò che muore qui è il client `docker`, e lo
         strumento dentro il container tira dritto.
+
+        Il tetto è la stessa idea con un'altra sveglia: invece di un consumatore che
+        smette, un cronometro che scade. Anche lui non può fare altro che abbattere il
+        figlio, e anche lui ha lo stesso limite col `docker exec`.
         """
         assert processo.stderr is not None
         motivo = ""
         sommario: tuple[int, int] | None = None
+        scaduto = threading.Event()
+        guardia: threading.Timer | None = None
+        if tetto_s is not None:
+            guardia = threading.Timer(tetto_s, _abbatti, (processo, scaduto))
+            guardia.daemon = True
+            guardia.start()
         try:
             for riga in processo.stderr:
                 testo = _senza_orario(riga.rstrip("\n"))
@@ -412,9 +473,13 @@ class SubprocessBackup:
             processo.wait()
             raise
         finally:
+            if guardia is not None:
+                guardia.cancel()
             processo.stderr.close()
 
         codice = processo.wait()
+        if tetto_s is not None and scaduto.is_set():
+            raise DumpTroppoLungo(eseguibile, tetto_s)
         if codice != 0:
             raise ComandoFallito(eseguibile, codice, motivo)
         if sommario is not None and sommario[1] > 0:

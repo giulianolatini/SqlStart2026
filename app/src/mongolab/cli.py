@@ -476,8 +476,20 @@ def _gia_fatto(riga: str) -> None:
     «no» non avrebbe una strada alternativa da prendere — la scena senza guasto non è una
     scena più corta, è un failover perfetto raccontato senza failover — e una domanda a
     cui una sola risposta è utile si fa con un Invio.
+
+    **L'`EOFError` si assorbe, e la ragione è dove questa funzione può essere chiamata.**
+    Da [ADR-0119](../../../docs/Decision.md#adr-0119) la ripresa del failover sta in un
+    `finally`, quindi la conferma può arrivare mentre un'eccezione sta risalendo — e
+    un'eccezione sollevata dentro un `finally` prende il posto di quella che passava. Con
+    `stdin` che non è un terminale — una prova di integrazione, una pipe, un
+    `docker compose run` senza `-t` — `input()` alza `EOFError` all'istante, e chi guarda
+    leggerebbe «EOF when reading a line» invece del motivo per cui la scena si è fermata.
+    Dove non c'è nessuno a cui fare la domanda, l'unica risposta sensata è proseguire.
     """
-    input("   Invio quando è stato eseguito ")
+    try:
+        input("   Invio quando è stato eseguito ")
+    except EOFError:
+        typer.echo("   (nessuno da chiedere: proseguo)")
 
 
 def niente_da_fermare(bersaglio: Bersaglio) -> typer.BadParameter:
@@ -946,7 +958,10 @@ def backup_live(
         float, typer.Option("--carico", help="Secondi di carico prima del dump.")
     ] = DURATA_CARICO_S,
     tetto: Annotated[
-        float, typer.Option("--tetto", help="Secondi oltre i quali il carico molla.")
+        float,
+        typer.Option(
+            "--tetto", help="Secondi oltre i quali il dump si abbatte e la scena finisce."
+        ),
     ] = TETTO_DUMP_S,
     step: Annotated[
         bool,
@@ -968,7 +983,9 @@ def backup_live(
     Il carico si ferma quando il dump finisce: con una durata fissa un dump da mezzo
     secondo dentro un campione da venti verrebbe diluito, e un crollo totale comparirebbe
     come un calo del due per cento. `--tetto` resta come rete di sicurezza, per il dump
-    che si pianta.
+    che si pianta: allo scadere il `mongodump` viene abbattuto, il carico si ferma con lui
+    e la scena finisce dicendo che è stato il tetto. Una scena che non termina in sala è
+    peggio di una scena che termina male.
 
     **Si gira dall'host**, ed è l'inverso del failover. Là serve la scoperta della
     topologia, che funziona solo da dentro la rete Compose (M-019); qui serve entrare in

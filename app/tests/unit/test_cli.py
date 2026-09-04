@@ -15,6 +15,7 @@ vorrebbe dire che nel cablaggio è finito del lavoro, e sarebbe quello il difett
 """
 
 import re
+import sys
 import threading
 from io import StringIO
 from typing import Sequence
@@ -27,6 +28,7 @@ from mongolab.application.topologia import INTERVALLO_PREDEFINITO_MS
 import typer
 
 from mongolab.cli import (
+    _gia_fatto,
     DATABASE_RIPRISTINO,
     DESTINAZIONE_DUMP,
     LETTORI_PREDEFINITI,
@@ -706,6 +708,32 @@ def test_dall_host_la_regia_comanda_e_dalla_rete_annuncia() -> None:
     """
     assert isinstance(regia_di(BERSAGLI["rs"], PuntoDiVista.HOST), RegiaCompose)
     assert isinstance(regia_di(BERSAGLI["rs"], PuntoDiVista.RETE), RegiaAnnunciata)
+
+
+def test_la_conferma_della_regia_non_copre_l_errore_che_sta_risalendo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Con `stdin` chiuso, `input()` alza `EOFError` — e da dentro un `finally` è un guaio.
+
+    Da quando la ripresa del failover sta in un `finally`
+    ([ADR-0119](../../../docs/Decision.md#adr-0119)), questa conferma può essere chiamata
+    **mentre un'eccezione sta risalendo**. Un'eccezione sollevata dentro un `finally`
+    sostituisce quella che stava passando: chi guarda vedrebbe un `EOFError` sulla lettura
+    di uno `stdin` che non c'è, al posto del motivo per cui la scena si è interrotta.
+
+    Non è un caso di laboratorio. `stdin` non è un terminale ogni volta che `mongolab` gira
+    dentro una prova di integrazione, dietro una pipe, o in un `docker compose run` senza
+    `-t`: là la domanda non ha nessuno a cui essere fatta, e l'unica risposta sensata è
+    proseguire. Dove invece un terminale c'è, la domanda si fa e si aspetta — è il momento
+    in cui chi conduce deve rimettere in piedi il nodo, e vale la pena fermarlo.
+    """
+    monkeypatch.setattr(sys, "stdin", StringIO(""))
+
+    with pytest.raises(KeyboardInterrupt):
+        try:
+            raise KeyboardInterrupt
+        finally:
+            _gia_fatto("docker compose -f docker/02-replicaset/compose.yaml start mongo-rs-1")
 
 
 def _vista(indirizzo: str | None) -> DescrizioneTopologia:

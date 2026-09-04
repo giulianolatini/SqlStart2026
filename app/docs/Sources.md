@@ -2754,3 +2754,68 @@ DOCKER_HOST=unix:///percorso/che/non/esiste.sock make app-test
   configurazione di `testpaths` e alla revisione dei marcatori `stack01`/`stack02`/`stack03`, non a
   un esperimento. I 110 s dell'integrazione sono un valore osservato più volte durante i Task 8-16,
   non una misura ripetuta apposta qui.
+
+<a id="m-059"></a>
+
+### M-059 — Il tetto che non fermava la scena: 15 s contro 0,05, e `close()` che non si può chiamare
+
+- **Data:** 2026-09-04
+- **Comando:** due sonde in sequenza, tutte e due contro un finto `mongodump` che stampa una riga
+  di avanzamento su `stderr` e poi dorme dieci minuti. La prima prova a chiudere l'iteratore da un
+  thread di guardia mentre il ciclo principale sta leggendo; la seconda esegue `ScenarioBackup`
+  intero con `tetto_s = 2,0`:
+
+
+```unknown
+uv run --directory app python sonda_close2.py
+uv run --directory app python sonda_tetto_scena.py
+```
+
+
+- **Output:**
+
+
+```unknown
+primo avanzamento: Progress(fase='lab.ordini', completati=0, totali=None, messaggio='writing `lab.ordini` to `dump/lab/ordini.bson`')
+GUARDIANO: close() ha alzato ValueError: generator already executing
+GUARDIANO: dump ancora vivo tre secondi dopo il tetto: True
+GUARDIANO: il thread principale è ancora dentro il ciclo
+PRINCIPALE: uscito con ComandoFallito
+
+uscita dopo 2.07 s
+DumpTroppoLungo: …/sonda-tetto/finto_dump.py ha superato il tetto di 2 secondi ed è stato fermato
+```
+
+
+- **Che cosa dimostra:** tre cose, e la seconda è quella che ha deciso la forma della correzione.
+
+  **Il difetto era reale e grande.** Prima della correzione, con lo stesso finto dump e
+  `tetto_s = 0,05 s`, `ScenarioBackup.esegui()` non era ancora tornata dopo **15 secondi**: trecento
+  volte il tetto. Il numero passava al solo `WorkloadRunner`, che smetteva di scrivere; il thread
+  principale restava dentro `for avanzamento in self._strumento.dump(...)`, fermo su una lettura
+  bloccante. Il carico mollava, la scena no. La differenza fra le due metà non si vede leggendo il
+  codice, perché le due chiamate sono a due righe di distanza.
+
+  **Il rimedio che viene in mente per primo non esiste.** Un thread di guardia che allo scadere
+  chiuda l'iteratore trova un generatore **in esecuzione**, non sospeso — il consumatore è dentro il
+  frame, fermo sul tubo — e `close()` alza `ValueError: generator already executing`. Il dump resta
+  vivo (`ancora vivo tre secondi dopo il tetto: True`) e il ciclo resta dov'è. Nella stessa corsa il
+  thread principale è uscito **solo** quando il guardiano ha ucciso il processo, e ne è uscito con
+  un `ComandoFallito`: la prova che l'unica leva che libera un consumatore bloccato è il figlio, non
+  il generatore. È il motivo per cui il tetto sta sulla porta e non nella scena.
+
+  **Col tetto sulla porta la promessa diventa vera.** Stessa sonda, tetto di 2 secondi: la scena
+  esce dopo **2,07 s** — 2,05 s in una prima corsa — nominando il tetto invece del segnale. Lo
+  scarto di due centesimi è il tempo fra la sveglia del `Timer` e il `wait()` sul figlio abbattuto.
+- **Riserve:** il finto dump è un `python` che dorme, non un `mongodump`: dimostra il comportamento
+  del **consumatore** davanti a un processo che non finisce, non che `mongodump` si pianti in quel
+  modo. Il caso vero da cui nasce il tetto — un `mongodump` che smette di scrivere ma non esce — non
+  è stato riprodotto contro MongoDB, e non è chiaro come lo si farebbe senza rompere il server.
+
+  I 15 secondi della prima misura sono un limite osservato, non una durata: la sonda è stata
+  interrotta a mano, la scena avrebbe continuato. Il valore utile è il rapporto con il tetto (300×),
+  non il numero.
+
+  Il limite dichiarato in `SubprocessBackup` vale anche qui e la sonda non lo tocca: quando il
+  comando è `docker exec ...`, il `kill` uccide il **client** `docker` e lo strumento dentro il
+  container tira dritto. Il tetto libera la scena, non il cluster.

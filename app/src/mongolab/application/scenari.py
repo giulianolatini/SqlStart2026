@@ -146,7 +146,14 @@ ragione per cui `WorkloadRunner.esegui` ha imparato `finche` al Task 14. Ma `fin
 garantisce la terminazione — se il dump si pianta resta vero per sempre — e `esegui` per
 questo esige comunque un limite. Cinque minuti: molto più dei 476 ms misurati contro lo
 stack 02 con la collezione della demo ([M-045](../../../docs/Sources.md#m-045)), e
-abbastanza poco da non lasciare il carico a scrivere per un'ora se qualcosa si blocca."""
+abbastanza poco da non lasciare il carico a scrivere per un'ora se qualcosa si blocca.
+
+**È una guardia oltre la quale non si va, e quindi vale su tutt'e due.** Lo stesso numero
+va al carico e allo strumento: al carico come limite della corsa, allo strumento come
+scadenza del processo. Per una stagione andava solo al primo, e il risultato era una rete
+di sicurezza che teneva la metà leggera — il carico mollava, e la scena restava dentro la
+lettura di uno `stderr` che non diceva più niente
+([ADR-0118](../../../docs/Decision.md#adr-0118))."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -352,6 +359,29 @@ class ScenarioFailover:
         """Gira la scena intera e restituisce i suoi numeri.
 
         `attesa` è l'unica differenza fra il palco e la registrazione di riserva.
+
+        **Ciò che si rompe si ripara in un `finally`.** Per una stagione `rompe` e `ripara`
+        sono state due righe consecutive con in mezzo la fase più lunga della scena, e
+        qualunque cosa sollevasse là dentro — il carico, la resa, un Ctrl-C dato al prompt
+        di `--step` — lasciava il laboratorio con un nodo a terra. Col modo `sospendi` è
+        peggio che a terra: **in pausa**, cioè vivo, con la sua memoria, e senza rispondere
+        a nessuno. Un container spento si vede in `docker compose ps`; uno in pausa si
+        scopre la volta dopo, quando il replica set non elegge e non si capisce perché.
+
+        Il `try` si apre **dopo** `rompe`, e non prima: il `finally` deve coprire ciò che è
+        stato rotto, non ciò che non si è riusciti a rompere. Se `ferma` solleva — la regia
+        senza socket del demone — il nodo non è mai caduto, e una ripresa chiesta lì sopra
+        sarebbe un comando dato al buio.
+
+        L'annuncio della ripresa resta **dentro** il `try`, ed è la riga che decide quante
+        volte lo strumento parla mentre qualcuno lo sta interrompendo. Sul percorso normale
+        non cambia niente: annuncio, pausa di `--step`, riparazione. Su quello interrotto la
+        riparazione avviene senza una seconda pausa — e non in silenzio, perché la regia che
+        ha bisogno di un umano è `RegiaAnnunciata`, che il comando lo scrive da sé. Rimane
+        una domanda sola, ed è quella che chi conduce dovrebbe comunque farsi.
+
+        L'eccezione risale. Un `finally` che la mangiasse per «non disturbare» chiuderebbe
+        la scena con i numeri di un failover che non è stato guardato fino in fondo.
         """
         copione = self._copione
         fasi: list[str] = []
@@ -369,12 +399,13 @@ class ScenarioFailover:
 
         annuncia("guasto", f"{verso} {copione.nodo}")
         rompe(self._regia, copione.nodo)
+        try:
+            annuncia("elezione", "il carico continua mentre il replica set elegge")
+            durante = self._con_carico(copione.elezione_s)
 
-        annuncia("elezione", "il carico continua mentre il replica set elegge")
-        durante = self._con_carico(copione.elezione_s)
-
-        annuncia("ripresa", f"rimetto in servizio {copione.nodo}")
-        ripara(self._regia, copione.nodo)
+            annuncia("ripresa", f"rimetto in servizio {copione.nodo}")
+        finally:
+            ripara(self._regia, copione.nodo)
 
         annuncia("recupero", "il carico continua mentre il nodo rientra")
         dopo = self._con_carico(copione.recupero_s)
@@ -517,6 +548,12 @@ class CopioneBackup:
     destinazione: Path
     carico_s: float = DURATA_CARICO_S
     tetto_s: float = TETTO_DUMP_S
+    """Un solo tetto per due destinatari: il carico e il dump.
+
+    Due campi separati sarebbero un ordine da ricordare per sempre — quale dei due scade
+    prima, e che cosa succede in mezzo — per una scelta che nessuno vuole fare. Il tetto è
+    una cosa sola: dopo tanto, la scena finisce comunque.
+    """
     intervallo_ms: float = INTERVALLO_PREDEFINITO_MS
 
 
@@ -666,6 +703,14 @@ class ScenarioBackup:
         l'uscita dal `with` aspetterebbe il pool, il pool aspetterebbe il tetto, e l'errore
         arriverebbe a chi l'ha causato cinque minuti dopo il fatto: in sala, uno schermo
         fermo senza spiegazione.
+
+        **Il tetto va a tutt'e due**, ed è una correzione: per una stagione arrivava al
+        solo `WorkloadRunner`, e un `mongodump` piantato faceva mollare il carico lasciando
+        la scena dentro questo `for`. La riga qui sopra copre il dump che *fallisce*; il
+        tetto copre il dump che non torna, che è l'altro modo di rovinare l'Atto III e
+        l'unico che non si vede arrivare. Lo stesso numero da tutt'e due le parti, perché
+        due limiti diversi vorrebbero dire un ordine fra i due da tenere a mente per
+        sempre.
         """
         finito = threading.Event()
         avanzamenti: list[Progress] = []
@@ -675,7 +720,9 @@ class ScenarioBackup:
         ) as pool:
             futuro = pool.submit(self._una_corsa, self._copione.tetto_s, finito)
             try:
-                for avanzamento in self._strumento.dump(self._copione.destinazione):
+                for avanzamento in self._strumento.dump(
+                    self._copione.destinazione, tetto_s=self._copione.tetto_s
+                ):
                     avanzamenti.append(avanzamento)
                     self._sink.emit(BackupProgressed(self._orologio.now(), avanzamento))
                     self._raccogli()

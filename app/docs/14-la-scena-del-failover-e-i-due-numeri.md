@@ -211,6 +211,63 @@ def _verbi(modo: ModoGuasto) -> tuple[...]:
 Il terzo elemento è la frase con cui la fase si annuncia, e sta accanto ai due verbi apposta: una
 scena che dicesse «fermo» mentre sospende sarebbe una scena che insegna la cosa sbagliata.
 
+## Ciò che la scena rompe, la scena lo ripara in un `finally`
+
+Il secondo verbo di quella coppia — `riavvia`, `risveglia` — per una stagione è stato chiamato da
+una riga qualunque in mezzo al metodo. `rompe` e `ripara` erano due istruzioni consecutive **con in
+mezzo la fase più lunga della scena**: dieci secondi di carico durante l'elezione, e prima ancora
+la pausa di `--step` se qualcuno l'ha chiesta. Qualunque cosa sollevasse là dentro saltava la
+ripresa.
+
+Non è un caso di laboratorio: il Ctrl-C dato al prompt di `--step` è il modo normale di abbandonare
+una scena che sta andando lunga. La review di `codex` lo ha rilevato, ed è misurato — con un carico
+che solleva alla seconda fase, la regia riceve solo `('ferma', 'mongo-rs-1')`, mai `riavvia`.
+
+Col modo `sospendi` è peggio che a terra. Un container spento si vede in `docker compose ps`; uno
+**in pausa** è vivo, tiene la sua memoria, non risponde a nessuno, e si scopre la volta dopo, quando
+il replica set non elegge e non si capisce perché.
+
+```python
+annuncia("guasto", f"{verso} {copione.nodo}")
+rompe(self._regia, copione.nodo)
+try:
+    annuncia("elezione", "il carico continua mentre il replica set elegge")
+    durante = self._con_carico(copione.elezione_s)
+
+    annuncia("ripresa", f"rimetto in servizio {copione.nodo}")
+finally:
+    ripara(self._regia, copione.nodo)
+```
+
+Due dettagli di posizione, che sono la decisione vera ([ADR-0119](../../docs/Decision.md#adr-0119)).
+
+**Il `try` si apre dopo `rompe`, non prima.** Il `finally` deve coprire ciò che è stato rotto, non
+ciò che non si è riusciti a rompere. Se `ferma` solleva — la regia senza il socket del demone — il
+nodo non è mai caduto, e una ripresa chiesta lì sopra sarebbe un comando dato al buio: con la regia
+annunciata, una riga sullo schermo che dice a qualcuno di riavviare qualcosa che nessuno ha spento.
+
+**L'annuncio della ripresa resta dentro il `try`,** e `ripara` sta da solo nel `finally`. Sul
+percorso normale non cambia niente: annuncio, pausa di `--step`, riparazione. Su quello interrotto
+la riparazione avviene senza una **seconda** pausa — e non in silenzio, perché la regia che ha
+bisogno di un umano è `RegiaAnnunciata`, che il comando lo scrive da sé. Resta una domanda sola, ed
+è quella che chi conduce dovrebbe comunque farsi.
+
+Quella domanda è `input()`, e da dentro un `finally` è un'insidia: un'eccezione sollevata mentre
+un'altra sta risalendo **prende il posto** di quella che passava. Con uno `stdin` che non è un
+terminale — una prova di integrazione, una pipe, un `docker compose run` senza `-t` — `input()` alza
+`EOFError` all'istante, e chi guarda leggerebbe «EOF when reading a line» invece del motivo per cui
+la scena si è fermata. Perciò `_gia_fatto` lo assorbe: dove non c'è nessuno a cui fare la domanda,
+l'unica risposta sensata è proseguire.
+
+L'eccezione, invece, risale. Un `finally` che la mangiasse per «non disturbare» chiuderebbe la scena
+con i numeri di un failover che nessuno ha guardato fino in fondo.
+
+Il prezzo è accettato consapevolmente: lo strumento fa una cosa di sua iniziativa nel momento in cui
+chi conduce ha appena chiesto di smettere. La riparazione è idempotente — `riavvia` e `risveglia` su
+un nodo sano non fanno danno — ed è l'unica azione che il `finally` compie. In cambio,
+`tools/reset-demo.sh 02` torna a essere ciò che era: il rimedio per quando qualcosa è andato storto
+*davvero*, non il passaggio obbligato dopo ogni Ctrl-C.
+
 ## Come si misura l'interruzione
 
 La strada ovvia è un ciclo che chiede al cluster chi è il primario finché qualcuno risponde.

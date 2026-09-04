@@ -131,6 +131,40 @@ esattamente quello: `mongodump` che si pianta, la condizione che resta vera, e u
 davanti a duecento persone. La decisione è [ADR-0101](../../docs/Decision.md#adr-0101); il tetto
 predefinito è `TETTO_DUMP_S` e si sposta con `--tetto`.
 
+### Il tetto arrivava a metà, e la metà che restava era la scena
+
+Per una stagione questo capitolo ha promesso più di quanto il codice facesse, e la frase qui sopra —
+«la rete di sicurezza che fa terminare la scena anche se il dump non torna più» — era la promessa.
+`tetto_s` arrivava al solo `WorkloadRunner`. Il carico mollava allo scadere; il thread chiamante
+restava dentro il ciclo del dump, fermo su una lettura che non tornava.
+
+Lo ha rilevato la review di `codex` sulla PR di questa feature, ed è **misurato**: con un iteratore
+che non finisce mai e `tetto_s = 0,05 s`, `ScenarioBackup.esegui()` non era ancora tornata dopo
+quindici secondi, cioè trecento volte il tetto ([M-059](Sources.md#m-059)).
+
+Il rimedio che viene in mente per primo non esiste, e questa è la parte che vale la pena portarsi
+via. Un thread di guardia che allo scadere chiuda l'iteratore trova un generatore **in esecuzione**
+e non sospeso — il consumatore è dentro il suo frame, fermo sul tubo — e `close()` da lì alza
+`ValueError: generator already executing`. Il dump resta vivo, il ciclo resta dov'è. Nella stessa
+sonda il thread principale è uscito solo quando il guardiano ha **ucciso il processo**.
+
+Chi chiama la porta ha in mano un iteratore; chi la implementa ha in mano il processo. Solo il
+secondo può onorare un tetto — e quindi il tetto è salito sulla porta:
+
+```python
+def dump(self, destinazione: Path, *, tetto_s: float | None = None) -> Iterator[Progress]: ...
+```
+
+`SubprocessBackup` lo fa rispettare con un `threading.Timer` che abbatte il figlio, e allo scadere
+alza `DumpTroppoLungo` — un'eccezione propria e non un `ComandoFallito` con codice `-9`, perché dal
+palco «è uscito con codice -9» è il rumore del rimedio, mentre «ha superato il tetto di 300 secondi»
+è la notizia. Con lo stesso dump piantato e un tetto di due secondi, adesso la scena esce dopo
+**2,07 s**. La decisione è [ADR-0118](../../docs/Decision.md#adr-0118).
+
+Il limite già dichiarato altrove vale anche qui: quando il comando è `docker exec ...`, ciò che
+muore è il **client** `docker`, e lo strumento dentro il container tira dritto. Il tetto libera la
+scena, non il cluster.
+
 Il copione dell'Atto III, di conseguenza, **non ha** il parametro `scritture` che il copione del
 failover ha:
 
@@ -157,7 +191,9 @@ Una riga sola tiene in piedi il caso brutto:
 
 ```python
 try:
-    for avanzamento in self._strumento.dump(self._copione.destinazione):
+    for avanzamento in self._strumento.dump(
+        self._copione.destinazione, tetto_s=self._copione.tetto_s
+    ):
         ...
 finally:
     finito.set()

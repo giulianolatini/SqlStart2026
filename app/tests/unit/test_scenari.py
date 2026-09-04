@@ -313,6 +313,59 @@ def test_col_modo_sospendi_la_scena_congela_il_nodo_invece_di_spegnerlo() -> Non
     assert regia.ordini == [("sospendi", "mongo-1"), ("risveglia", "mongo-1")]
 
 
+def _ctrl_c_alla_fase(quale: str) -> Attesa:
+    """Un'attesa che solleva a una fase precisa: il Ctrl-C dal palco, ridotto all'essenza.
+
+    Non è un caso di scuola. Dal vivo la scena gira con `--step`, cioè con un'attesa che si
+    ferma su un `input()`: l'unico posto in cui un'interruzione può arrivare *fra* due fasi
+    è proprio quello, ed è dopo il guasto e prima della ripresa.
+    """
+
+    def attesa(evento: FaseIniziata) -> None:
+        if evento.fase == quale:
+            raise KeyboardInterrupt
+
+    return attesa
+
+
+def test_una_scena_interrotta_dopo_il_guasto_rimette_il_nodo_in_servizio() -> None:
+    """Se la scena si rompe fra il guasto e la ripresa, il nodo resta a terra — e non deve.
+
+    `rompe` e `ripara` erano due righe consecutive senza niente che le legasse: qualunque
+    cosa sollevasse in mezzo — il carico, la resa, un Ctrl-C — saltava la ripresa e lasciava
+    il laboratorio con un nodo spento. Il rimedio è la coppia che il linguaggio ha per
+    questo: ciò che si rompe si ripara in un `finally`, che gira anche quando l'eccezione
+    passa.
+
+    L'eccezione deve comunque risalire. Una scena che si interrompe è una notizia, e un
+    `finally` che la mangiasse per «non disturbare» racconterebbe una scena riuscita.
+    """
+    scenario, _, regia, _ = _scenario()
+
+    with pytest.raises(KeyboardInterrupt):
+        scenario.esegui(attesa=_ctrl_c_alla_fase("elezione"))
+
+    assert regia.ordini == [("ferma", "mongo-1"), ("riavvia", "mongo-1")]
+
+
+def test_col_modo_sospendi_l_interruzione_non_lascia_un_container_congelato() -> None:
+    """Lo stesso caso nel modo che lo rende peggiore.
+
+    Un container **fermo** si vede: `docker compose ps` lo elenca `exited`, e chi rientra in
+    laboratorio se ne accorge. Un container **in pausa** è vivo, tiene la sua memoria e non
+    risponde: è lo stato più facile da dimenticare e il più difficile da diagnosticare la
+    volta dopo, quando il replica set non elegge e nessuno sa perché.
+    """
+    scenario, _, regia, _ = _scenario(
+        copione=Copione(nodo="mongo-1", modo=ModoGuasto.SOSPENDI, scritture=6)
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        scenario.esegui(attesa=_ctrl_c_alla_fase("elezione"))
+
+    assert regia.ordini == [("sospendi", "mongo-1"), ("risveglia", "mongo-1")]
+
+
 def test_la_scena_chiude_con_i_due_numeri() -> None:
     """Durata dell'interruzione e scritture perse: è ciò per cui il Blocco 2 esiste."""
     scenario, _, _, _ = _scenario()
@@ -402,6 +455,11 @@ def test_se_la_regia_non_puo_fermare_niente_la_scena_si_ferma_subito() -> None:
         scenario.esegui()
 
     assert _fasi(sink) == ["carico", "guasto"]
+    # E nessuna ripresa: il `finally` copre ciò che è stato rotto, non ciò che non si è
+    # riusciti a rompere. Chiedere di rimettere in piedi un nodo mai caduto sarebbe un
+    # comando dato al buio — e con la regia annunciata, una riga sullo schermo che dice a
+    # qualcuno di riavviare qualcosa che nessuno ha spento.
+    assert regia.ordini == [("ferma", "mongo-1")]
 
 
 # --- Il ciclo di `watch`, che al Task 13 esce da `cli.py` -------------------------------
@@ -522,6 +580,27 @@ def test_il_dump_va_dove_dice_il_copione_e_una_volta_sola() -> None:
 
     assert strumento.dump_chiesti == [DESTINAZIONE]
     assert esito.destinazione == DESTINAZIONE
+
+
+def test_il_tetto_del_copione_arriva_allo_strumento_e_non_solo_al_carico() -> None:
+    """La rete di sicurezza deve fermare la scena, e la scena la ferma solo chi ha il processo.
+
+    [ADR-0101](../../../docs/Decision.md#adr-0101) dice che il tetto esiste perché «una
+    scena che non termina in sala è peggio di una scena che termina male». Per una stagione
+    il tetto è arrivato al solo `WorkloadRunner`: il carico mollava e il thread della scena
+    restava dentro `for avanzamento in dump(...)`, cioè la promessa valeva per metà. Questa
+    prova guarda che il numero attraversi la porta, che è l'unico posto da cui si può
+    onorare.
+    """
+    strumento = FakeBackup(AVANZAMENTI)
+    scenario, _, _ = _scena_backup(
+        strumento,
+        copione=CopioneBackup(destinazione=DESTINAZIONE, carico_s=0.02, tetto_s=12.0),
+    )
+
+    scenario.esegui()
+
+    assert strumento.tetti_chiesti == [12.0]
 
 
 def test_ogni_avanzamento_del_dump_arriva_a_schermo_mentre_procede() -> None:

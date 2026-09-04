@@ -6360,6 +6360,10 @@ worker interrogano prima di ogni operazione; la scena del backup la lega alla vi
 processo si pianta, e una scena che non termina in sala è peggio di una scena che termina male. Il
 tetto resta, come rete di sicurezza, ed è esposto come `--tetto`.
 
+*Per una stagione quel tetto è arrivato al solo `WorkloadRunner`, e la rete di sicurezza teneva la
+metà leggera: il carico mollava, la scena no. [ADR-0118](#adr-0118) lo fa arrivare fino alla porta,
+che è l'unico posto da cui si può onorare.*
+
 **Conseguenze:** i due numeri della prima riga sono confrontabili, e la percentuale che li separa
 significa qualcosa. Il prezzo è che la seconda finestra può essere breve — mezzo secondo — e quindi
 rumorosa: la scena lo dichiara mostrando anche le due conte assolute, così chi guarda vede su
@@ -7424,3 +7428,165 @@ visibile, una registrazione completa e falsa non lo è.
   si è fermata, che è l'unica cosa che spiega dove guardare.
 
 **Fonti:** [ADR-0115](#adr-0115), [ADR-0055](#adr-0055), [ADR-0098](#adr-0098)
+
+<a id="adr-0118"></a>
+
+## ADR-0118 — Il tetto del dump viaggia fino alla porta, e chi lo supera abbatte il processo
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** [ADR-0101](#adr-0101) ha legato la fine del carico alla fine del `mongodump` e ha
+tenuto `--tetto` come rete di sicurezza, scrivendo perché: «una scena che non termina in sala è
+peggio di una scena che termina male». La pagina
+[15](../app/docs/15-il-backup-a-caldo-e-la-finestra-che-si-misura.md) lo ripete con altre parole —
+«`durata_s` resta la rete di sicurezza che fa **terminare la scena** anche se il dump non torna
+più» — e nomina il caso da evitare: «uno schermo fermo davanti a duecento persone».
+
+La review di `codex` sulla PR #5 ha rilevato che il codice non lo faceva. `ScenarioBackup._con_dump`
+passava `tetto_s` al solo `WorkloadRunner` e poi restava, sul thread principale, dentro
+`for avanzamento in self._strumento.dump(...)`. **Misurato:** con un iteratore che non torna mai e
+`tetto_s = 0,05 s`, dopo **15 secondi** — trecento volte il tetto — `esegui()` non era ancora
+tornata. Il carico mollava, la scena restava ferma a leggere uno `stderr` che non diceva più niente.
+La documentazione prometteva più di ciò che il codice faceva.
+
+La correzione ovvia non funziona, ed è la misura che ha deciso la forma di questa decisione. Un
+thread di guardia che allo scadere chiuda l'iteratore trova un generatore **in esecuzione**, non
+sospeso: il thread principale sta *dentro* il frame, fermo sulla lettura di un tubo. `close()` da lì
+alza `ValueError: generator already executing`, il dump resta vivo e il ciclo resta dov'è
+([M-059](../app/docs/Sources.md#m-059)). Nella stessa sonda, il thread principale è uscito solo
+quando il guardiano ha **ucciso il processo** — e ne è uscito con un `ComandoFallito`, cioè per una
+strada che la scena già conosce.
+
+Chi chiama la porta tiene un iteratore. Chi la implementa tiene il processo. Solo il secondo può
+onorare un tetto.
+
+**Decisione:** `BackupTool.dump` prende `tetto_s: float | None = None`, parola chiave, e
+`ScenarioBackup` gli passa lo stesso numero che dà al carico. `SubprocessBackup` lo fa rispettare
+con un `threading.Timer` che abbatte il figlio; allo scadere sale `DumpTroppoLungo`, che porta
+l'eseguibile e il tetto.
+
+Tre dettagli che il rimedio richiede e che nessuno dei tre è ovvio:
+
+- **Un'eccezione propria, non un `ComandoFallito` con codice `-9`.** Dal palco «mongodump è uscito
+  con codice -9» è il rumore del rimedio; «mongodump ha superato il tetto di 300 secondi ed è stato
+  fermato» è la notizia. Il numero sta anche in un attributo, perché la resa possa dirlo a modo suo.
+- **Il guardiano guarda `poll()` prima di segnare.** Il cronometro può scadere nell'attimo fra la
+  fine del figlio e la lettura del suo codice d'uscita — un dump riuscito mentre chi guarda è lento
+  a scorrere — e segnare «scaduto» lì vorrebbe dire dichiarare fallita in sala la scena che era
+  appena riuscita. Un processo già uscito non ha superato nessun tetto.
+- **Un solo numero per due destinatari.** Il tetto va al carico come limite della corsa e allo
+  strumento come scadenza del processo. Due campi separati sarebbero un ordine da ricordare per
+  sempre — quale scade prima, e che cosa succede in mezzo — per una scelta che nessuno vuole fare.
+
+**Conseguenze:** con lo stesso dump piantato e un tetto di 2 secondi, la scena esce dopo **2,05 s**
+in una corsa e **2,07 s** nell'altra, dicendo che è stato il tetto
+([M-059](../app/docs/Sources.md#m-059)). La promessa scritta in ADR-0101 e nella pagina 15 è
+diventata vera.
+
+Il limite dichiarato in `SubprocessBackup` resta e vale anche qui: quando il comando è
+`docker exec ...`, ciò che muore è il **client** `docker`, e lo strumento dentro il container tira
+dritto. Il tetto libera la scena, non il cluster; è il compromesso che [ADR-0012](#adr-0012)
+comporta, ed è scritto dove qualcuno lo leggerà.
+
+Il cronometro parte quando qualcuno comincia a scorrere l'iteratore e non alla chiamata di `dump`.
+Nella scena i due istanti coincidono — il `for` è la riga dopo — ma la differenza esiste ed è
+dichiarata: `dump` avvia il processo subito, il corpo del generatore parte al primo `next`.
+
+`restore` **non** ha preso il parametro. La simmetria delle due firme è una proprietà voluta della
+porta, e romperla è un debito: ma un tetto sul restore vorrebbe dire un `--tetto` su
+`demo restore`, cioè superficie di riga di comando che nessuno ha chiesto, e la scena del restore
+non ha un carico accanto da fermare. Sta nella tabella dei punti aperti del
+[registro di sviluppo dell'applicazione](../app/docs/registro-sviluppo-app.md#che-cosa-manca).
+
+**Alternative scartate.**
+
+- *Un thread di guardia che chiude l'iteratore.* È la correzione che viene in mente per prima, ed è
+  quella che la sonda ha escluso: `ValueError: generator already executing`.
+- *Il tetto nel costruttore di `SubprocessBackup` invece che sulla porta.* Non cambia nessuna firma,
+  e mette lo stesso numero in due posti — la radice di composizione e il copione della scena. Il
+  giorno in cui divergono nessuno se ne accorge, perché nessuna prova può accorgersene.
+- *Rifare `_avanzamento` attorno a `select` con un timeout sulla lettura.* Sposta il limite dal
+  dump alla **singola riga**: un `mongodump` che scrive un avanzamento ogni tre secondi per un'ora
+  non lo supererebbe mai, ed è esattamente il caso da fermare.
+- *Non correggere il codice e correggere i due documenti.* È l'opzione più economica, e la scarta
+  la frase stessa di ADR-0101: se una scena che non termina è peggio di una che termina male,
+  togliere la promessa è togliere la cosa sbagliata.
+
+**Fonti:** [M-059](../app/docs/Sources.md#m-059), [M-045](../app/docs/Sources.md#m-045),
+[ADR-0101](#adr-0101), [ADR-0077](#adr-0077), [ADR-0012](#adr-0012)
+
+<a id="adr-0119"></a>
+
+## ADR-0119 — Ciò che la scena rompe, la scena lo ripara in un `finally`
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** in `ScenarioFailover.esegui`, `rompe(...)` e `ripara(...)` erano due righe consecutive
+con in mezzo la fase più lunga della scena. Qualunque cosa sollevasse là dentro — il carico, la
+resa, un Ctrl-C dato al prompt di `--step` — saltava la ripresa. La review di `codex` sulla PR #5 lo
+ha rilevato e la misura lo conferma: con un carico che solleva alla seconda fase, la regia riceve
+`[('ferma', 'mongo-rs-1')]` e basta, per tutti e due i modi del guasto. Il `finally` di `cli.py`
+chiude il client e non tocca lo stack.
+
+Nel modo `sospendi` lo stato in cui il laboratorio resta è peggiore che nel modo `ferma`. Un
+container spento si vede: `docker compose ps` lo elenca `exited`. Un container **in pausa** è vivo,
+tiene la sua memoria e non risponde a nessuno; è lo stato più facile da dimenticare e il più
+difficile da diagnosticare la volta dopo, quando il replica set non elegge e non si capisce perché.
+
+L'obiezione che ha tenuto aperta la decisione per un giorno: dentro la rete Compose la regia è
+`RegiaAnnunciata`, che *annuncia* il comando e si ferma su un `input()`. Un `finally` che ripara
+farebbe una domanda **proprio mentre qualcuno sta interrompendo la scena**. Guardando i quattro casi
+uno per uno, l'obiezione si è ridotta a uno solo:
+
+- dall'host, con `RegiaCompose`, la riparazione è immediata e silenziosa;
+- sotto il registratore, la seconda finestra esegue la riparazione e conferma — funziona, ed è ciò
+  che si vuole ([ADR-0115](#adr-0115), [ADR-0117](#adr-0117));
+- dal palco, dopo un Ctrl-C, compare il comando e una domanda. Non è un blocco: è la domanda a cui
+  chi conduce dovrebbe comunque rispondere, e un secondo Ctrl-C ne esce;
+- con `stdin` che non è un terminale, `input()` alza `EOFError` **subito**. Da dentro un `finally`,
+  durante la risalita, quell'eccezione **prende il posto** di quella che stava passando: chi guarda
+  leggerebbe «EOF when reading a line» invece del motivo per cui la scena si è fermata.
+
+Solo il quarto è un guaio, e costa otto righe.
+
+**Decisione:** il `try` si apre **dopo** `rompe` e si chiude su un `finally` che chiama `ripara`.
+L'eccezione risale: un `finally` che la mangiasse per «non disturbare» chiuderebbe la scena con i
+numeri di un failover che nessuno ha guardato fino in fondo. E `_gia_fatto`, la conferma della regia
+annunciata, assorbe l'`EOFError`: dove non c'è nessuno a cui fare la domanda, l'unica risposta
+sensata è proseguire.
+
+Due dettagli di posizione, che sono la decisione vera:
+
+- **Il `try` si apre dopo `rompe`, non prima.** Il `finally` deve coprire ciò che è stato rotto, non
+  ciò che non si è riusciti a rompere. Se `ferma` solleva — la regia senza socket del demone,
+  [ADR-0095](#adr-0095) — il nodo non è mai caduto, e una ripresa chiesta lì sopra sarebbe un
+  comando dato al buio: con la regia annunciata, una riga sullo schermo che dice a qualcuno di
+  riavviare qualcosa che nessuno ha spento.
+- **L'annuncio della ripresa resta dentro il `try`,** e `ripara` da solo nel `finally`. Sul percorso
+  normale non cambia niente: annuncio, pausa di `--step`, riparazione. Su quello interrotto la
+  riparazione avviene senza una **seconda** pausa, e non in silenzio — la regia che ha bisogno di un
+  umano è quella che il comando lo scrive da sé. Una domanda sola, non due.
+
+**Conseguenze:** una scena interrotta lascia il laboratorio nello stato in cui l'ha trovato, e
+`tools/reset-demo.sh 02` torna a essere ciò che era: il rimedio per quando qualcosa è andato storto
+*davvero*, non il passaggio obbligato dopo ogni Ctrl-C.
+
+Il prezzo è che lo strumento fa una cosa di sua iniziativa nel momento in cui chi conduce ha appena
+chiesto di smettere. È accettato consapevolmente: la riparazione è idempotente — `riavvia` e
+`risveglia` su un nodo sano non fanno danno — ed è l'unica azione che il `finally` compie.
+
+**Alternative scartate.**
+
+- *Un `finally` che annuncia lo stato e la riga di ripristino, senza agire.* Difendibile, e costa la
+  metà. Lascia però il container **in pausa** nel modo in cui dimenticarlo è più facile, e sposta su
+  chi conduce un gesto che lo strumento sa fare e che nel novanta per cento dei casi è silenzioso.
+- *La riparazione al confine di `cli.py`, nel `finally` che chiude il client.* Là non si sa che cosa
+  la scena ha rotto né in che modo: servirebbe far uscire quello stato dallo scenario, cioè
+  aggiungere un canale per non aggiungere un `try`.
+- *Lasciare com'è e documentare `reset-demo.sh`.* Chiede a chi conduce di ricordarsene subito dopo
+  che qualcosa è andato storto in pubblico, che è il momento in cui ci si ricorda peggio.
+- *Assorbire anche l'`EOFError` di `_invio`, la pausa di `--step`.* Quella pausa non gira mai dentro
+  un `finally`, e un `--step` chiesto senza terminale è un uso sbagliato che è giusto veda un
+  errore.
+
+**Fonti:** [ADR-0095](#adr-0095), [ADR-0115](#adr-0115), [ADR-0117](#adr-0117)

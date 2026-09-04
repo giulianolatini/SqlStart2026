@@ -151,12 +151,29 @@ class QueryPlanner(Protocol):
 class BackupTool(Protocol):
     """Dump e restore come operazioni lunghe che raccontano come procedono."""
 
-    def dump(self, destinazione: Path) -> Iterator[Progress]:
+    def dump(
+        self, destinazione: Path, *, tetto_s: float | None = None
+    ) -> Iterator[Progress]:
         """Avvia il dump e produce l'avanzamento **mentre** procede.
 
         Un iteratore e non una lista: l'Atto III mostra il throughput che non crolla
         durante il dump, e una lista sarebbe disponibile solo a dump finito, cioè quando
         la scena è già passata.
+
+        **`tetto_s` sta sulla porta perché solo di là si può onorare.** Chi chiama tiene
+        un iteratore, e un iteratore fermo dentro una lettura bloccante non si chiude da
+        fuori: da un altro thread `close()` trova un generatore *in esecuzione* e alza
+        `ValueError: generator already executing`. Chi implementa la porta ha invece in
+        mano ciò che si ferma davvero — un processo, una connessione — e fermarlo fa finire
+        la lettura, l'iterazione e la scena. Il numero attraversa il confine perché la
+        promessa di [ADR-0101](../../../../docs/Decision.md#adr-0101) («il tetto fa
+        terminare la scena anche se il dump non torna più») possa essere mantenuta da
+        qualcuno.
+
+        `None` è nessuna scadenza, ed è il predefinito: un tetto «ragionevole» scelto qui
+        deciderebbe al posto di chi chiama, e lo si scoprirebbe in sala. Chi lo supera
+        solleva, e solleva **dicendo del tetto**: un dump abbattuto che si presentasse come
+        un'uscita diversa da zero racconterebbe il rimedio invece della notizia.
         """
         ...
 

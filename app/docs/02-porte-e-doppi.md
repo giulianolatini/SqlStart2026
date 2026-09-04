@@ -201,6 +201,21 @@ annotato, `Iterator[Progress]` ([M-007](Sources.md#m-007)). Insieme a [M-004](So
 un promemoria in due direzioni: mypy è l'**unico** posto in cui la conformità alle porte è
 verificata, e non verifica tutto.
 
+### Un doppio può registrare senza onorare
+
+`BackupTool.dump` ha preso, più tardi, un secondo parametro: `tetto_s`, i secondi oltre i quali il
+dump si abbatte ([ADR-0118](../../docs/Decision.md#adr-0118)). `FakeBackup` lo **registra** in
+`tetti_chiesti` e non lo fa scadere mai, ed è deliberato.
+
+Un doppio che lo onorasse dovrebbe fingere un cronometro e un figlio da abbattere, cioè rifare in
+finto la parte che è tutta la difficoltà dell'adattatore vero — e una prova verde contro quella
+finzione non direbbe niente di `mongodump`. Che il tetto **arrivi** è quanto le scene possono
+verificare di qua dalla porta; che valga è misurato in `test_backup.py`, con un processo vero che
+non finisce.
+
+È la stessa regola che vale per tutti i doppi di questo elenco, scritta però dalla parte scomoda:
+un doppio è il posto dove si verifica che una richiesta è stata fatta, non che è stata mantenuta.
+
 ### Ogni doppio porta la sua prova
 
 `tests/unit/test_doppi.py` verifica la promessa di ciascuno, non la sua implementazione: che

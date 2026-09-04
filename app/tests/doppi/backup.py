@@ -40,11 +40,25 @@ class FakeBackup:
         self._errore = errore
         self.dump_chiesti: list[Path] = []
         """Le destinazioni per cui è stato chiesto un dump, in ordine."""
+        self.tetti_chiesti: list[float | None] = []
+        """I tetti chiesti, in ordine e in parallelo a `dump_chiesti`.
+
+        **Registrato e non onorato**, ed è deliberato. Il tetto è una promessa sul
+        processo: un doppio che lo facesse scadere dovrebbe fingere un cronometro e un
+        figlio da abbattere, cioè rifare in finto la parte che è tutta la difficoltà
+        dell'adattatore vero — e una prova che passasse contro quella finzione non direbbe
+        niente di `mongodump`. Che il tetto **arrivi** è quanto le scene possono verificare
+        di qua dalla porta; che valga è misurato in `test_backup.py`, con un processo vero
+        che non finisce.
+        """
         self.restore_chiesti: list[tuple[Path, str]] = []
         """Le coppie origine e database di destinazione per cui è stato chiesto un restore."""
 
-    def dump(self, destinazione: Path) -> Iterator[Progress]:
+    def dump(
+        self, destinazione: Path, *, tetto_s: float | None = None
+    ) -> Iterator[Progress]:
         self.dump_chiesti.append(destinazione)
+        self.tetti_chiesti.append(tetto_s)
         return self._cronaca()
 
     def restore(self, origine: Path, destinazione_db: str) -> Iterator[Progress]:
