@@ -192,11 +192,15 @@ nascono con `connect=False`. Un battito che fallisce mentre il primario cade, e 
 `ServerStateChanged` verso `PRIMARIO` che arriva su un altro nodo, nessuno li ha ancora visti
 arrivare. La sede è il **Task 8**, contro gli stack veri.
 
-C'è un caso già segnalato come dubbio, e vale la pena saperlo in anticipo: `ChunkMigrated` è
-l'unico dei nove eventi che potrebbe risultare **non osservabile dal client**. Un client parla con
-`mongos`, e la migrazione di un chunk è una faccenda fra shard e config server. Se si scoprisse che
-non lo è, quell'evento cambierà natura — non resterà un campo morto lasciato lì per non toccare il
-disegno.
+**Il dubbio segnalato qui si è chiuso al Task 15, e non nel modo previsto.** `ChunkMigrated` era
+l'unico dei nove eventi che potesse risultare **non osservabile dal client**: un client parla con
+`mongos`, e la migrazione di un chunk è una faccenda fra shard e config server. Non è
+l'osservabilità ad aver deciso. È che la migrazione **non accade**: la chiave hashed di
+`lab.ordini` sparpaglia i documenti all'inserimento, i due shard restano a un chunk e a metà dei
+documenti ciascuno, e in 1 153 giri di balancer `config.changelog` non ha una sola voce
+`moveChunk` — due fusioni, zero migrazioni ([M-049](Sources.md#m-049)). L'evento è uscito dal
+dominio ([ADR-0103](../../docs/Decision.md#adr-0103)) invece di restare il campo morto che questa
+pagina si era impegnata a non lasciare.
 
 ---
 

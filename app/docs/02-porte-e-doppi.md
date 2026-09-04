@@ -3,19 +3,35 @@
 > Il principio in una riga: **un oggetto soddisfa una porta perché ha i metodi giusti, non perché
 > l'ha ereditata.** E chi verifica che li abbia davvero è mypy, non `isinstance`.
 
-## Le cinque porte
+## Le sette porte
 
-Il dominio dichiara cinque interfacce. Sono i soli punti in cui `mongolab` tocca il mondo.
+Il dominio dichiara sette interfacce. Sono i soli punti in cui `mongolab` tocca il mondo.
 
 | Porta | Metodi | A che cosa serve |
 |---|---|---|
 | `DocumentStore` | `insert_many`, `find_page`, `count`, `aggregate` | leggere e scrivere documenti |
 | `ClusterInspector` | `topology`, `server_status`, `db_stats`, `shard_distribution` | guardare com'è fatto il cluster e come sta |
+| `QueryPlanner` | `explain` | come il router ha deciso di eseguire una query |
 | `BackupTool` | `dump`, `restore` | dump e restore come operazioni lunghe che raccontano come procedono |
+| `Regia` | `ferma`, `riavvia`, `sospendi`, `risveglia` | far accadere il guasto, che non è cosa da applicazione |
 | `EventSink` | `emit` | dove finiscono gli eventi |
 | `Clock` | `now`, `sleep` | il tempo, come dipendenza invece che come fatto |
 
 Stanno in `app/src/mongolab/domain/porte.py`, e sono `typing.Protocol`.
+
+**Cinque erano quelle del disegno; due sono arrivate perché una scena non stava in piedi senza.**
+`Regia` è nata al Task 13 da un'impossibilità — chi fa cadere un nodo non può essere il processo che
+sta guardando il nodo cadere ([ADR-0095](../../docs/Decision.md#adr-0095)), e la pagina che la
+racconta è [14](14-la-scena-del-failover-e-i-due-numeri.md). `QueryPlanner` è nata al Task 15
+([ADR-0105](../../docs/Decision.md#adr-0105)) perché la scena dello sharding deve mostrare che cosa
+il router ha **deciso** di fare di una query, e nessuna delle sei sapeva chiederlo:
+`DocumentStore` scrive e legge documenti, `ClusterInspector` guarda il cluster e non una query.
+
+Aggiungere `explain` a `DocumentStore` sarebbe stato più corto e sbagliato: una porta che tutti
+implementano si sarebbe allargata per un bisogno che ha un chiamante solo, e i doppi in memoria
+avrebbero dovuto promettere un piano che non hanno. Una porta si disegna guardando **chi la
+chiama**. Che poi un solo adattatore — `PymongoStore` — ne soddisfi due non è un'eccezione da
+giustificare: è ciò che si ottiene quando le porte sono strutturali e nessuno le eredita.
 
 ## Perché `Protocol` e non una classe base astratta
 
@@ -62,7 +78,7 @@ asserzione a runtime verifica il comportamento, ma la riga che conta è l'annota
 
 ## `runtime_checkable`, e il buco che ha
 
-Le cinque porte sono decorate con `@runtime_checkable`. Serve a una cosa sola: permettere a una
+Le sette porte sono decorate con `@runtime_checkable`. Serve a una cosa sola: permettere a una
 prova di mostrare che a un oggetto incompleto **la porta si chiude**.
 
 ```python

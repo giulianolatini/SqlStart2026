@@ -1,4 +1,4 @@
-"""Le sei porte: le cinque del §6.2, più `Regia` (ADR-0095).
+"""Le sette porte: le cinque del §6.2, più `Regia` (ADR-0095) e `QueryPlanner`.
 
 **Strutturali, non nominali.** Un doppio soddisfa una porta perché ha i metodi giusti,
 senza ereditarla e senza registrarsi da nessuna parte. Il vantaggio non è risparmiare una
@@ -25,9 +25,10 @@ from typing import Iterator, Mapping, Protocol, Sequence, runtime_checkable
 
 from mongolab.domain.eventi import Evento
 from mongolab.domain.modelli import (
-    ContoShard,
     DescrizioneTopologia,
+    Distribuzione,
     Documento,
+    Piano,
     Progress,
 )
 
@@ -37,6 +38,7 @@ __all__ = [
     "ClusterInspector",
     "DocumentStore",
     "EventSink",
+    "QueryPlanner",
     "Regia",
 ]
 
@@ -89,8 +91,59 @@ class ClusterInspector(Protocol):
 
     def db_stats(self) -> Mapping[str, object]: ...
 
-    def shard_distribution(self) -> tuple[ContoShard, ...]:
-        """Dove stanno davvero i documenti. Vuota su ciò che non è uno sharded cluster."""
+    def shard_distribution(self, collezione: str) -> Distribuzione:
+        """Dove stanno davvero i documenti **di questa collezione**.
+
+        Due cose sono cambiate al Task 15, e sono la stessa cosa vista da due lati
+        ([ADR-0104](../../../../docs/Decision.md#adr-0104)).
+
+        **Il tipo di ritorno**, perché la `tuple[ContoShard, ...]` di prima aveva una
+        risposta sola per due fatti opposti: la tupla vuota diceva «non è uno sharded
+        cluster» e anche «è uno sharded cluster, ma questa collezione non è distribuita».
+        Il Blocco 3 esiste per mostrare **precisamente il secondo**, accanto al primo, e
+        una scena non può poggiare su un valore che li confonde.
+
+        **Il parametro**, perché delle quattro domande di questa porta è l'unica che è per
+        collezione: `topology` e `server_status` riguardano il cluster, `db_stats` il
+        database. Fino al Task 14 la collezione arrivava dal costruttore, e la ragione
+        scritta in `inspector.py` era che un ispettore capace di cambiare bersaglio a ogni
+        chiamata renderebbe possibile una schermata con due numeri accanto che non parlano
+        della stessa cosa. La ragione era buona e adesso non regge più, per due motivi: la
+        scena del Blocco 3 accosta **apposta** due collezioni dello stesso cluster, e
+        `Distribuzione` porta con sé il nome di quella di cui parla — i due numeri
+        accanto si presentano da soli.
+        """
+        ...
+
+
+@runtime_checkable
+class QueryPlanner(Protocol):
+    """Chiedere al router **come** eseguirebbe una query, senza eseguirla.
+
+    La settima porta, aggiunta al Task 15
+    ([ADR-0105](../../../../docs/Decision.md#adr-0105)). Un quinto metodo su
+    `DocumentStore` sarebbe stato la strada corta e sarebbe stata la strada sbagliata:
+    dei cinque oggetti che oggi soddisfano quella porta, tre esistono apposta per non
+    funzionare — uno rompe le scritture, uno è lento, uno non legge — e nessuno dei tre
+    ha un router da interrogare. Avrebbero risposto sollevando, cioè la porta avrebbe
+    dichiarato una promessa che la maggioranza delle sue implementazioni non mantiene.
+
+    Una porta si disegna guardando **chi la chiama**, non chi la implementa: a chiamare
+    questa è un solo scenario, e a soddisfarla è un solo adattatore — `PymongoStore`, che
+    la collezione ce l'ha già e adesso passa per due porte invece che per una. Che un
+    adattatore ne soddisfi due non è un'eccezione da giustificare: è ciò che si ottiene
+    quando le porte sono strutturali e nessuno le eredita.
+    """
+
+    def explain(self, filtro: Documento) -> Piano:
+        """Il piano che il router ha scelto per questo filtro.
+
+        Non un booleano «è mirata». La parola che `mongos` mette in
+        `winningPlan.stage` — `SINGLE_SHARD`, `SHARD_MERGE` — viaggia intera fino allo
+        schermo, perché è quella che chi guarda ritroverà in `explain()` la prima volta
+        che proverà da solo. Il booleano lo ricava `Piano.mirata`, e da un campo che si
+        vede.
+        """
         ...
 
 

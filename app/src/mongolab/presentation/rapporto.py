@@ -37,12 +37,14 @@ proprio nello stack in cui la fotografia serve a spiegare che il router non è u
 Dove il numero manca compare `IGNOTO`, che si legge come «non c'era» e non come «zero».
 """
 
+import json
 from typing import Mapping, Sequence
 
 from mongolab.application.scenari import (
     EsitoBackup,
     EsitoFailover,
     EsitoRestore,
+    EsitoSharding,
     Ritmo,
 )
 from mongolab.application.topologia import Interruzione
@@ -51,6 +53,9 @@ from mongolab.domain.modelli import (
     ContoShard,
     DescrizioneServer,
     DescrizioneTopologia,
+    Distribuzione,
+    Documento,
+    Piano,
     Progress,
 )
 from mongolab.domain.porte import ClusterInspector
@@ -66,6 +71,7 @@ __all__ = [
     "rapporto",
     "riassunto",
     "ripristino",
+    "spartizione",
 ]
 
 IGNOTO = "—"
@@ -100,6 +106,7 @@ def rapporto(
     ispettore: ClusterInspector,
     *,
     titolo: str,
+    collezione: str,
     larghezza: int | None = COLONNE_SALA,
 ) -> str:
     """La fotografia dello stack: topologia, server, database, distribuzione.
@@ -108,6 +115,10 @@ def rapporto(
     scritto e in quale directory sta lo stack — perché questo modulo non conosce la mappa
     dei bersagli e non deve: sta in `presentation/`, e `bersagli.py` sta
     nell'infrastruttura.
+
+    `collezione` arriva da fuori per la stessa ragione, e da ADR-0104: delle quattro
+    domande dell'ispettore la distribuzione è l'unica che è **per collezione**, e il nome
+    `ordini` sta in `bersagli.py`, cioè dall'altra parte del confine.
     """
     # **L'ordine di lettura non è quello di stampa, ed è deliberato.** `server_status`
     # esegue un comando, quindi obbliga il driver a una *selezione*, cioè a guardare;
@@ -118,7 +129,7 @@ def rapporto(
     # standalone sanissimo si legge `sconosciuta`. Misurato eseguendo, non dedotto.
     stato = ispettore.server_status()
     statistiche = ispettore.db_stats()
-    distribuzione = ispettore.shard_distribution()
+    distribuzione = ispettore.shard_distribution(collezione)
     vista = ispettore.topology()
 
     linee = [titolo]
@@ -270,6 +281,48 @@ def ripristino(scena: EsitoRestore, *, larghezza: int | None = COLONNE_SALA) -> 
     return "\n".join(tronca(linea, larghezza) for linea in linee)
 
 
+def spartizione(scena: EsitoSharding, *, larghezza: int | None = COLONNE_SALA) -> str:
+    """Il Blocco 3 in otto righe: le due colonne, i chunk fermi, i due piani.
+
+    **Le due colonne stanno una sopra l'altra e non una accanto all'altra.** Affiancarle
+    davvero vorrebbe dire due incolonnamenti su cento caratteri, cioè cinquanta per parte,
+    cioè i nomi degli shard troncati proprio dove si legge la differenza. In verticale
+    ciascuna riga è intera, e il confronto è fra la prima riga e la seconda — che è
+    esattamente la distanza che l'occhio percorre senza aiuto.
+
+    **La riga degli arrivi non è un di più: è la riga che rende vera la precedente.** I
+    totali di `lab.ordini` contengono i ventimila documenti del seed, e duemila arrivati
+    non si confrontano con ventiduemila presenti. Vedi `EsitoSharding.arrivi`, dove sta la
+    misura che ha fatto aggiungere questa riga.
+
+    **Il carico si dichiara.** L'ultima riga dice quante scritture ha fatto ciascuna
+    corsa, e se le due non combaciano lo scrive. Due colonne accostate danno per scontato
+    che il carico sia lo stesso; quando non lo è, la differenza fra le colonne non è più
+    la chiave di shard ed è la riga più importante dello schermo.
+
+    **Questa funzione non conclude.** Non scrive «lo sharding funziona»: scrive lo
+    sbilancio, i chunk e i due stadi, e chi guarda decide. È la stessa regola di `copia`,
+    e la ragione è la stessa per cui il §6.3 rimprovera i benchmark che concludono al
+    posto di chi legge.
+    """
+    linee = _shard(scena.intera, "non sharded")
+    linee += _shard(scena.dopo, "sharded")
+    linee += _arrivi(scena.arrivi)
+    linee.append(
+        _voce(
+            "bilancio",
+            f"sbilancio {_punti(scena.sbilancio)}",
+            f"chunk {_chunk_in_piu(scena.chunk_in_piu)}",
+        )
+    )
+    linee.append(_voce("mirata", *_piano(scena.mirata)))
+    linee.append(_voce("su tutti", *_piano(scena.sparpagliata)))
+    linee.append(_voce("carico", *_carico(scena)))
+    if scena.fasi:
+        linee.append(_voce("fasi", *scena.fasi))
+    return "\n".join(tronca(linea, larghezza) for linea in linee)
+
+
 # --- Le voci del rapporto ---------------------------------------------------------------
 
 
@@ -345,19 +398,128 @@ def _database(statistiche: Mapping[str, object]) -> list[str]:
     ]
 
 
-def _shard(distribuzione: Sequence[ContoShard]) -> list[str]:
-    if not distribuzione:
+def _shard(distribuzione: Distribuzione, etichetta: str = "shard") -> list[str]:
+    """Tre casi, tre righe diverse. Fino al Task 14 i primi due erano la stessa.
+
+    Il caso di mezzo — c'è un cluster, la collezione non è distribuita — è la prima metà
+    della scena del Blocco 3, e prima di ADR-0104 arrivava qui indistinguibile dal caso di
+    chi un cluster non ce l'ha: entrambi una tupla vuota, entrambi «questo non è uno
+    sharded cluster». Cioè lo schermo negava un cluster che era acceso.
+
+    **L'etichetta è un parametro** perché `spartizione` usa questa stessa funzione **due**
+    volte, sulle due collezioni che accosta, e due righe intitolate «shard» una sopra
+    l'altra non direbbero quale sia quale. I tre casi restano scritti in un posto solo: è
+    la logica, non il titolo, che non va duplicata.
+    """
+    if not distribuzione.in_un_cluster:
         # Dichiarare il vuoto invece di omettere la voce: su un replica set la domanda
         # «e gli shard?» è legittima, e una riga assente si legge come una dimenticanza.
-        return [_voce("shard", "nessuno: questo non è uno sharded cluster")]
-    prima, *altri = distribuzione
-    return [_voce("shard", _riga_shard(prima))] + [
-        _sotto(_riga_shard(conto)) for conto in altri
+        return [_voce(etichetta, "nessuno: questo non è uno sharded cluster")]
+    if not distribuzione.distribuita:
+        return [
+            _voce(
+                etichetta,
+                f"{distribuzione.collezione} non è distribuita",
+                f"{distribuzione.documenti} documenti su {distribuzione.primario}",
+            )
+        ]
+    if not distribuzione.conti:
+        # Distribuita e senza un solo shard che risponde: non è «zero documenti», è una
+        # risposta che manca, e inventare una riga di zeri la farebbe sembrare un dato.
+        return [_voce(etichetta, f"{distribuzione.collezione} è distribuita", IGNOTO)]
+    prima, *altri = distribuzione.conti
+    return [_voce(etichetta, _riga_shard(distribuzione, prima))] + [
+        _sotto(_riga_shard(distribuzione, conto)) for conto in altri
     ]
 
 
-def _riga_shard(conto: ContoShard) -> str:
-    return f"{conto.shard:<18}{conto.documenti} documenti{SEPARATORE}{conto.chunk} chunk"
+def _riga_shard(distribuzione: Distribuzione, conto: ContoShard) -> str:
+    """Documenti, quota e chunk. La quota perché due conteggi grezzi si confrontano a
+    mente, e dalla decima fila nessuno lo fa."""
+    quota = distribuzione.quota(conto.shard)
+    percentuale = IGNOTO if quota is None else f"{quota:.0f}%"
+    return (
+        f"{conto.shard:<18}{conto.documenti} documenti ({percentuale})"
+        f"{SEPARATORE}{conto.chunk} chunk"
+    )
+
+
+def _piano(piano: Piano) -> list[str]:
+    """Il filtro, lo stadio verbatim, e quanti shard ha coinvolto.
+
+    Lo stadio non si traduce: `SINGLE_SHARD` e `SHARD_MERGE` sono le parole che chi guarda
+    ritroverà nel proprio `explain()`, e sostituirle con «mirata» e «a tutti» renderebbe
+    la schermata più chiara e la shell irriconoscibile. Le due etichette italiane stanno a
+    sinistra, dove sono un titolo; la parola del server sta a destra, dove è un dato.
+    """
+    quanti = len(piano.shard)
+    return [
+        _filtro(piano.filtro),
+        piano.stadio,
+        f"{quanti} shard" if quanti else "nessuno shard: qui non c'è un router",
+    ]
+
+
+def _filtro(filtro: Documento) -> str:
+    """Il filtro come lo si digiterebbe, non come lo stampa Python.
+
+    Virgolette doppie: chi guarda riscriverà quella riga in `mongosh`, e il `repr` di un
+    dict — apostrofi compresi — non è ciò che mongosh accetta. Il ripiego su `str` c'è per
+    i filtri che JSON non sa scrivere, un `ObjectId` per esempio: meglio una riga con gli
+    apostrofi che una schermata che solleva mentre la sala guarda.
+    """
+    try:
+        return json.dumps(filtro, ensure_ascii=False, separators=(", ", ": "))
+    except TypeError:
+        return str(filtro)
+
+
+def _arrivi(arrivi: Sequence[tuple[str, int]]) -> list[str]:
+    """Dove è finito il carico, shard per shard, con la sua quota.
+
+    Nessuna riga se gli arrivi non ci sono: là non c'è una collezione distribuita di cui
+    dire dove sia finito qualcosa, e le due righe sopra lo hanno già detto.
+    """
+    totale = sum(quanti for _, quanti in arrivi)
+    if not arrivi or totale <= 0:
+        return []
+    return [
+        _voce(
+            "arrivati",
+            *(
+                f"{shard} {quanti} ({100.0 * quanti / totale:.0f}%)"
+                for shard, quanti in arrivi
+            ),
+        )
+    ]
+
+
+def _punti(sbilancio: float | None) -> str:
+    """Punti percentuali, e il trattino dove la distanza non esiste. Vedi `sbilancio`.
+
+    Il singolare è scritto a mano perché «1 punti» è la svista che si nota dalla prima
+    fila, e questa schermata sta su un proiettore per un minuto intero.
+    """
+    if sbilancio is None:
+        return IGNOTO
+    quanti = round(sbilancio)
+    return f"{quanti} punto" if quanti == 1 else f"{quanti} punti"
+
+
+def _chunk_in_piu(quanti: int | None) -> str:
+    """Zero si scrive. È la lezione del Passo 1, e una riga assente sembrerebbe un buco."""
+    return IGNOTO if quanti is None else f"{quanti} in più"
+
+
+def _carico(scena: EsitoSharding) -> list[str]:
+    """Una riga sola se le due corse combaciano, tre se no. Vedi `EsitoSharding`."""
+    if scena.confrontabile:
+        return [f"{scena.carico_intera.scritture} scritture su ognuna"]
+    return [
+        f"{scena.carico_intera.scritture} senza chiave",
+        f"{scena.carico_sparsa.scritture} con chiave",
+        "non è lo stesso carico",
+    ]
 
 
 def _latenze(etichetta: str, latenze: Latenze | None) -> list[str]:

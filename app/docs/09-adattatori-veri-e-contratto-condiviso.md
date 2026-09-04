@@ -357,10 +357,11 @@ che è una somma è credere di guardare una macchina mentre se ne guardano due.
 
 ### `shard_distribution`, ovvero due numeri che stanno in due posti
 
-È il metodo che costa, e costa **due** chiamate. Il motivo è tutta la scena del Blocco 3: **chunk e
-documenti non si deducono l'uno dall'altro.** Con una chiave di sharding sbagliata si vedono i chunk
-divisi a metà e i documenti tutti da una parte, ed è esattamente ciò che il pubblico deve vedere
-succedere.
+È il metodo che costa, e costa **fino a tre** chiamate — due erano quelle del Task 8, la terza
+l'ha aggiunta il Task 15 per sapere chi è lo shard primario. Il motivo delle prime due è tutta la
+scena del Blocco 3: **chunk e documenti non si deducono l'uno dall'altro.** Con una chiave di
+sharding sbagliata si vedono i chunk divisi a metà e i documenti tutti da una parte, ed è
+esattamente ciò che il pubblico deve vedere succedere.
 
 I documenti per shard li sa `$shardedDataDistribution`, che è l'unico modo di averli **senza
 interrogare gli shard uno per uno** ([A-012](Sources.md#a-012)). Lo stadio si esegue solo su
@@ -404,6 +405,7 @@ cui sta scritto qui.
 
 ```python
 def _e_sharded(self) -> bool:
+    self._scopri()
     return any(server.ruolo is RuoloServer.ROUTER for server in self.topology().server)
 ```
 
@@ -420,15 +422,80 @@ resta `ROUTER`, perché glielo dice `hello` con `msg: "isdbgrid"`. Siccome è pr
 prove di integrazione si collegano (vedi sotto), la differenza non è teorica: è la differenza fra
 sei prove verdi e sei prove che non provano niente.
 
-### La tupla vuota che ha due significati
+#### La riga aggiunta al Task 15: chiedere al driver che cosa sa è chiedere anche *se* sa
 
-`shard_distribution()` restituisce `()` sia quando non è uno sharded cluster, sia quando lo è ma
-**questa collezione non è distribuita** — i documenti stanno tutti sullo shard primario e il
-catalogo non ha niente da dire su di loro. Distinguere i due casi richiederebbe un tipo di ritorno
-diverso. Per la scena che questa applicazione mostra la distinzione non serve, e la porta lo
-dichiara invece di fingere di averla fatta: entrambi i casi hanno la loro prova di integrazione,
+`self._scopri()` non c'era, e la sua assenza è costata una schermata. **PyMongo scopre la
+topologia alla prima operazione, non alla costruzione del client:** fino a lì ogni seme è
+`SCONOSCIUTO`, che nel dominio significa esattamente «assenza di un'osservazione» e non
+«osservato assente». La riga qui sopra leggeva quello stato e ne concludeva «non c'è nessun
+router», cioè leggeva il proprio non aver guardato — e la prima fotografia di `demo sharding`
+dichiarava non distribuita una `lab.ordini` distribuita su due shard, con la riga del bilancio a
+trattini ([M-053](Sources.md#m-053), [ADR-0108](../../docs/Decision.md#adr-0108)).
+
+`_scopri()` fa un `ping` **solo se nessun ruolo è ancora noto**: appena uno lo è, il monitoraggio
+in background tiene aggiornata la descrizione da sé e la riga non costa più niente. E il `ping`
+porta `read_preference=ReadPreference.NEAREST`, che è la parte da non sbagliare: un comando su
+`admin` va sul primario per impostazione predefinita e **non torna finché un primario non c'è**
+([A-017](Sources.md#a-017)). Su un mongos non esiste; su un replica set in mezzo a un'elezione
+nemmeno. Con la preferenza predefinita, questa riga avrebbe piantato `stats` durante l'Atto II.
+
+È la seconda volta che il repository inciampa nella topologia fredda —
+[M-042](Sources.md#m-042) è la stessa cosa un task prima, in `demo failover` — e vale la pena
+sapere perché nessuna prova d'integrazione la vedeva: la fixture di sessione chiama
+`spazza(client)` prima di consegnarlo, quindi la scoperta era già avvenuta per **effetto
+collaterale** della pulizia. Ogni prova partiva da un client caldo; solo la sala partiva da uno
+freddo. La prova che adesso lo copre apre il proprio client apposta.
+
+### La tupla vuota che aveva due significati, e il tipo che li separa
+
+Fino al Task 14 `shard_distribution()` restituiva `()` sia quando non era uno sharded cluster,
+sia quando lo era ma **quella collezione non era distribuita** — i documenti tutti sullo shard
+primario, e il catalogo senza niente da dire su di loro. La pagina scriveva che «per la scena che
+questa applicazione mostra la distinzione non serve». Il Blocco 3 è la scena in cui serve: mette
+le due colonne una accanto all'altra, ed è tutto il suo contenuto.
+
+Il tipo di ritorno è quindi cambiato ([ADR-0104](../../docs/Decision.md#adr-0104)):
+`Distribuzione(collezione, distribuita, primario, conti)`, dove due campi bastano a separare i
+tre stati.
+
+| `primario` | `distribuita` | che cosa significa                                |
+| ---------- | ------------- | ------------------------------------------------- |
+| `None`     | `False`       | non è uno sharded cluster: non c'è niente da dire |
+| uno shard  | `False`       | è un cluster, ma la collezione sta **intera** lì  |
+| uno shard  | `True`        | è un cluster, e il catalogo la conosce            |
+
+Che cosa distingua il secondo caso dal terzo è stato **misurato, non dedotto**
+([M-050](Sources.md#m-050)): su una collezione distribuita e **vuota**
+`$shardedDataDistribution` produce comunque la sua riga, con i due shard a zero documenti; su una
+non distribuita e piena di cinquanta documenti non ne produce nessuna. Un criterio basato sui
+documenti avrebbe sbagliato il primo caso; uno basato su `config.collections` — che per una
+collezione non distribuita non ha proprio la voce — avrebbe confuso «non distribuita» con «non ho
+i permessi per saperlo».
+
+Le prove d'integrazione dei due casi restano quelle di allora,
 `test_su_un_istanza_singola_non_c_e_distribuzione_per_shard` e
-`test_una_collezione_non_distribuita_dentro_un_cluster_sharded`.
+`test_una_collezione_non_distribuita_dentro_un_cluster_sharded`, e adesso guardano due campi
+invece di una tupla vuota.
+
+### `explain`, ovvero la settima porta su un adattatore che ne aveva già una
+
+`PymongoStore` soddisfa `DocumentStore` **e** `QueryPlanner`
+([ADR-0105](../../docs/Decision.md#adr-0105)). Non è un compromesso: le porte sono `Protocol`
+strutturali e nessuno le eredita, quindi un oggetto che ha i metodi di due porte soddisfa due
+porte, e la cosa non ha bisogno di essere dichiarata da nessuna parte.
+
+L'adattatore legge tre cose da `queryPlanner.winningPlan`, e le tre sono state misurate sui tre
+stack ([M-051](Sources.md#m-051)):
+
+- **lo stadio**, che sta sempre in `winningPlan.stage`, senza dover scendere in un `queryPlan`
+  annidato, e che viaggia fino allo schermo **verbatim** — `SINGLE_SHARD`, `SHARD_MERGE` sono le
+  parole che chi guarda ritroverà in `explain()` la prima volta che proverà da solo;
+- **gli shard**, che compaiono **solo** attraverso un router: da un mongod o da un replica set il
+  piano è `IDHACK` e la chiave `shards` non c'è proprio, quindi la tupla vuota è un fatto e non un
+  ripiego;
+- **il loro ordine**, che il server non garantisce — restituisce `['shard2rs', 'shard1rs']` — e
+  che l'adattatore ordina prima di consegnare, perché una schermata che cambia ordine da sola
+  insegna a diffidarne.
 
 ---
 

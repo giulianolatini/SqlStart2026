@@ -909,6 +909,88 @@ def test_i_due_predefiniti_tengono_insieme_le_due_scene() -> None:
     assert DATABASE_RIPRISTINO != DATABASE
 
 
+# --- Il Blocco 3: `demo sharding` -------------------------------------------------------
+#
+# La scena gira **da tutti e due i posti**, e non è una dimenticanza: qui non c'è nessuno
+# strumento esterno da avviare in un nodo, si parla con il router e basta. Dall'host il
+# router è `localhost:27117`, da dentro la rete è `mongos:27017`, e in entrambi i casi la
+# scoperta resta spenta perché un `mongos` non si scopre — lo si interroga.
+
+
+def test_la_scena_dello_sharding_e_nel_gruppo_demo() -> None:
+    codice, testo = esegui("demo", "--help")
+
+    assert codice == 0
+    assert "sharding" in testo
+
+
+def test_sharding_ha_le_opzioni_della_scena() -> None:
+    codice, testo = esegui("demo", "sharding", "--help")
+
+    assert codice == 0
+    for opzione in ("--target", "--collection", "--scritture", "--step", "--sink"):
+        assert opzione in testo, opzione
+
+
+def test_il_carico_del_blocco_3_si_conta_e_non_si_cronometra() -> None:
+    """L'unica scena senza `--carico`, e la ragione è una misura.
+
+    Le altre tre si limitano con i secondi, e va bene: là il carico è lo sfondo su cui
+    succede qualcos'altro. Qui il carico **è** la misura, e le due corse vanno accostate:
+    con una durata uguale ne escono due conteggi diversi, perché il throughput delle due
+    collezioni non è lo stesso. Misurato sullo stack 03 con sei secondi per parte:
+    **4288 scritture sulla non distribuita, 4415 sulla distribuita**
+    ([M-052](../../docs/Sources.md#m-052)) — cioè la schermata dichiarava «non è lo stesso
+    carico» proprio nella scena che il copione intitola «lo stesso carico due volte».
+
+    Con un conteggio le due corse sono uguali per costruzione, e la differenza fra le
+    colonne resta quella che la scena vuole mostrare: la chiave di shard.
+    """
+    codice, testo = esegui("demo", "sharding", "--help")
+
+    assert codice == 0
+    assert "--carico" not in testo
+
+
+def test_la_scena_dello_sharding_vuole_uno_sharded_cluster() -> None:
+    """Su un mongod solo non c'è niente da ripartire, e il rifiuto lo dice così.
+
+    Non «comando non valido»: la riga spiega che cosa manca — gli shard — e quale
+    bersaglio ce li ha. È la stessa forma di `_solo_da_un_replica_set`, ed è la forma che
+    serve dal palco, dove un errore si legge a voce alta senza poterlo interpretare.
+    """
+    codice, testo = esegui("demo", "sharding", "--target", "standalone")
+
+    assert codice != 0
+    # Non `"shard"`: quella parola è dentro il nome del comando, e un'asserzione così
+    # passerebbe anche contro «No such command 'sharding'» — cioè contro un comando che
+    # non esiste. La prova deve poter fallire, se no non sta provando niente.
+    assert "sharded cluster" in testo
+    assert "--target sharded" in testo
+
+
+def test_su_un_replica_set_non_c_e_nessun_router_a_cui_chiedere() -> None:
+    """Tre nodi con gli stessi dati non sono tre shard, e la differenza è tutta la scena.
+
+    `explain()` su un replica set risponde `COLLSCAN` o `IXSCAN` e non nomina nessuno
+    shard, perché non c'è nessun router che riparta la domanda: la schermata del Blocco 3
+    resterebbe muta proprio nelle due righe per cui esiste.
+    """
+    codice, testo = esegui("demo", "sharding", "--target", "rs")
+
+    assert codice != 0
+    assert "router" in testo
+    assert "--target sharded" in testo
+
+
+def test_step_e_la_tui_non_convivono_nemmeno_nello_sharding() -> None:
+    """Stesso rifiuto delle altre scene, e dalla stessa funzione: ADR-0019."""
+    codice, testo = esegui("demo", "sharding", "--target", "sharded", "--step")
+
+    assert codice != 0
+    assert "plain" in testo
+
+
 # --- Chi esegue gli strumenti, e con quale indirizzo ------------------------------------
 
 

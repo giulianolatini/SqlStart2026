@@ -19,7 +19,6 @@ from datetime import datetime
 
 from mongolab.domain.eventi import (
     BackupProgressed,
-    ChunkMigrated,
     Evento,
     FaseIniziata,
     LatencySampled,
@@ -182,12 +181,6 @@ def _etichetta_e_dettaglio(evento: Evento) -> tuple[str, str]:
             )
         case BackupProgressed():
             return "BACKUP", _avanzamento(evento)
-        case ChunkMigrated():
-            return (
-                "CHUNK",
-                f"{evento.collezione} {evento.chunk}"
-                f" {evento.da_shard} → {evento.a_shard}",
-            )
         case FaseIniziata():
             return "FASE", evento.descrizione
         case PrimaryWaitAbandoned():

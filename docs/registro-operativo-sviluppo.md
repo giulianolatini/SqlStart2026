@@ -6258,3 +6258,152 @@ alla **207**. Le suite: **166** prove per gli strumenti, **582** per l'applicazi
 integrazione, `mypy --strict` verde su 64 file. Prossimo passo: **Task 15** del
 [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), `demo sharding`, dove l'evento
 `ChunkMigrated` trova finalmente chi lo emette — o si scopre che nessuno può.
+
+## 2026-09-04 — `feature/04`, Task 15: nessuno emette `ChunkMigrated`, e la sala partiva da un client freddo
+
+Il Task 15 costruisce il Blocco 3: la stessa corsa di scritture fatta **due volte**, su una
+collezione che nessuno ha distribuito e su `lab.ordini` che lo è, con i conteggi per shard
+accostati, più le due righe di `explain()` che contrappongono query mirata e scatter-gather. Ne
+escono un sottocomando `demo sharding`, la settima porta, sei ADR, cinque misure — e un evento del
+dominio **in meno**. Le prove unitarie passano da **582 a 619**, quelle d'integrazione da **49 a
+58**, `mypy --strict` resta verde e sale da 64 a **66** file.
+
+Tre dei quattro passi del piano hanno prodotto una risposta diversa da quella che chiedevano, e in
+tutti e tre i casi perché sono stati eseguiti invece che ragionati.
+
+**Il Passo 2 chiedeva chi emette `ChunkMigrated`, e la risposta è che nessuno può.** Il passo era
+scritto con la sua via d'uscita già dentro — «se non è osservabile dal client, va detto» — ma la via
+d'uscita è servita per un'altra ragione. Prima di scrivere l'emittente valeva la pena chiedersi se
+ci fosse qualcosa da emettere: `balancerStatus` dice `mode: "full"` e **1 153 giri**, e
+`config.changelog`, che conserva le voci dall'`addShard` del giorno dell'inizializzazione, ha **due
+`merge` e zero migrazioni** — non una sola voce `moveChunk`, `moveRange` o `migrate`
+([M-049](../app/docs/Sources.md#m-049)). Non è l'osservabilità a mancare: è la migrazione. Con una
+chiave `{_id: "hashed"}` i due shard restano pari per costruzione, e non c'è nessuno squilibrio da
+correggere — cosa che [ADR-0069](Decision.md#adr-0069) aveva già scritto un task prima, dal lato
+dell'infrastruttura. L'evento è uscito dal dominio ([ADR-0103](Decision.md#adr-0103)), la guardia
+dei nomi scende da dieci a nove, e al suo posto resta un commento che dice quando è uscito e con
+quale misura.
+
+**Due pagine erano stantìe da prima, e nessuna guardia le copriva.** Rimuovendo l'evento è venuto
+fuori che `app/docs/03-eventi-immutabili.md` elencava dieci eventi ma **non aveva mai aggiunto
+`FaseIniziata`**, arrivata al Task 13, e che `app/docs/02-porte-e-doppi.md` diceva ancora «Le
+cinque porte» senza `Regia`, arrivata dallo stesso task. `make docs-check` verifica citazioni e
+collegamenti; i conteggi raccontati in prosa non li vede nessuno.
+
+**«Lo stesso carico due volte» non lo era.** La prima esecuzione vera, con il limite ancora
+espresso in secondi come nelle altre tre scene, ha stampato `carico 4288 senza chiave · 4415 con
+chiave · non è lo stesso carico` ([M-052](../app/docs/Sources.md#m-052)). La riga di garanzia ha
+funzionato, e ciò che denunciava era un difetto di disegno: sei secondi per corsa incontrano due
+throughput diversi e producono due conteggi diversi, e la differenza fra le colonne non è più
+attribuibile alla sola chiave di shard. Nessuna prova unitaria poteva vederlo — i doppi scrivono
+esattamente quanto il copione chiede, quindi `confrontabile` era sempre verde. Da lì `demo
+sharding` è l'unica delle quattro scene **senza** `--carico`: il limite è `--scritture`,
+predefinito 5 000 ([ADR-0107](Decision.md#adr-0107)), e le due corse diventano uguali per
+costruzione. Il prezzo sono quattordici secondi invece di dieci.
+
+**A client freddo la prima fotografia negava un cluster acceso.** Sullo stack 03 sano, la
+fotografia di *prima* diceva `distribuita=False, primario=None, conti=()` di una `lab.ordini` che
+le righe subito sotto mostravano ripartita su due shard, con la riga del bilancio a trattini
+([M-053](../app/docs/Sources.md#m-053)). `PymongoInspector._e_sharded()` guardava la descrizione
+della topologia **come il client la conosce**, e un client appena costruito non conosce niente:
+PyMongo scopre i server alla prima operazione, non alla costruzione, e fino a lì ogni seme è
+`SCONOSCIUTO` — che nel dominio significa «assenza di un'osservazione», non «osservato assente».
+La correzione è un `ping` fatto **solo se nessun ruolo è ancora noto**, e con
+`read_preference=NEAREST`: un comando su `admin` va sul primario per impostazione predefinita e non
+torna finché un primario non c'è ([A-017](../app/docs/Sources.md#a-017)), quindi con la preferenza
+predefinita quella riga avrebbe piantato `stats` durante l'Atto II
+([ADR-0108](Decision.md#adr-0108)). È la **seconda volta** — [M-042](../app/docs/Sources.md#m-042)
+è la stessa cosa un task prima, in `demo failover` — e la parte che vale è perché nessuna prova
+d'integrazione la vedesse: la fixture di sessione chiama `spazza(client)` prima di consegnare il
+client, quindi ogni prova partiva da un client già caldo. Solo la sala partiva da uno freddo.
+
+**La tupla vuota aveva due significati, e adesso ne ha uno.** `shard_distribution()` restituiva
+`()` sia per «non è uno sharded cluster» sia per «lo è, ma questa collezione non è distribuita»; la
+pagina 09 lo dichiarava e concludeva che per le scene di questa applicazione la distinzione non
+serviva. Il Blocco 3 è la scena in cui serve, perché accostare le due colonne è tutto il suo
+contenuto. Il ritorno è `Distribuzione(collezione, distribuita, primario, conti)`
+([ADR-0104](Decision.md#adr-0104)), e il criterio che separa i tre stati è stato **misurato**: su
+una collezione distribuita e *vuota* `$shardedDataDistribution` produce comunque la sua riga con i
+due shard a zero, su una non distribuita e piena di cinquanta documenti non ne produce nessuna
+([M-050](../app/docs/Sources.md#m-050)). Nella stessa decisione la collezione è passata dal
+costruttore dell'ispettore al metodo: la difesa scritta al Task 8 impediva la scena invece di un
+errore, e si è spostata dal costruttore al **dato**, perché `Distribuzione` porta con sé il nome
+della collezione di cui parla e la presentazione lo stampa.
+
+**La settima porta.** `explain()` non stava in nessuna delle sei. Allargare `DocumentStore` era la
+strada corta e sarebbe stata una promessa che la maggioranza delle sue implementazioni non
+mantiene — i doppi in memoria non hanno un piano da restituire. `QueryPlanner` ha un metodo solo
+([ADR-0105](Decision.md#adr-0105)), e che `PymongoStore` ne soddisfi due non è un'eccezione: è ciò
+che si ottiene quando le porte sono `Protocol` strutturali e nessuno le eredita. Le tre cose lette
+da `winningPlan` sono misurate sui tre stack ([M-051](../app/docs/Sources.md#m-051)): lo stadio sta
+sempre in `winningPlan.stage` e va a schermo verbatim, gli shard compaiono solo attraverso un
+router, e il loro ordine **non è stabile** — il server risponde `['shard2rs', 'shard1rs']` — quindi
+l'adattatore li ordina prima di consegnarli.
+
+**L'accoppiamento accettato dal PO non si è pagato.** La decisione era di scrivere in `lab.ordini`,
+riaprendo l'accoppiamento col numero del seme che [ADR-0088](Decision.md#adr-0088) aveva scartato.
+Misurato: `lab.ordini` contiene 34 415 documenti, 20 000 con `_id` intero che sono il seed e 14 415
+con `_id` `ObjectId` che sono le corse dell'applicazione, e non si sono mai scontrati. **Non
+possono**: le scene di `demo` scrivono con `documento_progressivo`, che l'`_id` non lo tocca, e
+l'unico che numera gli `_id` da zero è `mongolab workload`, che ha la propria collezione per corsa
+([ADR-0106](Decision.md#adr-0106)). L'invariante dichiarata in `generatore.py` — «le due
+popolazioni non si incontrano mai nella stessa collezione» — è diventata falsa ed è stata
+riscritta invece di essere lasciata a contraddire il codice; quella che regge riguarda solo l'`_id`,
+e dà anche il criterio per la pulizia, `{_id: {$type: "objectId"}}`, che `tools/reset-demo.sh`
+adesso conta prima che il seed ricostruisca la collezione.
+
+**Per la stessa ragione la scena misura gli arrivi e non i totali.** Misurata sui totali, una corsa
+finita per l'ottanta per cento su un solo shard risultava sbilanciata di **tre centesimi di punto**:
+i ventimila documenti del seed diluiscono qualunque squilibrio, e la schermata avrebbe dichiarato un
+equilibrio perfetto mentre il carico era tutto da una parte.
+
+**Accettato dal PO, lo stesso giorno.** Le due decisioni di scena erano state portate al PO
+all'apertura del task: scrivere in `lab.ordini` sapendo di riaprire l'accoppiamento, e girare lo
+stesso carico due volte accettando lo sforo di scaletta — «sforo leggermente, ho margine». Sono i
+quattordici secondi contro i dieci delle altre scene, ed è il prezzo della seconda colonna: senza,
+la prima non dimostra niente.
+
+### Note di metodo
+
+208. **Prima di scrivere chi emette un evento, misurare se l'evento esiste.** Il passo del piano
+     diceva «`ChunkMigrated` trova finalmente chi lo emette», e la strada naturale era attaccarsi al
+     `changelog` o a un listener e vedere che cosa arriva. Cinque minuti di interrogazione hanno
+     mostrato che in quel cluster non è mai arrivata **nemmeno una** migrazione da quando esiste, e
+     hanno cambiato il passo da «implementare» a «rimuovere e documentare». La differenza pratica è
+     che un'assenza misurata si può scrivere in un ADR con un numero accanto, mentre un emittente
+     scritto e mai innescato sarebbe rimasto in casa come codice che sembra funzionare. La regola
+     pratica: quando un piano chiede di produrre un segnale, la prima domanda non è «come lo
+     produco» ma «quante volte è successo finora».
+
+209. **Una riga di garanzia va lasciata a schermo anche quando il difetto che denunciava è stato
+     corretto alla radice.** `confrontabile` è nato per dire in sala se le due corse hanno scritto
+     lo stesso numero di documenti, ed è la riga che ha scoperto che con un limite di tempo non lo
+     facevano. Corretto il limite — un conteggio invece di una durata — le due corse sono uguali per
+     costruzione, e la tentazione era togliere il controllo diventato ridondante. Non lo è: se una
+     delle due corse scrivesse meno per un altro motivo, il pubblico deve vedere il numero e la sua
+     smentita. La regola pratica: una garanzia che nessuno controlla è una speranza, e il costo di
+     tenerla è una riga.
+
+210. **Una fixture che prepara l'ambiente nasconde i difetti dello stato iniziale che nessuno le ha
+     chiesto di preparare.** Il difetto del client freddo era in produzione da due task e la suite
+     d'integrazione non poteva vederlo, perché la fixture di sessione chiama `spazza(client)` prima
+     di consegnare il client e la scoperta SDAM avveniva come **effetto collaterale della pulizia**.
+     Ogni prova partiva da uno stato che in sala non esiste. La regola pratica: quando un difetto
+     dipende dal primo istante di vita di un oggetto, la prova che lo copre deve costruire
+     quell'oggetto da sé, fuori dalla fixture, e va scritto nel commento perché.
+
+211. **Un'asserzione su una sottostringa corta può essere verde per il motivo sbagliato.** In fase
+     rossa, `test_su_un_replica_set_non_c_e_nessun_router_a_cui_chiedere` **passava**: il messaggio
+     di Typer per un comando che ancora non esisteva — «No such command 'sharding'» — contiene
+     `shard`. La prova non stava verificando il rifiuto, stava verificando l'assenza del comando. Le
+     asserzioni sono diventate `"sharded cluster"`, `"--target sharded"` e `"router"`. La regola
+     pratica: quando si asserisce su un messaggio d'errore, scegliere una stringa che **non possa**
+     comparire nel messaggio generico dello strumento che lo stamperebbe al posto tuo — e se la fase
+     rossa è verde, la colpa è dell'asserzione, non del codice.
+
+Stato aggiornato: decisioni fino ad **ADR-0108**, verifiche fino a **V-074**, note di metodo fino
+alla **211**. Le suite: **166** prove per gli strumenti, **619** per l'applicazione più **58** di
+integrazione, `mypy --strict` verde su 66 file. Le porte del dominio sono **sette**, gli eventi
+**nove** — l'unico conteggio di questo registro che sia mai sceso. Prossimo passo: **Task 16** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), il confronto fra le tre
+architetture, che eredita da qui una scelta già fatta su dove scrivere.

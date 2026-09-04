@@ -23,15 +23,18 @@ from mongolab.application.scenari import (
     Copione,
     CopioneBackup,
     CopioneRestore,
+    CopioneSharding,
     CronometroInterruzione,
     EsitoBackup,
     EsitoFailover,
     EsitoRestore,
+    EsitoSharding,
     ModoGuasto,
     Ritmo,
     ScenarioBackup,
     ScenarioFailover,
     ScenarioRestore,
+    ScenarioSharding,
     senza_attesa,
     sorveglia,
 )
@@ -43,15 +46,20 @@ from mongolab.domain.eventi import (
     TopologyChanged,
 )
 from mongolab.domain.modelli import (
+    ContoShard,
     DescrizioneServer,
     DescrizioneTopologia,
+    Distribuzione,
     Documento,
+    Piano,
     Progress,
     RuoloServer,
     TipoTopologia,
 )
 from tests.doppi import (
     FakeBackup,
+    FakeInspector,
+    FakePlanner,
     InMemoryStore,
     OrologioCheScorre,
     RecordingSink,
@@ -768,3 +776,289 @@ def test_anche_la_scena_del_restore_si_ferma_a_ogni_fase_con_step() -> None:
     scenario.esegui(attesa=attesa)
 
     assert fermate == ["restore", "verifica"]
+
+
+# --- Il Blocco 3: lo stesso carico due volte, e i chunk che non si muovono ---------------
+
+INTERA = "carico-20260918-093000"
+"""La collezione che nessuno ha distribuito: il nome porta l'istante, come da ADR-0088."""
+
+SPARSA = "ordini"
+"""La collezione del seed, distribuita su chiave hashed da `30-dati-demo.js`."""
+
+MIRATO: Documento = {"_id": 4242}
+SPARPAGLIATO: Documento = {"citta": "Ancona"}
+
+SCRITTURE = 10
+"""Un conteggio e non una durata, per la ragione scritta in `Copione`: le prove usano il
+conteggio e per questo non si piantano quando la macchina è lenta."""
+
+
+def _distribuzione(
+    collezione: str,
+    *coppie: tuple[str, int, int],
+    distribuita: bool = True,
+) -> Distribuzione:
+    return Distribuzione(
+        collezione=collezione,
+        distribuita=distribuita,
+        primario=coppie[0][0],
+        conti=tuple(
+            ContoShard(shard=shard, documenti=documenti, chunk=chunk)
+            for shard, documenti, chunk in coppie
+        ),
+    )
+
+
+A_RIPOSO = _distribuzione(SPARSA, ("shard1rs", 10_000, 2), ("shard2rs", 10_000, 2))
+
+DOPO_IL_CARICO = _distribuzione(SPARSA, ("shard1rs", 10_008, 2), ("shard2rs", 10_002, 2))
+"""Otto arrivi da una parte e due dall'altra: ottanta contro venti, sessanta punti di
+sbilancio, e nessuna di queste cifre va ricalcolata a mente leggendo l'asserzione.
+
+Notare quanto sono **piccoli** gli arrivi accanto ai ventimila che c'erano già: è
+esattamente la ragione per cui lo sbilancio non si misura sui totali. Sui totali questi
+stessi numeri darebbero zero punti, cioè «perfettamente bilanciato», mentre il carico è
+finito per l'ottanta per cento da una parte sola."""
+
+PARI = _distribuzione(SPARSA, ("shard1rs", 10_005, 2), ("shard2rs", 10_005, 2))
+"""Cinque e cinque: l'equilibrio vero, che sui totali è indistinguibile dal precedente."""
+
+TUTTA_SU_UNO = _distribuzione(
+    INTERA, ("shard1rs", SCRITTURE, 0), distribuita=False
+)
+
+
+def _scena_sharding(
+    *,
+    distribuzioni: dict[str, list[Distribuzione]] | None = None,
+    piani: Sequence[tuple[str, Sequence[str]]] = (
+        ("SINGLE_SHARD", ("shard1rs",)),
+        ("SHARD_MERGE", ("shard1rs", "shard2rs")),
+    ),
+    copione: CopioneSharding | None = None,
+) -> tuple[ScenarioSharding, FakeInspector, FakePlanner, RecordingSink]:
+    """La scena con i doppi al loro posto: due archivi, un ispettore, un pianificatore."""
+    sink = RecordingSink()
+    orologio = OrologioCheScorre(ISTANTE, passo_s=0.001)
+    ispettore = FakeInspector(
+        [_topologia(UNO)],
+        distribuzioni=distribuzioni
+        if distribuzioni is not None
+        else {SPARSA: [A_RIPOSO, DOPO_IL_CARICO], INTERA: [TUTTA_SU_UNO]},
+    )
+    pianificatore = FakePlanner(piani)
+    scenario = ScenarioSharding(
+        ispettore,
+        pianificatore,
+        WorkloadRunner(InMemoryStore(), orologio, sink),
+        WorkloadRunner(InMemoryStore(), orologio, sink),
+        orologio,
+        sink,
+        copione=copione
+        if copione is not None
+        else CopioneSharding(
+            intera=INTERA,
+            sparsa=SPARSA,
+            mirato=MIRATO,
+            sparpagliato=SPARPAGLIATO,
+            scritture=SCRITTURE,
+        ),
+    )
+    return scenario, ispettore, pianificatore, sink
+
+
+def test_la_scena_dello_sharding_ha_cinque_fasi_nell_ordine() -> None:
+    """Riposo, i due carichi, i piani, il bilancio.
+
+    La prima fase sembra non servire a niente, come la fase «carico» del failover, e per
+    la stessa ragione non lo è: senza la fotografia di prima, quella di dopo è un elenco
+    di numeri di cui nessuno sa dire se siano cambiati.
+    """
+    scenario, _, _, sink = _scena_sharding()
+
+    esito = scenario.esegui()
+
+    assert esito.fasi == (
+        "riposo",
+        "non-distribuita",
+        "distribuita",
+        "piani",
+        "bilancio",
+    )
+    annunci = [evento for evento in sink.eventi if isinstance(evento, FaseIniziata)]
+    assert [evento.fase for evento in annunci] == list(esito.fasi)
+
+
+def test_lo_stesso_carico_gira_due_volte_e_l_esito_dice_che_e_lo_stesso() -> None:
+    """La decisione del PO, messa alla prova: due corse, e il confronto vale solo se sono
+    identiche.
+
+    Nessuno scarto fra le due, a differenza delle fasi del failover e del backup: lì le
+    fasi si susseguono nella **stessa** collezione e gli indici si sovrapporrebbero, qui le
+    collezioni sono due e ripartire da zero è ciò che rende le due corse letteralmente lo
+    stesso carico.
+    """
+    scenario, _, _, _ = _scena_sharding()
+
+    esito = scenario.esegui()
+
+    assert esito.carico_intera.scritture == SCRITTURE
+    assert esito.carico_sparsa.scritture == SCRITTURE
+    assert esito.confrontabile
+
+
+def test_due_corse_di_lunghezza_diversa_non_si_accostano_e_l_esito_lo_dice() -> None:
+    """Un archivio che rifiuta metà delle scritture rende il confronto una bugia.
+
+    Non solleva e non nasconde: l'esito porta un booleano, e chi disegna la schermata
+    decide che cosa scriverci accanto. Accostare due colonne senza dire che vengono da due
+    carichi diversi sarebbe il modo più elegante di mentire in sala.
+    """
+    esito = _esito_sharding(scritte_intera=5, scritte_sparsa=3)
+
+    assert not esito.confrontabile
+
+
+def test_la_collezione_non_distribuita_finisce_tutta_su_un_solo_shard() -> None:
+    """La prima metà della scena, ed è la domanda che il pubblico fa sempre.
+
+    «L'ho acceso, perché non distribuisce?» — perché nessuno ha eseguito
+    `shardCollection`. La quota dello shard primario è cento, e non è un difetto.
+    """
+    scenario, _, _, _ = _scena_sharding()
+
+    esito = scenario.esegui()
+
+    assert not esito.intera.distribuita
+    assert esito.intera.in_un_cluster, "il cluster c'è: è la metà che ADR-0104 ha aggiunto"
+    assert esito.intera.quota("shard1rs") == 100.0
+
+
+def test_lo_sbilancio_e_la_distanza_fra_lo_shard_piu_pieno_e_il_piu_vuoto() -> None:
+    """Un numero solo, perché in sala due colonne di conteggi non si confrontano a mente.
+
+    Punti percentuali e non un rapporto: «venti punti di distanza» si capisce senza
+    spiegazioni, «uno virgola cinque» chiede di sapere che cosa sta sopra e che cosa sotto.
+    """
+    scenario, _, _, _ = _scena_sharding()
+
+    esito = scenario.esegui()
+
+    assert esito.sbilancio == 60.0
+    assert _esito_sharding(dopo=PARI).sbilancio == 0.0
+
+
+def test_gli_arrivi_dicono_dove_e_finito_il_carico_e_non_dove_stava_il_seed() -> None:
+    """Il numero che rende le due colonne confrontabili, e che per poco non c'era.
+
+    La colonna «non sharded» mostra duemila documenti su uno shard: sono **tutti** quelli
+    scritti, perché quella collezione è nata con il carico. La colonna «sharded» mostra i
+    totali di `lab.ordini`, che contengono i ventimila del seed: accostare duemila a
+    ventiduemila non confronta niente. Gli arrivi sono la differenza fra la fotografia di
+    dopo e quella di prima, cioè l'unica parte comparabile.
+    """
+    scenario, _, _, _ = _scena_sharding()
+
+    esito = scenario.esegui()
+
+    assert esito.arrivi == (("shard1rs", 8), ("shard2rs", 2))
+    assert sum(quanti for _, quanti in esito.arrivi) == SCRITTURE
+
+
+def test_senza_arrivi_lo_sbilancio_e_ignoto_e_non_un_equilibrio_perfetto() -> None:
+    """Zero documenti arrivati non è «distribuiti alla perfezione»: è niente da misurare.
+
+    Il caso non è teorico — è ciò che si vede se il carico fallisce del tutto — ed è
+    precisamente quello in cui uno zero stampato mentirebbe con la faccia del successo.
+    """
+    assert _esito_sharding(dopo=A_RIPOSO).sbilancio is None
+
+
+def test_su_una_collezione_non_distribuita_lo_sbilancio_e_ignoto_e_non_cento() -> None:
+    """Zero shard e uno shard solo non hanno uno sbilancio: non c'è una seconda colonna.
+
+    `None` e non `100.0`: cento direbbe «massimamente sbilanciata», che è una descrizione
+    di una distribuzione che non esiste. È la stessa regola dei doppi applicata alle
+    statistiche — un numero inventato è peggio di un dato che manca.
+    """
+    assert _esito_sharding(dopo=TUTTA_SU_UNO).sbilancio is None
+
+
+def test_la_collezione_distribuita_si_guarda_due_volte_prima_e_dopo() -> None:
+    scenario, ispettore, _, _ = _scena_sharding()
+
+    esito = scenario.esegui()
+
+    assert ispettore.distribuzioni_chieste == [SPARSA, INTERA, SPARSA]
+    assert esito.prima.documenti == 20_000
+    assert esito.dopo.documenti == 20_010
+
+
+def test_i_chunk_che_non_si_sono_mossi_si_contano_invece_di_tacere() -> None:
+    """Il Passo 1 del Task 15, e la risposta misurata è zero.
+
+    Il balancer del 7.0 in questo laboratorio non migra mai — 1153 giri e nessuna migrazione
+    ([M-049](../../docs/Sources.md#m-049), ADR-0069) — e con una chiave hashed i
+    chunk sono già distribuiti prima che arrivi la prima scrittura. Uno zero **mostrato** è
+    la lezione della scena; uno zero taciuto sembrerebbe una funzione che non c'è.
+    """
+    scenario, _, _, _ = _scena_sharding()
+
+    esito = scenario.esegui()
+
+    assert esito.chunk_in_piu == 0
+
+
+def test_senza_una_delle_due_fotografie_distribuite_i_chunk_in_piu_sono_ignoti() -> None:
+    assert _esito_sharding(dopo=TUTTA_SU_UNO).chunk_in_piu is None
+
+
+def test_i_due_piani_arrivano_dal_pianificatore_nell_ordine_del_copione() -> None:
+    """Mirata prima, scatter-gather dopo — e il contrasto è tutto il Passo 3.
+
+    L'ordine non è estetico: la scena mostra prima che si **può** interrogare un solo
+    shard, poi che cosa costa non poterlo fare. Invertito, la seconda schermata sembra un
+    miglioramento invece di un prezzo.
+    """
+    scenario, _, pianificatore, _ = _scena_sharding()
+
+    esito = scenario.esegui()
+
+    assert pianificatore.chiesti == [MIRATO, SPARPAGLIATO]
+    assert esito.mirata.stadio == "SINGLE_SHARD"
+    assert esito.mirata.mirata
+    assert esito.sparpagliata.stadio == "SHARD_MERGE"
+    assert not esito.sparpagliata.mirata
+
+
+def test_col_passo_la_pausa_arriva_prima_di_ogni_fase() -> None:
+    """`--step`, la stessa funzione delle altre due scene e la stessa prova."""
+    scenario, _, _, _ = _scena_sharding()
+    viste: list[str] = []
+    attesa: Attesa = lambda fase: viste.append(fase.fase)  # noqa: E731
+
+    esito = scenario.esegui(attesa=attesa)
+
+    assert viste == list(esito.fasi)
+
+
+def _esito_sharding(
+    *,
+    dopo: Distribuzione = DOPO_IL_CARICO,
+    scritte_intera: int = SCRITTURE,
+    scritte_sparsa: int = SCRITTURE,
+) -> EsitoSharding:
+    """Un esito montato a mano, per le proprietà che non hanno bisogno di una corsa."""
+    return EsitoSharding(
+        fasi=("riposo", "non-distribuita", "distribuita", "piani", "bilancio"),
+        intera=TUTTA_SU_UNO,
+        prima=A_RIPOSO,
+        dopo=dopo,
+        carico_intera=_riepilogo(scritte_intera),
+        carico_sparsa=_riepilogo(scritte_sparsa),
+        mirata=Piano(filtro=MIRATO, stadio="SINGLE_SHARD", shard=("shard1rs",)),
+        sparpagliata=Piano(
+            filtro=SPARPAGLIATO, stadio="SHARD_MERGE", shard=("shard1rs", "shard2rs")
+        ),
+    )

@@ -15,7 +15,9 @@ __all__ = [
     "ContoShard",
     "DescrizioneServer",
     "DescrizioneTopologia",
+    "Distribuzione",
     "Documento",
+    "Piano",
     "Progress",
     "RuoloServer",
     "TipoTopologia",
@@ -146,3 +148,90 @@ class Progress:
         if self.totali is None or self.totali <= 0:
             return None
         return 100.0 * self.completati / self.totali
+
+
+@dataclass(frozen=True, slots=True)
+class Distribuzione:
+    """Dove stanno i documenti di **una** collezione, e se qualcuno l'ha distribuita.
+
+    Sostituisce la `tuple[ContoShard, ...]` che `ClusterInspector.shard_distribution()`
+    restituiva fino al Task 14, e nasce per chiudere il punto aperto che quella firma
+    dichiarava da sé: **la tupla vuota voleva dire due cose diverse.** «Non è uno sharded
+    cluster» e «è uno sharded cluster, ma questa collezione non è distribuita» sono lo
+    stesso valore e fatti opposti, e la scena del Blocco 3 esiste per mostrare
+    precisamente il secondo ([ADR-0104](../../../../docs/Decision.md#adr-0104)).
+
+    I tre stati si leggono da due campi, e nessuna combinazione è ambigua:
+
+    | `primario` | `distribuita` | che cosa significa                                  |
+    | ---------- | ------------- | --------------------------------------------------- |
+    | `None`     | `False`       | non è uno sharded cluster: non c'è niente da dire     |
+    | uno shard  | `False`       | è un cluster, ma la collezione sta **intera** lì      |
+    | uno shard  | `True`        | è un cluster, e il catalogo la conosce                |
+
+    La quarta combinazione — `primario is None` e `distribuita` — non è rappresentabile
+    in un cluster reale, e questo tipo **non la vieta**: sarebbe una guardia che difende
+    da un errore di chi costruisce l'oggetto, non da un fatto del mondo, e costerebbe una
+    riga di validazione in un dominio che di validazione non ne ha da nessun'altra parte.
+    """
+
+    collezione: str
+    distribuita: bool
+    primario: str | None
+    conti: tuple[ContoShard, ...]
+
+    @property
+    def in_un_cluster(self) -> bool:
+        """C'è uno shard primario, quindi la domanda ha senso. Non dice che sia distribuita."""
+        return self.primario is not None
+
+    @property
+    def documenti(self) -> int:
+        """Quanti documenti in tutto, sommando gli shard che hanno risposto."""
+        return sum(conto.documenti for conto in self.conti)
+
+    @property
+    def chunk(self) -> int:
+        """Quanti chunk in tutto. **Zero è la risposta giusta** per una non distribuita."""
+        return sum(conto.chunk for conto in self.conti)
+
+    def quota(self, shard: str) -> float | None:
+        """La percentuale di documenti su `shard`, o `None` se la domanda è vuota.
+
+        Due casi restituiscono `None`, e sono diversi fra loro. Il primo: la collezione
+        non ha documenti, e «zero su zero» non è lo zero per cento. Il secondo: quello
+        shard non compare nella risposta — e uno shard che non ha risposto non ha «zero
+        documenti», semplicemente non si sa. Dire zero in entrambi i casi metterebbe a
+        schermo un numero fabbricato accanto a numeri misurati.
+        """
+        totale = self.documenti
+        if totale <= 0:
+            return None
+        for conto in self.conti:
+            if conto.shard == shard:
+                return 100.0 * conto.documenti / totale
+        return None
+
+
+@dataclass(frozen=True, slots=True)
+class Piano:
+    """Come il router ha deciso di eseguire una query: su uno shard o su tutti.
+
+    È il lato client del Passo 3 del Blocco 3. `stadio` è la parola che `mongos` mette in
+    `queryPlanner.winningPlan.stage` — `SINGLE_SHARD` o `SHARD_MERGE` sulla 7.0.40 — e si
+    porta dietro **verbatim** invece di tradurla in un booleano soltanto: il giorno in cui
+    comparisse una terza parola, un campo di testo la mostra e un booleano la nasconde.
+
+    *Riserva.* `mirata` guarda **quanti** shard sono stati interrogati, non che cosa il
+    router abbia pensato. Su un cluster a uno shard solo ogni query risulterebbe mirata, e
+    sarebbe vero senza essere interessante.
+    """
+
+    filtro: Documento
+    stadio: str
+    shard: tuple[str, ...]
+
+    @property
+    def mirata(self) -> bool:
+        """Un solo shard interrogato. Nessuno shard **non** è mirato: è una risposta vuota."""
+        return len(self.shard) == 1

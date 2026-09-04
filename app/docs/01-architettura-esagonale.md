@@ -51,7 +51,7 @@ radice di composizione: l'unico punto in cui i pezzi veri vengono costruiti e me
 
 | Directory | Che cosa contiene | Che cosa può importare |
 |---|---|---|
-| `domain/` | modelli, eventi, le cinque porte | **solo la libreria standard** |
+| `domain/` | modelli, eventi, le sette porte | **solo la libreria standard** |
 | `application/` | i casi d'uso: `WorkloadRunner`, `TopologyWatcher` | **solo la libreria standard** e `domain` |
 | `infrastructure/` | gli adattatori: pymongo, `mongodump` come sottoprocesso | tutto |
 | `presentation/` | la resa: Rich, e il formato testuale di riserva | tutto |
@@ -108,7 +108,7 @@ Sarebbe disonesto elencare solo i vantaggi.
 succede davvero. In un'applicazione di questa dimensione è un costo reale, non teorico.
 
 **Il rischio di porte che copiano il driver.** Una porta che riproduce la firma di pymongo metodo
-per metodo non inverte niente: sposta soltanto il nome. Le cinque porte di `mongolab` sono state
+per metodo non inverte niente: sposta soltanto il nome. Le sette porte di `mongolab` sono state
 scritte guardando **che cosa serve alle scene**, non che cosa offre il driver — per esempio
 `insert_many` restituisce un conteggio e non un elenco di identificatori, perché il numero della
 scena è «confermate contro ritrovate» e le chiavi costerebbero memoria dentro oggetti che

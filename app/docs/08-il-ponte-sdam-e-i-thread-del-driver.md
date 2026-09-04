@@ -292,10 +292,12 @@ misurati qui, su questa versione, con l'output riportato in `Sources.md`.
 primario cade, un `ServerStateChanged` verso `PRIMARIO` su un altro nodo — nessuno li ha visti
 arrivare. La sede è il **Task 8**, contro gli stack veri.
 
-Resta aperto anche `ChunkMigrated`, che potrebbe non essere osservabile da un client di `mongos`: il
-ponte non lo emette, e nessuno dei quattro listener SDAM è il posto in cui potrebbe nascere. Se
-al Task 15 si scoprisse che non c'è modo di vederlo da qui, quell'evento cambierà natura invece di
-restare un campo morto.
+**Chiuso al Task 15:** `ChunkMigrated`. Il ponte non lo emetteva, e nessuno dei quattro listener
+SDAM era il posto in cui potesse nascere — ma la ragione per cui non nasce non sta nel ponte. Sta
+nel cluster: in 1 153 giri il balancer di questo lab non ha migrato un chunk nemmeno una volta,
+perché con una chiave hashed non c'è niente da ribilanciare ([M-049](Sources.md#m-049)). L'evento
+è uscito dal dominio ([ADR-0103](../../docs/Decision.md#adr-0103)), che è precisamente ciò che
+questa pagina aveva promesso sarebbe successo.
 
 ---
 

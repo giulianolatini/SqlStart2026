@@ -469,15 +469,15 @@ Atto III del Blocco 2, quattro minuti.
 **File:** modificare `app/src/mongolab/application/scenari.py`; prove di integrazione contro lo
 stack 03.
 
-- [ ] **Passo 1.** Distribuzione dei chunk **sotto carico** e balancer al lavoro: è la parte che
+- [x] **Passo 1.** Distribuzione dei chunk **sotto carico** e balancer al lavoro: è la parte che
       `feature/03` ha potuto mostrare solo a riposo, e la pagina dello sharded dichiara scoperto «il
       comportamento oltre la soglia del balancer» proprio perché serviva carico controllato.
-- [ ] **Passo 2.** L'evento `ChunkMigrated` trova finalmente chi lo emette. Se durante la scrittura
+- [x] **Passo 2.** L'evento `ChunkMigrated` trova finalmente chi lo emette. Se durante la scrittura
       risulta che non è osservabile dal client, va detto: un evento dichiarato nel design e non
       producibile è una voce in `Sources.md` e un ADR, non un campo morto nel codice.
-- [ ] **Passo 3.** `explain()` che contrappone query mirata e scatter-gather, come da copione. La
+- [x] **Passo 3.** `explain()` che contrappone query mirata e scatter-gather, come da copione. La
       pagina dello sharded ha già il materiale; qui si aggiunge il lato client.
-- [ ] **Passo 4.** Commit: `feat: la scena dello sharding, con i chunk che si muovono sotto carico`.
+- [x] **Passo 4.** Commit: `feat: la scena dello sharding, con i chunk che si muovono sotto carico`.
 
 ---
 

@@ -2734,3 +2734,149 @@ Fonte: [registro operativo, nota 206](registro-operativo-sviluppo.md).
 più, ed è l'unico che di solito non si prova. La forma che funziona è banale una volta vista: un
 helper di prova non solleva, restituisce il codice di uscita insieme all'output, e l'asserzione
 viene dopo che il chiamante ha raccolto ciò che gli serve per rimettere a posto.
+
+---
+
+### Il balancer è acceso, ha fatto 1 153 giri, e non ha mai migrato niente
+
+> `balancerStatus` dice `mode: "full"` e **1 153 giri**. Il `changelog` del cluster, che conserva le
+> voci dal giorno dell'`addShard`, ha due fusioni e **zero** migrazioni: non una sola voce
+> `moveChunk`.
+
+Fonte: [`app/docs/Sources.md`, M-049](../app/docs/Sources.md#m-049),
+[ADR-0103](Decision.md#adr-0103),
+[ADR-0069](Decision.md#adr-0069).
+
+**Perché una slide:** perché è la risposta a «e il balancer quando si vede lavorare?», ed è una
+risposta che spiega invece di scusarsi. Con una chiave `{_id: "hashed"}` i documenti si sparpagliano
+**all'inserimento**: i due shard restano pari per costruzione, e il balancer non ha nessuno
+squilibrio da correggere. Lo zero non è un difetto del lab, è il comportamento corretto di una
+chiave scelta bene — e ha portato con sé la conseguenza più netta del task, un evento del dominio
+**rimosso** perché nessuno può emetterlo.
+
+---
+
+### Un evento che nessuno può emettere non è un campo vuoto: è una decisione
+
+> `ChunkMigrated` era nel design fin dal §6.3. È uscito dal dominio quando si è misurato che in
+> questo cluster non è mai avvenuta una migrazione. La guardia dei nomi scende da dieci a nove, e al
+> suo posto resta un commento che dice quando è uscito e con quale numero accanto.
+
+Fonte: [ADR-0103](Decision.md#adr-0103),
+[`app/docs/Sources.md`, M-049](../app/docs/Sources.md#m-049),
+[registro operativo, nota 208](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché la scelta alternativa — lasciare il nome nel codice «per quando
+servirà» — produce un campo che sembra funzionante e non lo è, e nessuno se ne accorge finché non
+serve davvero. Rimuoverlo costa il cambio di un elenco in una guardia, cioè costa **accorgersene**.
+È anche un cambio di ordine nelle domande: prima di chiedersi «come lo emetto», chiedersi «quante
+volte è successo finora».
+
+---
+
+### Una sola colonna non dimostra niente
+
+> ```
+> non sharded  carico-20260904-140333 non è distribuita · 5000 documenti su shard1rs
+> arrivati     shard1rs 2507 (50%) · shard2rs 2493 (50%)
+> ```
+> Lo stesso identico carico, due volte: una collezione che nessuno ha distribuito se lo prende
+> tutto, quella distribuita lo divide a metà.
+
+Fonte: [ADR-0106](Decision.md#adr-0106),
+[ADR-0107](Decision.md#adr-0107),
+[`app/docs/16`](../app/docs/16-la-chiave-di-shard-e-lo-stesso-carico-due-volte.md).
+
+**Perché una slide:** perché mostrare due colonne di numeri equilibrati non prova che lo sharding
+faccia qualcosa — serve accanto il caso in cui non lo fa. Costa quattro secondi di scaletta in più
+ed è l'unica forma in cui la scena dimostra la sua tesi. Da sola, la prima riga è anche la risposta
+alla domanda che il pubblico fa sempre: *cosa succede a una collezione che non ho distribuito?* Va
+tutta sullo shard primario.
+
+---
+
+### La riga di garanzia ha funzionato, e denunciava un difetto di disegno
+
+> `carico 4288 senza chiave · 4415 con chiave · non è lo stesso carico`. Due corse da sei secondi
+> l'una non scrivono lo stesso numero di documenti, perché il throughput non è lo stesso. Da lì il
+> limite della scena non è più una durata: è un conteggio.
+
+Fonte: [`app/docs/Sources.md`, M-052](../app/docs/Sources.md#m-052),
+[ADR-0107](Decision.md#adr-0107),
+[registro operativo, nota 209](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché nessuna prova unitaria poteva vederlo — i doppi scrivono esattamente
+quanto il copione chiede — e il fatto vive nel punto in cui un limite di tempo incontra due
+throughput diversi, cioè in nessuno dei due. La riga resta a schermo anche adesso che le due corse
+sono uguali per costruzione: **una garanzia che nessuno controlla è una speranza**, e il costo di
+tenerla è una riga.
+
+---
+
+### `SCONOSCIUTO` non è «non c'è»: è «non ho ancora guardato»
+
+> Un client PyMongo appena costruito non conosce nessun server: la scoperta avviene alla prima
+> operazione, non alla costruzione. L'ispettore leggeva quello stato e concludeva «non è uno sharded
+> cluster» — cioè leggeva il proprio non aver guardato, e negava un cluster acceso.
+
+Fonte: [`app/docs/Sources.md`, M-053](../app/docs/Sources.md#m-053),
+[ADR-0108](Decision.md#adr-0108),
+[`app/docs/Sources.md`, M-042](../app/docs/Sources.md#m-042).
+
+**Perché una slide:** perché è la distinzione che tutta l'architettura del dominio prende sul serio
+— «assenza di un'osservazione» contro «osservato assente» — colta nel momento in cui è stata
+violata, per la seconda volta, dal codice che l'aveva dichiarata. La correzione è un `ping`, e la
+parte da non sbagliare è la preferenza di lettura: `NEAREST`, perché un comando su `admin` aspetta
+un primario che su un mongos non esiste.
+
+---
+
+### La fixture preparava anche ciò che nessuno le aveva chiesto
+
+> Il difetto del client freddo era in produzione da due task, e la suite d'integrazione non poteva
+> vederlo: la fixture di sessione pulisce il database prima di consegnare il client, e la scoperta
+> avveniva come **effetto collaterale della pulizia**. Ogni prova partiva da un client caldo. Solo
+> la sala partiva da uno freddo.
+
+Fonte: [registro operativo, nota 210](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md`, M-053](../app/docs/Sources.md#m-053).
+
+**Perché una slide:** perché è il modo più comune in cui una suite verde convive con un difetto
+riproducibile a mano in dieci secondi. Il primo istante di vita di un oggetto non è coperto da
+nessuna prova che riceva quell'oggetto già usato — e la correzione non è una fixture migliore, è una
+prova che si costruisce il proprio client apposta, con scritto accanto perché.
+
+---
+
+### Il seed diluiva lo squilibrio fino a farlo sparire
+
+> Misurata sui totali di `lab.ordini`, una corsa finita per l'**ottanta per cento** su un solo shard
+> risultava sbilanciata di **tre centesimi di punto**. I ventimila documenti del seed coprono
+> qualunque cosa faccia il carico. La scena misura gli arrivi: dopo meno prima.
+
+Fonte: [ADR-0106](Decision.md#adr-0106),
+[`app/docs/16`](../app/docs/16-la-chiave-di-shard-e-lo-stesso-carico-due-volte.md#perché-gli-arrivi-e-non-i-totali).
+
+**Perché una slide:** perché è la stessa trappola della finestra di misura più larga dell'evento, in
+un'altra forma: **una misura che non può smentire la tesi non la sta verificando**. Qui il numero
+sbagliato sarebbe stato un equilibrio perfetto mostrato mentre il carico andava tutto da una parte —
+cioè la conferma più convincente possibile della cosa falsa.
+
+---
+
+### `SINGLE_SHARD` e `SHARD_MERGE`, con le parole del server
+
+> ```
+> mirata    {"_id": 4242}          · SINGLE_SHARD · 1 shard
+> su tutti  {"citta": "Ancona"}    · SHARD_MERGE  · 2 shard
+> ```
+> Lo stadio va a schermo **verbatim**: sono le parole che chi guarda ritroverà in `explain()` la
+> prima volta che proverà da solo.
+
+Fonte: [`app/docs/Sources.md`, M-051](../app/docs/Sources.md#m-051),
+[ADR-0105](Decision.md#adr-0105).
+
+**Perché una slide:** perché è la differenza fra chiedere a **un** shard e chiedere a **tutti**,
+mostrata in due righe e senza spiegazioni — e perché tradurre lo stadio in un booleano significherebbe
+tenere aggiornato un dizionario al posto del server. Nota per chi presenta: l'ordine degli shard che
+il server restituisce **non è stabile**, e la scena li ordina apposta.

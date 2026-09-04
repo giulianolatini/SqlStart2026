@@ -56,12 +56,14 @@ from mongolab.domain.eventi import (
     FaseIniziata,
     TopologyChanged,
 )
-from mongolab.domain.modelli import Progress
+from mongolab.domain.modelli import Distribuzione, Documento, Piano, Progress
 from mongolab.domain.porte import (
     BackupTool,
     Clock,
+    ClusterInspector,
     DocumentStore,
     EventSink,
+    QueryPlanner,
     Regia,
 )
 
@@ -70,16 +72,19 @@ __all__ = [
     "Copione",
     "CopioneBackup",
     "CopioneRestore",
+    "CopioneSharding",
     "CronometroInterruzione",
     "Drena",
     "EsitoBackup",
     "EsitoFailover",
     "EsitoRestore",
+    "EsitoSharding",
     "ModoGuasto",
     "Ritmo",
     "ScenarioBackup",
     "ScenarioFailover",
     "ScenarioRestore",
+    "ScenarioSharding",
     "senza_attesa",
     "sorveglia",
 ]
@@ -823,3 +828,251 @@ class ScenarioRestore:
             documenti_destinazione=self._destinazione.count({}),
             avanzamenti=tuple(avanzamenti),
         )
+
+
+# --- Il Blocco 3: lo stesso carico due volte, e i chunk che non si muovono ---------------
+
+
+@dataclass(frozen=True, slots=True)
+class CopioneSharding:
+    """Le due collezioni, le due query, e quanto carico.
+
+    **Due nomi di collezione e nessun `DocumentStore` in più.** I due archivi arrivano
+    dentro i due `WorkloadRunner`, che è dove servono per scrivere; qui i nomi servono per
+    **chiedere di loro** all'ispettore, che dopo ADR-0104 risponde per collezione. Sono la
+    stessa collezione detta a due porte diverse, e tenerne il nome qui è ciò che impedisce
+    a una scena di scrivere in una e fotografare l'altra.
+
+    **I due filtri stanno nel copione e non nel codice della scena.** Quale query sia
+    mirata dipende dalla chiave di shard, cioè da come è fatto lo stack, cioè da qualcosa
+    che `application` non sa e non deve sapere. Scritti qui, cambiano con lo stack senza
+    toccare la scena; scritti dentro `esegui`, sarebbero una costante vera per un solo
+    `docker-compose.yml`.
+
+    Non hanno un valore predefinito, e la mancanza è voluta: un filtro «ragionevole»
+    scelto qui verrebbe usato contro uno stack con un'altra chiave, e la scena mostrerebbe
+    due scatter-gather affermando che il primo è mirato.
+    """
+
+    intera: str
+    sparsa: str
+    mirato: Documento
+    sparpagliato: Documento
+    scritture: int | None = None
+    carico_s: float = DURATA_CARICO_S
+
+
+@dataclass(frozen=True, slots=True)
+class EsitoSharding:
+    """Le tre fotografie, i due carichi e i due piani. Tutto ciò che la scena mostra.
+
+    `prima` e `dopo` sono la **stessa** collezione a due istanti, `intera` è l'altra: tre
+    oggetti e non due, perché la scena del Blocco 3 fa due confronti diversi con lo stesso
+    materiale — distribuita contro non distribuita, e distribuita prima contro dopo.
+    """
+
+    fasi: tuple[str, ...]
+    intera: Distribuzione
+    prima: Distribuzione
+    dopo: Distribuzione
+    carico_intera: Riepilogo
+    carico_sparsa: Riepilogo
+    mirata: Piano
+    sparpagliata: Piano
+
+    @property
+    def confrontabile(self) -> bool:
+        """Le due corse hanno scritto lo stesso numero di documenti?
+
+        La decisione del PO è «lo stesso carico due volte», e due colonne affiancate lo
+        danno per scontato. Se una delle due corse ha scritto meno — un archivio che
+        rifiuta, un tentativo esaurito — la differenza fra le colonne non è più la chiave
+        di shard, è il carico. Un booleano, e non un'eccezione: la scena continua, e chi
+        disegna la schermata decide che cosa scriverci accanto.
+        """
+        return self.carico_intera.scritture == self.carico_sparsa.scritture
+
+    @property
+    def arrivi(self) -> tuple[tuple[str, int], ...]:
+        """Quanti documenti sono arrivati su ciascuno shard **durante** il carico.
+
+        La differenza fra la fotografia di dopo e quella di prima, ed è il numero che rende
+        confrontabili le due colonne della scena. La collezione non distribuita nasce con
+        il carico, quindi il suo totale **è** il carico; `lab.ordini` invece contiene già i
+        ventimila documenti del seed, e accostare duemila a ventiduemila non confronta
+        niente.
+
+        Non è una raffinatezza: misurata su questi totali, una corsa finita per l'ottanta
+        per cento su un solo shard risultava sbilanciata di **tre centesimi di punto**,
+        cioè la schermata avrebbe dichiarato un equilibrio perfetto mentre il carico era
+        tutto da una parte. Il seed diluisce qualunque squilibrio, e una misura che non può
+        smentire la tesi non la sta verificando.
+
+        Vuota se una delle due fotografie non è distribuita: la differenza fra i conteggi
+        di una collezione sharded e quelli di una che non lo è non è un arrivo.
+        """
+        if not (self.prima.distribuita and self.dopo.distribuita):
+            return ()
+        prima = {conto.shard: conto.documenti for conto in self.prima.conti}
+        return tuple(
+            (conto.shard, conto.documenti - prima.get(conto.shard, 0))
+            for conto in self.dopo.conti
+        )
+
+    @property
+    def sbilancio(self) -> float | None:
+        """Quanti punti percentuali separano lo shard più servito dal meno servito.
+
+        Sugli **arrivi**, per la ragione scritta lì sopra. Zero è l'equilibrio. Punti e non
+        un rapporto: «venti punti di distanza» si capisce senza spiegazioni, mentre «uno
+        virgola cinque» chiede di ricordare che cosa sta sopra e che cosa sotto — e in sala
+        nessuno lo ricorda.
+
+        `None` in due casi, e nessuno dei due è uno zero. Meno di due shard, perché una
+        distanza vuole due estremi. E **nessun arrivo**, che non è «distribuiti alla
+        perfezione» ma «niente da ripartire»: è ciò che si vede se il carico fallisce del
+        tutto, cioè precisamente il momento in cui uno zero stampato mentirebbe con la
+        faccia del successo. Stessa regola di `Riepilogo.latenze`, che è `None` e non una
+        fila di zeri.
+        """
+        arrivi = self.arrivi
+        totale = sum(quanti for _, quanti in arrivi)
+        if len(arrivi) < 2 or totale <= 0:
+            return None
+        quote = [100.0 * quanti / totale for _, quanti in arrivi]
+        return max(quote) - min(quote)
+
+    @property
+    def chunk_in_piu(self) -> int | None:
+        """Quanti chunk sono comparsi durante il carico. La risposta attesa è zero.
+
+        Ed è la lezione, non un difetto: il balancer del 7.0 in questo laboratorio non
+        migra mai — 1153 giri e nessuna migrazione ([M-049](../../../docs/Sources.md#m-049),
+        ADR-0069) — e con una chiave hashed i chunk sono già distribuiti prima che arrivi
+        la prima scrittura. Uno zero **mostrato** dice che la distribuzione era già decisa;
+        uno zero taciuto sembrerebbe una funzione che manca.
+
+        `None` se una delle due fotografie non è distribuita: la differenza fra i chunk di
+        una collezione sharded e quelli di una che non lo è non è un numero, è un confronto
+        fra due cose diverse.
+        """
+        if not (self.prima.distribuita and self.dopo.distribuita):
+            return None
+        return self.dopo.chunk - self.prima.chunk
+
+
+class ScenarioSharding:
+    """`demo sharding`: lo stesso carico due volte, e la chiave che fa la differenza.
+
+    **Perché due volte.** Mostrare una collezione distribuita che si riempie in modo
+    uniforme non dimostra niente da solo: chi guarda non ha visto l'alternativa, e «i
+    documenti si sono divisi» resta un'affermazione. Accanto, lo stesso identico carico su
+    una collezione che nessuno ha distribuito finisce tutto su uno shard, e la differenza
+    fra le due colonne ha una causa sola — `shardCollection` — perché tutto il resto è
+    uguale per costruzione. È la decisione del PO per il Blocco 3, e costa il tempo di una
+    seconda corsa.
+
+    **Identico vuol dire identico.** Le due corse partono entrambe dall'indice zero, senza
+    lo scarto che `ScenarioFailover` e `ScenarioBackup` portano fra le loro fasi. Là le
+    fasi si susseguono nella **stessa** collezione e senza scarto gli `indice` si
+    sovrapporrebbero; qui le collezioni sono due, e ripartire da zero è precisamente ciò
+    che rende i due carichi lo stesso carico.
+
+    **Nessuno cancella niente.** Il carico distribuito va in `lab.ordini`, cioè nella
+    collezione del seed, ed è ancora la decisione del PO. Non c'è un `delete` in questa
+    classe e non ci sarà: la pulizia è di `tools/reset-demo.sh`, come stabilito da
+    ADR-0088, e un quinto metodo su `DocumentStore` che esiste solo per la scena sarebbe
+    una porta allargata per una comodità.
+
+    **Nessun `drena`**, per la stessa ragione di `ScenarioRestore`: qui la topologia non
+    ha niente da raccontare, e un parametro aggiunto per simmetria è un parametro che
+    qualcuno dovrà passare a vuoto.
+
+    **Il carico non gira su un pool.** Nelle altre due scene un thread serviva perché
+    qualcos'altro doveva succedere insieme — l'elezione, il dump. Qui le fasi sono in
+    fila: si scrive, poi si guarda. Un thread aggiungerebbe una sincronizzazione per
+    ottenere ciò che una chiamata dopo l'altra ottiene da sola.
+    """
+
+    __slots__ = (
+        "_copione",
+        "_corsa_intera",
+        "_corsa_sparsa",
+        "_genera",
+        "_ispettore",
+        "_orologio",
+        "_pianificatore",
+        "_sink",
+    )
+
+    def __init__(
+        self,
+        ispettore: ClusterInspector,
+        pianificatore: QueryPlanner,
+        corsa_intera: WorkloadRunner,
+        corsa_sparsa: WorkloadRunner,
+        orologio: Clock,
+        sink: EventSink,
+        *,
+        copione: CopioneSharding,
+        genera: Genera = documento_progressivo,
+    ) -> None:
+        self._ispettore = ispettore
+        self._pianificatore = pianificatore
+        self._corsa_intera = corsa_intera
+        self._corsa_sparsa = corsa_sparsa
+        self._orologio = orologio
+        self._sink = sink
+        self._copione = copione
+        self._genera = genera
+
+    def esegui(self, *, attesa: Attesa = senza_attesa) -> EsitoSharding:
+        """Gira la scena. `attesa` è `--step`, come nelle altre due."""
+        copione = self._copione
+        fasi: list[str] = []
+
+        def annuncia(fase: str, descrizione: str) -> None:
+            evento = FaseIniziata(self._orologio.now(), fase, descrizione)
+            self._sink.emit(evento)
+            fasi.append(fase)
+            attesa(evento)
+
+        annuncia("riposo", f"com'è distribuita {copione.sparsa} prima che qualcuno scriva")
+        prima = self._ispettore.shard_distribution(copione.sparsa)
+
+        annuncia(
+            "non-distribuita",
+            f"il carico su {copione.intera}, che nessuno ha distribuito",
+        )
+        carico_intera = self._una_corsa(self._corsa_intera)
+        intera = self._ispettore.shard_distribution(copione.intera)
+
+        annuncia(
+            "distribuita",
+            f"lo stesso carico su {copione.sparsa}, che ha una chiave di shard",
+        )
+        carico_sparsa = self._una_corsa(self._corsa_sparsa)
+        dopo = self._ispettore.shard_distribution(copione.sparsa)
+
+        annuncia("piani", "la stessa domanda a un solo shard e poi a tutti")
+        mirata = self._pianificatore.explain(copione.mirato)
+        sparpagliata = self._pianificatore.explain(copione.sparpagliato)
+
+        annuncia("bilancio", "le due colonne accostate, e i chunk che non si sono mossi")
+        return EsitoSharding(
+            fasi=tuple(fasi),
+            intera=intera,
+            prima=prima,
+            dopo=dopo,
+            carico_intera=carico_intera,
+            carico_sparsa=carico_sparsa,
+            mirata=mirata,
+            sparpagliata=sparpagliata,
+        )
+
+    def _una_corsa(self, corsa: WorkloadRunner) -> Riepilogo:
+        """Una delle due corse. Conteggio **oppure** durata, come in `WorkloadRunner`."""
+        copione = self._copione
+        if copione.scritture is not None:
+            return corsa.esegui(copione.scritture, genera=self._genera)
+        return corsa.esegui(durata_s=copione.carico_s, genera=self._genera)

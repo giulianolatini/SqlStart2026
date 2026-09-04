@@ -1175,6 +1175,187 @@ che fallisce una volta e poi passa è una prova da **spiegare**, non da riesegui
 
 ---
 
+## Task 15 — La scena dello sharding, e i chunk che non si sono mossi
+
+**Fatto il 4 settembre 2026.** Il capitolo che ne esce è
+[16-la-chiave-di-shard-e-lo-stesso-carico-due-volte.md](16-la-chiave-di-shard-e-lo-stesso-carico-due-volte.md).
+
+È il Blocco 3, ed è la parte che `feature/03` aveva potuto mostrare solo **a riposo**: la pagina
+canonica dello sharded cluster dichiarava scoperto «il comportamento oltre la soglia del balancer»
+proprio perché serviva carico controllato. Il piano lo scriveva in quattro passi, e tre di quei
+passi hanno prodotto una risposta diversa da quella che chiedevano. Non per un errore del piano:
+perché sono state **eseguite** invece che ragionate.
+
+### Il Passo 2 chiedeva chi emette `ChunkMigrated`, e la risposta è che nessuno può
+
+Il passo era scritto con la sua via d'uscita già dentro: «se durante la scrittura risulta che non è
+osservabile dal client, va detto — un evento dichiarato nel design e non producibile è una voce in
+`Sources.md` e un ADR, non un campo morto nel codice». La via d'uscita è servita, ma non per la
+ragione che prevedeva.
+
+Prima di scrivere l'emittente valeva la pena chiedersi se ci fosse qualcosa da emettere.
+`balancerStatus` dice `mode: "full"` e **1 153 giri**; `config.changelog`, che conserva le voci
+dall'`addShard` del giorno dell'inizializzazione, ha **due `merge` e zero migrazioni** — non una
+sola voce `moveChunk`, `moveRange` o `migrate` ([M-049](Sources.md#m-049)). Non è
+l'osservabilità a mancare: è la migrazione. Con una chiave `{_id: "hashed"}` i documenti si
+sparpagliano all'inserimento, i due shard restano pari per costruzione, e non c'è nessuno
+squilibrio da correggere. [ADR-0069](../../docs/Decision.md#adr-0069) l'aveva già scritto un task
+prima, dal lato dell'infrastruttura.
+
+L'evento è quindi uscito dal dominio ([ADR-0103](../../docs/Decision.md#adr-0103)), lasciando al
+suo posto un commento che dice che stava lì, quando è uscito e con quale misura. La guardia scende
+da dieci nomi a nove, ed è quello il punto in cui la decisione si paga: rimettere l'evento
+significa cambiare l'elenco, cioè accorgersene.
+
+Da questo sono discese due correzioni che il Task 15 non aveva chiesto e che hanno riguardato
+pagine vecchie: [03](03-eventi-immutabili.md) elencava ancora dieci eventi e **non aveva mai
+aggiunto `FaseIniziata`**, arrivata al Task 13; [02](02-porte-e-doppi.md) diceva «Le cinque porte»
+e non aveva mai aggiunto `Regia`, arrivata dallo stesso task. Le due pagine erano stantìe prima di
+questo task, e nessuna guardia le copriva: `docs-check` verifica i collegamenti, non i conteggi
+raccontati in prosa.
+
+### Il Passo 1 ha misurato che «lo stesso carico due volte» non lo era
+
+La decisione del PO era di girare la stessa corsa due volte — collezione non distribuita e
+`lab.ordini` distribuita — con i conteggi per shard accostati, accettando lo sforo di scaletta. La
+prima esecuzione vera, con il limite ancora espresso in secondi come nelle altre tre scene, ha
+stampato `carico 4288 senza chiave · 4415 con chiave · non è lo stesso carico`
+([M-052](Sources.md#m-052)).
+
+**La riga di garanzia ha funzionato, e ciò che denunciava era un difetto di disegno.** Nessuna
+prova unitaria poteva vederlo: i doppi fanno esattamente il numero di scritture che il copione
+chiede, quindi `confrontabile` è sempre stato verde. Il fatto vive nel punto in cui un limite di
+tempo incontra due throughput diversi, cioè in nessuno dei due.
+
+Da lì `demo sharding` è l'unica delle quattro scene **senza** `--carico`: il suo limite è
+`--scritture`, predefinito 5 000 ([ADR-0107](../../docs/Decision.md#adr-0107)). Le due corse
+diventano uguali per costruzione invece che per fortuna, e la riga di garanzia resta comunque a
+schermo, perché una garanzia che nessuno controlla è una speranza. Il prezzo sono quattordici
+secondi invece di dieci, **accettati dal PO il 4 settembre 2026**.
+
+L'altra tentazione è stata lasciata perdere: in quella misura la collezione distribuita ha ricevuto
+*più* scritture, ma su una finestra di sei secondi il rumore vale quanto l'effetto, e che lo
+sharding aumenti il throughput di scrittura è una tesi che il Blocco 3 non sostiene.
+
+### La prima fotografia negava un cluster acceso, e la fixture nascondeva il perché
+
+Terza cosa scoperta eseguendo, e la più grave. Sullo stack 03 sano, la fotografia di **prima**
+diceva `distribuita=False, primario=None, conti=()` di una `lab.ordini` che le righe subito sotto
+mostravano ripartita su due shard, con la riga del bilancio a trattini
+([M-053](Sources.md#m-053)).
+
+`PymongoInspector._e_sharded()` decideva guardando la descrizione della topologia **come il client
+la conosce**, e un client appena costruito non conosce niente: PyMongo scopre i server alla prima
+operazione, non alla costruzione. Fino a lì ogni seme è `SCONOSCIUTO`, che nel dominio significa
+«assenza di un'osservazione» e non «osservato assente» — leggere quello stato e concluderne «non
+c'è nessun router» è leggere il proprio non aver guardato.
+
+La correzione è un `ping` con `read_preference=NEAREST`, fatto **solo se nessun ruolo è ancora
+noto** ([ADR-0108](../../docs/Decision.md#adr-0108)). La preferenza non è un dettaglio: un comando
+su `admin` va sul primario per impostazione predefinita e **non torna finché un primario non c'è**
+([A-017](Sources.md#a-017)). Su un mongos non esiste; su un replica set in mezzo a un'elezione
+nemmeno. Con la preferenza predefinita questa riga avrebbe piantato `stats` durante l'Atto II,
+cioè avrebbe scambiato un difetto di schermata con un blocco in scena.
+
+È la **seconda volta** che il repository inciampa nella topologia fredda —
+[M-042](Sources.md#m-042) è la stessa cosa un task prima, in `demo failover`, chiusa con
+[ADR-0099](../../docs/Decision.md#adr-0099) — e la parte che vale è perché nessuna prova
+d'integrazione la vedesse: **la fixture di sessione chiama `spazza(client)` prima di consegnare il
+client**, quindi la scoperta era già avvenuta per effetto collaterale della pulizia. Ogni prova
+partiva da un client caldo; solo la sala partiva da uno freddo. Una fixture che prepara l'ambiente
+prepara anche ciò che nessuno ha chiesto, e ciò che nessuno ha chiesto non viene provato. La prova
+nuova apre il proprio client apposta.
+
+### Due tipi nuovi, perché la scena mette due colonne accanto
+
+`shard_distribution()` restituiva una tupla, e la tupla vuota diceva due cose opposte: «non è uno
+sharded cluster» e «lo è, ma questa collezione non è distribuita». La pagina
+[09](09-adattatori-veri-e-contratto-condiviso.md) lo dichiarava, e concludeva che «per la scena che
+questa applicazione mostra la distinzione non serve». Il Blocco 3 è la scena in cui serve: mettere
+le due colonne una accanto all'altra è tutto il suo contenuto.
+
+Il ritorno è diventato `Distribuzione(collezione, distribuita, primario, conti)`
+([ADR-0104](../../docs/Decision.md#adr-0104)), dove `primario` e `distribuita` bastano a separare
+tre stati. Che cosa distingua «cluster, ma collezione intera su un solo shard» da «cluster, e
+collezione distribuita» è stato **misurato**: su una collezione distribuita e *vuota*
+`$shardedDataDistribution` produce comunque la sua riga con i due shard a zero; su una non
+distribuita e piena di cinquanta documenti non ne produce nessuna ([M-050](Sources.md#m-050)). Un
+criterio basato sui documenti avrebbe sbagliato il primo caso.
+
+Nella stessa decisione la collezione è passata dal costruttore dell'ispettore al metodo. La
+motivazione scritta al Task 8 era buona — un ispettore che cambia bersaglio a ogni chiamata rende
+possibile una schermata con due numeri accanto che non parlano della stessa cosa — ma il Blocco 3
+accosta due collezioni **apposta**, e la difesa impediva la scena invece di un errore. Il rischio
+non è stato rimesso altrove: `Distribuzione` porta con sé il nome della collezione di cui parla, e
+la presentazione lo stampa. La difesa è passata dal costruttore al dato.
+
+### La settima porta, e il Passo 3
+
+`explain()` non stava in nessuna delle sei porte: `DocumentStore` scrive e legge documenti,
+`ClusterInspector` guarda il cluster e non una query. La strada corta era allargare
+`DocumentStore`, che è già l'oggetto con la collezione in mano, e sarebbe stata una promessa che la
+maggioranza delle sue implementazioni non mantiene — i doppi in memoria non hanno un piano da
+restituire. Da qui `QueryPlanner`, con un metodo solo
+([ADR-0105](../../docs/Decision.md#adr-0105)). Che `PymongoStore` ne soddisfi due non è
+un'eccezione da giustificare: è ciò che si ottiene quando le porte sono `Protocol` strutturali e
+nessuno le eredita.
+
+Le tre cose che l'adattatore legge sono state misurate sui tre stack ([M-051](Sources.md#m-051)):
+lo stadio sta sempre in `winningPlan.stage` e viaggia allo schermo **verbatim** — `SINGLE_SHARD`,
+`SHARD_MERGE` sono le parole che chi guarda ritroverà provando da solo; gli shard compaiono solo
+attraverso un router, quindi fuori da un cluster la tupla vuota è un fatto e non un ripiego; e il
+loro ordine **non è stabile** — il server risponde `['shard2rs', 'shard1rs']` — quindi l'adattatore
+li ordina, perché una scena che cambia ordine da sola insegna a diffidarne.
+
+### L'accoppiamento accettato dal PO, che poi non si è pagato
+
+La decisione era di scrivere in `lab.ordini`, riaprendo l'accoppiamento col numero del seme che
+[ADR-0088](../../docs/Decision.md#adr-0088) aveva scartato. Misurato, non si paga: `lab.ordini`
+contiene 34 415 documenti, 20 000 con `_id` intero che sono il seed e 14 415 con `_id` `ObjectId`
+che sono le corse dell'applicazione, e non si sono mai scontrati. **Non possono**: le scene di
+`demo` scrivono con `documento_progressivo`, che l'`_id` non lo tocca e lascia che sia il server a
+generarlo; l'unico che numera gli `_id` da zero è `DataGenerator.documento`, cioè `mongolab
+workload`, che ha la propria collezione per corsa ([ADR-0106](../../docs/Decision.md#adr-0106)).
+
+L'invariante dichiarata in `generatore.py` — «le due popolazioni non si incontrano mai nella stessa
+collezione» — è quindi diventata falsa, ed è stata riscritta invece di essere lasciata a
+contraddire il codice. Quella che regge è più stretta e riguarda solo l'`_id`, e dà anche il
+criterio per la pulizia: `{_id: {$type: "objectId"}}` seleziona ciò che ha scritto l'applicazione.
+`tools/reset-demo.sh` adesso lo conta prima che il seed ricostruisca la collezione, perché un
+residuo silenzioso è un residuo che qualcuno prima o poi attribuirà al seed.
+
+Per la stessa ragione la scena misura gli **arrivi** e non i totali. Non è una raffinatezza:
+misurata sui totali, una corsa finita per l'ottanta per cento su un solo shard risultava sbilanciata
+di **tre centesimi di punto**. Il seed diluisce qualunque squilibrio, e una misura che non può
+smentire la tesi non la sta verificando.
+
+### Una prova verde per il motivo sbagliato
+
+Nella fase rossa `test_su_un_replica_set_non_c_e_nessun_router_a_cui_chiedere` **passava**, perché
+il messaggio di Typer per un comando inesistente — «No such command 'sharding'» — contiene la
+sottostringa `shard`. Un'asserzione su `"shard"` è verde comunque; le asserzioni sono quindi su
+`"sharded cluster"`, `"--target sharded"` e `"router"`, e il commento accanto dice perché. È lo
+stesso tipo di trappola del Task 13, e la lezione è la stessa: **una sottostringa corta dentro un
+messaggio d'errore generico non è una prova.**
+
+### Numeri
+
+| | Prima | Dopo |
+|---|---|---|
+| Prove unitarie | 582 | **619** |
+| Prove di integrazione | 49 | **58** |
+| File controllati da mypy | 64 | **66** |
+| Prove degli strumenti | 166 | 166 |
+| ADR del repository | 102 | **108** |
+| Fonti esterne nel registro dell'app | 17 | 17 |
+| Misure nel registro dell'app | 48 | **53** |
+| Porte del dominio | 6 | **7** |
+| Eventi del dominio | 10 | **9** |
+
+L'ultima riga è l'unica di questo registro che sia mai **scesa**, ed è la misura del task.
+
+---
+
 ## Che cosa manca
 
 I task dal 13 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
@@ -1197,7 +1378,7 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | ~~L'osservatore interroga invece di ascoltare: la risoluzione è l'intervallo~~ | [08](08-il-ponte-sdam-e-i-thread-del-driver.md) | **chiuso** al Task 7: il ponte riceve i cambiamenti quando accadono |
 | ~~L'intervallo predefinito di 500 ms è scelto, non misurato~~ | [07](07-topologia-failover-e-i-due-numeri.md#il-limite-di-questo-osservatore-dichiarato) | **decaduto** al Task 13: l'interruzione non si sonda più, si **deduce** dagli eventi del ponte ([ADR-0096](../../docs/Decision.md#adr-0096)), quindi la risoluzione della misura non dipende più da nessun intervallo. I 500 ms restano il ritmo con cui la scena drena la coda verso lo schermo, che è un'altra cosa |
 | Il `TopologyWatcher` non ha un invariante di thread: oggi non lo usa nessuno | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | **Task 13 non l'ha rimesso in servizio, e la scadenza cade**: `ScenarioFailover` deduce l'interruzione dal ponte ([ADR-0096](../../docs/Decision.md#adr-0096)), non da una sentinella che interroga. Il `TopologyWatcher` resta codice provato che nessun comando costruisce: la domanda vera, da porre al Task 18, non è più «che invariante di thread ha» ma «serve ancora» |
-| `ChunkMigrated` potrebbe non essere osservabile da un client di `mongos` | [08](08-il-ponte-sdam-e-i-thread-del-driver.md#che-cosa-non-è-ancora-verificato) | Task 15 |
+| ~~`ChunkMigrated` potrebbe non essere osservabile da un client di `mongos`~~ | [08](08-il-ponte-sdam-e-i-thread-del-driver.md#che-cosa-non-è-ancora-verificato) | **chiuso** al Task 15, e non per la ragione attesa: non è l'osservabilità a mancare, è la migrazione — 1 153 giri di balancer, zero `moveChunk` ([M-049](Sources.md#m-049)). L'evento è uscito dal dominio ([ADR-0103](../../docs/Decision.md#adr-0103)) |
 | Un'eccezione dentro un listener finisce su `stderr`, e sotto un `Live` non si vede | [M-015](Sources.md#m-015) | **ancora aperto dopo il Task 13, e più esposto**: `demo failover` senza `--step` usa `--sink rich` per default, e ci mette dentro un failover vero, cioè il momento in cui gli ascoltatori lavorano di più. La difesa resta la stessa — gli ascoltatori sono **totali** — e non è che l'errore si veda. Task 18, con la registrazione che è il controllo |
 | La soglia della prova cronometrata non prende una `f-string` nel callback | [M-013, riserve](Sources.md#m-013) | dichiarata, non si chiude |
 | Le unità delle durate sono lette nel sorgente di PyMongo, non viste su un battito vero | [M-012, riserve](Sources.md#m-012) | il primo battito su un cluster in movimento: il Task 8 ha collegato l'ispettore, non il ponte |
@@ -1220,8 +1401,8 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | Nessuna prova guarda che cosa Rich disegna davvero: il Passo 4 lo vieta | [11](11-tre-rese-e-un-solo-thread-che-disegna.md#il-divieto-del-passo-4-letto-due-volte) | Task 18: la registrazione `.cast` **è** il controllo, e la guarda una persona |
 | Il costo di un disegno è misurato su `StringIO`, non su un terminale vero | [M-028, riserve](Sources.md#m-028) | Task 18, se la registrazione risultasse a scatti |
 | `_RefreshThread` è privato di Rich e può cambiare senza avviso | [A-015, riserve](Sources.md#a-015) | dichiarata: la difesa è la prova che conta i thread, che si accorgerebbe del cambiamento |
-| Sullo stack 03 `lab.carico-*` **non è distribuita**: `init/30-dati-demo.js` distribuisce solo `lab.ordini` su `{_id: "hashed"}` | [ADR-0088, riserve](../../docs/Decision.md#adr-0088) | **Task 15, non Task 16**: ADR-0088 lo aveva intestato al confronto di prestazioni, ma il Passo 1 del Task 15 chiede la distribuzione dei chunk **sotto carico**, e su una collezione che nessuno ha distribuito non c'è nessun chunk da guardare. Le strade sono tre: la scena distribuisce la collezione appena creata — che essendo **vuota** riceve subito due chunk per shard ([S-066](../../docs/Sources.md#s-066)) e senza la quale finisce tutta sullo **shard primario** ([§6.3](../../docs/02-architetture/sharded-cluster.md#63-le-collezioni-non-distribuite-e-lo-shard-primario)) — oppure scrive in `lab.ordini`, riaprendo l'accoppiamento che ADR-0088 aveva scartato, oppure si dichiara che misura un solo shard. Il Task 16 eredita la stessa scelta |
-| Il Passo 1 del Task 15 promette «**balancer al lavoro**», e questo repository non l'ha mai visto muoversi | [`sharded-cluster.md`, riserva](../../docs/02-architetture/sharded-cluster.md#cosa-questa-pagina-non-dice) e [V-061](../../docs/Sources.md#v-061) | **Task 15**: la soglia di squilibrio è **384 MB** e il lab ne muove 2,4 — è provato che sotto la soglia il balancer sta fermo, non che sopra si muova. In più una chiave **hashed** tiene gli shard pari per costruzione, quindi lo squilibrio che farebbe muovere il balancer non si forma. Quello che una corsa può mostrare è la **divisione** dei chunk, non la migrazione, e solo scrivendo abbastanza: o si usa `--doc-size` per gonfiare i documenti, o si abbassa `chunksize` nel cluster, o il passo si riscrive per quello che è osservabile |
+| ~~Sullo stack 03 `lab.carico-*` **non è distribuita**: `init/30-dati-demo.js` distribuisce solo `lab.ordini` su `{_id: "hashed"}` | [ADR-0088, riserve](../../docs/Decision.md#adr-0088) | **Task 15, non Task 16**: ADR-0088 lo aveva intestato al confronto di prestazioni, ma il Passo 1 del Task 15 chiede la distribuzione dei chunk **sotto carico**, e su una collezione che nessuno ha distribuito non c'è nessun chunk da guardare. Le strade sono tre: la scena distribuisce la collezione appena creata — che essendo **vuota** riceve subito due chunk per shard ([S-066](../../docs/Sources.md#s-066)) e senza la quale finisce tutta sullo **shard primario** ([§6.3](../../docs/02-architetture/sharded-cluster.md#63-le-collezioni-non-distribuite-e-lo-shard-primario)) — oppure scrive in `lab.ordini`, riaprendo l'accoppiamento che ADR-0088 aveva scartato, oppure si dichiara che misura un solo shard. Il Task 16 eredita la stessa scelta.~~ **Chiuso al Task 15 con la prima strada e la seconda insieme**: la scena carica *entrambe*, una collezione nuova non distribuita come metro e `lab.ordini` come misura, e l'accoppiamento temuto non si paga perché le scene di `demo` non numerano gli `_id` ([ADR-0106](../../docs/Decision.md#adr-0106)). Il Task 16 eredita una scelta già fatta |
+| ~~Il Passo 1 del Task 15 promette «**balancer al lavoro**», e questo repository non l'ha mai visto muoversi~~ | [`sharded-cluster.md`, riserva](../../docs/02-architetture/sharded-cluster.md#cosa-questa-pagina-non-dice) e [V-061](../../docs/Sources.md#v-061) | **Task 15**: la soglia di squilibrio è **384 MB** e il lab ne muove 2,4 — è provato che sotto la soglia il balancer sta fermo, non che sopra si muova. In più una chiave **hashed** tiene gli shard pari per costruzione, quindi lo squilibrio che farebbe muovere il balancer non si forma. Quello che una corsa può mostrare è la **divisione** dei chunk, non la migrazione, e solo scrivendo abbastanza: o si usa `--doc-size` per gonfiare i documenti, o si abbassa `chunksize` nel cluster, o il passo si riscrive per quello che è osservabile.~~ **Chiuso al Task 15 riscrivendo il passo**, e con una misura al posto di una previsione: 1 153 giri di balancer e **zero** `moveChunk` in tutto il `changelog` del cluster ([M-049](Sources.md#m-049)). La scena mostra i chunk fermi e ne dà la ragione; l'evento `ChunkMigrated` è uscito dal dominio ([ADR-0103](../../docs/Decision.md#adr-0103)) |
 | `TOPOLOGIA singola → singola` è vera e non utile: cambia la *descrizione*, non la forma | [12](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md#che-cosa-questo-capitolo-lascia-aperto) | decidendo che cosa quella riga debba dire, non aggiungendo un osservatore |
 | ~~Il ciclo di `watch` vive in `cli.py`: orchestrazione dentro la radice di composizione~~ | [12](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md#che-cosa-questo-capitolo-lascia-aperto) | **chiuso** al Task 13: è `sorveglia` in `application/scenari.py`, e la regola delle attese — `giri - 1` e non `giri` — adesso ha le sue prove |
 | Le letture fallite si contano ma non emettono nessun evento: nel consuntivo ci sono, in cronaca no | [12](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md#che-cosa-questo-capitolo-lascia-aperto) | **il Task 13 non l'ha chiesto, e per scelta**: la scena del failover gira con `--readers 0`, perché durante l'elezione le letture su un secondario continuano a riuscire e mescolate alle scritture renderebbero illeggibile l'unica cosa che quella scena misura. Torna al Task 16, dove le letture sono il contenuto |
@@ -1244,6 +1425,12 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | I 10 019 ms dipendono dalle impostazioni di elezione **di questo lab** | [M-043, riserve](Sources.md#m-043) | dichiarata: la frase in sala è «su questo lab», non «in MongoDB» |
 | «Zero scritture perse» dipende da un default **del server**, non da una scelta dell'applicazione | [M-041](Sources.md#m-041) | dichiarata: un `setDefaultRWConcern` più debole cambierebbe il numero, ed è una cosa da dire, non un difetto da correggere |
 | La prova di integrazione della scena assicura una banda larga (5-15 s), non il numero | [14](14-la-scena-del-failover-e-i-due-numeri.md#contro-lo-stack-vero-una-prova-che-fa-da-umano) | dichiarata: la banda intercetta l'errore di categoria, il numero preciso sta in [M-043](Sources.md#m-043) |
+| Il balancer non è stato visto migrare, e su questo stack non lo sarà | [16](16-la-chiave-di-shard-e-lo-stesso-carico-due-volte.md#che-cosa-questo-capitolo-lascia-aperto) | non si chiude qui: servirebbe una chiave crescente e un'attesa, cioè una scena che questo lab non ha. Il Blocco 3 mostra i chunk fermi e ne dà la ragione |
+| La riga «non è lo stesso carico» non ha una prova che la veda scattare contro un cluster vero | [16](16-la-chiave-di-shard-e-lo-stesso-carico-due-volte.md#lo-stesso-carico-due-volte-e-la-volta-in-cui-non-lo-è-stato) | con i doppi `confrontabile` è sempre verde per costruzione; il caso rosso è stato visto una volta sola, eseguendo, prima che `--carico` diventasse `--scritture` |
+| `demo sharding` non ha nessun limite di tempo: con `--scritture` grande e un cluster lento dura finché dura | [ADR-0107, conseguenze](../../docs/Decision.md#adr-0107) | dichiarata: `WorkloadRunner.esegui` rifiuta i due limiti insieme, e il predefinito è misurato |
+| Senza permessi su `config` il primario resta ignoto, e una `Distribuzione` senza primario si legge come «non è un cluster» | [ADR-0104, conseguenze](../../docs/Decision.md#adr-0104) | dichiarata: è la degradazione che c'era prima, ristretta a un caso che questo laboratorio non incontra |
+| `Distribuzione` non vieta la quarta combinazione, `primario None` e `distribuita True` | [ADR-0104, alternative](../../docs/Decision.md#adr-0104) | dichiarata: sarebbe una guardia contro chi costruisce l'oggetto, non contro un fatto del mondo, in un dominio che di validazione non ne ha altrove |
+| Il `ping` di `_scopri()` è una chiamata in più su ogni ispettore appena costruito | [ADR-0108, conseguenze](../../docs/Decision.md#adr-0108) | dichiarata: succede una volta sola per client, e il monitoraggio di PyMongo fa il resto |
 
 ---
 

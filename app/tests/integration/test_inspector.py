@@ -19,6 +19,12 @@ from pymongo import MongoClient
 
 from mongolab.domain.modelli import RuoloServer, TipoTopologia
 from mongolab.domain.porte import ClusterInspector
+from mongolab.infrastructure.bersagli import (
+    BERSAGLI,
+    COLLEZIONE,
+    DATABASE,
+    connetti,
+)
 from mongolab.infrastructure.generatore import DataGenerator
 from mongolab.infrastructure.inspector import PymongoInspector
 from mongolab.infrastructure.store import PymongoStore
@@ -30,7 +36,7 @@ from tests.integration.ambiente import PREFISSO_PROVE, collezione_usa_e_getta
 
 def test_l_ispettore_passa_per_la_porta(stack01: MongoClient[dict[str, Any]]) -> None:
     """La conformità strutturale, verificata dove mypy la verifica: in un'annotazione."""
-    ispettore: ClusterInspector = PymongoInspector(stack01, "lab", "ordini")
+    ispettore: ClusterInspector = PymongoInspector(stack01, "lab")
     assert ispettore.topology().server
 
 
@@ -42,7 +48,7 @@ def test_la_topologia_di_un_istanza_singola(stack01: MongoClient[dict[str, Any]]
     prova. `nome_set` è `None` perché non c'è nessun set: è il valore che distingue
     un'istanza singola da un membro visto da vicino, e il Task 12 lo userà.
     """
-    topologia = PymongoInspector(stack01, "lab", "ordini").topology()
+    topologia = PymongoInspector(stack01, "lab").topology()
 
     assert topologia.tipo is TipoTopologia.SINGOLA
     assert topologia.nome_set is None
@@ -59,7 +65,7 @@ def test_lo_stato_del_server_arriva_grezzo(stack01: MongoClient[dict[str, Any]])
     porta restituisce il documento intero apposta, così che la pagina del Task 17 possa
     dire quali campi guardare senza che il codice l'abbia già deciso.
     """
-    stato = PymongoInspector(stack01, "lab", "ordini").server_status()
+    stato = PymongoInspector(stack01, "lab").server_status()
 
     assert stato["process"] == "mongod"
     assert isinstance(stato["version"], str)
@@ -77,14 +83,14 @@ def test_le_statistiche_del_database_contano_la_collezione_che_c_e(
     davvero usato: senza la seconda, un ispettore che interrogasse sempre lo stesso
     database passerebbe la prima.
     """
-    ispettore = PymongoInspector(stack01, "lab", "ordini")
+    ispettore = PymongoInspector(stack01, "lab")
     statistiche = ispettore.db_stats()
 
     assert statistiche["db"] == "lab"
     assert isinstance(statistiche["dataSize"], (int, float))
     assert int(statistiche["objects"]) > 0  # type: ignore[call-overload]
 
-    vuoto = PymongoInspector(stack01, f"{PREFISSO_PROVE}mai_creato", "ordini").db_stats()
+    vuoto = PymongoInspector(stack01, f"{PREFISSO_PROVE}mai_creato").db_stats()
     assert vuoto["db"] == f"{PREFISSO_PROVE}mai_creato"
     assert vuoto["objects"] == 0
 
@@ -92,7 +98,7 @@ def test_le_statistiche_del_database_contano_la_collezione_che_c_e(
 def test_su_un_istanza_singola_non_c_e_distribuzione_per_shard(
     stack01: MongoClient[dict[str, Any]],
 ) -> None:
-    """Tupla vuota, e **non** un'eccezione: lo dice la porta.
+    """Una `Distribuzione` che dice di no, e **non** un'eccezione: lo dice la porta.
 
     La strada facile sarebbe eseguire `$shardedDataDistribution` e catturare l'errore. Su
     un mongod solleva davvero — codice 6789101, «can only be run on mongoS», misurato —
@@ -100,7 +106,12 @@ def test_su_un_istanza_singola_non_c_e_distribuzione_per_shard(
     cui il codice cambia o l'utente non ha i permessi, «non è sharded» diventa la risposta
     a una domanda diversa. L'ispettore lo chiede alla topologia, che il driver conosce già.
     """
-    assert PymongoInspector(stack01, "lab", "ordini").shard_distribution() == ()
+    fuori = PymongoInspector(stack01, "lab").shard_distribution("ordini")
+
+    assert fuori.collezione == "ordini"
+    assert not fuori.in_un_cluster
+    assert not fuori.distribuita
+    assert fuori.conti == ()
 
 
 # --- Lo stack 02: replica set ---------------------------------------------------------
@@ -123,7 +134,7 @@ def test_il_membro_di_un_replica_set_si_dichiara_primario(
     giorno in cui la forma diventerà giusta questa riga diventi rossa e chieda di essere
     riscritta invece di restare a raccontare una cosa vecchia.
     """
-    topologia = PymongoInspector(stack02, "lab", "ordini").topology()
+    topologia = PymongoInspector(stack02, "lab").topology()
 
     assert len(topologia.server) == 1
     assert topologia.server[0].ruolo is RuoloServer.PRIMARIO
@@ -143,7 +154,7 @@ def test_lo_stato_di_un_membro_dichiara_il_set(
     dimostrazione che restituire il documento grezzo era la scelta giusta — un modello
     scritto contro lo stack 01 non avrebbe avuto un posto dove metterli.
     """
-    stato = PymongoInspector(stack02, "lab", "ordini").server_status()
+    stato = PymongoInspector(stack02, "lab").server_status()
     repl = stato["repl"]
 
     assert isinstance(repl, dict)
@@ -154,7 +165,10 @@ def test_lo_stato_di_un_membro_dichiara_il_set(
 def test_un_replica_set_non_ha_distribuzione_per_shard(
     stack02: MongoClient[dict[str, Any]],
 ) -> None:
-    assert PymongoInspector(stack02, "lab", "ordini").shard_distribution() == ()
+    fuori = PymongoInspector(stack02, "lab").shard_distribution("ordini")
+
+    assert not fuori.in_un_cluster
+    assert fuori.primario is None
 
 
 # --- Lo stack 03: sharded cluster -----------------------------------------------------
@@ -167,7 +181,7 @@ def test_il_mongos_si_presenta_come_router(stack03: MongoClient[dict[str, Any]])
     punto d'ingresso, quindi la scoperta non porta altrove e la topologia si legge per
     quello che è.
     """
-    topologia = PymongoInspector(stack03, "lab", "ordini").topology()
+    topologia = PymongoInspector(stack03, "lab").topology()
 
     assert topologia.tipo is TipoTopologia.SHARDED
     assert [server.ruolo for server in topologia.server] == [RuoloServer.ROUTER]
@@ -183,10 +197,41 @@ def test_lo_stato_di_un_mongos_dice_di_essere_un_mongos(
     memorizzazione e non replica niente. Una pagina di monitoraggio che li desse per
     scontati mostrerebbe dei buchi proprio sullo stack più complicato.
     """
-    stato = PymongoInspector(stack03, "lab", "ordini").server_status()
+    stato = PymongoInspector(stack03, "lab").server_status()
 
     assert stato["process"] == "mongos"
     assert "wiredTiger" not in stato
+
+
+def test_la_prima_domanda_a_un_client_appena_aperto_non_nega_il_cluster() -> None:
+    """Il difetto che nessuna prova vedeva, perché tutte partivano da un client già caldo.
+
+    `_e_sharded()` legge la topologia **come il client la conosce**, e un client appena
+    costruito non conosce ancora niente: PyMongo scopre i server alla prima operazione, non
+    alla costruzione. La domanda diventava allora «fra i server che conosco c'è un router?»
+    posta a un client che non conosce nessun server, e la risposta era no — cioè
+    `shard_distribution` dichiarava non distribuita una collezione distribuita, e `primario`
+    `None` su un cluster acceso.
+
+    Le fixture di sessione lo nascondevano tutte: `_acceso` chiama `spazza(client)` prima
+    di consegnarlo, e quella spazzata scalda la topologia. Il difetto è comparso alla prima
+    corsa vera di `demo sharding`, dove la fase «riposo» legge per prima ed è l'unica che
+    parte fredda — schermata con `sbilancio —` e `chunk —` su un cluster perfettamente
+    distribuito ([M-053](../../docs/Sources.md#m-053)).
+
+    Questa prova apre il proprio client apposta e non usa `stack03`: il client della
+    fixture è caldo per costruzione, e su un client caldo il difetto non si riproduce.
+    """
+    cliente: MongoClient[dict[str, Any]] = connetti(BERSAGLI["sharded"])
+    try:
+        # Prima operazione in assoluto su questo client. Nessun ping, nessuna scrittura.
+        distribuzione = PymongoInspector(cliente, DATABASE).shard_distribution(COLLEZIONE)
+    finally:
+        cliente.close()
+
+    assert distribuzione.in_un_cluster, "il cluster è acceso, e il client lo deve scoprire"
+    assert distribuzione.distribuita, "lab.ordini è distribuita dal seed dello stack 03"
+    assert len(distribuzione.conti) == 2
 
 
 def test_la_distribuzione_per_shard_conta_documenti_e_chunk(
@@ -215,15 +260,23 @@ def test_la_distribuzione_per_shard_conta_documenti_e_chunk(
         PymongoStore(collezione).insert_many(list(DataGenerator().lotto(quanti)))
 
         distribuzione = PymongoInspector(
-            stack03, collezione.database.name, collezione.name
-        ).shard_distribution()
+            stack03, collezione.database.name
+        ).shard_distribution(collezione.name)
 
-    assert len(distribuzione) == 2, "il cluster del repository ha due shard"
-    assert sum(conto.documenti for conto in distribuzione) == quanti
-    assert all(conto.chunk >= 1 for conto in distribuzione)
-    assert [conto.shard for conto in distribuzione] == sorted(
-        conto.shard for conto in distribuzione
+    assert distribuzione.collezione == collezione.name
+    assert distribuzione.in_un_cluster
+    assert distribuzione.distribuita
+    assert len(distribuzione.conti) == 2, "il cluster del repository ha due shard"
+    assert distribuzione.documenti == quanti
+    assert all(conto.chunk >= 1 for conto in distribuzione.conti)
+    assert [conto.shard for conto in distribuzione.conti] == sorted(
+        conto.shard for conto in distribuzione.conti
     ), "l'ordine è stabile perché la scena confronta due schermate a distanza di minuti"
+    # La quota è il numero che il Blocco 3 mostra, e con una chiave hashed sta vicino a
+    # metà. «Vicino» e non «uguale»: asserire 50.0 esatto sarebbe una prova capricciosa.
+    for conto in distribuzione.conti:
+        quota = distribuzione.quota(conto.shard)
+        assert quota is not None and 25.0 < quota < 75.0
 
 
 def test_una_collezione_non_distribuita_dentro_un_cluster_sharded(
@@ -233,19 +286,28 @@ def test_una_collezione_non_distribuita_dentro_un_cluster_sharded(
 
     Finché nessuno ha eseguito `shardCollection`, i documenti stanno tutti sullo shard
     primario del database e `$shardedDataDistribution` non ha niente da dire su quella
-    collezione. La tupla esce vuota, ed è la risposta giusta: **non c'è** una
-    distribuzione, che è diverso da «la distribuzione è tutta da una parte».
+    collezione. Fino al Task 14 la risposta era la tupla vuota, cioè **la stessa** che dà
+    un replica set: il codice negava un cluster che era acceso. Da ADR-0104 la risposta
+    dice tutte e tre le cose — il cluster c'è, la collezione non è distribuita, e i
+    documenti stanno tutti su questo shard qui, che ha un nome.
 
     È anche la domanda più frequente di chi vede uno sharded cluster per la prima volta —
-    «l'ho acceso, perché non distribuisce?» — e vale la pena che il codice abbia una
-    risposta invece di un conteggio che sembra sbagliato.
+    «l'ho acceso, perché non distribuisce?» — ed è la prima metà della scena del Blocco 3.
     """
+    quanti = 100
     with collezione_usa_e_getta(stack03) as collezione:
-        PymongoStore(collezione).insert_many(list(DataGenerator().lotto(100)))
-        ispettore = PymongoInspector(stack03, collezione.database.name, collezione.name)
+        PymongoStore(collezione).insert_many(list(DataGenerator().lotto(quanti)))
+        ispettore = PymongoInspector(stack03, collezione.database.name)
+        intera = ispettore.shard_distribution(collezione.name)
 
-        assert ispettore.shard_distribution() == ()
-        assert int(ispettore.db_stats()["objects"]) == 100  # type: ignore[call-overload]
+        assert intera.collezione == collezione.name
+        assert intera.in_un_cluster, "il cluster c'è, ed è la metà che mancava"
+        assert not intera.distribuita
+        assert intera.primario is not None
+        assert intera.documenti == quanti
+        assert intera.chunk == 0, "una collezione non distribuita non ha chunk suoi"
+        assert intera.quota(intera.primario) == 100.0
+        assert int(ispettore.db_stats()["objects"]) == quanti  # type: ignore[call-overload]
 
 
 @pytest.mark.parametrize("nome", ["lab", "config"])
@@ -258,7 +320,7 @@ def test_le_statistiche_attraverso_il_mongos_sommano_gli_shard(
     cluster e leggere quelle di un server, e chi la ignora crede di guardare una macchina
     mentre ne sta guardando due sommate.
     """
-    statistiche = PymongoInspector(stack03, nome, "ordini").db_stats()
+    statistiche = PymongoInspector(stack03, nome).db_stats()
 
     assert statistiche["db"] == nome
     assert isinstance(statistiche["raw"], dict)

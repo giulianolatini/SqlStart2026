@@ -6432,3 +6432,363 @@ Misurato sullo stack vero: 3 908 documenti all'origine, 3 802 nella copia, **106
   invocazioni diverse — che è metà di quello che la sezione sta insegnando.
 
 **Fonti:** [M-047](../app/docs/Sources.md#m-047), [ADR-0084](#adr-0084), [ADR-0100](#adr-0100)
+
+---
+
+<a id="adr-0103"></a>
+## ADR-0103 — `ChunkMigrated` esce dal dominio: un evento che questo laboratorio non produce
+
+**Data:** 2026-09-04 · **Stato:** Accettata · **Corregge:** il §6.3 di
+[`2026-08-24-design.md`](00-progetto/2026-08-24-design.md)
+
+**Contesto:** il §6.3 del design elencava otto eventi, e l'ottavo era `ChunkMigrated` —
+`collezione`, `da_shard`, `a_shard`, `chunk`. Al Task 3 è stato scritto insieme agli altri sette,
+congelato e slottato come loro, con una docstring che dichiarava già la propria condizione di
+esistenza: se durante la scena dello sharding fosse risultato non osservabile dal client, sarebbe
+diventato «una voce in `Sources.md` e un ADR, non un campo morto nel codice». Il Passo 2 del Task
+15 chiedeva di trovargli finalmente chi lo emette.
+
+Non c'è nessuno. [ADR-0069](#adr-0069) aveva già stabilito che il balancer di una 7.0 fa due
+mestieri e che qui ne esercita uno solo — l'AutoMerger fonde, e non migra. Il Task 15 l'ha
+**misurato** invece di ricordarlo: `balancerStatus` risponde `mode: full` e 1 153 giri, e
+`config.changelog`, che conserva le voci dall'`addShard` del giorno dell'inizializzazione, non ne
+ha **una sola** di tipo `moveChunk`. Due `merge`, zero migrazioni
+([M-049](../app/docs/Sources.md#m-049)).
+
+La ragione sta nel disegno dello stack e non in un guasto: `lab.ordini` è distribuita su
+`{_id: "hashed"}`, e una chiave hashed sparpaglia i documenti fra gli shard **all'inserimento**. I
+due shard restano a un chunk ciascuno e a metà dei documenti ciascuno; non c'è nessuno sbilancio da
+correggere, e il balancer migra solo quando qualcuno si è sbilanciato. Che non succeda non è un
+limite del lab: è precisamente ciò che il Blocco 3 vuole far vedere.
+
+**Decisione:** `ChunkMigrated` esce da `domain/eventi.py`. Al suo posto resta un commento che dice
+che stava lì, quando è uscito e con quale misura — un buco nominato costa meno di un buco muto,
+perché il prossimo che cerca l'evento nel design lo trova invece di ricostruirlo. La guardia
+`test_gli_eventi_del_design_sono_nove_e_sono_quelli` scende da dieci nomi a nove, ed è il punto in
+cui la decisione si paga: rimetterlo significa cambiare quell'elenco, cioè accorgersene.
+
+**Conseguenze:** il dominio ha nove eventi — otto dal §6.3 meno uno, più
+[`PrimaryWaitAbandoned`](#adr-0082) e [`FaseIniziata`](#adr-0094). La scena dello sharding mostra i
+chunk **fermi**, e lo dichiara: `bilancio · sbilancio 0 punti · chunk 0 in più` è una riga che
+afferma qualcosa, e afferma il vero. Le tre pagine che tenevano l'evento fra i dubbi aperti —
+`03-eventi-immutabili.md`, `04-eventi-del-driver-e-concorrenza.md`,
+`08-il-ponte-sdam-e-i-thread-del-driver.md` — lo chiudono citando questo ADR. Il design del 24
+agosto resta com'è scritto: è un documento datato, e la divergenza è registrata qui.
+
+**Alternative scartate.**
+
+- *Tenerlo, non emesso.* È esattamente il campo morto che la sua docstring vietava. Un dominio in
+  cui un evento non ha emittente insegna a chi legge che l'elenco degli eventi è una lista di
+  intenzioni e non di fatti, e a quel punto non ne garantisce più nessuno.
+- *Emetterlo leggendo `config.changelog` in polling.* Un componente in più, un permesso in più su
+  `config`, un thread in più — per una coda che resta vuota. E se una migrazione avvenisse davvero,
+  arriverebbe con un ritardo che la cronaca non saprebbe dichiarare, cioè con un istante sbagliato
+  addosso in un dominio il cui unico campo comune è l'istante.
+- *Provocare una migrazione a scena aperta*, spegnendo uno shard o distribuendo su una chiave
+  crescente perché si sbilanci. Sono decine di secondi di attesa dentro un blocco che ne ha dieci,
+  e cambierebbero lo stack per far accadere una cosa che l'architettura del lab non fa. Il Blocco 3
+  dimostra dove finiscono i documenti, non che il balancer esista.
+
+**Fonti:** [M-049](../app/docs/Sources.md#m-049), [ADR-0069](#adr-0069), [ADR-0082](#adr-0082),
+[ADR-0094](#adr-0094)
+
+---
+
+<a id="adr-0104"></a>
+## ADR-0104 — La distribuzione per shard diventa una risposta strutturata, e la collezione un parametro
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** fino al Task 14 `ClusterInspector.shard_distribution()` restituiva una
+`tuple[ContoShard, ...]` e leggeva la collezione dal costruttore dell'ispettore. Entrambe le scelte
+avevano una ragione, ed entrambe smettono di reggere davanti al Blocco 3.
+
+**La tupla vuota diceva due cose opposte.** «Non è uno sharded cluster» e «è uno sharded cluster,
+ma questa collezione non è distribuita» arrivavano allo scenario con lo stesso valore. Il Blocco 3
+esiste per mostrare **precisamente il secondo caso accanto al terzo** — la collezione di carico che
+sta tutta su uno shard, e `lab.ordini` che sta su due — e una scena non può poggiare su un valore
+che confonde i due fatti che deve contrapporre.
+
+**La collezione dal costruttore** era una scelta difensiva, e la sua ragione è scritta in
+`inspector.py`: un ispettore capace di cambiare bersaglio a ogni chiamata rende possibile una
+schermata con due numeri accanto che non parlano della stessa cosa. Il Blocco 3 accosta due
+collezioni **apposta**, e la difesa impediva la scena invece di un errore.
+
+Le tre fonti che rispondono sono state interrogate invece che dedotte
+([M-050](../app/docs/Sources.md#m-050)): `$shardedDataDistribution` distingue «distribuita e vuota»
+— una riga con tutti gli shard a zero — da «non distribuita», che non produce **nessuna** riga;
+`config.collections` per una collezione non distribuita non ha proprio la voce; `config.databases`
+nomina lo shard primario del database, e `$collStats` conferma che è lì che stanno i documenti.
+
+**Decisione:** la porta restituisce `Distribuzione(collezione, distribuita, primario, conti)` e
+prende la collezione come parametro. Il tipo distingue i tre stati con due campi, e la tabella che
+li elenca sta nella sua docstring:
+
+| `primario` | `distribuita` | che cosa significa                                |
+| ---------- | ------------- | ------------------------------------------------- |
+| `None`     | `False`       | non è uno sharded cluster: non c'è niente da dire |
+| uno shard  | `False`       | è un cluster, ma la collezione sta **intera** lì  |
+| uno shard  | `True`        | è un cluster, e il catalogo la conosce            |
+
+Il rischio dei due numeri che non parlano della stessa cosa non è stato risolto vietando la
+domanda, ma facendo sì che la risposta **si presenti**: `Distribuzione` porta con sé il nome della
+collezione di cui parla, e la presentazione lo stampa. La difesa è passata dal costruttore al dato.
+
+**Conseguenze:** `documenti`, `chunk` e `quota()` diventano proprietà del tipo invece di calcoli
+sparsi in chi chiama, e `chunk == 0` è la risposta **giusta** per una collezione non distribuita,
+non un dato mancante. La quarta combinazione — `primario None` e `distribuita True` — non è
+rappresentabile in un cluster reale, e il tipo non la vieta: sarebbe una guardia contro un errore
+di chi costruisce l'oggetto, non contro un fatto del mondo, in un dominio che di validazione non ne
+ha da nessun'altra parte.
+
+**Alternative scartate.**
+
+- *Un `bool` in più accanto alla tupla.* Due valori di ritorno che vanno tenuti coerenti da chi
+  chiama sono la premessa della prossima schermata sbagliata.
+- *Sollevare un'eccezione quando non è uno sharded cluster.* «Non sei in un cluster» è una risposta
+  legittima a una domanda legittima — è ciò che la scena dice allo stack 01 e allo stack 02 — e
+  farne un'eccezione obbligherebbe a un `try` intorno a una riga di rapporto.
+- *Un secondo ispettore per la seconda collezione.* Due client, due topologie, due fotografie prese
+  in due istanti: esattamente il disallineamento da cui il costruttore voleva difendere.
+
+**Fonti:** [M-050](../app/docs/Sources.md#m-050), [ADR-0064](#adr-0064), [ADR-0088](#adr-0088)
+
+---
+
+<a id="adr-0105"></a>
+## ADR-0105 — `QueryPlanner`, la settima porta: il piano si legge, e non lo si esegue
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** il Passo 3 del Task 15 chiede due righe sullo schermo: una query mirata e una
+scatter-gather, con accanto ciò che il router ha deciso di farne. È una domanda che nessuna delle
+sei porte sa fare. `DocumentStore` scrive e legge documenti; `ClusterInspector` guarda il cluster,
+non una query.
+
+La tentazione era aggiungere `explain` a `DocumentStore`, che è già l'oggetto che ha la collezione
+in mano. Sarebbe una promessa che la maggioranza delle sue implementazioni non mantiene: i doppi in
+memoria non hanno un piano da restituire, e un metodo che quasi tutti implementano sollevando
+`NotImplementedError` è una porta larga travestita da porta stretta.
+
+La forma di `explain()` è stata misurata sui tre stack ([M-051](../app/docs/Sources.md#m-051)): lo
+stadio sta sempre in `queryPlanner.winningPlan.stage`; la chiave `shards` compare **solo**
+attraverso un router, e fuori da un cluster il piano non nomina nessuno shard; l'ordine in cui il
+server elenca gli shard non è quello del nome — `['shard2rs', 'shard1rs']` — quindi due schermate a
+minuti di distanza potrebbero elencarli in ordine diverso senza che sia cambiato niente.
+
+**Decisione:** una settima porta, `QueryPlanner`, con un metodo solo, `explain(filtro) -> Piano`.
+`Piano` porta `stadio`, `shard` e il filtro, e `mirata` è una proprietà che si ricava da un campo
+che si vede.
+
+Lo stadio viaggia **verbatim** fino allo schermo: `SINGLE_SHARD` e `SHARD_MERGE` sono le parole che
+chi guarda ritroverà in `explain()` la prima volta che proverà da solo, e tradurle in un booleano
+significherebbe tenere aggiornato un dizionario al posto del server — il giorno in cui comparisse
+una terza parola, un campo di testo la mostra e un booleano la nasconde. Gli shard si consegnano
+**ordinati**, perché il server non li ordina e una scena che cambia ordine da sola insegna a
+diffidarne.
+
+Una porta si disegna guardando **chi la chiama**, non chi la implementa. Qui la chiama un solo
+scenario, e la soddisfa un solo adattatore: `PymongoStore`, che la collezione ce l'ha già, adesso
+passa per due porte invece che per una. Che un adattatore ne soddisfi due non è un'eccezione da
+giustificare — è ciò che si ottiene quando le porte sono `Protocol` strutturali e nessuno le
+eredita.
+
+**Conseguenze:** le porte diventano sette, e `app/docs/02-porte-e-doppi.md` lo registra. Fuori da un
+cluster `Piano.shard` è vuoto — sullo stack 01 e sullo stack 02 lo stadio è `IDHACK` e la chiave
+`shards` non c'è proprio — e la presentazione lo dice invece di stampare uno zero: «nessuno shard:
+qui non c'è un router». Il comando comunque rifiuta i due stack non sharded prima di arrivarci
+([ADR-0107](#adr-0107)).
+
+**Alternative scartate.**
+
+- *`explain` dentro `DocumentStore`.* Vedi sopra: allarga una porta che tutti implementano per un
+  bisogno che ha un chiamante solo.
+- *`explain` dentro `ClusterInspector`.* Quella porta risponde su cluster, database e collezione;
+  una query non è nessuna delle tre, e il suo adattatore non ha in mano la collezione su cui
+  eseguirla.
+- *Restituire il dizionario grezzo di `explain()`.* Farebbe entrare la forma di una risposta di
+  PyMongo dentro lo scenario, cioè dentro il dominio, che è precisamente ciò contro cui l'esagono
+  esiste — e la guardia che tiene `pymongo` fuori da tutto ciò che non è `infrastructure/` non se
+  ne accorgerebbe, perché un `dict` non si importa.
+- *Un booleano `mirata` come tipo di ritorno.* Butta via la parola per cui la scena esiste.
+
+**Fonti:** [M-051](../app/docs/Sources.md#m-051), [ADR-0095](#adr-0095)
+
+---
+
+<a id="adr-0106"></a>
+## ADR-0106 — Il Blocco 3 carica `lab.ordini`, e l'accoppiamento temuto non si paga
+
+**Data:** 2026-09-04 · **Stato:** Accettata · **Chiude la riserva di:** [ADR-0088](#adr-0088)
+
+**Contesto:** ADR-0088 si era chiuso con una riserva che nominava questo task: sullo stack 03 la
+collezione del carico **non è distribuita**, perché `docker/03-sharded/init/30-dati-demo.js`
+distribuisce `lab.ordini` e una collezione creata al volo resta intera sullo shard primario. Il
+confronto fra architetture avrebbe dovuto o distribuire la collezione appena creata, o dichiarare
+che stava misurando un solo shard.
+
+Il Blocco 3 fa una terza cosa, ed è la scena: carica **entrambe**. La collezione nuova, non
+distribuita, è il metro; `lab.ordini`, distribuita, è la misura. Le due colonne accanto sono
+l'intero contenuto didattico del blocco, e per averle serve scrivere in `lab.ordini`.
+
+Fra le alternative che ADR-0088 aveva scartato c'era «far partire il generatore dopo la fine del
+seed», rifiutata perché accoppia il generatore a un numero che vive in tre `init/*.js`. Scrivere in
+`lab.ordini` sembrava riaprire quell'accoppiamento, ed è stato accettato in quanto tale — poi
+misurato, e non si paga.
+
+`lab.ordini` sullo stack 03 contiene **34 415** documenti: 20 000 con `_id` intero, che sono il
+seed, e 14 415 con `_id` `ObjectId` e un campo `indice`, che sono le corse dell'applicazione. Non
+si sono mai scontrati, e non possono: le scene di `demo` scrivono con `documento_progressivo`, che
+**non tocca `_id`** e lascia che sia il server a generarlo. L'unico che numera gli `_id` è
+`DataGenerator.documento`, cioè `mongolab workload`, che ha la sua collezione per corsa e la
+conserva.
+
+**Decisione:** `demo sharding` scrive in `lab.ordini` — il valore predefinito di `--collection`,
+non un nome scritto nel codice — e in una collezione `carico-<AAAAMMGG-hhmmss>` creata dalla stessa
+`collezione_di_carico()` delle altre scene. Annuncia entrambe con la formula condivisa
+`carico in lab.<nome>`, che è la riga da cui chi presenta — e la prova d'integrazione — ricava che
+cosa togliere dopo.
+
+La pulizia resta a `reset-demo` come vuole ADR-0088, e adesso ha un criterio che prima non le
+serviva: i documenti dell'applicazione dentro `lab.ordini` si riconoscono da
+`{_id: {$type: "objectId"}}`, e il seed no. La collezione del seed non si cancella, si sfoltisce.
+
+**Conseguenze:** dopo la scena `lab.ordini` ha qualche migliaio di documenti in più, ripartiti fra
+gli shard come tutti gli altri, e la riga `arrivati` dello schermo dice esattamente quanti ne sono
+arrivati su ciascuno **in questa corsa** — che è il numero della scena, mentre il totale per shard è
+il contesto. Ripetere la scena in sala è sicuro: nessun `_id` duplicato, nessuna `drop` implicita.
+Chi vuole lasciare `lab.ordini` intatta ha `--collection` e paga il prezzo di caricare una
+collezione che nessuno ha distribuito, cioè di non vedere niente.
+
+**Alternative scartate.**
+
+- *Distribuire al volo la collezione di carico.* Un comando `shardCollection` dentro una scena è un
+  atto sul catalogo del cluster nascosto in un comando che dice di generare carico, e lascerebbe
+  dietro di sé collezioni distribuite che `reset-demo` deve poi togliere dal `config` oltre che dai
+  dati. In più toglierebbe il metro: senza la collezione **non** distribuita non c'è confronto.
+- *Una collezione fissa distribuita una volta per tutte nel seed.* È `lab.ordini`. Farne una seconda
+  identica accanto significa aggiungere un file al `docker/03-sharded/init/` per non toccare una
+  collezione che si può toccare.
+- *Non scrivere affatto e leggere solo la distribuzione a riposo.* È ciò che `feature/03` sapeva già
+  fare, ed è il motivo per cui la sua pagina dichiarava scoperto «il comportamento sotto carico».
+
+**Fonti:** [ADR-0088](#adr-0088), [ADR-0064](#adr-0064), [M-050](../app/docs/Sources.md#m-050)
+
+---
+
+<a id="adr-0107"></a>
+## ADR-0107 — Il limite del Blocco 3 è un conteggio, e il blocco si gira solo sullo sharded cluster
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** la prima esecuzione vera della scena, quando il limite era ancora una durata come
+nelle altre tre, ha stampato in fondo:
+
+```
+carico      4288 senza chiave · 4415 con chiave · non è lo stesso carico
+```
+
+Sei secondi per corsa, gli stessi otto scrittori, pochi secondi di distanza — e due conteggi
+diversi ([M-052](../app/docs/Sources.md#m-052)). Il tre per cento non è molto, e non è il punto: il
+punto è che la scena si chiama «lo stesso carico due volte», e con due conteggi diversi la
+differenza fra le colonne non è più attribuibile alla sola chiave di shard. La riga di garanzia
+funzionava — ha detto il vero — e ciò che denunciava era un difetto di disegno, non un caso.
+
+Nessuna prova unitaria poteva vederlo: i doppi fanno esattamente il numero di scritture che il
+copione chiede. Il fatto vive nel punto in cui un limite di tempo incontra due throughput diversi,
+cioè in nessuno dei due.
+
+**Decisione:** `demo sharding` è l'unica delle quattro scene senza `--carico`. Il suo limite è
+`--scritture`, predefinito 5 000, e le due corse diventano uguali **per costruzione** — non per
+fortuna. La riga che dichiara i due conteggi resta a schermo comunque: una garanzia che nessuno
+controlla è una speranza.
+
+Cinquemila per corsa costano circa sette secondi sullo stack 03, cioè quattordici in tutto, contro i
+dieci delle altre scene. Lo sforo è deliberato ed è stato accettato dal PO: è il prezzo della
+seconda colonna, e senza la seconda colonna la prima non dimostra niente.
+
+Nella stessa decisione sta il rifiuto degli altri due stack. Su un mongod solo non ci sono shard fra
+cui ripartire niente, e `explain()` non nomina nessuno shard perché non c'è nessun router che
+riparta la domanda; su un replica set ci sono tre nodi con gli **stessi** dati, non tre shard con
+dati diversi. Le due righe per cui il Blocco 3 esiste resterebbero mute. Il comando si ferma prima
+di connettersi e dice **quale** delle due cose manca, con parole diverse per i due casi: un
+messaggio unico costringerebbe chi lo legge a capire da sé quale metà lo riguarda.
+
+**Conseguenze:** `--carico` non esiste in questa scena, ed è una difformità che va spiegata a voce
+una volta sola. `WorkloadRunner.esegui` rifiuta per disegno i due limiti insieme, quindi non c'è una
+rete di sicurezza temporale: con un `--scritture` molto grande e un cluster lento la scena dura
+finché dura. È accettabile perché il predefinito è misurato e chi lo alza sa che cosa sta chiedendo.
+
+**Alternative scartate.**
+
+- *Tenere la durata e dichiarare la differenza.* È ciò che il codice faceva, ed è ciò che ha
+  prodotto la riga «non è lo stesso carico» in mezzo alla scena che dimostra il contrario.
+- *Durata uguale e poi troncare al minore dei due conteggi.* Butterebbe via documenti già scritti
+  per far tornare un numero: una scena che aggiusta i propri dati dopo averli prodotti.
+- *Un conteggio con una durata massima di sicurezza.* Richiederebbe di riaprire il rifiuto dei due
+  limiti insieme in `WorkloadRunner`, che è una decisione presa altrove e per altre ragioni, in
+  cambio di una protezione da uno scenario che nel lab non si verifica.
+- *Girare il blocco anche sugli altri stack, mostrando le righe vuote.* «Qui non c'è niente da
+  vedere» è un'informazione, ma dieci secondi di carico per arrivarci sono dieci secondi spesi male
+  in un talk di sessanta minuti.
+
+**Fonti:** [M-052](../app/docs/Sources.md#m-052), [ADR-0098](#adr-0098), [ADR-0101](#adr-0101)
+
+---
+
+<a id="adr-0108"></a>
+## ADR-0108 — A client freddo si guarda prima di rispondere: un `ping` `NEAREST`, e solo la prima volta
+
+**Data:** 2026-09-04 · **Stato:** Accettata · **Ricorrenza di:** [ADR-0099](#adr-0099)
+
+**Contesto:** la prima esecuzione vera di `demo sharding` contro uno stack 03 sano ha stampato per
+la collezione distribuita `sbilancio —` e `chunk —`, e per la fotografia iniziale
+`distribuita=False, primario=None, conti=()` — su una `lab.ordini` che le righe subito sotto
+mostravano ripartita su due shard ([M-053](../app/docs/Sources.md#m-053)).
+
+`PymongoInspector._e_sharded()` decideva guardando la descrizione della topologia **come il client
+la conosce**. Un client appena costruito non conosce niente: PyMongo scopre i server alla **prima
+operazione**, non alla costruzione. Fino a lì ogni seme è `SCONOSCIUTO`, che nel dominio significa
+esattamente «assenza di un'osservazione» e non «osservato assente» — e concludere «non c'è nessun
+router» da lì è leggere il proprio non aver guardato.
+
+Nessuna prova d'integrazione lo vedeva, e la ragione è istruttiva: la fixture di sessione chiama
+`spazza(client)` prima di consegnarlo, quindi la scoperta era già avvenuta **per effetto
+collaterale** della pulizia. Ogni prova partiva da un client caldo; solo la sala partiva da uno
+freddo.
+
+È la seconda volta. [M-042](../app/docs/Sources.md#m-042) è lo stesso inciampo un task prima, in
+`demo failover`, e la sua nota diceva già che gli altri comandi non ci cascavano «per caso»:
+`stats` chiede `serverStatus`, che aspetta la selezione del server. Il caso ha smesso di reggere
+alla prima scena che legge la topologia **prima** di fare qualunque altra cosa.
+
+**Decisione:** `_scopri()` costringe il client a guardare — un `ping` su `admin` — e lo fa **solo se
+nessun ruolo è ancora noto**. Appena uno lo è, il monitoraggio in background tiene aggiornata la
+descrizione da sé, e la riga non costa più niente per il resto della corsa.
+
+Il `ping` porta `read_preference=ReadPreference.NEAREST`, e non è un dettaglio: per
+[A-017](../app/docs/Sources.md#a-017) un comando su `admin` va sul primario per impostazione
+predefinita e **non torna finché un primario non c'è**. Su un mongos non esiste; su un replica set
+in mezzo a un'elezione nemmeno. Con la preferenza predefinita questa riga avrebbe piantato `stats`
+proprio durante l'Atto II, cioè avrebbe scambiato un difetto di schermata con un blocco in scena.
+
+**Conseguenze:** `shard_distribution` costa un giro di rete in più su uno stack non sharded, dove
+prima non ne costava nessuno. È il prezzo di una risposta che distingue «ho guardato e non c'è» da
+«non ho guardato», e su tre stack accesi è un millisecondo. La prova che lo copre apre il **proprio**
+client apposta, invece di riusare la fixture: è l'unico modo di provare una condizione che la
+fixture cancella.
+
+**Alternative scartate.**
+
+- *Attendere il primario, come fa `attendi_il_primario` per il failover.* È la correzione di
+  [ADR-0099](#adr-0099), ed è giusta lì: quella scena il primario lo vuole davvero. Qui no — e su un
+  mongos aspetterebbe qualcosa che non esiste.
+- *Chiamare `_scopri()` nel costruttore dell'ispettore.* Farebbe un giro di rete a ogni costruzione,
+  anche quando nessuno chiede la distribuzione, e trasformerebbe un costruttore in un'operazione di
+  I/O che può fallire — proprio in un oggetto che si costruisce nella radice di composizione, dove
+  un'eccezione non ha ancora un rapporto in cui finire.
+- *Documentare che la prima fotografia può mentire.* Una nota che chiede a chi presenta di ignorare
+  una riga sbagliata sul proiettore.
+
+**Fonti:** [M-053](../app/docs/Sources.md#m-053), [M-042](../app/docs/Sources.md#m-042),
+[A-017](../app/docs/Sources.md#a-017), [ADR-0099](#adr-0099)

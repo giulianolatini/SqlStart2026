@@ -15,7 +15,6 @@ import pytest
 
 from mongolab.domain.eventi import (
     BackupProgressed,
-    ChunkMigrated,
     Evento,
     FaseIniziata,
     LatencySampled,
@@ -30,7 +29,9 @@ from mongolab.domain.modelli import (
     ContoShard,
     DescrizioneServer,
     DescrizioneTopologia,
+    Distribuzione,
     Documento,
+    Piano,
     Progress,
     RuoloServer,
     TipoTopologia,
@@ -41,6 +42,7 @@ from mongolab.domain.porte import (
     ClusterInspector,
     DocumentStore,
     EventSink,
+    QueryPlanner,
     Regia,
 )
 from tests.aiutanti import sottoclassi_di_evento
@@ -51,8 +53,14 @@ ISTANTE = datetime(2026, 9, 18, 9, 30, 0, tzinfo=UTC)
 # --- Gli eventi -----------------------------------------------------------------------
 
 
-def test_gli_eventi_del_design_sono_dieci_e_sono_quelli() -> None:
-    """Otto dal §6.3, il nono da ADR-0082, il decimo da ADR-0094.
+def test_gli_eventi_del_design_sono_nove_e_sono_quelli() -> None:
+    """Otto dal §6.3, il nono da ADR-0082, il decimo da ADR-0094, meno uno: ADR-0103.
+
+    `ChunkMigrated` è uscito al Task 15, e non perché fosse scomodo da emettere: in
+    1153 giri di balancer questo cluster non ha migrato un chunk nemmeno una volta
+    ([M-049](../../docs/Sources.md#m-049)). La sua stessa docstring aveva scritto la
+    condizione — «una voce in `Sources.md` e un ADR, non un campo morto» — e questa
+    prova è il posto in cui quella condizione si paga.
 
     Questa prova non elenca per pignoleria: elenca perché il costo di aggiungere un
     evento deve restare **visibile**. Un dominio che cresce in silenzio è un dominio in
@@ -60,7 +68,6 @@ def test_gli_eventi_del_design_sono_dieci_e_sono_quelli() -> None:
     """
     attesi = {
         "BackupProgressed",
-        "ChunkMigrated",
         "FaseIniziata",
         "LatencySampled",
         "PrimaryWaitAbandoned",
@@ -132,7 +139,7 @@ def test_un_evento_e_confrontabile_per_valore() -> None:
     assert primo == secondo
 
 
-def test_i_dieci_eventi_si_costruiscono() -> None:
+def test_i_nove_eventi_si_costruiscono() -> None:
     # Una prova noiosa che serve a una cosa sola: se una firma cambia, se ne accorge qui
     # e non dentro il primo caso d'uso che la usa.
     topologia = DescrizioneTopologia(tipo=TipoTopologia.SCONOSCIUTA, server=())
@@ -149,13 +156,6 @@ def test_i_dieci_eventi_si_costruiscono() -> None:
             successivo=RuoloServer.IRRAGGIUNGIBILE,
         ),
         BackupProgressed(istante=ISTANTE, avanzamento=Progress(fase="dump", completati=1)),
-        ChunkMigrated(
-            istante=ISTANTE,
-            collezione="lab.ordini",
-            da_shard="shard1",
-            a_shard="shard2",
-            chunk="[MinKey, 100)",
-        ),
         PrimaryWaitAbandoned(
             istante=ISTANTE,
             atteso_ms=30_000.0,
@@ -164,7 +164,7 @@ def test_i_dieci_eventi_si_costruiscono() -> None:
         ),
         FaseIniziata(istante=ISTANTE, fase="guasto", descrizione="spengo il primario"),
     ]
-    assert len(costruiti) == 10
+    assert len(costruiti) == 9
     assert all(evento.istante == ISTANTE for evento in costruiti)
 
 
@@ -195,6 +195,93 @@ def test_l_avanzamento_non_inventa_una_percentuale_che_non_ha() -> None:
     # sembrerebbe una barra ferma.
     assert Progress(fase="dump", completati=25).percentuale is None
     assert Progress(fase="dump", completati=0, totali=0).percentuale is None
+
+
+def test_una_distribuzione_distingue_i_tre_casi_che_la_tupla_confondeva() -> None:
+    """Il punto aperto che la vecchia firma dichiarava, chiuso qui (ADR-0104).
+
+    `shard_distribution()` restituiva una tupla, e la tupla vuota voleva dire due cose:
+    «non è uno sharded cluster» e «è uno sharded cluster, ma questa collezione non è
+    distribuita». La scena del Task 15 esiste per mostrare **esattamente la seconda**, e
+    una scena non può poggiare su un valore ambiguo.
+    """
+    fuori = Distribuzione(collezione="lab.ordini", distribuita=False, primario=None, conti=())
+    assert not fuori.in_un_cluster
+    assert not fuori.distribuita
+    assert fuori.documenti == 0
+
+    intera = Distribuzione(
+        collezione="lab.carico-20260918-093000",
+        distribuita=False,
+        primario="shard1rs",
+        conti=(ContoShard(shard="shard1rs", documenti=300, chunk=0),),
+    )
+    assert intera.in_un_cluster
+    assert not intera.distribuita
+    assert intera.documenti == 300
+    assert intera.chunk == 0
+
+    sparsa = Distribuzione(
+        collezione="lab.ordini",
+        distribuita=True,
+        primario="shard1rs",
+        conti=(
+            ContoShard(shard="shard1rs", documenti=9860, chunk=1),
+            ContoShard(shard="shard2rs", documenti=10140, chunk=1),
+        ),
+    )
+    assert sparsa.in_un_cluster
+    assert sparsa.distribuita
+    assert sparsa.documenti == 20000
+    assert sparsa.chunk == 2
+
+
+def test_la_quota_di_uno_shard_e_none_quando_non_c_e_niente_da_ripartire() -> None:
+    """Zero documenti su zero documenti non è «lo zero per cento», è una domanda vuota."""
+    vuota = Distribuzione(
+        collezione="lab.ordini",
+        distribuita=True,
+        primario="shard1rs",
+        conti=(ContoShard(shard="shard1rs", documenti=0, chunk=1),),
+    )
+    assert vuota.quota("shard1rs") is None
+    assert vuota.quota("shard2rs") is None
+
+    piena = Distribuzione(
+        collezione="lab.ordini",
+        distribuita=True,
+        primario="shard1rs",
+        conti=(
+            ContoShard(shard="shard1rs", documenti=1, chunk=1),
+            ContoShard(shard="shard2rs", documenti=3, chunk=1),
+        ),
+    )
+    assert piena.quota("shard1rs") == pytest.approx(25.0)
+    assert piena.quota("shard2rs") == pytest.approx(75.0)
+    # Uno shard che non compare non ha «zero documenti»: non ha risposto affatto.
+    assert piena.quota("shard3rs") is None
+
+
+def test_un_piano_e_mirato_quando_il_router_interroga_un_solo_shard() -> None:
+    """`SINGLE_SHARD` contro `SHARD_MERGE`, che è il Passo 3 del Task 15 in due parole."""
+    mirata = Piano(filtro={"_id": 42}, stadio="SINGLE_SHARD", shard=("shard2rs",))
+    assert mirata.mirata
+
+    ovunque = Piano(filtro={"citta": "Ancona"}, stadio="SHARD_MERGE", shard=("shard1rs", "shard2rs"))
+    assert not ovunque.mirata
+
+    # Il caso che la sala non si aspetta: stesso campo della chiave, ma per intervallo.
+    intervallo = Piano(
+        filtro={"_id": {"$gte": 100, "$lt": 200}},
+        stadio="SHARD_MERGE",
+        shard=("shard1rs", "shard2rs"),
+    )
+    assert not intervallo.mirata
+
+
+def test_un_piano_senza_shard_non_e_mirato() -> None:
+    """Nessuno shard non è «uno shard». Un `explain` fuori da un cluster non risponde qui."""
+    assert not Piano(filtro={}, stadio="COLLSCAN", shard=()).mirata
 
 
 def test_i_modelli_sono_congelati_come_gli_eventi() -> None:
@@ -240,6 +327,13 @@ class ArchivioDiProva:
 
     def aggregate(self, pipeline: Sequence[Documento]) -> tuple[Documento, ...]:
         return ()
+
+
+class PianificatoreDiProva:
+    """Il minimo che soddisfi `QueryPlanner`: un metodo, e nessun documento in casa."""
+
+    def explain(self, filtro: Documento) -> Piano:
+        return Piano(filtro=filtro, stadio="SINGLE_SHARD", shard=("shard1rs",))
 
 
 class RaccoglitoreDiProva:
@@ -290,6 +384,26 @@ def test_un_oggetto_qualunque_soddisfa_la_porta_senza_ereditarla() -> None:
     regia.ferma("mongo-1")
     regia.sospendi("mongo-2")
     assert annotata.ordini == [("ferma", "mongo-1"), ("sospendi", "mongo-2")]
+
+
+def test_il_pianificatore_e_una_porta_a_se_non_un_quinto_metodo_dell_archivio() -> None:
+    """`explain` sta su una porta sua, e la ragione è nei doppi (ADR-0105).
+
+    Metterlo su `DocumentStore` avrebbe obbligato **quattro** doppi a rispondere: uno che
+    esiste per rompersi, uno che esiste per essere lento, uno che esiste per non leggere.
+    Nessuno dei tre ha un router da interrogare, quindi tutti e tre avrebbero risposto
+    sollevando — cioè la porta avrebbe dichiarato una promessa che tre implementazioni su
+    cinque non mantengono. Una porta esiste per un chiamante, non per un oggetto.
+    """
+    pianificatore: QueryPlanner = PianificatoreDiProva()
+    piano = pianificatore.explain({"_id": 42})
+
+    assert piano.filtro == {"_id": 42}
+    assert piano.mirata
+
+    assert isinstance(PianificatoreDiProva(), QueryPlanner)
+    # E l'archivio non lo è: i suoi quattro metodi non ne fanno un pianificatore.
+    assert not isinstance(ArchivioDiProva(), QueryPlanner)
 
 
 def test_le_porte_si_riconoscono_anche_a_runtime() -> None:

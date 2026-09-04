@@ -17,13 +17,22 @@ Sono i fatti che `mongolab` sa raccontare. Stanno in `app/src/mongolab/domain/ev
 | `TopologyChanged` | `precedente`, `successiva` | la forma del cluster che cambia |
 | `ServerStateChanged` | `indirizzo`, `precedente`, `successivo` | il singolo membro che cade o risale |
 | `BackupProgressed` | `avanzamento` | il dump che procede |
-| `ChunkMigrated` | `collezione`, `da_shard`, `a_shard`, `chunk` | il balancer che sposta |
 | `PrimaryWaitAbandoned` | `atteso_ms`, `pazienza_ms`, `ultimo_primario` | il client che smette di aspettare |
+| `FaseIniziata` | `fase`, `descrizione` | lo scenario che annuncia il passo successivo |
 
-Otto vengono dal §6.3 del design. Il nono è arrivato dopo, al Task 6, e non per comodità: la
+Nove, ma non gli stessi nove di sempre, ed è la ragione per cui questo elenco esiste.
+**Sette** vengono dal §6.3 del design. Il **nono** è arrivato al Task 6, e non per comodità: la
 regola del §6.2 «dopo 30 s senza primario, smetti di ritentare» non aveva un evento che sapesse
 dirla senza mentire, e aggiungerne uno è costato un ADR ([ADR-0082](../../docs/Decision.md#adr-0082)).
-Come ci sia riuscita una guardia a imporlo sta in
+Il **decimo** è arrivato al Task 13: `FaseIniziata`, con cui uno scenario annuncia il passo
+successivo invece di stamparlo da sé ([ADR-0094](../../docs/Decision.md#adr-0094)).
+
+E l'ottavo del design se n'è andato al Task 15. `ChunkMigrated` — `collezione`, `da_shard`,
+`a_shard`, `chunk` — descriveva un fatto che questo laboratorio non produce: in 1 153 giri il
+balancer non ha migrato un chunk nemmeno una volta, perché la chiave hashed di `lab.ordini`
+sparpaglia i documenti **all'inserimento** e non lascia nessuno sbilancio da correggere
+([M-049](Sources.md#m-049), [ADR-0103](../../docs/Decision.md#adr-0103)). Dieci meno uno fa nove,
+ed è il numero che la guardia controlla. Come ci sia riuscita una guardia a imporlo sta in
 [07-topologia-failover-e-i-due-numeri.md](07-topologia-failover-e-i-due-numeri.md).
 
 ## Perché immutabili: la coda è una consegna

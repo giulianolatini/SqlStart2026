@@ -72,17 +72,19 @@ from mongolab.application.scenari import (
     Copione,
     CopioneBackup,
     CopioneRestore,
+    CopioneSharding,
     ModoGuasto,
     ScenarioBackup,
     ScenarioFailover,
     ScenarioRestore,
+    ScenarioSharding,
     senza_attesa,
     sorveglia,
 )
 from mongolab.application.topologia import INTERVALLO_PREDEFINITO_MS
 from mongolab.application.workload import WorkloadRunner
 from mongolab.domain.eventi import FaseIniziata
-from mongolab.domain.modelli import DescrizioneTopologia
+from mongolab.domain.modelli import DescrizioneTopologia, Documento
 from mongolab.domain.porte import Clock, EventSink, Regia
 from mongolab.infrastructure.bersagli import (
     ATTESA_SELEZIONE_MS,
@@ -122,6 +124,7 @@ from mongolab.presentation.rapporto import (
     rapporto,
     riassunto,
     ripristino,
+    spartizione,
 )
 from mongolab.presentation.rich_tui import RichTui
 
@@ -135,6 +138,9 @@ __all__ = [
     "OPZIONI_DUMP",
     "niente_da_fermare",
     "LETTORI_PREDEFINITI",
+    "MIRATO",
+    "SCRITTURE_SHARDING",
+    "SPARPAGLIATO",
     "SCRITTORI_PREDEFINITI",
     "Cablaggio",
     "Resa",
@@ -194,6 +200,39 @@ Ciò che manca nella copia sono i documenti scritti **durante** il dump, e quell
 nell'originale: restaurare lì sopra li lascerebbe dove sono, il conteggio combacerebbe, e
 la differenza che l'Atto III esiste per mostrare sparirebbe proprio perché il restore è
 riuscito.
+"""
+
+SCRITTURE_SHARDING: Final = 5000
+"""Quante scritture fa ciascuna delle due corse del Blocco 3.
+
+Un conteggio e non una durata, per la ragione scritta in `sharding`. Cinquemila perché
+sullo stack 03 sono circa sette secondi per corsa — misurati 4288 scritture in sei
+secondi ([M-052](../../../app/docs/Sources.md#m-052)) — cioè quattordici secondi in tutto,
+un po' più dei dieci che costano le altre scene. Lo sforo è deliberato: è il prezzo della
+seconda colonna, e senza la seconda colonna la prima non dimostra niente.
+"""
+
+MIRATO: Final[Documento] = {"_id": 4242}
+"""La domanda che il router sa indirizzare, e il numero non è a caso.
+
+La chiave dello stack 03 è `{_id: "hashed"}`: su una **uguaglianza** di `_id` il router
+calcola l'hash, sa in quale intervallo cade e interroga un solo shard. Su qualunque altro
+campo non può, e li interroga tutti — che è precisamente l'altra riga della schermata.
+
+`4242` sta dentro i ventimila del seed, quindi il documento esiste davvero: un piano su un
+filtro che non trova niente sarebbe identico, ma chi guarda non ha modo di saperlo e la
+domanda «e se non c'era?» si porta via la scena.
+"""
+
+SPARPAGLIATO: Final[Documento] = {"citta": "Ancona"}
+"""La domanda che nessun router sa indirizzare, e nemmeno questa è a caso.
+
+`citta` è un campo del seed dello stack 03 — dieci città, Ancona è la prima — quindi il
+filtro è uno che si scriverebbe davvero. E non è la chiave di shard né un suo prefisso:
+il router non ha modo di sapere dove stiano quei documenti, li chiede a tutti gli shard e
+poi ricuce. È lo scatter-gather del §6.3, mostrato invece che raccontato.
+
+Ancona perché il talk si tiene lì. Non cambia niente al piano, e in sala si nota.
 """
 
 OPZIONI_DUMP: Final = ("--readPreference=secondary", "--oplog")
@@ -557,9 +596,13 @@ def stats(target: Bersaglio_) -> None:
     bersaglio = bersaglio_di(target)
     cliente = connetti(bersaglio)
     try:
-        ispettore = PymongoInspector(cliente, DATABASE, COLLEZIONE)
+        ispettore = PymongoInspector(cliente, DATABASE)
         typer.echo(
-            rapporto(ispettore, titolo=f"{bersaglio.nome} (docker/{bersaglio.stack})")
+            rapporto(
+                ispettore,
+                collezione=COLLEZIONE,
+                titolo=f"{bersaglio.nome} (docker/{bersaglio.stack})",
+            )
         )
     finally:
         cliente.close()
@@ -724,7 +767,7 @@ def failover(
             attendi_il_primario(cliente)
         except SenzaPrimario as senza:
             raise niente_da_fermare(cablaggio.bersaglio) from senza
-        ispettore = PymongoInspector(cliente, DATABASE, COLLEZIONE)
+        ispettore = PymongoInspector(cliente, DATABASE)
         nodo = (
             node
             if node is not None
@@ -822,7 +865,7 @@ def backup_live(
             attendi_il_primario(cliente)
         except SenzaPrimario as senza:
             raise _serve_il_primario(cablaggio.bersaglio) from senza
-        ispettore = PymongoInspector(cliente, DATABASE, COLLEZIONE)
+        ispettore = PymongoInspector(cliente, DATABASE)
         if not ispettore.topology().ha_primario:
             raise _serve_il_primario(cablaggio.bersaglio)
         destinazione = collezione_di_carico(cablaggio.orologio.now())
@@ -935,6 +978,132 @@ def restore(
     finally:
         cliente.close()
     typer.echo(ripristino(esito))
+
+
+# --- Il Blocco 3: lo stesso carico due volte, e i chunk che si muovono ------------------
+
+
+@demo.command()
+def sharding(
+    target: Bersaglio_,
+    collection: Annotated[
+        str,
+        typer.Option("--collection", help="La collezione distribuita da caricare."),
+    ] = COLLEZIONE,
+    scritture: Annotated[
+        int,
+        typer.Option("--scritture", help="Quante scritture, per ciascuna delle due corse."),
+    ] = SCRITTURE_SHARDING,
+    step: Annotated[
+        bool,
+        typer.Option(
+            "--step", help="Pausa prima di ogni fase, si riparte con Invio: da palco."
+        ),
+    ] = False,
+    sink: Resa_ = Resa.RICH,
+) -> None:
+    """Lo stesso carico due volte, e la chiave di shard è l'unica differenza. È il Blocco 3.
+
+    **Due corse e non una.** Il primo carico va in una collezione nuova, che nessuno ha
+    distribuito: finisce tutto su un solo shard, ed è la riga che dà un metro al resto. Il
+    secondo va in `lab.ordini`, che è distribuita su `{_id: "hashed"}`, e si ripartisce.
+    Le due colonne accostate dicono che cosa fa la chiave di shard — e una sola colonna
+    non lo direbbe, perché mancherebbe il termine di paragone.
+
+    **Il limite è un conteggio e non una durata**, ed è l'unica scena in cui lo sia. Le
+    altre tre usano i secondi perché là il carico è lo sfondo; qui è la misura, e due
+    corse cronometrate uguali producono conteggi diversi — 4288 contro 4415 sullo stack 03
+    ([M-052](../../../app/docs/Sources.md#m-052)), cioè la scena chiamata «lo stesso carico
+    due volte» dichiarava di non esserlo. Con un conteggio sono uguali per costruzione, e
+    la sola differenza rimasta fra le colonne è la chiave di shard. Lo schermo lo verifica
+    lo stesso, perché una garanzia che nessuno controlla è una speranza.
+
+    **Niente si cancella alla fine.** Le due collezioni restano dove sono: il carico è la
+    prova, e una prova che si autodistrugge non è ispezionabile dopo. La pulizia è di
+    `tools/reset-demo.sh` ([ADR-0088](../../../docs/Decision.md#adr-0088)).
+    """
+    _niente_step_con_la_tui(step, sink)
+    cablaggio = cabla(target, sink)
+    _solo_da_uno_sharded_cluster(cablaggio.bersaglio)
+    cliente = connetti(cablaggio.bersaglio)
+    try:
+        intera = collezione_di_carico(cablaggio.orologio.now())
+        # «carico in lab.…» è la formula delle altre due scene, e non è una convenzione
+        # estetica: è la riga da cui chi presenta — e la prova d'integrazione — ricava il
+        # nome della collezione da togliere dopo. Riscriverla diversamente qui vorrebbe
+        # dire un residuo in più ogni volta che la scena muore a metà.
+        typer.echo(
+            f"scena dello sharding · carico in {DATABASE}.{intera} (non distribuita) "
+            f"e in {DATABASE}.{collection} (distribuita)"
+        )
+        archivio_intera = PymongoStore(cliente[DATABASE][intera])
+        archivio_sparsa = PymongoStore(cliente[DATABASE][collection])
+        # `--readers 0` per la ragione delle altre due scene: qui si contano i documenti
+        # **arrivati** su ciascuno shard, e delle letture non ne fanno arrivare nessuno.
+        scena = ScenarioSharding(
+            PymongoInspector(cliente, DATABASE),
+            # Il pianificatore è lo store della collezione distribuita, e non è un caso:
+            # `explain()` si chiede alla collezione di cui si vuole il piano, e le due
+            # domande del copione riguardano quella.
+            archivio_sparsa,
+            _corsa(archivio_intera, cablaggio),
+            _corsa(archivio_sparsa, cablaggio),
+            cablaggio.orologio,
+            cablaggio.sink,
+            copione=CopioneSharding(
+                intera=intera,
+                sparsa=collection,
+                mirato=MIRATO,
+                sparpagliato=SPARPAGLIATO,
+                scritture=scritture,
+            ),
+        )
+        attesa: Attesa = _invio if step else senza_attesa
+        esito = mentre_disegna(cablaggio.sink, lambda: scena.esegui(attesa=attesa))
+    finally:
+        cliente.close()
+    typer.echo(spartizione(esito))
+
+
+def _corsa(archivio: PymongoStore, cablaggio: Cablaggio) -> WorkloadRunner:
+    """Le due corse del Blocco 3 nascono uguali, e questa riga è la garanzia che lo siano.
+
+    Scritte due volte disteso sarebbero due righe che possono divergere con una svista, e
+    la svista renderebbe le due colonne non confrontabili senza che niente lo segnali.
+    """
+    return WorkloadRunner(
+        archivio,
+        cablaggio.orologio,
+        cablaggio.sink,
+        scrittori=SCRITTORI_PREDEFINITI,
+        lettori=0,
+    )
+
+
+def _solo_da_uno_sharded_cluster(bersaglio: Bersaglio) -> None:
+    """Il Blocco 3 si gira sullo stack 03, e gli altri due si rifiutano dicendo perché.
+
+    Come `_solo_da_un_replica_set`, il controllo è sulla **proprietà** e non sul nome: si
+    passa da un router — quindi la scoperta è spenta — e quel router non appartiene a
+    nessun replica set. È la firma che in `bersagli.py` ha soltanto lo stack sharded.
+    """
+    if not bersaglio.da_rete.diretto and bersaglio.da_rete.replica is None:
+        return
+    if bersaglio.da_rete.diretto:
+        raise typer.BadParameter(
+            f"«{bersaglio.nome}» è un mongod solo: non ha shard fra cui ripartire niente, "
+            "e `explain()` da lì non nomina nessuno shard perché non c'è nessun router "
+            "che riparta la domanda. La scena dei chunk è quella dello sharded cluster: "
+            "--target sharded.",
+            param_hint="--target",
+        )
+    raise typer.BadParameter(
+        f"«{bersaglio.nome}» è un replica set: tre nodi con gli **stessi** dati, non tre "
+        "shard con dati diversi. Non c'è nessun router a cui chiedere un piano, e le due "
+        "righe per cui il Blocco 3 esiste — la query mirata e quella su tutti — "
+        "resterebbero mute. La scena dei chunk vuole lo sharded cluster: --target sharded.",
+        param_hint="--target",
+    )
 
 
 def _niente_step_con_la_tui(step: bool, sink: Resa) -> None:

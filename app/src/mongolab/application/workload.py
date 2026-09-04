@@ -108,7 +108,16 @@ duplicato o perso.
 
 
 def documento_progressivo(indice: int) -> Documento:
-    """Il documento più piccolo che serva a qualcosa: solo il suo numero d'ordine."""
+    """Il documento più piccolo che serva a qualcosa: solo il suo numero d'ordine.
+
+    **Non c'è `_id`, e l'assenza è la ragione per cui il Task 15 sta in piedi.** Senza
+    quel campo lo genera il server, che produce un `ObjectId`; con esso lo genererebbe
+    `DataGenerator`, che numera da zero e andrebbe a sbattere contro gli interi del seed
+    al primo documento ([ADR-0088](../../../../docs/Decision.md#adr-0088)). È per questo
+    che le scene di `demo` possono caricare `lab.ordini` — la collezione del seed, l'unica
+    distribuita — senza un solo `E11000`, e che i loro documenti si riconoscono poi da
+    `{_id: {$type: "objectId"}}` ([ADR-0106](../../../../docs/Decision.md#adr-0106)).
+    """
     return {"indice": indice}
 
 

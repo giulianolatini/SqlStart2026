@@ -61,7 +61,12 @@ import pytest
 from pymongo import MongoClient
 
 from mongolab.cli import comandi_di
-from mongolab.infrastructure.bersagli import BERSAGLI, DATABASE, radice
+from mongolab.infrastructure.bersagli import (
+    BERSAGLI,
+    COLLEZIONE,
+    DATABASE,
+    radice,
+)
 from tests.integration.ambiente import (
     IMMAGINE,
     PREFISSO_PROVE,
@@ -425,3 +430,94 @@ def test_l_atto_iii_esce_dallo_stack_vero(
         f"grande dell'originale vuol dire che il restore ha scritto due volte.\n{ripristino}"
     )
     assert differenza == origine - copia
+
+
+# --- Il Blocco 3: la chiave di shard, misurata sullo stack 03 ---------------------------
+#
+# Gira dall'host come l'Atto III, ma per la ragione opposta: non perché serva un socket
+# Docker — qui non serve — ma perché non serve niente di più che parlare con il router, e
+# la disposizione più semplice è quella che chi presenta userà davvero.
+
+SCRITTURE_BLOCCO_3: Final = "800"
+"""Un ottavo del predefinito: la prova verifica la forma della schermata, non il ritmo.
+
+Ottocento bastano perché entrambi gli shard ricevano qualcosa — con una chiave hashed la
+probabilità che quattrocento consecutivi cadano tutti da una parte non è una probabilità
+di cui preoccuparsi — e costano un paio di secondi per corsa invece di sette.
+"""
+
+NON_SHARDED = re.compile(
+    r"^non sharded\s+(?P<collezione>carico-\S+) non è distribuita\s+·\s+"
+    r"(?P<documenti>\d+) documenti su (?P<shard>\S+)\s*$"
+)
+ARRIVATI = re.compile(r"^arrivati\s+(?P<elenco>.+?)\s*$")
+QUANTI_ARRIVATI = re.compile(r"(?P<shard>\S+) (?P<quanti>\d+) \(\d+%\)")
+MIRATA = re.compile(r"^mirata\s+.*?·\s+(?P<stadio>\S+)\s+·\s+(?P<shard>\d+) shard\s*$")
+SU_TUTTI = re.compile(r"^su tutti\s+.*?·\s+(?P<stadio>\S+)\s+·\s+(?P<shard>\d+) shard\s*$")
+CARICO_UGUALE = re.compile(r"^carico\s+(?P<scritture>\d+) scritture su ognuna\s*$")
+
+
+def test_il_blocco_3_esce_dallo_stack_vero(
+    stack03: MongoClient[dict[str, Any]],
+) -> None:
+    """Lo stesso carico due volte, e la sola differenza è la chiave di shard.
+
+    **Le asserzioni sono sui versi, non sui numeri.** Quanti documenti finiscano su
+    ciascuno shard lo decide una funzione hash, e pretendere una cifra esatta renderebbe
+    la prova capricciosa su un'altra macchina. Quello che il disegno garantisce è che la
+    collezione non distribuita finisca **tutta** su un solo shard e che quella distribuita
+    ne veda due, che è precisamente la tesi del Blocco 3.
+
+    **La riga del carico si verifica**, e non è pedanteria: se le due corse divergessero,
+    la differenza fra le colonne non sarebbe più la chiave di shard e la scena mentirebbe
+    con l'aria di dimostrare. È l'invariante che ha fatto sostituire `--carico` con
+    `--scritture` ([M-052](../../docs/Sources.md#m-052)), e qui c'è la riga che la tiene.
+
+    **`chunk 0 in più` non è un'asserzione di questa prova.** Che il bilanciatore non
+    migri è un fatto del cluster e non del codice — ADR-0069 e
+    [M-049](../../docs/Sources.md#m-049) — e asserirlo qui vorrebbe dire una prova rossa
+    il giorno in cui MongoDB cambia politica, senza che niente si sia rotto.
+    """
+    collezione: str | None = None
+    try:
+        codice, uscita = _dall_host(
+            "demo", "sharding",
+            "--target", "sharded",
+            "--sink", "plain",
+            "--scritture", SCRITTURE_BLOCCO_3,
+        )
+        annuncio = DESTINAZIONE.search(uscita)
+        collezione = annuncio.group("collezione") if annuncio is not None else None
+        assert codice == 0, f"`demo sharding` è uscito con {codice}.\n{uscita}"
+        assert collezione is not None, f"la scena non ha annunciato dove scrive.\n{uscita}"
+
+        # La colonna che dà il metro: nessuno l'ha distribuita, e infatti sta tutta di là.
+        sola = _riga(uscita, NON_SHARDED)
+        assert sola.group("collezione") == collezione
+        assert int(sola.group("documenti")) == int(SCRITTURE_BLOCCO_3)
+
+        # La colonna che dimostra: gli stessi documenti, su due shard.
+        arrivi = QUANTI_ARRIVATI.findall(_riga(uscita, ARRIVATI).group("elenco"))
+        assert len(arrivi) == 2, f"il cluster del repository ha due shard.\n{uscita}"
+        assert sum(int(quanti) for _, quanti in arrivi) == int(SCRITTURE_BLOCCO_3)
+        assert all(int(quanti) > 0 for _, quanti in arrivi), (
+            f"uno shard non ha ricevuto niente: con una chiave hashed non è un esito "
+            f"plausibile, è un difetto.\n{uscita}"
+        )
+
+        # I due piani, che sono l'altra metà del blocco.
+        assert _riga(uscita, MIRATA).group("stadio") == "SINGLE_SHARD"
+        assert _riga(uscita, MIRATA).group("shard") == "1"
+        assert _riga(uscita, SU_TUTTI).group("stadio") == "SHARD_MERGE"
+        assert _riga(uscita, SU_TUTTI).group("shard") == "2"
+
+        # E la riga che rende lecito accostare le due colonne.
+        assert _riga(uscita, CARICO_UGUALE).group("scritture") == SCRITTURE_BLOCCO_3
+    finally:
+        if collezione is not None:
+            stack03[DATABASE].drop_collection(collezione)
+        # Ciò che la scena ha scritto in `lab.ordini` resta: è la collezione del seed, e
+        # toglierla svuoterebbe lo stack per le prove che vengono dopo. I documenti in più
+        # si riconoscono dall'`_id`, che è un ObjectId e non un intero, ed è
+        # `tools/reset-demo.sh` a portarli via.
+        stack03[DATABASE][COLLEZIONE].delete_many({"_id": {"$type": "objectId"}})

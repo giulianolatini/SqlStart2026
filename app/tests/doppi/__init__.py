@@ -1,4 +1,4 @@
-"""I doppi delle sei porte, scritti prima degli adattatori veri.
+"""I doppi delle sette porte, scritti prima degli adattatori veri.
 
 **Prima, e non dopo, per una ragione sola.** I Task 5 e 6 fanno TDD contro questi
 oggetti: sono ciò che sta dall'altra parte della porta mentre `WorkloadRunner` e
@@ -33,6 +33,7 @@ from tests.doppi.archivio import (
 from tests.doppi.backup import FakeBackup
 from tests.doppi.ispettore import FakeInspector
 from tests.doppi.orologio import FakeClock, OrologioCheScorre
+from tests.doppi.pianificatore import FakePlanner
 from tests.doppi.raccoglitore import RecordingSink
 from tests.doppi.regia import NodoSconosciuto, RegiaCheRifiuta, RegiaFinta
 
@@ -43,6 +44,7 @@ __all__ = [
     "FakeBackup",
     "FakeClock",
     "FakeInspector",
+    "FakePlanner",
     "InMemoryStore",
     "LetturaRifiutata",
     "NodoSconosciuto",

@@ -1,6 +1,13 @@
-"""`PymongoStore`: la porta `DocumentStore` attaccata a un MongoDB vero.
+"""`PymongoStore`: le porte `DocumentStore` e `QueryPlanner` attaccate a un MongoDB vero.
 
-Quattro metodi, e nessuno di essi è una riga sola per caso. Ognuno traduce una promessa
+**Due porte, un adattatore.** `explain` è arrivato al Task 15 e non è entrato in
+`DocumentStore`: sta su una porta sua, `QueryPlanner`, per la ragione scritta là
+([ADR-0105](../../../../docs/Decision.md#adr-0105)). Questo oggetto le soddisfa tutte e
+due, e non è un'eccezione da giustificare — è ciò che si ottiene quando le porte sono
+`Protocol` e nessuno le eredita: le implementazioni non si spartiscono le interfacce, sono
+i **chiamanti** a scegliere quale forma vedere.
+
+Quattro metodi più uno, e nessuno di essi è una riga sola per caso. Ognuno traduce una promessa
 del dominio in una chiamata al driver, e in tre casi su quattro la traduzione ovvia
 sarebbe **diversa** da quella giusta: le ragioni stanno nelle docstring dei metodi, e
 ognuna ha una prova in `tests/integration/test_contratto_archivio.py` che la verifica
@@ -29,7 +36,7 @@ from typing import Any, Sequence
 from pymongo import ASCENDING
 from pymongo.collection import Collection
 
-from mongolab.domain.modelli import Documento
+from mongolab.domain.modelli import Documento, Piano
 
 __all__ = ["PymongoStore"]
 
@@ -161,3 +168,43 @@ class PymongoStore:
         dichiara.
         """
         return tuple(self.collezione.aggregate([dict(stadio) for stadio in pipeline]))
+
+    def explain(self, filtro: Documento) -> Piano:
+        """Che cosa farebbe il router con questo filtro, senza farlo.
+
+        **`find(...).explain()` e non `command("explain", ...)`.** Il driver costruisce la
+        stessa cosa e il verbo resta quello che chi guarda scriverà nella shell, che è metà
+        del valore didattico di questa riga.
+
+        **Lo stadio esce verbatim.** `SINGLE_SHARD` e `SHARD_MERGE` sono le due parole che
+        il Blocco 3 contrappone, e stanno in `queryPlanner.winningPlan.stage`. Misurato su
+        7.0.40: lì e non in un `queryPlan` annidato, sia dal mongos sia da un mongod, dove
+        le stesse tre query danno `IDHACK`, `COLLSCAN` e `FETCH`
+        ([M-051](../../../../app/docs/Sources.md#m-051)). Tradurre le parole in un booleano
+        qui vorrebbe dire decidere al posto di chi guarda quali siano i casi che contano.
+
+        **Gli shard escono ordinati, e serve.** L'ordine che il server dà non è stabile: lo
+        stesso mongos, alle stesse due query, ha risposto una volta `['shard2rs',
+        'shard1rs']` e una volta l'inverso (M-051). La scena accosta due piani, e due righe
+        che si scambiano di posto sembrano un cambiamento che non c'è stato.
+
+        **Fuori da un cluster la tupla è vuota**, perché `winningPlan` non ha `shards`. Non
+        è un caso da nascondere: `Piano.mirata` risponde di no, ed è la risposta giusta —
+        «una sola» è un conto, «nessuna» è un'altra cosa.
+
+        **Su un namespace il cui database non esiste, dal mongos questo metodo solleva**
+        `NamespaceNotFound`, e non c'è un ripiego: il router non ha nessuno a cui girare la
+        domanda, e un `Piano` inventato per non sollevare direbbe una cosa falsa su come
+        gira una query che nessuno può girare. Misurato, non previsto — è stato il primo
+        giro verde delle prove di integrazione a dirlo, e ora c'è una prova che lo tiene
+        fermo.
+        """
+        piano = self.collezione.find(dict(filtro)).explain()
+        pianificatore = piano.get("queryPlanner", {})
+        vincitore = pianificatore.get("winningPlan", {})
+        shard = tuple(
+            sorted(str(parte["shardName"]) for parte in vincitore.get("shards", []))
+        )
+        return Piano(
+            filtro=dict(filtro), stadio=str(vincitore.get("stage", "")), shard=shard
+        )

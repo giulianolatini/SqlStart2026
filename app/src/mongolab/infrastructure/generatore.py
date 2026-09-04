@@ -29,8 +29,27 @@ e senza che nulla fallisse.
 Qui il documento di indice `n` è una funzione pura di `(seme, n)`. Non c'è stato che
 avanzi, quindi non c'è ordine che conti e non c'è niente da bloccare fra thread. Il prezzo
 è che il dataset **non coincide** con quello del seed: stessa forma, stessi valori
-possibili, contenuti diversi. È dichiarato, e non è un problema — le due popolazioni non
-si incontrano mai nella stessa collezione, perché il carico scrive nella propria.
+possibili, contenuti diversi.
+
+## Le due popolazioni si incontrano, e non si scontrano
+
+Fino al Task 14 qui c'era scritto che «le due popolazioni non si incontrano mai nella stessa
+collezione, perché il carico scrive nella propria». Dal Task 15 non è più vero: la scena
+dello sharding carica **apposta** `lab.ordini`, che è la collezione del seed, perché è
+l'unica distribuita e senza quella non c'è niente da mostrare
+([ADR-0106](../../../../docs/Decision.md#adr-0106)).
+
+Quello che regge è un'invariante più stretta, e riguarda solo l'`_id`. **`documento` numera
+gli `_id` da zero**, ed è ciò che rende il dataset una funzione pura di `(seme, indice)`:
+quel metodo lo chiama solo `mongolab workload`, che ha la propria collezione per corsa
+([ADR-0088](../../../../docs/Decision.md#adr-0088)). Le scene di `demo` scrivono invece con
+`documento_progressivo`, che l'`_id` **non lo tocca** e lascia che sia il server a generare
+un `ObjectId`. Un intero e un `ObjectId` non collidono mai, e infatti in `lab.ordini` sullo
+stack 03 le due popolazioni convivono senza un solo `E11000`.
+
+Il che dà anche il modo di distinguerle dopo: `{_id: {$type: "objectId"}}` seleziona ciò che
+ha scritto l'applicazione, e `tools/reset-demo.sh` lo conta prima che il seed ricostruisca
+la collezione.
 
 ## Perché xorshift e non `random`
 

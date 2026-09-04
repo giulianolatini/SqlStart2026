@@ -2369,3 +2369,174 @@ il puntatore e il motivo per cui riguardano `mongolab`.
   fase di `recupero` di cinque secondi; a freddo, subito dopo il rientro del nodo, il tempo è
   presumibilmente più lungo. La prova concede sessanta secondi e non quattro, perché un'attesa
   tarata sulla misura migliore è un'attesa che fallisce sulla macchina di qualcun altro.
+
+<a id="m-049"></a>
+### M-049 — Il balancer del 7.0 in questo lab fonde e non migra: 1 153 giri, 2 fusioni, zero migrazioni
+
+- **Data:** 2026-09-04
+- **Comando:** contro `docker/03-sharded` acceso, dal client di `mongolab`:
+  ```python
+  admin.command("balancerStatus")
+  # e, in config.changelog, il conteggio per campo `what`
+  ```
+- **Output:**
+  ```
+  balancerStatus: { mode: 'full', inBalancerRound: false, numBalancerRounds: 1153, term: 2 }
+  config.changelog per `what`:
+    addShard 2 · setClusterParameter.start 1 · setClusterParameter.end 1
+    shardCollection.start 33 · shardCollection.end 33
+    dropDatabase.start 50 · dropDatabase 50
+    merge 2 · dropCollection.start 2 · dropCollection 2
+  ```
+- **Che cosa dimostra:** che il balancer **è acceso e gira** — mille centocinquantatré giri, e
+  `mode: full` — e che in tutta la vita di questo cluster non ha spostato un chunk nemmeno una
+  volta: nel registro dei cambiamenti non c'è una sola voce `moveChunk`, `migrate` o
+  `moveRange`. Le due voci `merge` sono le stesse che [ADR-0069](../../docs/Decision.md#adr-0069)
+  aveva già datate al secondo, ed è l'AutoMerger. Il balancer di una 7.0 fa due mestieri, e qui
+  ne esercita esattamente uno.
+- **Perché è stata fatta:** perché il Task 15 doveva emettere `ChunkMigrated`, e prima di
+  scrivere l'emittente valeva la pena chiedersi se ci fosse mai qualcosa da emettere. Non c'è: un
+  evento che descrive un fatto che questo laboratorio non produce sarebbe un campo che sul
+  proiettore resta vuoto per sempre, e la scelta è stata toglierlo
+  ([ADR-0103](../../docs/Decision.md#adr-0103)) invece di lasciarlo lì a somigliare a un difetto.
+- **Riserve:** il conteggio dei giri cresce da sé finché il cluster è acceso, quindi «1 153» è la
+  fotografia di questo istante e non un valore da mettere su una slide. Il numero che conta è
+  l'altro, ed è zero. Il changelog del config server ha una finestra di ritenzione: se questo
+  cluster girasse per settimane, una migrazione vecchia potrebbe esserne uscita — qui non è il
+  caso, perché le voci `addShard` del giorno dell'inizializzazione ci sono ancora.
+
+<a id="m-050"></a>
+### M-050 — Le tre fonti della distribuzione per shard rispondono a domande diverse, e nessuna da sola basta
+
+- **Data:** 2026-09-04
+- **Comando:** su un database usa-e-getta dello stack 03, tre casi in fila.
+- **Output:**
+  ```
+  ### 1. collezione DISTRIBUITA ma VUOTA
+    $shardedDataDistribution: {"ns": "…​.vuota", "shards": [
+      {"shardName": "shard2rs", "numOrphanedDocs": 0, "numOwnedDocuments": 0, …},
+      {"shardName": "shard1rs", "numOrphanedDocs": 0, "numOwnedDocuments": 0, …}]}
+
+  ### 2. collezione NON distribuita, con 50 documenti
+    $shardedDataDistribution: []
+    config.collections   : None
+    config.databases     : {'_id': '…', 'primary': 'shard2rs', 'partitioned': False, …}
+    $collStats           : [('shard2rs', 50)]
+  ```
+- **Che cosa dimostra:** tre cose che insieme decidono la forma di `Distribuzione`.
+  **(a)** `$shardedDataDistribution` distingue «distribuita e vuota» da «non distribuita»: nel
+  primo caso restituisce una riga con tutti gli shard a zero, nel secondo **nessuna riga**. È
+  quindi una risposta sul catalogo e non sui dati, ed è la sola che sappia dirlo.
+  **(b)** Per una collezione non distribuita `config.collections` non ha proprio la voce — è
+  `None`, non una riga con un campo assente — quindi non è di lì che si ricava lo shard che
+  tiene i documenti.
+  **(c)** `config.databases` lo dice: `primary: 'shard2rs'`. E `$collStats` conferma che è
+  proprio quello lo shard che ha i cinquanta documenti. Le due fonti concordano, e questo
+  autorizza `shard_distribution` a fidarsi della prima, che costa una lettura sola.
+- **Perché è stata fatta:** perché fino al Task 14 la risposta per la collezione non distribuita
+  era una tupla vuota — **la stessa** che dà un replica set — e lo schermo del Blocco 3 negava un
+  cluster che era acceso. Distinguere i tre casi richiede di sapere quale fonte risponde a quale
+  domanda, e le fonti sono state interrogate invece che dedotte
+  ([ADR-0104](../../docs/Decision.md#adr-0104)).
+- **Riserve:** `$shardedDataDistribution` esiste dalla 6.0.3, e questo lab è fissato alla 7.0.40
+  ([ADR-0058](../../docs/Decision.md#adr-0058)): su un cluster più vecchio il metodo non
+  risponderebbe. `numOwnedDocuments` esclude gli orfani, che dopo uno spegnimento sporco possono
+  esserci: sono documenti presenti sul disco di uno shard che non li possiede più, e questa misura
+  li lascia fuori — è la scelta giusta per la scena, ed è una scelta. `config.databases` chiede il
+  permesso di leggere `config`: senza, `primario` resta `None` e la riga a schermo perde il nome
+  dello shard senza perdere il resto.
+
+<a id="m-051"></a>
+### M-051 — `explain()` dal mongos: lo stadio sta in `winningPlan.stage`, gli shard ci sono solo lì, e il loro ordine non è stabile
+
+- **Data:** 2026-09-04
+- **Comando:** lo stesso `find(...).explain()` sui tre stack, letto in `queryPlanner.winningPlan`.
+- **Output:**
+  ```
+  mongos, {_id: 42}      stage='SINGLE_SHARD'  shards=['shard2rs']              chiavi=['shards', 'stage']
+  mongos, {indice: 42}   stage='SHARD_MERGE'   shards=['shard2rs', 'shard1rs']  chiavi=['shards', 'stage']
+  replica set, {_id: 3}  stage='IDHACK'                                         chiavi=['stage']
+  standalone,  {_id: 3}  stage='IDHACK'                                         chiavi=['stage']
+  ```
+- **Che cosa dimostra:** **(a)** lo stadio si legge sempre in `winningPlan.stage`, su tutti e tre
+  gli stack, senza dover scendere in un `queryPlan` annidato. **(b)** La chiave `shards` compare
+  **solo** attraverso un router: fuori da un cluster il piano non nomina nessuno shard, e la
+  tupla vuota che l'adattatore restituisce lì è un fatto e non un ripiego. **(c)** L'ordine con
+  cui il server elenca gli shard **non è quello del nome** — `shard2rs` viene prima di `shard1rs`
+  — quindi due schermate a distanza di minuti potrebbero elencarli in ordine diverso senza che sia
+  cambiato niente. È per questo che `PymongoStore.explain` li ordina prima di consegnarli.
+- **Perché è stata fatta:** perché la porta `QueryPlanner`
+  ([ADR-0105](../../docs/Decision.md#adr-0105)) restituisce un `Piano` con tre campi, e ciascuno
+  dei tre andava preso da un posto che si sapesse indicare. Dedurre la forma di `explain()` dalla
+  documentazione avrebbe prodotto un adattatore che funziona finché il piano è semplice.
+- **Riserve:** `IDHACK` compare perché il filtro è su `_id`; con un altro filtro sarebbe
+  `COLLSCAN` o `IXSCAN`. Lo stadio si consegna **verbatim** proprio per questo: tradurlo vorrebbe
+  dire un dizionario da tenere aggiornato al posto del server. Su un `find` con `sort` o `limit`
+  il piano vincente può avere altri stadi sopra, e `winningPlan.stage` allora nomina il più
+  esterno — che per la scena del Blocco 3 è ciò che si vuole, ma non è vero in generale.
+
+<a id="m-052"></a>
+### M-052 — A durata uguale le due corse del Blocco 3 non fanno lo stesso carico: 4 288 contro 4 415
+
+- **Data:** 2026-09-04
+- **Comando:** la prima esecuzione vera della scena, quando il limite era ancora una durata:
+  ```
+  uv run --directory app mongolab demo sharding --target sharded --carico 6 --sink plain
+  ```
+- **Output:** l'ultima riga della schermata:
+  ```
+  carico      4288 senza chiave · 4415 con chiave · non è lo stesso carico
+  ```
+- **Che cosa dimostra:** che due corse cronometrate uguali, con gli stessi otto scrittori e a
+  pochi secondi di distanza, producono conteggi diversi — qui il tre per cento — perché il
+  throughput di una collezione distribuita su due shard e quello di una collezione che sta tutta
+  su un nodo non sono lo stesso numero. La differenza è piccola, e non è il punto: il punto è che
+  **c'è**, e che la scena si chiama «lo stesso carico due volte». Con due conteggi diversi la
+  differenza fra le colonne non è più attribuibile alla sola chiave di shard.
+- **Perché è stata fatta:** non è stata fatta, è **capitata** alla prima corsa contro lo stack
+  vero. Le prove unitarie non la vedevano perché i doppi fanno esattamente il numero di scritture
+  che il copione chiede. La conseguenza è che `demo sharding` è l'unica delle quattro scene senza
+  `--carico`: il suo limite è `--scritture`, che rende le due corse uguali per costruzione. La
+  riga che dichiara i due conteggi resta a schermo comunque — una garanzia che nessuno controlla
+  è una speranza.
+- **Riserve:** il verso della differenza non è stabile e non va raccontato: in questa esecuzione
+  la collezione distribuita ha ricevuto **più** scritture, ma la finestra è di sei secondi e su
+  sei secondi il rumore vale quanto l'effetto. Che lo sharding aumenti il throughput di scrittura
+  è una tesi diversa da quella del Blocco 3, e questa misura non la sostiene.
+
+<a id="m-053"></a>
+### M-053 — A client freddo la topologia è tutta `SCONOSCIUTO`, e la prima fotografia negava un cluster acceso
+
+- **Data:** 2026-09-04
+- **Comando:** la prima esecuzione vera della scena, contro lo stack 03 sano e distribuito:
+  ```
+  uv run --directory app mongolab demo sharding --target sharded --sink null
+  ```
+- **Output:**
+  ```
+  non sharded carico-20260904-140017 non è distribuita · 5000 documenti su shard1rs
+  sharded     shard1rs          14540 documenti (49%) · 1 chunk
+              shard2rs          14875 documenti (51%) · 1 chunk
+  bilancio    sbilancio — · chunk —
+  ```
+  Le righe `arrivati` e i due numeri del bilancio mancavano, perché la fotografia di **prima**
+  diceva `distribuita=False, primario=None, conti=()` su una `lab.ordini` distribuita su due shard.
+- **Che cosa dimostra:** che `_e_sharded()` leggeva la descrizione della topologia **come il
+  client la conosce**, e che un client appena costruito non conosce ancora niente: PyMongo scopre
+  i server alla prima operazione. Ogni seme è allora `SCONOSCIUTO`, che nel dominio significa
+  esattamente «assenza di un'osservazione» — e concludere «non c'è nessun router» da lì è leggere
+  il proprio non aver guardato. La correzione è un `ping` con preferenza `NEAREST`, e solo da
+  freddo: appena un ruolo è noto il monitoraggio in background tiene aggiornata la descrizione.
+- **Perché è stata fatta:** è **capitata**, ed è la seconda volta — [M-042](#m-042) è lo stesso
+  inciampo un Task prima, in `demo failover`. Quella volta la nota diceva che gli altri comandi
+  non ci cascavano «per caso»: `stats` chiede `serverStatus`, che aspetta la selezione. Il caso
+  ha smesso di reggere alla prima scena che legge la topologia **prima** di fare qualunque altra
+  cosa. Nessuna prova d'integrazione la vedeva, perché la fixture di sessione consegna un client
+  già caldo: la scoperta avveniva per effetto collaterale di `spazza(client)`. La prova nuova
+  apre il proprio client apposta.
+- **Riserve:** `NEAREST` e non il primario, per la ragione di [A-017](#a-017): un comando su
+  `admin` va sul primario per impostazione predefinita e **non torna finché un primario non c'è**
+  — che su un mongos non esiste, e su un replica set in mezzo a un'elezione nemmeno. Con la
+  preferenza sbagliata questa riga avrebbe piantato `stats` proprio durante l'Atto II. Il `ping`
+  costa un giro di rete su un metodo che altrimenti, su uno stack non sharded, non ne faceva
+  nessuno: è il prezzo di una risposta che distingue «ho guardato e non c'è» da «non ho guardato».

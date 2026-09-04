@@ -1,11 +1,13 @@
-"""I dieci eventi del §6.3. Immutabili, e con l'istante come campo esplicito.
+"""I nove eventi del §6.3. Immutabili, e con l'istante come campo esplicito.
 
 Il design ne elencava **otto**. Il nono, `PrimaryWaitAbandoned`, è arrivato al Task 6 di
 `feature/04` con ADR-0082: la regola «dopo tanto senza primario, smetti di ritentare»
 esisteva come frase dal §6.2, e nessuno degli otto sapeva raccontarne l'esito senza
 mentire. Il decimo, `FaseIniziata`, è arrivato al Task 13 con ADR-0094, ed è di specie
-diversa: non racconta un fatto del cluster ma un fatto **dello scenario**. Il §6.3 non si
-riscrive: gli ADR lo emendano, e la guardia in `test_dominio.py` conta dieci.
+diversa: non racconta un fatto del cluster ma un fatto **dello scenario**. Uno è poi
+**uscito**: `ChunkMigrated`, al Task 15 con ADR-0103, perché in questo laboratorio nessuno
+può emetterlo — 1 153 giri di balancer e zero migrazioni nel `changelog` del cluster. Il
+§6.3 non si riscrive: gli ADR lo emendano, e la guardia in `test_dominio.py` conta nove.
 
 **Immutabili non per eleganza.** Un evento nasce dentro un callback di pymongo, che gira
 sul thread del driver, e viene letto dal ciclo di disegno, che gira sul thread
@@ -35,7 +37,6 @@ from mongolab.domain.modelli import (
 
 __all__ = [
     "BackupProgressed",
-    "ChunkMigrated",
     "Evento",
     "FaseIniziata",
     "LatencySampled",
@@ -140,20 +141,16 @@ class BackupProgressed(Evento):
     avanzamento: Progress
 
 
-@dataclass(frozen=True, slots=True)
-class ChunkMigrated(Evento):
-    """Il balancer ha spostato un chunk da uno shard a un altro.
-
-    È l'unico evento degli otto che al Task 15 potrebbe risultare **non osservabile dal
-    client**: un client parla con `mongos`, e la migrazione è una faccenda fra shard e
-    config server. Se si scoprisse che non lo è, la conseguenza è una voce in
-    `Sources.md` e un ADR — non un campo morto lasciato qui per non toccare il design.
-    """
-
-    collezione: str
-    da_shard: str
-    a_shard: str
-    chunk: str
+# `ChunkMigrated` stava qui, ed è uscito al Task 15
+# ([ADR-0103](../../../../docs/Decision.md#adr-0103)). La sua docstring aveva scritto da sé
+# la condizione — «se si scoprisse che non è osservabile, la conseguenza è una voce in
+# `Sources.md` e un ADR, non un campo morto lasciato qui per non toccare il design» — e la
+# condizione si è avverata due volte. Non è osservabile: un driver non riceve nessun evento
+# per una migrazione, che è una faccenda fra shard e config server. E soprattutto non è mai
+# **accaduta**: in 1153 giri di balancer questo cluster non ha spostato un chunk nemmeno una
+# volta, e `config.changelog` non ha una sola voce `moveChunk`
+# ([M-049](../../../docs/Sources.md#m-049)). Un evento che descrive un fatto che non
+# succede non è un evento raro: è una promessa che la cronaca non può mantenere.
 
 
 @dataclass(frozen=True, slots=True)

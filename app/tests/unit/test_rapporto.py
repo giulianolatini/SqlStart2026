@@ -17,13 +17,20 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from mongolab.application.scenari import EsitoFailover
-from mongolab.application.scenari import EsitoBackup, EsitoRestore, Ritmo
+from mongolab.application.scenari import (
+    EsitoBackup,
+    EsitoRestore,
+    EsitoSharding,
+    Ritmo,
+)
 from mongolab.application.topologia import Bilancio, Interruzione
 from mongolab.application.workload import Latenze, Riepilogo
 from mongolab.domain.modelli import (
     ContoShard,
     DescrizioneServer,
     DescrizioneTopologia,
+    Distribuzione,
+    Piano,
     Progress,
     RuoloServer,
     TipoTopologia,
@@ -36,6 +43,7 @@ from mongolab.presentation.rapporto import (
     rapporto,
     riassunto,
     ripristino,
+    spartizione,
 )
 from mongolab.presentation.righe import COLONNE_SALA
 
@@ -79,30 +87,43 @@ def ispettore(
     topologia: DescrizioneTopologia = SET,
     stato: Mapping[str, object] = STATO,
     statistiche: Mapping[str, object] = STATISTICHE,
-    distribuzione: Sequence[ContoShard] = (),
+    distribuzione: Distribuzione | None = None,
 ) -> FakeInspector:
     """Un `FakeInspector` sul caso normale, con le sostituzioni che la prova chiede."""
-    return FakeInspector([topologia], stato, statistiche, distribuzione)
+    distribuzioni = (
+        {} if distribuzione is None else {distribuzione.collezione: [distribuzione]}
+    )
+    return FakeInspector([topologia], stato, statistiche, distribuzioni)
+
+
+def sparsa(*conti: ContoShard, collezione: str = "ordini") -> Distribuzione:
+    """Una collezione distribuita su questi shard, con il primo come primario."""
+    return Distribuzione(
+        collezione=collezione,
+        distribuita=True,
+        primario=conti[0].shard,
+        conti=conti,
+    )
 
 
 # --- La fotografia di `stats` ----------------------------------------------------------
 
 
 def test_il_rapporto_apre_con_il_titolo() -> None:
-    testo = rapporto(ispettore(), titolo="rs (docker/02-replicaset)")
+    testo = rapporto(ispettore(), collezione="ordini", titolo="rs (docker/02-replicaset)")
 
     assert testo.splitlines()[0] == "rs (docker/02-replicaset)"
 
 
 def test_il_rapporto_nomina_la_forma_della_topologia_e_il_set() -> None:
-    testo = rapporto(ispettore(), titolo="rs")
+    testo = rapporto(ispettore(), collezione="ordini", titolo="rs")
 
     assert TipoTopologia.REPLICA_SET_CON_PRIMARIO.value in testo
     assert "rs0" in testo
 
 
 def test_il_rapporto_elenca_i_server_con_ruolo_e_ritardo() -> None:
-    testo = rapporto(ispettore(), titolo="rs")
+    testo = rapporto(ispettore(), collezione="ordini", titolo="rs")
 
     assert "mongo-rs-1:27021" in testo
     assert RuoloServer.PRIMARIO.value in testo
@@ -122,7 +143,7 @@ def test_un_server_senza_ritardo_non_ne_inventa_uno() -> None:
         tipo=TipoTopologia.REPLICA_SET_SENZA_PRIMARIO, server=(muto,), nome_set="rs0"
     )
 
-    testo = rapporto(ispettore(topologia=topologia), titolo="rs")
+    testo = rapporto(ispettore(topologia=topologia), collezione="ordini", titolo="rs")
     riga_del_server = next(
         linea for linea in testo.splitlines() if "mongo-rs-9:27029" in linea
     )
@@ -146,7 +167,7 @@ def test_un_indirizzo_lungo_non_si_incolla_al_ruolo() -> None:
     )
     topologia = DescrizioneTopologia(tipo=TipoTopologia.SINGOLA, server=(lungo,))
 
-    testo = rapporto(ispettore(topologia=topologia), titolo="standalone")
+    testo = rapporto(ispettore(topologia=topologia), collezione="ordini", titolo="standalone")
     riga = next(
         linea for linea in testo.splitlines() if "mongo-standalone:27017" in linea
     )
@@ -172,7 +193,7 @@ def test_le_colonne_dei_server_restano_allineate() -> None:
     )
     topologia = DescrizioneTopologia(tipo=TipoTopologia.SINGOLA, server=(corto, lungo))
 
-    testo = rapporto(ispettore(topologia=topologia), titolo="misto")
+    testo = rapporto(ispettore(topologia=topologia), collezione="ordini", titolo="misto")
     righe = [linea for linea in testo.splitlines() if ":27017" in linea]
 
     assert righe[0].index(RuoloServer.ROUTER.value) == righe[1].index(
@@ -187,13 +208,13 @@ def test_un_server_irraggiungibile_mostra_perche() -> None:
         nome_set="rs0",
     )
 
-    testo = rapporto(ispettore(topologia=topologia), titolo="rs")
+    testo = rapporto(ispettore(topologia=topologia), collezione="ordini", titolo="rs")
 
     assert "AutoReconnect" in testo
 
 
 def test_il_rapporto_legge_server_status() -> None:
-    testo = rapporto(ispettore(), titolo="rs")
+    testo = rapporto(ispettore(), collezione="ordini", titolo="rs")
 
     assert "mongod" in testo
     assert "8.0.15" in testo
@@ -214,7 +235,7 @@ def test_un_server_status_di_mongos_non_fa_esplodere_il_rapporto() -> None:
     scrivendo che il mongos è appena partito. Provata rompendo, è successo davvero.
     """
     testo = rapporto(
-        ispettore(stato={"process": "mongos", "version": "8.0.15"}), titolo="sharded"
+        ispettore(stato={"process": "mongos", "version": "8.0.15"}), collezione="ordini", titolo="sharded"
     )
 
     assert "mongos" in testo
@@ -223,7 +244,7 @@ def test_un_server_status_di_mongos_non_fa_esplodere_il_rapporto() -> None:
 
 
 def test_il_rapporto_legge_db_stats() -> None:
-    testo = rapporto(ispettore(), titolo="rs")
+    testo = rapporto(ispettore(), collezione="ordini", titolo="rs")
 
     assert "lab" in testo
     assert "50000 documenti" in testo
@@ -234,24 +255,56 @@ def test_il_rapporto_legge_db_stats() -> None:
 def test_senza_shard_il_rapporto_lo_dice() -> None:
     # Una riga assente si legge come una dimenticanza; una riga che dichiara il vuoto si
     # legge come una risposta. Su un replica set la domanda «e gli shard?» è legittima.
-    testo = rapporto(ispettore(), titolo="rs")
+    testo = rapporto(ispettore(), collezione="ordini", titolo="rs")
 
-    assert "shard" in testo
+    assert "questo non è uno sharded cluster" in testo
 
 
-def test_con_gli_shard_il_rapporto_li_elenca() -> None:
-    distribuzione = (
+def test_con_gli_shard_il_rapporto_li_elenca_con_la_loro_quota() -> None:
+    distribuzione = sparsa(
         ContoShard(shard="shard01", documenti=30_000, chunk=12),
         ContoShard(shard="shard02", documenti=20_000, chunk=11),
     )
 
-    testo = rapporto(ispettore(distribuzione=distribuzione), titolo="sharded")
+    testo = rapporto(
+        ispettore(distribuzione=distribuzione), collezione="ordini", titolo="sharded"
+    )
 
     assert "shard01" in testo
     assert "30000 documenti" in testo
     assert "12 chunk" in testo
     assert "shard02" in testo
     assert "11 chunk" in testo
+    # La percentuale accanto al conteggio: due numeri grezzi si confrontano a mente, e
+    # dalla decima fila nessuno lo fa. È il numero che il Blocco 3 esiste per mostrare.
+    assert "60%" in testo
+    assert "40%" in testo
+
+
+def test_una_collezione_non_distribuita_non_si_legge_come_un_replica_set() -> None:
+    """Il punto aperto che ADR-0104 chiude, visto dallo schermo.
+
+    Fino al Task 14 questi due casi producevano la stessa riga — «nessuno: questo non è
+    uno sharded cluster» — perché arrivavano qui come la stessa tupla vuota. Uno dei due
+    è la scena del Blocco 3: un cluster c'è, e la collezione sta tutta su uno shard solo.
+    """
+    intera = Distribuzione(
+        collezione="carico-20260918-093000",
+        distribuita=False,
+        primario="shard1rs",
+        conti=(ContoShard(shard="shard1rs", documenti=2_000, chunk=0),),
+    )
+
+    testo = rapporto(
+        ispettore(distribuzione=intera),
+        collezione="carico-20260918-093000",
+        titolo="sharded",
+    )
+
+    assert "non è distribuita" in testo
+    assert "shard1rs" in testo
+    assert "2000 documenti" in testo
+    assert "questo non è uno sharded cluster" not in testo
 
 
 def test_il_rapporto_guarda_la_topologia_una_volta_sola() -> None:
@@ -259,15 +312,17 @@ def test_il_rapporto_guarda_la_topologia_una_volta_sola() -> None:
     # racconterebbe uno stato che non è mai esistito.
     doppio = ispettore()
 
-    rapporto(doppio, titolo="rs")
+    rapporto(doppio, collezione="ordini", titolo="rs")
 
     assert doppio.letture == 1
 
 
 def test_il_rapporto_sta_nel_budget_di_sala() -> None:
-    distribuzione = tuple(
-        ContoShard(shard=f"shard{numero:02d}", documenti=10_000, chunk=7)
-        for numero in range(1, 4)
+    distribuzione = sparsa(
+        *(
+            ContoShard(shard=f"shard{numero:02d}", documenti=10_000, chunk=7)
+            for numero in range(1, 4)
+        )
     )
     topologia = DescrizioneTopologia(
         tipo=TipoTopologia.SHARDED, server=(PRIMARIO, SECONDARIO, CADUTO)
@@ -275,7 +330,7 @@ def test_il_rapporto_sta_nel_budget_di_sala() -> None:
 
     testo = rapporto(
         ispettore(topologia=topologia, distribuzione=distribuzione),
-        titolo="sharded (docker/03-sharded)",
+        collezione="ordini", titolo="sharded (docker/03-sharded)",
     )
 
     for linea in testo.splitlines():
@@ -406,9 +461,11 @@ class IspettoreCheRicorda:
         self.chiamate.append("db_stats")
         return STATISTICHE
 
-    def shard_distribution(self) -> tuple[ContoShard, ...]:
+    def shard_distribution(self, collezione: str) -> Distribuzione:
         self.chiamate.append("shard_distribution")
-        return ()
+        return Distribuzione(
+            collezione=collezione, distribuita=False, primario=None, conti=()
+        )
 
 
 def test_il_rapporto_guarda_la_topologia_per_ultima() -> None:
@@ -424,7 +481,7 @@ def test_il_rapporto_guarda_la_topologia_per_ultima() -> None:
     """
     doppio: ClusterInspector = IspettoreCheRicorda()
 
-    rapporto(doppio, titolo="rs")
+    rapporto(doppio, collezione="ordini", titolo="rs")
 
     assert isinstance(doppio, IspettoreCheRicorda)
     assert doppio.chiamate[0] == "server_status"
@@ -655,4 +712,144 @@ def test_il_ripristino_nomina_i_due_database() -> None:
 
 def test_il_ripristino_sta_nel_budget_di_sala() -> None:
     for linea in ripristino(RIPRISTINO).splitlines():
+        assert len(linea) <= COLONNE_SALA, linea
+
+
+# --- Il Blocco 3: le due colonne, i chunk fermi e i due piani ---------------------------
+
+NON_DISTRIBUITA = Distribuzione(
+    collezione="carico-20260918-093000",
+    distribuita=False,
+    primario="shard1rs",
+    conti=(ContoShard(shard="shard1rs", documenti=2_000, chunk=0),),
+)
+
+A_RIPOSO = Distribuzione(
+    collezione="ordini",
+    distribuita=True,
+    primario="shard1rs",
+    conti=(
+        ContoShard(shard="shard1rs", documenti=10_000, chunk=2),
+        ContoShard(shard="shard2rs", documenti=10_000, chunk=2),
+    ),
+)
+
+DOPO_IL_CARICO = Distribuzione(
+    collezione="ordini",
+    distribuita=True,
+    primario="shard1rs",
+    conti=(
+        ContoShard(shard="shard1rs", documenti=11_200, chunk=2),
+        ContoShard(shard="shard2rs", documenti=10_800, chunk=2),
+    ),
+)
+"""Milleduecento arrivi contro ottocento: sessanta a quaranta, venti punti di sbilancio.
+
+Sui **totali** gli stessi numeri darebbero due punti, ed è la ragione per cui lo sbilancio
+non si misura lì: i ventimila del seed diluiscono qualunque squilibrio del carico."""
+
+
+def _spartizione(
+    *,
+    dopo: Distribuzione = DOPO_IL_CARICO,
+    scritte_intera: int = 2_000,
+    scritte_sparsa: int = 2_000,
+) -> EsitoSharding:
+    return EsitoSharding(
+        fasi=("riposo", "non-distribuita", "distribuita", "piani", "bilancio"),
+        intera=NON_DISTRIBUITA,
+        prima=A_RIPOSO,
+        dopo=dopo,
+        carico_intera=replace(CORSA, scritture=scritte_intera),
+        carico_sparsa=replace(CORSA, scritture=scritte_sparsa),
+        mirata=Piano(filtro={"_id": 4242}, stadio="SINGLE_SHARD", shard=("shard1rs",)),
+        sparpagliata=Piano(
+            filtro={"citta": "Ancona"},
+            stadio="SHARD_MERGE",
+            shard=("shard1rs", "shard2rs"),
+        ),
+    )
+
+
+def test_la_spartizione_accosta_le_due_collezioni_con_i_conteggi_per_shard() -> None:
+    """Le due colonne sono la scena: senza l'altra, una sola non dimostra niente."""
+    testo = spartizione(_spartizione())
+
+    assert "carico-20260918-093000" in testo
+    assert "non è distribuita" in testo
+    assert "2000 documenti su shard1rs" in testo
+    assert "11200 documenti" in testo
+    assert "10800 documenti" in testo
+    # E la riga che rende le due colonne confrontabili: duemila scritti da una parte,
+    # duemila dall'altra, e qui si vede dove sono finiti.
+    assert "shard1rs 1200" in testo
+    assert "shard2rs 800" in testo
+
+
+def test_la_spartizione_dice_lo_sbilancio_in_punti_percentuali() -> None:
+    testo = spartizione(_spartizione())
+
+    assert "sbilancio" in testo
+    assert "20 punti" in testo
+    # Un punto solo si scrive al singolare: è una schermata italiana, e «1 punti» è la
+    # svista che si nota dalla prima fila.
+    assert "1 punto" in spartizione(_spartizione(dopo=_di_un_punto()))
+
+
+def _di_un_punto() -> Distribuzione:
+    """Milledieci arrivi contro novecentonovanta: 50,5 contro 49,5, cioè un punto."""
+    return Distribuzione(
+        collezione="ordini",
+        distribuita=True,
+        primario="shard1rs",
+        conti=(
+            ContoShard(shard="shard1rs", documenti=11_010, chunk=2),
+            ContoShard(shard="shard2rs", documenti=10_990, chunk=2),
+        ),
+    )
+
+
+def test_i_chunk_fermi_si_scrivono_invece_di_lasciare_la_riga_fuori() -> None:
+    """Zero è il risultato, e va **mostrato**.
+
+    Il balancer del 7.0 in questo laboratorio non migra mai (M-049, ADR-0069). Una riga
+    assente si leggerebbe come una funzione mancante; una riga che dice zero è la lezione.
+    """
+    testo = spartizione(_spartizione())
+
+    assert "chunk" in testo
+    assert "0 in più" in testo
+
+
+def test_la_spartizione_contrappone_i_due_piani_con_gli_shard_interrogati() -> None:
+    testo = spartizione(_spartizione())
+
+    assert "SINGLE_SHARD" in testo
+    assert "SHARD_MERGE" in testo
+    assert "1 shard" in testo
+    assert "2 shard" in testo
+    # Le virgolette sono doppie: chi guarda riscriverà quel filtro in mongosh, e il
+    # `repr` di un dict Python non è ciò che mongosh accetta.
+    assert '{"_id": 4242}' in testo
+    assert '{"citta": "Ancona"}' in testo
+
+
+def test_se_i_due_carichi_non_combaciano_la_schermata_lo_scrive() -> None:
+    """Due colonne affiancate danno per scontato che il carico sia lo stesso.
+
+    Se non lo è, la differenza fra le colonne non è più la chiave di shard: è il carico.
+    Tacerlo sarebbe il modo più elegante di mentire in sala.
+    """
+    testo = spartizione(_spartizione(scritte_intera=2_000, scritte_sparsa=1_400))
+
+    assert "2000" in testo and "1400" in testo
+    assert "non è lo stesso carico" in testo
+
+
+def test_quando_i_carichi_combaciano_la_schermata_non_avvisa_di_niente() -> None:
+    assert "non è lo stesso carico" not in spartizione(_spartizione())
+
+
+def test_la_spartizione_sta_nel_budget_di_sala() -> None:
+    for linea in spartizione(_spartizione()).splitlines():
         assert len(linea) <= COLONNE_SALA, linea

@@ -95,11 +95,16 @@ scrittura tornerebbe indietro con un `E11000 duplicate key`. Misurato eseguendo,
 dedotto — la prima corsa contro lo stack 01 acceso ha risposto «38 scritture, 0
 confermate», tutte per quel motivo.
 
-Che dovesse andare altrove era già dichiarato: `generatore.py` scrive che «le due
+Che dovesse andare altrove era già dichiarato: `generatore.py` scriveva che «le due
 popolazioni non si incontrano mai nella stessa collezione, perché il carico scrive nella
 propria», e `tools/reset-demo.sh` tiene `const superstiti = ["ordini"]` — cioè in `lab`
 ogni altra collezione è residuo, e viene tolta. Il posto c'era; a sbagliare era il
 cablaggio.
+
+Dal Task 15 quella frase è più stretta, e questa costante non ne è toccata: le scene di
+`demo` scrivono anche in `ordini`, ma con `documento_progressivo`, che l'`_id` non lo tocca
+([ADR-0106](../../../../docs/Decision.md#adr-0106)). A numerare gli `_id` resta solo
+`workload`, ed è solo `workload` ad avere bisogno di una collezione tutta sua.
 """
 
 

@@ -170,7 +170,7 @@ class Scena:
             case BackupProgressed():
                 self._avanzamento = evento.avanzamento
             case _:
-                # `ServerStateChanged`, `ChunkMigrated`, `PrimaryWaitAbandoned`: la riga
+                # `ServerStateChanged` e `PrimaryWaitAbandoned`: la riga
                 # di cronaca è tutta la loro resa, e non c'è nessun contatore da toccare.
                 # Il passaggio di ruolo di un server arriva già dentro la topologia.
                 pass

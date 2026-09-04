@@ -28,8 +28,10 @@ from mongolab.domain.modelli import (
     ContoShard,
     DescrizioneServer,
     DescrizioneTopologia,
+    Distribuzione,
     Documento,
     Progress,
+    Piano,
     RuoloServer,
     TipoTopologia,
 )
@@ -50,6 +52,7 @@ from tests.doppi import (
     FakeBackup,
     FakeClock,
     FakeInspector,
+    FakePlanner,
     InMemoryStore,
     LetturaRifiutata,
     NodoSconosciuto,
@@ -360,29 +363,143 @@ def test_un_ispettore_senza_topologie_e_un_errore_della_prova() -> None:
 
 
 def test_l_ispettore_restituisce_i_documenti_di_stato_preparati() -> None:
-    distribuzione = (
-        ContoShard(shard="shard1", documenti=20000, chunk=3),
-        ContoShard(shard="shard2", documenti=100, chunk=3),
+    sparsa = Distribuzione(
+        collezione="ordini",
+        distribuita=True,
+        primario="shard1",
+        conti=(
+            ContoShard(shard="shard1", documenti=20000, chunk=3),
+            ContoShard(shard="shard2", documenti=100, chunk=3),
+        ),
     )
     ispettore = FakeInspector(
         [con_primario("mongo1:27017")],
         server_status={"connections": {"current": 12}},
         db_stats={"dataSize": 4096},
-        distribuzione=distribuzione,
+        distribuzioni={"ordini": [sparsa]},
     )
 
     assert ispettore.server_status() == {"connections": {"current": 12}}
     assert ispettore.db_stats() == {"dataSize": 4096}
-    assert ispettore.shard_distribution() == distribuzione
+    assert ispettore.shard_distribution("ordini") == sparsa
+
+
+def test_l_ispettore_cambia_risposta_a_ogni_lettura_della_stessa_collezione() -> None:
+    """Prima e dopo il carico, e la scena dello sharding vive sulla differenza."""
+    prima = Distribuzione(
+        collezione="ordini",
+        distribuita=True,
+        primario="shard1rs",
+        conti=(
+            ContoShard(shard="shard1rs", documenti=10, chunk=2),
+            ContoShard(shard="shard2rs", documenti=10, chunk=2),
+        ),
+    )
+    dopo = Distribuzione(
+        collezione="ordini",
+        distribuita=True,
+        primario="shard1rs",
+        conti=(
+            ContoShard(shard="shard1rs", documenti=510, chunk=2),
+            ContoShard(shard="shard2rs", documenti=490, chunk=2),
+        ),
+    )
+    ispettore = FakeInspector([con_primario("mongo1:27017")], distribuzioni={"ordini": [prima, dopo]})
+
+    assert ispettore.shard_distribution("ordini").documenti == 20
+    assert ispettore.shard_distribution("ordini").documenti == 1000
+    # Finite le risposte si resta sull'ultima, come per le topologie.
+    assert ispettore.shard_distribution("ordini").documenti == 1000
+    assert ispettore.distribuzioni_chieste == ["ordini", "ordini", "ordini"]
+
+
+def test_l_ispettore_risponde_per_collezione_e_non_una_volta_per_tutte() -> None:
+    """La scena del Blocco 3 accosta **due** collezioni dello stesso cluster.
+
+    Un doppio che desse la stessa risposta a tutte e due farebbe passare la scena senza
+    che ci sia niente da vedere: le due colonne sarebbero identiche per costruzione.
+    """
+    intera = Distribuzione(
+        collezione="carico-20260918-093000",
+        distribuita=False,
+        primario="shard1",
+        conti=(ContoShard(shard="shard1", documenti=300, chunk=0),),
+    )
+    sparsa = Distribuzione(
+        collezione="ordini",
+        distribuita=True,
+        primario="shard1",
+        conti=(
+            ContoShard(shard="shard1", documenti=150, chunk=1),
+            ContoShard(shard="shard2", documenti=150, chunk=1),
+        ),
+    )
+    ispettore = FakeInspector(
+        [con_primario("mongo1:27017")],
+        distribuzioni={intera.collezione: [intera], sparsa.collezione: [sparsa]},
+    )
+
+    assert ispettore.shard_distribution("ordini").quota("shard2") == 50.0
+    assert ispettore.shard_distribution(intera.collezione).chunk == 0
 
 
 def test_l_ispettore_non_inventa_una_distribuzione_di_shard() -> None:
-    # La porta dice «vuota su ciò che non è uno sharded cluster», e il valore di partenza
-    # del doppio è quello: un doppio che restituisse due shard finti farebbe passare la
-    # scena del Blocco 3 contro un replica set.
+    # Il valore di partenza del doppio è «non è uno sharded cluster», che dopo ADR-0104
+    # non è più la tupla vuota ma una `Distribuzione` che lo dice: un doppio che
+    # restituisse due shard finti farebbe passare la scena del Blocco 3 contro un
+    # replica set.
     ispettore = FakeInspector([con_primario("mongo1:27017")])
-    assert ispettore.shard_distribution() == ()
+    fuori = ispettore.shard_distribution("ordini")
+
+    assert fuori.collezione == "ordini"
+    assert not fuori.in_un_cluster
+    assert not fuori.distribuita
+    assert fuori.conti == ()
     assert ispettore.server_status() == {}
+
+
+# --- FakePlanner ----------------------------------------------------------------------
+
+
+def test_il_pianificatore_risponde_con_i_piani_preparati_nell_ordine_scritto() -> None:
+    """Una sequenza, come le topologie di `FakeInspector`, e per la stessa ragione.
+
+    Ciò che la scena mostra non è un piano ma il **contrasto** fra due: mirata contro
+    scatter-gather. Un doppio a risposta unica proverebbe che il codice chiede, non che
+    accosta due risposte diverse.
+    """
+    pianificatore = FakePlanner(
+        [("SINGLE_SHARD", ("shard1rs",)), ("SHARD_MERGE", ("shard1rs", "shard2rs"))]
+    )
+
+    mirata = pianificatore.explain({"_id": 42})
+    ovunque = pianificatore.explain({"citta": "Ancona"})
+
+    assert mirata.stadio == "SINGLE_SHARD"
+    assert mirata.mirata
+    assert not ovunque.mirata
+    assert ovunque.shard == ("shard1rs", "shard2rs")
+    assert pianificatore.chiesti == [{"_id": 42}, {"citta": "Ancona"}]
+
+
+def test_il_pianificatore_restituisce_il_filtro_che_gli_e_stato_dato() -> None:
+    # Il piano porta con sé la domanda a cui risponde, ed è ciò che la resa stampa. Un
+    # doppio che restituisse un filtro preparato lascerebbe passare una scena che mostra
+    # il piano di una query accanto al testo di un'altra.
+    pianificatore = FakePlanner([("SHARD_MERGE", ("shard1rs", "shard2rs"))])
+
+    piano: Piano = pianificatore.explain({"_id": {"$gte": 100, "$lt": 200}})
+
+    assert piano.filtro == {"_id": {"$gte": 100, "$lt": 200}}
+
+
+def test_finiti_i_piani_il_pianificatore_resta_sull_ultimo() -> None:
+    # Come `FakeInspector` con le topologie: un doppio che si esaurisse farebbe fallire la
+    # prova per il numero di domande invece che per il comportamento.
+    pianificatore = FakePlanner([("SINGLE_SHARD", ("shard1rs",))])
+
+    assert pianificatore.explain({"_id": 1}).mirata
+    assert pianificatore.explain({"_id": 2}).mirata
 
 
 def test_l_ispettore_passa_per_la_porta() -> None:

@@ -30,7 +30,6 @@ import pytest
 
 from mongolab.domain.eventi import (
     BackupProgressed,
-    ChunkMigrated,
     Evento,
     FaseIniziata,
     LatencySampled,
@@ -99,7 +98,6 @@ def uno_per_specie() -> list[Evento]:
     """
     return [
         BackupProgressed(ISTANTE, Progress("dump", 1200, 50000, "lab.ordini")),
-        ChunkMigrated(ISTANTE, "lab.ordini", "shard0000", "shard0001", "[0, 5000)"),
         FaseIniziata(ISTANTE, "guasto", "fermo il primario"),
         LatencySampled(ISTANTE, "insert_many", 12.34),
         PrimaryWaitAbandoned(ISTANTE, 30000.0, 30000.0, "mongo-rs-1:27017"),
@@ -119,13 +117,15 @@ def uno_per_specie() -> list[Evento]:
 def test_ogni_evento_del_dominio_sa_diventare_una_riga() -> None:
     """Dieci eventi, dieci rese dedicate: nessuno cade nel ripiego.
 
-    La guardia è scritta al contrario di come verrebbe: non elenca le dieci classi ma le
-    **scopre**, e chiede che nessuna finisca sull'etichetta di ripiego. Un decimo evento
+    La guardia è scritta al contrario di come verrebbe: non elenca le nove classi ma le
+    **scopre**, e chiede che nessuna finisca sull'etichetta di ripiego. Un evento in più
     aggiunto senza una riga sua fa fallire questa prova invece di comparire a schermo
     come una scritta inutile nel mezzo del Blocco 2 — ed è successo davvero al Task 13.
+    Funziona anche al contrario: al Task 15 un evento se n'è andato, e il numero qui è
+    l'unico posto in cui bisognava accorgersene.
     """
-    assert len(sottoclassi_di_evento()) == 10
-    assert len(uno_per_specie()) == 10
+    assert len(sottoclassi_di_evento()) == 9
+    assert len(uno_per_specie()) == 9
 
     for evento in uno_per_specie():
         assert ETICHETTA_IGNOTA not in riga(evento), type(evento).__name__
@@ -254,7 +254,7 @@ def test_emit_deposita_e_ritorna_senza_toccare_lo_stato() -> None:
     for evento in uno_per_specie():
         scena.emit(evento)
 
-    assert scena.in_coda == 10
+    assert scena.in_coda == 9
     assert scena.cronaca == ()
     assert scena.conteggi.scritture == 0
     assert scena.topologia is None
@@ -268,9 +268,9 @@ def test_assorbi_svuota_la_coda_e_dice_quanti() -> None:
 
     assorbiti = scena.assorbi()
 
-    assert assorbiti == 10
+    assert assorbiti == 9
     assert scena.in_coda == 0
-    assert len(scena.cronaca) == min(10, RIGHE_CRONACA)
+    assert len(scena.cronaca) == min(9, RIGHE_CRONACA)
 
 
 def test_assorbi_su_una_coda_vuota_ritorna_zero_e_non_aspetta() -> None:
@@ -364,7 +364,7 @@ def test_il_sink_di_testo_scrive_una_riga_per_evento(tmp_path: Path) -> None:
 
     righe_scritte = percorso.read_text(encoding="utf-8").splitlines()
 
-    assert len(righe_scritte) == 10
+    assert len(righe_scritte) == 9
     assert righe_scritte[-1] == riga(WriteSucceeded(ISTANTE, 3, 12.34))
 
 
@@ -437,7 +437,7 @@ def test_i_tre_sink_sono_tre_rese_dello_stesso_flusso(tmp_path: Path) -> None:
 
     righe_scritte = percorso.read_text(encoding="utf-8").splitlines()
 
-    assert len(righe_scritte) == len(raccoglitore.eventi) == 10
+    assert len(righe_scritte) == len(raccoglitore.eventi) == 9
     assert righe_scritte == [riga(evento) for evento in raccoglitore.eventi]
 
 
