@@ -6205,6 +6205,12 @@ lascerebbe dove sono, i conteggi combacerebbero, e la differenza sparirebbe *pro
 restore è riuscito. La scena mostrerebbe zero e insegnerebbe il contrario di quello che deve
 insegnare ([ADR-0102](Decision.md#adr-0102)).
 
+**Accettato dal PO, lo stesso giorno.** Le due conseguenze di palco sono state portate al PO
+alla chiusura del task e accettate entrambe: l'Atto III si gira **da un altro terminale** rispetto
+all'Atto II, e i **quattro secondi** di attesa del primario entrano in scaletta invece di essere
+compressi. Resta aperto il caso diverso di [ADR-0095](Decision.md#adr-0095), dove i due terminali
+non si alternano ma servono **contemporaneamente**.
+
 ### Note di metodo
 
 203. **Provare la strada corta costa meno che discuterla, e il risultato è più solido.** La copia
