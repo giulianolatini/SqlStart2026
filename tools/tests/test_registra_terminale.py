@@ -281,6 +281,45 @@ def test_la_regia_esegue_solo_le_righe_che_cominciano_con_il_prefisso(tmp_path):
     assert not fatto.exists(), "il prefisso vale dall'inizio della riga, non ovunque"
 
 
+def test_la_regia_riconosce_la_riga_annunciata_anche_se_rientrata(tmp_path):
+    """Il caso vero: `mongolab` non annuncia a colonna zero, rientra di due spazi.
+
+    `_da_un_altra_finestra` stampa «▸ da un'altra finestra…» e poi il comando con due
+    spazi davanti, perché a schermo va staccato dal testo che lo introduce. Un confronto
+    che pretendesse il prefisso a colonna zero non troverebbe mai niente, e la scena
+    resterebbe appesa all'`input()` **per sempre**: non fallirebbe, si pianterebbe. Questa
+    prova esiste perché quel rientro è portante e non si vede leggendo la condizione.
+    """
+    fatto = tmp_path / "fatto"
+    scena = copione(tmp_path, f"  touch {fatto}")
+    destinazione = tmp_path / "prova.cast"
+
+    esito = esegui(str(destinazione), "--regia", "touch ", "--", sys.executable, str(scena))
+
+    assert esito.returncode == 0, esito.stderr
+    assert fatto.exists(), "una riga rientrata è la riga che l'applicazione annuncia davvero"
+    _, testo = intestazione_e_testo(destinazione)
+    assert "ripartito" in testo, "la scena non ha ricevuto l'Invio"
+
+
+def test_la_regia_non_esegue_una_riga_che_il_prefisso_ce_l_ha_dentro(tmp_path):
+    """Tollerare il rientro non vuol dire cercare il prefisso ovunque.
+
+    Fra «spazi a sinistra» e «testo a sinistra» c'è la differenza fra una riga annunciata
+    e una riga che *parla* di un comando — un log, una citazione, un messaggio d'errore che
+    riporta ciò che ha provato a fare. La prima si esegue, la seconda no.
+    """
+    fatto = tmp_path / "fatto"
+    scena = tmp_path / "scena.py"
+    scena.write_text(f"print('  # poi: touch {fatto}')\n", encoding="utf-8")
+    destinazione = tmp_path / "prova.cast"
+
+    esito = esegui(str(destinazione), "--regia", "touch ", "--", sys.executable, str(scena))
+
+    assert esito.returncode == 0, esito.stderr
+    assert not fatto.exists(), "a sinistra del prefisso possono esserci spazi, non parole"
+
+
 def test_la_regia_su_una_riproduzione_si_ferma_invece_di_non_fare_niente(tmp_path):
     """Una registrazione già girata non ha una seconda finestra da azionare."""
     destinazione = tmp_path / "prova.cast"

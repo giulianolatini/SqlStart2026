@@ -255,7 +255,10 @@ python3 tools/registra-terminale.py \
 ```
 
 Il prefisso è un argomento e non un predefinito nascosto: la riga di comando dichiara che cosa lo
-strumento è autorizzato a eseguire, e chi rilegge la ricetta lo legge lì. L'esito del comando finisce
+strumento è autorizzato a eseguire, e chi rilegge la ricetta lo legge lì. Il confronto ignora gli
+spazi ai due lati: l'applicazione annuncia il comando **rientrato di due spazi**, per staccarlo dal
+testo che lo introduce, e un prefisso ancorato alla colonna zero non lo troverebbe mai. A sinistra
+possono esserci spazi, non parole. L'esito del comando finisce
 su `stderr` di chi registra — `regia: … · uscita 0` — e **non** nel `.cast`, dove va solo ciò che il
 pubblico vedrebbe nella finestra di sinistra.
 

@@ -16,8 +16,9 @@ Riproduce anche, e senza `asciinema`: una registrazione di riserva che per esser
 vista richiede di installare qualcosa non è una registrazione di riserva.
 
 Con `--regia PREFISSO` fa anche da **seconda finestra**: le righe che il comando
-registrato stampa e che cominciano con quel prefisso vengono eseguite qui, e poi
-un Invio torna al comando. Serve alle scene che l'applicazione gira dentro la
+registrato stampa e che cominciano con quel prefisso — a meno degli spazi ai due
+lati, perché chi annuncia un comando lo rientra per staccarlo dal testo — vengono
+eseguite qui, e poi un Invio torna al comando. Serve alle scene che l'applicazione gira dentro la
 rete Compose, dove vede la topologia ma non ha il socket del demone: annuncia il
 comando che ferma il primario e aspetta che qualcuno lo dia altrove. Dal palco
 quel qualcuno è una persona; per registrare la scena dev'essere questo strumento.
@@ -188,6 +189,14 @@ def registra(
                     sospeso += testo
                     *complete, sospeso = sospeso.split("\n")
                     for vista in complete:
+                        # Lo `strip()` è portante e non è pulizia. Chi annuncia un comando
+                        # lo rientra per staccarlo dal testo che lo introduce — `mongolab`
+                        # lo fa di due spazi — quindi pretendere il prefisso a colonna zero
+                        # vorrebbe dire non riconoscere mai la riga vera, e la scena
+                        # resterebbe appesa all'`input()` per sempre: non fallirebbe, si
+                        # pianterebbe. A sinistra del prefisso possono esserci spazi, non
+                        # parole: `startswith` continua a rifiutare una riga che il prefisso
+                        # ce l'ha dentro invece che davanti.
                         if vista.strip().startswith(regia):
                             seconda_finestra(vista.strip(), figlio)
             else:
@@ -259,7 +268,7 @@ def main(argomenti: list[str] | None = None) -> int:
         "--regia",
         metavar="PREFISSO",
         default=None,
-        help="esegue le righe che cominciano così, e poi manda un Invio",
+        help="esegue le righe che cominciano così, rientro a parte, e poi manda un Invio",
     )
 
     # La divisione su `--` si fa a mano invece che con `argparse.REMAINDER`, che

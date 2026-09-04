@@ -7238,12 +7238,12 @@ alla scena, o girarla dall'host perdendo la cronaca, sarebbero state due riserve
 sostituiscono la scena che devono sostituire.
 
 **Decisione:** lo strumento di registrazione impara a fare da seconda finestra. Con `--regia
-PREFISSO`, ogni **riga intera** che il comando registrato stampa e che comincia con quel prefisso
-viene eseguita da chi registra, e subito dopo un `\n` va sul lato padrone dello pseudo-terminale:
+PREFISSO`, ogni **riga intera** che il comando registrato stampa e che comincia con quel prefisso —
+a meno degli spazi ai due lati — viene eseguita da chi registra, e subito dopo un `\n` va sul lato padrone dello pseudo-terminale:
 prima il comando, poi la conferma. L'ordine è l'unico possibile — invertirlo produrrebbe una scena
 che riparte prima che il guasto sia avvenuto, cioè un failover raccontato senza failover.
 
-Tre vincoli che fanno parte della decisione:
+Quattro vincoli che fanno parte della decisione:
 
 - **Il prefisso è un argomento obbligatorio dell'opzione, non un predefinito.** Un `--regia` senza
   valore eseguirebbe ciò che un comando registrato decide di stampare, e la riga di comando che ha
@@ -7255,6 +7255,13 @@ Tre vincoli che fanno parte della decisione:
 - **La regia guarda le righe, non i blocchi.** Lo pseudo-terminale consegna quando gli pare, e un
   comando annunciato spezzato a metà fra due letture non comincerebbe con il prefisso. Il residuo
   non terminato resta in sospeso fino alla lettura successiva.
+- **Il confronto ignora gli spazi ai due lati della riga, ed è una scelta e non una svista.** Chi
+  annuncia un comando lo rientra per staccarlo dal testo che lo introduce: `mongolab` stampa
+  «▸ da un'altra finestra…» e poi il comando con due spazi davanti. Un confronto ancorato alla
+  colonna zero non troverebbe mai la riga vera, e la scena resterebbe appesa all'`input()` per
+  sempre — non fallirebbe, si pianterebbe. A sinistra del prefisso possono esserci **spazi, non
+  parole**: una riga che il prefisso ce l'ha *dentro* — un log, un messaggio d'errore che riporta
+  ciò che ha provato a fare — non viene eseguita.
 
 Su `--riproduci` l'opzione è un errore dichiarato e non un'opzione ignorata: una riproduzione non ha
 una seconda finestra, e un'opzione che non fa niente in silenzio è peggio di un rifiuto.

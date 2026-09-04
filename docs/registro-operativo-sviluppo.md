@@ -6860,3 +6860,72 @@ terminale: **14**. Porte **sette**, eventi **nove**; `app/src/` non è stata toc
 fusione è del Product Owner, e a PR unita il worktree si chiude nell'ordine di
 [ADR-0079](Decision.md#adr-0079) — prima si sgancia la sessione, poi si rimuove la directory — dopo
 aver salvato i `.env` ([ADR-0056](Decision.md#adr-0056)).
+
+## 2026-09-04 — La review di Copilot sulla PR #5: un rilievo solo, vero a metà e con il rimedio sbagliato
+
+Il Product Owner ha chiesto una review automatica della PR #5 a GitHub Copilot. L'esito: 74 file
+esaminati su 129, «review effort: Lite», nessun commento a livello di PR e **un solo commento in
+linea**, su `tools/registra-terminale.py`. Dice che la regia confronta con
+`vista.strip().startswith(regia)`, che `strip()` toglie anche gli spazi a sinistra e quindi «una
+riga indentata può diventare eseguibile anche se il prefisso non è realmente a colonna 0»; propone
+di non togliere niente a sinistra e limitarsi al `\r` finale; aggiunge che «lo stesso problema
+compare anche alla riga 297».
+
+Dentro cinque righe di testo ci sono tre esiti diversi, e per separarli è servito **eseguire**.
+
+**La preoccupazione è fondata.** Riconoscere un comando dal testo che un altro programma stampa è la
+famiglia di problemi della nota 227, e in questo branch il conto è già arrivato una volta: l'eco di
+`make` cominciava con `docker compose ` come il comando annunciato, e la prima registrazione della
+scena 12 è ripartita dentro se stessa. Chiedersi quanto è largo quel confronto è la domanda giusta.
+
+**Il rimedio è sbagliato e romperebbe lo strumento.** `_da_un_altra_finestra`
+(`app/src/mongolab/cli.py`) stampa «▸ da un'altra finestra…» e poi il comando **rientrato di due
+spazi**, perché a schermo va staccato dal testo che lo introduce; la scena 12 registrata lo conferma
+su tutt'e due le righe annunciate. Con il prefisso ancorato alla colonna zero la regia non
+riconoscerebbe **mai** la riga vera. Applicato alla lettera, il rimedio è stato misurato: la suite
+della regia non diventa rossa, **non finisce**. La scena resta appesa all'`input()` e il processo va
+fermato a mano — che è precisamente il guasto che ADR-0115 esisteva per evitare.
+
+**La riga 297 non contiene nessuno `strip()`.** È `uscita = registra(`, il punto di chiamata;
+`strip().startswith` compare una volta sola in tutto il file, alla 191. Quella parte del rilievo è
+inventata, ed è utile saperlo: un recensore che aggiunge un riferimento plausibile e falso costa più
+di uno che non lo aggiunge.
+
+**Quello che la review ha trovato davvero è un buco nelle prove.** Nessuna delle quattro prove della
+regia passava per una riga **rientrata**, cioè per il caso di produzione: tutte annunciavano a
+colonna zero, e il comportamento su cui poggia la scena 12 non era fissato da niente. Adesso ci sono
+due prove in più — una riga rientrata **si esegue**, una riga che il prefisso ce l'ha *dentro*
+invece che davanti **no** — e la seconda è quella che tiene aperta la distanza fra «spazi a
+sinistra» e «prefisso ovunque». `make tools-test`: **174**.
+
+E una correzione di parole, che è la parte del rilievo con cui Copilot aveva ragione senza saperlo:
+ADR-0115, il docstring del modulo, la stringa di `--help` e la ricetta dell'indice delle
+registrazioni dicevano tutti «le righe che cominciano con quel prefisso» — più stretto di ciò che il
+codice fa. Adesso dicono che gli spazi ai due lati si ignorano, e perché; e accanto alla condizione
+c'è il commento che spiega che quello `strip()` è portante e non è pulizia.
+
+### Note di metodo
+
+232. **Un rilievo di review si arbitra eseguendolo, perché «ha ragione» e «il suo rimedio funziona»
+    sono due domande diverse.** Il commento conteneva una preoccupazione fondata, un rimedio che
+    pianta lo strumento e un riferimento a una riga che non esiste. Applicare il rimedio è costato
+    un minuto e ha prodotto la risposta che nessuna rilettura avrebbe dato: la suite non fallisce,
+    si blocca — e un blocco, in una pipeline, si legge come un timeout e non come un difetto. La
+    regola pratica: davanti al suggerimento di un recensore automatico la prima mossa è
+    **applicarlo e girarlo**; e se il verdetto è «non pertinente», la motivazione scritta nel
+    commento di chiusura deve contenere un fatto misurato, non un'opinione.
+233. **Quando la documentazione descrive il codice più stretto di com'è, prima o poi qualcuno lo
+    «corregge» verso la documentazione.** Quattro punti — una decisione, un docstring, un `--help` e
+    una ricetta — dicevano «le righe che cominciano con quel prefisso», e il codice invece ignorava
+    di proposito il rientro con cui l'applicazione annuncia. Il rilievo nasce esattamente lì:
+    leggendo la promessa, il codice sembra troppo largo. La regola pratica: se una condizione
+    tollera qualcosa **di proposito**, la tolleranza si scrive dove sta la condizione — nel commento
+    accanto, non solo nella testa di chi l'ha scritta — e la stessa frase va nei documenti che la
+    promettono, altrimenti la prossima review chiederà di stringere.
+
+Stato aggiornato: decisioni fino ad **ADR-0116**, verifiche fino a **V-089**, note di metodo fino
+alla **233**. Controlli: `make tools-test` **174** e `make docs-check` verde. `app/src/` non è stata
+toccata: la modifica sta in `tools/`, e i tre documenti che la descrivono sono allineati. Nessuna
+citazione nuova per le slide — il rilievo riguarda il metodo di lavoro e non il contenuto del talk.
+Prossimo passo: chiusura del thread di Copilot sulla PR #5 con la motivazione misurata, poi la
+review di `codex` sulla stessa PR.
