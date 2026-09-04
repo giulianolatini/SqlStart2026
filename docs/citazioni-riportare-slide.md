@@ -3183,3 +3183,23 @@ non descrive il servizio: descrive chi è sopravvissuto alla finestra. Le richie
 lente, sono **assenti** — non hanno nemmeno cominciato — e un cruscotto che mostra solo latenze le
 conta zero volte. È il motivo per cui il numero che conta in quella scena non è un percentile ma
 un'interruzione: 10 019 millisecondi, e zero scritture perse.
+
+
+---
+
+### Il registratore diceva «uscita 7» e usciva 0
+
+> Lo strumento che registra le demo fa anche da seconda finestra: esegue il comando che uccide il
+> primario e poi manda l'Invio alla scena che lo aspettava. Con un comando uscito con **7** mandava
+> l'Invio lo stesso, scriveva `regia: … · uscita 7` su `stderr` e usciva **0**. Il `.cast` conteneva
+> un failover con zero millisecondi di interruzione e zero scritture perse: un failover perfetto,
+> mai avvenuto.
+> Fonte: [ADR-0117](Decision.md#adr-0117), rilievo della review di `codex` sulla PR #5.
+
+**Perché una slide:** perché una registrazione mutila è un problema visibile e una registrazione
+completa e falsa non lo è — e perché il sistema *lo stava già dicendo*. L'informazione c'era, su
+`stderr`, esatta; il codice di uscita, che è l'unica cosa che qualcuno legge davvero, diceva il
+contrario. Segnalare non è agire, e un difetto già descritto altrove nello stesso repository — il
+docstring dell'adattatore spiegava per esteso perché un guasto fallito e ignorato produce «un
+failover perfetto» — può ricomparire intatto dall'altra parte del confine fra l'applicazione e i
+suoi strumenti.

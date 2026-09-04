@@ -262,6 +262,16 @@ possono esserci spazi, non parole. L'esito del comando finisce
 su `stderr` di chi registra — `regia: … · uscita 0` — e **non** nel `.cast`, dove va solo ciò che il
 pubblico vedrebbe nella finestra di sinistra.
 
+**Se il comando di regia fallisce, la registrazione si ferma lì**
+([ADR-0117](../../Decision.md#adr-0117)): niente Invio, la scena viene abbattuta e lo strumento esce
+con **125**, stampando su `stderr` il codice e l'uscita del comando. Il `.cast` parziale resta sul
+disco, e la sua interruzione è la prova di ciò che è successo. Il motivo è che la scena aspetta la
+conferma di un guasto: un Invio mandato dopo un `docker compose stop` fallito produrrebbe una
+registrazione in cui il primario non cade mai, con zero millisecondi di interruzione e zero
+scritture perse — un failover perfetto, e nessuno che riguarda il `.cast` può accorgersene. Quando
+capita: si legge perché il comando è fallito, si rimette a posto lo stack con
+`./tools/reset-demo.sh 02`, e si rilancia.
+
 La scena 11 ha lo stesso bisogno e non passa dalla regia: `watch` non annuncia niente, sta solo a
 guardare. Lì il guasto si dà da fuori, con uno script che aspetta dieci secondi, ferma `mongo-rs-1`,
 ne aspetta venti e lo riavvia, mentre la registrazione è già partita.

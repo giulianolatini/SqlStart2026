@@ -381,6 +381,33 @@ def test_chiudere_l_iteratore_ferma_il_processo(tmp_path: Path) -> None:
     assert not vivo(pid)
 
 
+def test_un_eccezione_dentro_l_iteratore_ferma_il_processo(tmp_path: Path) -> None:
+    """Non solo la chiusura ordinata: anche un'interruzione deve fermare il dump.
+
+    `close()` solleva `GeneratorExit` dentro il generatore, ed è il caso educato. Ma il
+    consumatore può anche morire in un altro modo — un `KeyboardInterrupt` che arriva
+    mentre il generatore è fermo a leggere `stderr`, un errore sollevato da chi disegna
+    l'avanzamento — e allora l'eccezione che passa dal punto di sospensione non è
+    `GeneratorExit`. Il processo non deve sopravvivere neanche a quelle: da qui il figlio
+    non si distingue, ed è lui che sta leggendo il cluster.
+    """
+    comando, diario = strumento_finto(tmp_path, righe=[APERTURA], attesa=120.0)
+    backup = strumento(comando)
+
+    avanzamenti = backup.dump(tmp_path / "dump")
+    next(avanzamenti)
+    pid, _, _ = diario_di(diario)
+    assert vivo(pid)
+
+    with pytest.raises(KeyboardInterrupt):
+        avanzamenti.throw(KeyboardInterrupt())  # type: ignore[attr-defined]
+
+    scadenza = time.monotonic() + 10.0
+    while vivo(pid) and time.monotonic() < scadenza:
+        time.sleep(0.02)
+    assert not vivo(pid)
+
+
 # --- La credenziale ---------------------------------------------------------------------
 
 

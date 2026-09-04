@@ -18,10 +18,14 @@ vista richiede di installare qualcosa non è una registrazione di riserva.
 Con `--regia PREFISSO` fa anche da **seconda finestra**: le righe che il comando
 registrato stampa e che cominciano con quel prefisso — a meno degli spazi ai due
 lati, perché chi annuncia un comando lo rientra per staccarlo dal testo — vengono
-eseguite qui, e poi un Invio torna al comando. Serve alle scene che l'applicazione gira dentro la
-rete Compose, dove vede la topologia ma non ha il socket del demone: annuncia il
-comando che ferma il primario e aspetta che qualcuno lo dia altrove. Dal palco
-quel qualcuno è una persona; per registrare la scena dev'essere questo strumento.
+eseguite qui, e poi — **solo se sono riuscite** — un Invio torna al comando. Se il
+comando annunciato fallisce, la scena si ferma e lo strumento esce con 125: una
+registrazione in cui il guasto non è avvenuto racconterebbe un failover perfetto.
+
+Serve alle scene che l'applicazione gira dentro la rete Compose, dove vede la
+topologia ma non ha il socket del demone: annuncia il comando che ferma il
+primario e aspetta che qualcuno lo dia altrove. Dal palco quel qualcuno è una
+persona; per registrare la scena dev'essere questo strumento.
 
 Uso:
     python3 tools/registra-terminale.py <destinazione.cast> -- <comando> [argomenti]
@@ -57,6 +61,11 @@ RIGHE = 30
 # vengono presi al momento della lettura.
 BLOCCO = 65536
 
+# Il codice che dice «non è fallita la scena, è fallita la regia». 126 e 127 sono
+# già presi, e parlano del comando registrato; 125 è quello che `env` e `timeout`
+# usano per «ha fallito lo strumento, non ciò che gli era stato chiesto di fare».
+REGIA_FALLITA = 125
+
 
 def imposta_dimensioni(discendente: int, righe: int, colonne: int) -> None:
     """Dichiara al pty quanto è grande, prima che il comando lo chieda."""
@@ -67,22 +76,61 @@ def imposta_dimensioni(discendente: int, righe: int, colonne: int) -> None:
     fcntl.ioctl(discendente, termios.TIOCSWINSZ, struct.pack("HHHH", righe, colonne, 0, 0))
 
 
-def seconda_finestra(riga: str, canale: int) -> None:
-    """Esegue la riga annunciata e manda l'Invio a chi la aspettava.
+def seconda_finestra(riga: str, canale: int) -> int:
+    """Esegue la riga annunciata e, **se è riuscita**, manda l'Invio a chi la aspettava.
 
     L'ordine è l'unico possibile: prima il comando, poi la conferma. Invertirli
     vorrebbe dire una scena che riparte prima che il guasto sia avvenuto, cioè un
     failover raccontato senza failover — che è esattamente ciò che la conferma
     esiste per impedire.
 
+    Per la stessa ragione la conferma non parte se il comando è fallito, e non è
+    una cautela in più: è la stessa invariante che `RegiaCompose` protegge
+    alzando `ComandoFallito`. Un `docker stop` che non ferma niente e un Invio
+    mandato lo stesso producono una scena in cui il primario non è mai caduto,
+    con zero millisecondi di interruzione e zero scritture perse — un failover
+    perfetto, e nessuno che guarda la registrazione può accorgersene. Qui il
+    danno è peggiore che dal vivo: dal palco una persona vede il comando fallire,
+    in un `.cast` non resta traccia di niente.
+
     L'uscita del comando si cattura e si riassume su stderr invece di lasciarla
     andare: **non** deve finire nel .cast — nel .cast va ciò che il pubblico
     vedrebbe nella finestra di sinistra — e chi registra deve comunque sapere se
-    il comando è riuscito.
+    il comando è riuscito. Quando non lo è, di quell'uscita si stampa anche il
+    contenuto: senza, chi registra sa che è andata male e non perché.
+
+    Restituisce il codice di uscita del comando annunciato.
     """
     esito = subprocess.run(shlex.split(riga), capture_output=True, text=True)
     print("regia: %s · uscita %d" % (riga, esito.returncode), file=sys.stderr)
+    if esito.returncode != 0:
+        for flusso in (esito.stdout, esito.stderr):
+            for riga_uscita in flusso.strip().splitlines():
+                print("regia: | " + riga_uscita, file=sys.stderr)
+        print(
+            "regia: la scena non riparte e la registrazione si ferma qui — un Invio "
+            "adesso racconterebbe un guasto che non è avvenuto",
+            file=sys.stderr,
+        )
+        return esito.returncode
     os.write(canale, b"\n")
+    return 0
+
+
+def ferma_la_scena(pid: int) -> None:
+    """Abbatte il comando registrato quando la regia è fallita.
+
+    Non c'è una terza possibilità. La scena non può ripartire — aspetta la
+    conferma di un guasto che non è avvenuto — e non può nemmeno restare dov'è,
+    perché resterebbe appesa all'`input()` finché qualcuno non se ne accorge, che
+    è il modo peggiore di fallire: non un errore, un'attesa. Il segnale va al
+    gruppo e non al solo processo, perché il figlio ha fatto `setsid()` ed è
+    capogruppo: ciò che ha lanciato lui va giù con lui.
+    """
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass  # se n'è già andato per conto suo: non c'è niente da fermare
 
 
 def registra(
@@ -166,6 +214,11 @@ def registra(
     # quel momento il processo non esiste più, e la `waitpid` finale non lo troverebbe.
     raccolto = None
 
+    # Se un comando di regia fallisce, il codice di uscita della scena non è più la
+    # cosa da riportare: la scena l'abbiamo interrotta noi, e il suo stato direbbe
+    # «ucciso da un segnale» invece di «la registrazione non è utilizzabile».
+    regia_fallita = False
+
     with open(destinazione, "w", encoding="utf-8") as uscita:
         uscita.write(json.dumps(intestazione, ensure_ascii=False) + "\n")
         while True:
@@ -198,7 +251,12 @@ def registra(
                         # parole: `startswith` continua a rifiutare una riga che il prefisso
                         # ce l'ha dentro invece che davanti.
                         if vista.strip().startswith(regia):
-                            seconda_finestra(vista.strip(), figlio)
+                            if seconda_finestra(vista.strip(), figlio) != 0:
+                                regia_fallita = True
+                                break
+                    if regia_fallita:
+                        ferma_la_scena(pid)
+                        break
             else:
                 # Nessun output: si controlla se il comando è finito senza chiudere
                 # il pty — succede quando lascia dietro di sé un figlio. Lo stato si
@@ -217,6 +275,8 @@ def registra(
             raccolto = 0
     stato = raccolto
 
+    if regia_fallita:
+        return REGIA_FALLITA
     if os.WIFSIGNALED(stato):
         return 128 + os.WTERMSIG(stato)
     return os.WEXITSTATUS(stato)
@@ -268,7 +328,10 @@ def main(argomenti: list[str] | None = None) -> int:
         "--regia",
         metavar="PREFISSO",
         default=None,
-        help="esegue le righe che cominciano così, rientro a parte, e poi manda un Invio",
+        help=(
+            "esegue le righe che cominciano così, rientro a parte; se riescono manda "
+            "un Invio, se falliscono ferma la scena ed esce 125"
+        ),
     )
 
     # La divisione su `--` si fa a mano invece che con `argparse.REMAINDER`, che

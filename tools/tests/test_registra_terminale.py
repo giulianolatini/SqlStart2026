@@ -320,6 +320,36 @@ def test_la_regia_non_esegue_una_riga_che_il_prefisso_ce_l_ha_dentro(tmp_path):
     assert not fatto.exists(), "a sinistra del prefisso possono esserci spazi, non parole"
 
 
+def test_la_regia_non_conferma_un_comando_fallito(tmp_path):
+    """L'invariante che `RegiaCompose` protegge, dall'altra parte del confine.
+
+    Il docstring di quella classe dice perché un comando di guasto fallito e ignorato è
+    grave: «un `stop` fallito lascerebbe il primario in piedi, e i due numeri finali
+    sarebbero zero millisecondi di interruzione e zero scritture perse — cioè un failover
+    perfetto. La sala vedrebbe la slide sbagliata senza che nessuno abbia modo di
+    accorgersene.» Quando si registra, questa funzione **sta al posto** di quella regia:
+    se manda l'Invio comunque, il `.cast` racconta un guasto mai avvenuto, e nessuno
+    guardando la registrazione può accorgersene.
+
+    Rilievo della review di `codex` sulla PR #5, 4 settembre 2026.
+    """
+    guasto = tmp_path / "ferma-il-primario"
+    guasto.write_text("#!/bin/sh\nexit 7\n", encoding="utf-8")
+    guasto.chmod(0o755)
+    scena = copione(tmp_path, f"  {guasto} mongo-rs-1")
+    destinazione = tmp_path / "prova.cast"
+
+    esito = esegui(
+        str(destinazione), "--regia", str(guasto), "--", sys.executable, str(scena)
+    )
+
+    assert esito.returncode == 125, "una regia fallita non è una registrazione riuscita"
+    assert "uscita 7" in esito.stderr
+    assert "non riparte" in esito.stderr
+    _, testo = intestazione_e_testo(destinazione)
+    assert "ripartito" not in testo, "la scena è ripartita senza che il guasto sia avvenuto"
+
+
 def test_la_regia_su_una_riproduzione_si_ferma_invece_di_non_fare_niente(tmp_path):
     """Una registrazione già girata non ha una seconda finestra da azionare."""
     destinazione = tmp_path / "prova.cast"

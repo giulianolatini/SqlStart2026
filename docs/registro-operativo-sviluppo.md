@@ -7035,3 +7035,85 @@ verde. Nessuna riga di `app/src/` e di `tools/` è stata cambiata da questa voce
 sono **registrati, misurati e aperti**. Prossimo passo: la decisione del Product Owner su quali
 correggere prima della fusione — la raccomandazione è di correggere subito il terzo e il quarto, che
 non hanno alternative di disegno, e di discutere i primi due.
+
+*Il Product Owner ha risposto lo stesso giorno, accogliendo la raccomandazione: il terzo e il quarto
+si correggono subito, il primo e il secondo restano aperti per la discussione. Voce successiva.*
+
+
+## 2026-09-04 — I due rilievi senza alternative: il registratore che confermava un guasto mancato, l'`except` che copriva solo il caso educato
+
+Dei quattro rilievi della review di `codex`, il Product Owner ne ha mandati due in correzione
+immediata — il terzo e il quarto — tenendo aperti i primi due, che sono scelte di disegno e non
+sviste. Il criterio è quello proposto nella voce precedente: si corregge subito ciò che non ha
+alternative, si discute ciò che ne ha.
+
+Tutt'e due per prova prima e codice poi, e tutt'e due il rosso l'hanno dato per la ragione giusta.
+
+**Il quarto: `_avanzamento` uccideva il processo solo su `GeneratorExit`.** La prova nuova apre un
+dump finto, ne consuma il primo avanzamento, e poi rimanda dentro il generatore un
+`KeyboardInterrupt` con `throw()` invece di chiuderlo con `close()`. La differenza è tutta lì:
+`close()` solleva `GeneratorExit`, `throw()` solleva ciò che gli si dà, e il punto di sospensione è
+lo stesso. Rossa, il figlio era ancora vivo dopo **dieci secondi** di attesa, e vivo davvero — non
+uno zombie: nessuno gli aveva mandato niente. La correzione è una parola, `except BaseException` al
+posto di `except GeneratorExit`, e regge perché quell'`except` fa una cosa sola e poi rilancia:
+libera una risorsa esterna. Verde, l'intero file passa in mezzo secondo, cioè il figlio muore
+subito. Resta il limite che il docstring già dichiarava: se il comando è `docker exec …`, ciò che
+muore qui è il client, e lo strumento dentro il container tira dritto.
+
+`throw()` al posto di un segnale vero non è una scorciatoia, è la misura giusta: un `SIGINT` al
+gruppo di processi ammazzerebbe anche il figlio per conto suo, e la prova diventerebbe verde senza
+che il codice sia cambiato. È lo stesso inganno della sonda di ieri, vista dall'altro lato.
+
+**Il terzo: `seconda_finestra` confermava anche dopo un comando fallito.** Qui la correzione sono
+tre cose insieme, e nessuna delle tre da sola basta — è [ADR-0117](Decision.md#adr-0117). L'Invio
+parte solo se il comando annunciato è uscito con zero; la scena viene abbattuta con un `SIGTERM` al
+gruppo, perché il figlio ha fatto `setsid()` ed è capogruppo; lo strumento esce con **125**, il
+codice che `env` e `timeout` usano per «ha fallito lo strumento, non ciò che gli era stato chiesto
+di fare», dato che 126 e 127 parlano già del comando registrato. La seconda delle tre è quella che
+si dimentica: senza l'abbattimento, non mandare l'Invio vorrebbe dire lasciare la scena appesa
+all'`input()` finché qualcuno non se ne accorge, che è il modo di fallire peggiore di tutti — la
+stessa trappola in cui era caduto il rimedio proposto da Copilot poche ore prima, misurata quel
+giorno stesso.
+
+La prova rossa pretende codice 125, `ripartito` assente dal `.cast` e il motivo su `stderr`. C'è
+però una quarta cosa che controlla, «uscita 7» su `stderr`, e quella **il codice rotto la passava
+già**: verificato eseguendo la versione precedente dello strumento, che stampa `regia: … · uscita 7`
+e poi esce **0** con la scena ripartita e il `.cast` che racconta un failover mai avvenuto. È la
+misura esatta di che cosa non bastava.
+
+**Che cosa resta aperto.** Il primo e il secondo, con la misura accanto, nella tabella di
+`app/docs/registro-sviluppo-app.md`: il `--tetto` che ferma il carico e non la scena, e la
+riparazione del nodo che non sta in un `finally`. Sul secondo la domanda per il Product Owner non è
+tecnica: dentro la rete Compose la regia è `RegiaAnnunciata`, e un `finally` che ripara annuncerebbe
+la riparazione fermandosi su un `input()` **mentre qualcuno sta interrompendo la scena**. Che cosa
+deve fare il laboratorio quando la scena si rompe a metà — rimettere in piedi, o lasciare com'è per
+farlo guardare — è una decisione sul laboratorio, non sul codice.
+
+### Note di metodo
+
+237. **Un `except` che nomina l'eccezione educata copre solo il caso educato.** `except
+    GeneratorExit` copre il consumatore che se ne va con ordine, non quello che muore: un Ctrl-C
+    che arriva mentre il generatore è fermo a leggere, un errore che chi disegna rimanda dentro. La
+    domanda da farsi non è «quale eccezione mi aspetto» ma «da qui, il rimedio cambia a seconda di
+    come me ne vado?» — e quando la risposta è no, perché il rimedio è rilasciare una risorsa
+    esterna e rilanciare, la classe da nominare è la più larga. La regola pratica: un `except` che
+    fa pulizia e rilancia prende `BaseException`; un `except` che **decide** qualcosa nomina ciò
+    che sa gestire.
+238. **Fra fallire e piantarsi, piantarsi è peggio — e va deciso quando si scrive il rimedio, non
+    dopo.** Togliere la conferma a un comando fallito è metà correzione: qualcuno stava aspettando
+    quella conferma, e senza di essa resta lì. La stessa forma dello sbaglio si era vista lo stesso
+    giorno nel rimedio proposto dalla review precedente, che non faceva fallire la suite ma non la
+    faceva finire. La regola pratica: ogni volta che si aggiunge un «in questo caso non lo
+    facciamo», si cerca chi aspettava che lo facessimo, e gli si dice qualcosa.
+239. **Un'asserzione che era già verde prima della correzione, dentro una prova che era rossa, non
+    è di troppo: è la misura di ciò che non bastava.** Il registratore stampava già `uscita 7` su
+    `stderr`, e usciva 0 lo stesso. Tenere quell'asserzione nella prova nuova dice due cose che
+    altrove non si leggono — che l'informazione c'era, e che averla non è agire — e impedisce a
+    qualcuno di «semplificare» via la diagnostica pensando che ora sia ridondante. La regola
+    pratica: quando si corregge un difetto di cui il sistema *si lamentava già*, la prova nuova
+    controlla anche il lamento vecchio.
+
+Stato aggiornato: decisioni fino ad **ADR-0117**, verifiche fino a **V-089**, note di metodo fino
+alla **239**. Controlli: `make tools-test` **175**, `make app-test` **640**, `make app-check`
+(mypy `--strict`, 66 file) e `make docs-check` verdi. Prossimo passo: la discussione con il Product
+Owner sui due rilievi rimasti, e la fusione della PR #5, che è sua.

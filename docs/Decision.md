@@ -7251,7 +7251,8 @@ Quattro vincoli che fanno parte della decisione:
   strumento è autorizzato a eseguire, e chi rilegge lo legge lì.
 - **L'uscita del comando eseguito non entra nel `.cast`.** Si cattura e si riassume su `stderr`
   (`regia: … · uscita 0`): nel tracciato va ciò che il pubblico vedrebbe nella finestra di sinistra,
-  e chi registra deve comunque sapere se il comando è riuscito.
+  e chi registra deve comunque sapere se il comando è riuscito. *Questa decisione dava per scontato
+  che chi registra `stderr` lo legga: [ADR-0117](#adr-0117) toglie quel presupposto.*
 - **La regia guarda le righe, non i blocchi.** Lo pseudo-terminale consegna quando gli pare, e un
   comando annunciato spezzato a metà fra due letture non comincerebbe con il prefisso. Il residuo
   non terminato resta in sospeso fino alla lettura successiva.
@@ -7352,3 +7353,74 @@ girare; in sala la vedrà chi guarda il filmato.
 
 **Fonti:** [V-089](Sources.md#v-089), [ADR-0016](#adr-0016), [ADR-0050](#adr-0050),
 [ADR-0055](#adr-0055), [ADR-0098](#adr-0098)
+
+<a id="adr-0117"></a>
+
+## ADR-0117 — Se il comando di regia fallisce, la registrazione si ferma invece di confermare
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** [ADR-0115](#adr-0115) ha insegnato allo strumento di registrazione a fare da seconda
+finestra: esegue la riga annunciata e poi manda un Invio a chi la aspettava. Nella prima stesura
+l'Invio partiva **sempre**, e l'esito del comando finiva solo in una riga di `stderr` che chi
+registra è libero di non leggere.
+
+La review di `codex` sulla PR #5 ha rilevato il punto, e la misura lo conferma: con un comando
+annunciato che esce con **7**, la scena riparte, il `.cast` contiene una scena in cui il primario
+non è mai caduto, e lo strumento esce **0**. È esattamente il guasto che l'adattatore
+dell'applicazione evita alzando `ComandoFallito`, e il docstring di `RegiaCompose` aveva già scritto
+perché è grave: «un `stop` fallito lascerebbe il primario in piedi, e i due numeri finali sarebbero
+zero millisecondi di interruzione e zero scritture perse — cioè un failover perfetto. La sala
+vedrebbe la slide sbagliata senza che nessuno abbia modo di accorgersene.» Quando si registra,
+`seconda_finestra` sta **al posto** di quella regia; il ragionamento non aveva attraversato il
+confine fra l'applicazione e gli strumenti.
+
+Dal vivo il difetto sarebbe stato meno grave: una persona con il secondo terminale aperto vede il
+comando fallire, e la scena non riparte perché non è lei a premere Invio. In una registrazione non
+resta traccia di niente, e la riserva del talk mostrerebbe un failover che non è avvenuto.
+
+**Decisione:** la conferma è condizionata alla riuscita, e la registrazione si ferma. Tre cose
+insieme, perché nessuna delle tre da sola basta:
+
+- **L'Invio parte solo se il comando annunciato è uscito con zero.** È l'invariante di
+  `RegiaCompose`, scritta dove serve la seconda volta.
+- **La scena viene abbattuta**, con un `SIGTERM` al gruppo di processi — il comando registrato ha
+  fatto `setsid()` ed è capogruppo. Non c'è una terza possibilità: la scena non può ripartire,
+  perché aspetta la conferma di un guasto che non è avvenuto, e non può nemmeno restare dov'è,
+  perché resterebbe appesa all'`input()` finché qualcuno non se ne accorge. Fra un errore e
+  un'attesa, il modo peggiore di fallire è l'attesa.
+- **Lo strumento esce con 125.** 126 e 127 sono già presi, e parlano del **comando registrato**: 125
+  è quello che `env` e `timeout` usano per «ha fallito lo strumento, non ciò che gli era stato
+  chiesto di fare». Chi registra dentro un `make` se ne accorge senza leggere niente.
+
+Quando il comando fallisce si stampa anche il **contenuto** della sua uscita, non solo il codice:
+senza, chi registra sa che è andata male e non perché.
+
+**Conseguenze:** il `.cast` parziale resta sul disco e non viene cancellato. È la scelta giusta:
+mostra fin dove la scena è arrivata, e la sua interruzione è la prova di ciò che è successo — un
+file che sparisce non spiega niente. Chi registra rilancia dopo aver capito perché il comando è
+fallito.
+
+Il prezzo è che una registrazione ora può essere **interrotta a metà da chi la registra**, cosa che
+prima non poteva succedere. È esattamente ciò che si voleva: una registrazione mutila è un problema
+visibile, una registrazione completa e falsa non lo è.
+
+**Alternative scartate.**
+
+- *Lasciare com'era e fidarsi di `stderr`.* È lo stato che il rilievo ha trovato. Una riga di
+  diagnostica in mezzo all'output di `make`, accanto a un comando uscito con 0, è precisamente ciò
+  che non si legge.
+- *Non mandare l'Invio e lasciare la scena dov'è.* Il `.cast` non racconterebbe più una bugia, ma lo
+  strumento resterebbe appeso senza dire niente. Lo stesso modo di fallire che
+  [ADR-0115](#adr-0115) evita con lo `strip()`, e per la stessa ragione: piantarsi non è fallire.
+- *Ritentare il comando.* Lo strumento non sa se la riga annunciata è idempotente, e non può
+  saperlo: esegue ciò che l'applicazione stampa. Un secondo tentativo che riesce nasconderebbe per
+  di più il fatto che il primo non era riuscito, cioè l'informazione che serve.
+- *Restituire il codice di uscita del comando annunciato.* Porta più informazione e la porta
+  ambigua: chi legge non distingue un 7 della regia da un 7 della scena, e un 126 della regia
+  sembrerebbe un comando registrato non eseguibile.
+- *Cancellare il `.cast` parziale.* È ciò che fanno i due controlli preventivi (127 e 126), ma là il
+  file non è ancora stato aperto e non contiene niente. Qui contiene la scena fino al punto in cui
+  si è fermata, che è l'unica cosa che spiega dove guardare.
+
+**Fonti:** [ADR-0115](#adr-0115), [ADR-0055](#adr-0055), [ADR-0098](#adr-0098)

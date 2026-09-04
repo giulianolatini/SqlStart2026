@@ -378,11 +378,19 @@ class SubprocessBackup:
     ) -> Iterator[Progress]:
         """Legge `stderr` riga per riga, produce ciò che è avanzamento, e poi giudica.
 
-        **Chiudere l'iteratore ferma il processo.** Se l'avanzamento si consuma man mano
-        allora esiste un consumatore che può smettere — una schermata chiusa, un Ctrl-C — e
-        senza questo `except` resterebbe un `mongodump` a girare contro il cluster senza
-        più nessuno che lo guardi. Il limite: quando il comando è `docker exec ...`, ciò che
-        muore qui è il client `docker`, e lo strumento dentro il container tira dritto.
+        **Uscire di qui in qualunque modo ferma il processo.** Se l'avanzamento si consuma
+        man mano allora esiste un consumatore che può smettere — una schermata chiusa, un
+        Ctrl-C — e senza questo `except` resterebbe un `mongodump` a girare contro il
+        cluster senza più nessuno che lo guardi.
+
+        L'`except` prende `BaseException` e non `GeneratorExit`, ed è la differenza fra
+        coprire il caso educato e coprire quello vero. `close()` solleva `GeneratorExit`,
+        ma un `KeyboardInterrupt` che arriva mentre siamo fermi a leggere `stderr` non è
+        un `GeneratorExit`, e nemmeno lo è un errore sollevato da chi disegna
+        l'avanzamento e rimandato qui dentro: da queste tre parti il figlio non si
+        distingue, e quindi non si distingue neanche il rimedio. Il limite resta: quando
+        il comando è `docker exec ...`, ciò che muore qui è il client `docker`, e lo
+        strumento dentro il container tira dritto.
         """
         assert processo.stderr is not None
         motivo = ""
@@ -399,7 +407,7 @@ class SubprocessBackup:
                 avanzamento = leggi_avanzamento(testo)
                 if avanzamento is not None:
                     yield avanzamento
-        except GeneratorExit:
+        except BaseException:
             processo.kill()
             processo.wait()
             raise
