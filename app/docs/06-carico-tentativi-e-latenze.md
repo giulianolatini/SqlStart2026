@@ -226,16 +226,30 @@ quasi sempre — il tipo peggiore. Le prove asseriscono ciò che il §6.3 promet
 evento si perda, che il lavoro non si duplichi (gli indici generati sono esattamente `0..N-1`), e che
 a chiamare `emit` sia un thread solo.
 
-## Il gancio per `maxPoolSize`, e la misura che non c'è
+## Il gancio per `maxPoolSize`, e la misura che adesso c'è
 
-`scrittori` è il numero di thread che scrivono insieme. È **il parametro che il Task 16 farà salire
-sopra `maxPoolSize`** per mostrare la saturazione del connection pool di PyMongo, che il design
-dichiara materiale didattico.
+`scrittori` è il numero di thread che scrivono insieme. Qui la saturazione del pool non si misura e
+non si può: contro `InMemoryStore` non c'è nessun pool da saturare, e una prova che pretendesse di
+mostrarla misurerebbe il doppio invece del driver. Questa riga è il gancio, non la misura — e la
+distinzione è scritta perché il prossimo lettore non la cerchi dove non c'è.
 
-Qui la saturazione non si misura e non si può: contro `InMemoryStore` non c'è nessun pool da saturare,
-e una prova che pretendesse di mostrarla misurerebbe il doppio invece del driver. Questa riga è il
-gancio, non la misura — e la distinzione è scritta perché il prossimo lettore non la cerchi dove non
-c'è.
+**Dove la misura sta davvero.** Il Task 16 ha aggiunto `--max-pool-size` e l'ha fatta contro uno
+stack vero ([V-080](../../docs/Sources.md#v-080), e il
+[capitolo 17](17-le-quattro-opzioni-e-i-debiti-di-misura.md#maxpoolsize-la-resa-non-è-la-variabile)).
+Due cose valgono la pena di essere sapute già da qui.
+
+La prima è che il disegno naturale — pool fermo, `scrittori` crescente, esattamente quello che
+questa sezione anticipava — è **sbagliato**: muove due variabili insieme, la pressione sul pool e la
+contesa fra thread Python sulla CPU del client, e la resa che scende sembra saturazione mentre è
+contesa. Il disegno buono tiene `scrittori` fermo a 32 e stringe il pool.
+
+La seconda riguarda i percentili di cui questa pagina argomenta il primato. Con `maxPoolSize` a uno
+in meno degli scrittori c'è un thread che aspetta per tutta la corsa, e **p50, p95 e p99 non se ne
+accorgono**: chi aspetta non scrive, chi non scrive non produce campioni, e i percentili pesano le
+operazioni, non i thread. Il thread che soffre di più è il meno rappresentato nella statistica che
+dovrebbe descriverlo. È la ragione per cui il riepilogo stampa anche il **massimo**, che preso da
+solo non vale niente e qui è l'unica colonna che distingue una configurazione sana da una rotta
+([M-054](Sources.md#m-054)).
 
 ## Che cosa hanno insegnato i doppi, qui
 

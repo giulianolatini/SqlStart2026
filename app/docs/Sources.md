@@ -2540,3 +2540,172 @@ il puntatore e il motivo per cui riguardano `mongolab`.
   preferenza sbagliata questa riga avrebbe piantato `stats` proprio durante l'Atto II. Il `ping`
   costa un giro di rete su un metodo che altrimenti, su uno stack non sharded, non ne faceva
   nessuno: è il prezzo di una risposta che distingue «ho guardato e non c'è» da «non ho guardato».
+
+<a id="m-054"></a>
+### M-054 — L'attesa di una connessione è dentro la latenza misurata, e il thread che soffre è quello meno rappresentato
+
+- **Data:** 2026-09-04
+- **Comando:** le otto corse di [V-080](../../docs/Sources.md#v-080) — trentadue scrittori fermi e
+  solo `maxPoolSize` che cambia — più la lettura del punto in cui parte l'orologio:
+  ```
+  CPU_APP=4.0 make app-workload TARGET=standalone \
+    ARGS="--writers 32 --readers 0 --doc-size 2k --duration 20 --sink null --max-pool-size 31"
+  ```
+- **Output:**
+  ```
+  --max-pool-size 31   p50 7.4 ms · p95 19.9 ms · p99 28.7 ms · max 19973.1 ms
+  --max-pool-size 32   p50 7.7 ms · p95 21.1 ms · p99 32.7 ms · max   101.7 ms
+  --max-pool-size 33   p50 7.7 ms · p95 21.0 ms · p99 32.2 ms · max   137.4 ms
+  ```
+- **Che cosa dimostra:** due cose sul modo in cui questa applicazione misura, e valgono per
+  chiunque legga i suoi numeri.
+
+  **La prima.** In `_scrivi` l'orologio si guarda **prima** di `insert_many` e non dentro
+  (`workload.py:706`), quindi la latenza registrata comprende tutto ciò che pymongo fa per
+  quell'operazione — compresa l'attesa di una connessione libera dal pool. Non è un caso
+  fortunato: se il campione partisse dopo l'acquisizione della connessione, la fame di pool
+  sarebbe **invisibile** in questi numeri, e la riga a 31 connessioni sarebbe indistinguibile da
+  quella a 33.
+
+  **La seconda, e non è ovvia.** Con `maxPoolSize` a uno in meno del numero di scrittori, p50, p95
+  e p99 sono indistinguibili dal caso sano; solo il massimo dice che un thread ha aspettato venti
+  secondi. Il motivo è che **il thread affamato contribuisce pochi campioni proprio perché è
+  affamato**: se aspetta non scrive, e se non scrive non compare. I percentili pesano le
+  operazioni, non i thread, quindi il thread che soffre di più è quello meno rappresentato nella
+  statistica che dovrebbe descriverlo.
+- **Perché è stata fatta:** il docstring di `Latenze` argomenta perché il riassunto stampa i
+  percentili e non la media — la media è il numero che nasconde. Mancava l'altra metà: perché
+  accanto ai tre percentili stia anche il **massimo**, che è la cifra meno rispettabile
+  statisticamente di tutte. Questa misura è la risposta: in tutta la tabella di
+  [V-080](../../docs/Sources.md#v-080) il massimo è l'unica colonna che distingue una
+  configurazione sana da una che affama un thread per l'intera corsa.
+- **Riserve:** il massimo di ~20 000 ms coincide con la durata della corsa, quindi è un **limite
+  inferiore**: non si sa quanto avrebbe aspettato quel thread se la corsa fosse durata di più.
+  L'attesa non produce errori perché `waitQueueTimeoutMS` non è impostato e il predefinito di
+  pymongo è «nessun limite»: con un timeout configurato il fenomeno cambierebbe forma — da attesa
+  illimitata a eccezioni — e diventerebbe visibile in un posto completamente diverso. Il
+  ragionamento sul peso dei campioni è dedotto dalla forma dei numeri, non misurato per thread:
+  l'applicazione non tiene un campione separato per scrittore, e per confermarlo servirebbe.
+
+<a id="m-055"></a>
+### M-055 — `maxStalenessSeconds` in pymongo: non viaggia mai da sola, e il `repr` del client non è la fonte
+
+- **Data:** 2026-09-04
+- **Comando:** costruzione diretta di un client con le opzioni che
+  [ADR-0109](../../docs/Decision.md#adr-0109) compone, e interrogazione della preferenza effettiva:
+  ```
+  cliente = connetti(BERSAGLI["rs"], **opzioni_di_misura(max_staleness_s=90))
+  cliente.read_preference.document
+  ```
+- **Output:**
+  ```
+  read_preference           Secondary(tag_sets=None, max_staleness=90, hedge=None)
+  read_preference.document  {'mode': 'secondary', 'maxStalenessSeconds': 90}
+  read_preference.mode      2
+  ```
+- **Che cosa dimostra:** tre trappole, tutte incontrate scrivendo `opzioni_di_misura` e la prova che
+  la copre.
+
+  **Uno.** `maxStalenessSeconds` da sola, con la preferenza predefinita, è un errore in
+  **costruzione**: `primary` più una staleness massima è una `ConfigurationError`, perché il
+  primario non ha ritardo per definizione e il vincolo non avrebbe significato. Per questo
+  `opzioni_di_misura` aggiunge sempre `readPreference` insieme alla staleness, e non offre
+  all'utente il modo di separarle.
+
+  **Due.** Il modo `secondary` vale **2** e non 1 — l'enumerazione è
+  0 `primary`, 1 `primaryPreferred`, 2 `secondary`, 3 `secondaryPreferred`, 4 `nearest`. La prima
+  stesura della prova asseriva `mode == 1` con il commento `# secondary` accanto, e falliva con
+  `assert 2 == 1`. La correzione non è stata cambiare l'1 in 2: è stato asserire sulla forma sul
+  filo, `read_preference.document`, che si legge senza sapere a memoria un'enumerazione.
+
+  **Tre.** Il `repr` del `MongoClient` mostra `maxstalenessseconds=90000`, che a colpo d'occhio
+  sembra un errore di unità di misura di tre ordini di grandezza. Non lo è: quel `repr` sta
+  riecheggiando l'argomento grezzo in una forma sua, mentre la preferenza effettiva è
+  `Secondary(max_staleness=90)`. **Il `repr` non è la fonte**; `read_preference.document` sì.
+- **Perché è stata fatta:** il terzo punto è costato un'indagine, perché un fattore mille in una
+  misura di tempo è esattamente il tipo di difetto che invalida una voce `V-`. Vale la pena
+  registrarlo: chi rivedrà questo codice vedrà lo stesso `repr` e si porrà la stessa domanda.
+- **Riserve:** i tre comportamenti sono di pymongo 4.x come impacchettato in questa applicazione, e
+  il `repr` in particolare è la parte meno stabile di una libreria — è testo di comodo, e può
+  cambiare in una patch senza che nessuno lo consideri una rottura. La validazione `primary` +
+  staleness avviene lato client: non è stato chiesto al server come reagirebbe se la coppia gli
+  arrivasse comunque.
+
+<a id="m-056"></a>
+### M-056 — Il container dell'applicazione ha una CPU, e satura la misura prima del server
+
+- **Data:** 2026-09-04
+- **Comando:** la stessa riga di carico, due volte, con l'unica differenza del limite dato al
+  container che esegue l'applicazione:
+  ```
+  make app-workload TARGET=standalone ARGS="--writers 8 --readers 4 --doc-size 2k --duration 30 --sink null"
+  CPU_APP=4.0 MEMORIA_APP=1024m make app-workload TARGET=standalone ARGS="…la stessa riga…"
+  ```
+- **Output:**
+  ```
+  cpus 1.0 (predefinito)  49 690–51 361 scritture · p50 2.8 · p95 12.3–13.9 · p99 ≈40.6 · 21 808–23 087 letture
+  cpus 4.0                70 013        scritture · p50 2.8 · p95  7.4       · p99  11.0 · 31 065        letture
+  ```
+  Le stesse due corse contro `rs` e `sharded` danno +3 % e +9 %, cioè rumore.
+- **Che cosa dimostra:** che il servizio `app` dei tre file Compose porta `cpus: ${CPU_APP:-1.0}`, e
+  che **una CPU non basta** a saturare uno standalone: l'interprete Python arriva al proprio
+  tetto prima. Il numero misurato nel lab predefinito era del 40 % più basso del vero, e non
+  c'era niente nel riassunto che lo dicesse — nessuna scrittura fallita, nessun ritentativo,
+  latenze plausibili.
+
+  La firma che lo tradisce è la coda, non la mediana: il p50 è identico (2,8 ms) e il p99 passa da
+  40,6 a 11,0. Una mediana intatta con una coda quattro volte più lunga è **contesa dal lato di
+  chi chiede**, non lentezza dal lato di chi risponde.
+
+  Il controllo che rende leggibile il numero è che le altre due architetture **non** si muovano:
+  se tutte e tre fossero salite del 40 % il sospetto sarebbe stato la macchina, non il client.
+- **Perché è stata fatta:** è stata **provocata** da un'altra misura. Il primo disegno della prova
+  su `maxPoolSize` teneva il pool fermo e faceva salire gli scrittori, e la resa **scendeva**
+  — 4 118 → 3 372 → 2 632 → 2 446 scritture/s. Una resa che scende quando si aggiungono scrittori
+  non è saturazione di pool, è contesa per una risorsa del chiamante; da lì al `cpus: 1.0` nel
+  file Compose il passo è stato corto. Il disegno buono tiene fermi gli scrittori e stringe il
+  pool ([V-080](../../docs/Sources.md#v-080)), e il limite di CPU è diventato una variabile da
+  controllare invece di un rumore di fondo.
+- **Riserve:** una corsa per riga nel controllo. `CPU_APP` alza solo il **client**: il `mongod`
+  dello stack 01 ha `cpus: 1.0` scritto a mano e non parametrizzato, quindi non si sa a quale
+  ritmo saturerebbe davvero, e la riga a quattro CPU è a sua volta un limite inferiore. Il rapporto
+  fra CPU del client e resa non è lineare e non è stato mappato: sono state provate una CPU e
+  quattro, non le due in mezzo.
+
+<a id="m-057"></a>
+### M-057 — L'avvio dell'interprete è dentro il tempo a orologio, e va misurato a parte prima di dividere
+
+- **Data:** 2026-09-04
+- **Comando:** il costo fisso, isolato con la corsa più corta che l'applicazione sa fare, e poi
+  sottratto dalle corse vere:
+  ```
+  make app-workload TARGET=standalone ARGS="--writes 1 --writers 1 --readers 0 --sink null"
+  ```
+- **Output:**
+  ```
+  avvio (una scrittura, uno scrittore)   0.78 s · 0.68 s · 0.67 s
+  5 000 scritture --no-journal           1.79 s · 1.70 s · 1.68 s   → netto ≈ 1.02 s → ≈ 4 900/s
+  5 000 scritture --journal              2.19 s · 2.22 s · 2.19 s   → netto ≈ 1.50 s → ≈ 3 330/s
+  ```
+- **Che cosa dimostra:** che su corse dell'ordine dei due secondi l'avvio dell'interprete pesa il
+  **40 %** del tempo a orologio, e che dividere le scritture per la durata senza sottrarlo produce
+  un numero sbagliato — e sbagliato **in modo asimmetrico**, perché comprime le differenze: sui
+  tempi lordi il giornale costerebbe il 23 %, sui netti ne costa il 32.
+
+  Il costo fisso si isola con `--writes 1 --writers 1`, che è la corsa più corta possibile:
+  quel tempo è tutto ciò che l'applicazione fa prima e dopo il lavoro — avviare Python, importare
+  pymongo, costruire il cablaggio, aprire il client, chiudere e riassumere.
+
+  È anche la ragione per cui il confronto fra le tre architetture
+  ([V-079](../../docs/Sources.md#v-079)) **non** usa il tempo a orologio: usa `--duration` fisso e
+  confronta le scritture fatte. Con la durata fissata dall'orologio interno, l'avvio esce dal
+  numero da sé.
+- **Perché è stata fatta:** perché il primo calcolo del prezzo di `j: true` l'aveva dimenticato, e
+  dava −23 %. La cifra pubblicata in [V-075](../../docs/Sources.md#v-075) è −32 %, ed è quella al
+  netto.
+- **Riserve:** tre corse per misurare il costo fisso, che varia di 0,11 s fra la più veloce e la
+  più lenta — su un netto di un secondo è un 10 % di incertezza che si trasferisce interamente al
+  ritmo calcolato. I ritmi «≈ 4 900/s» e «≈ 3 330/s» vanno letti con quella tolleranza: il
+  rapporto fra i due è più solido delle due cifre. Il costo fisso è misurato con `DOVE=host`; da
+  dentro la rete Compose ci sarebbe in più la creazione del container, che è molto più grande e
+  altrettanto fissa, e non è stata misurata.

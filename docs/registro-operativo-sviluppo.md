@@ -6407,3 +6407,147 @@ integrazione, `mypy --strict` verde su 66 file. Le porte del dominio sono **sett
 **nove** — l'unico conteggio di questo registro che sia mai sceso. Prossimo passo: **Task 16** del
 [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), il confronto fra le tre
 architetture, che eredita da qui una scelta già fatta su dove scrivere.
+
+---
+
+## 2026-09-04 — `feature/04`, Task 16: i debiti di misura saldati, e il controllo che approvava un file rotto
+
+Il Task 16 non aggiunge una scena: salda dei debiti. Quattro pagine di `docs/02-architetture`
+avevano scritto per iscritto che una certa misura «ha senso solo sotto carico controllato, cioè con
+l'applicazione Python di `feature/04`, e prima di allora sarebbe aria». Il piano lo colloca
+**prima** delle pagine nuove del Task 17, con una motivazione che vale la pena ripetere: una pagina
+scritta su misure che non esistono ancora è esattamente l'aria che quelle righe promettevano di
+evitare.
+
+Ne escono una funzione (`opzioni_di_misura`), quattro opzioni sulla riga di comando, **sette**
+verifiche empiriche, **quattro** misure lato applicazione, **tre** ADR, sette righe di «cosa questa
+pagina non dice» che diventano rimandi — e una correzione a uno strumento del repository. Le prove
+unitarie passano da **619 a 634**, quelle degli strumenti da **166 a 168**, `mypy --strict` resta
+verde su 66 file, l'integrazione resta a 58.
+
+**Chi non chiede non riceve.** `opzioni_di_misura` restituisce una mappa in cui un argomento
+lasciato a `None` **non compare**, e il client resta byte per byte quello di prima
+([ADR-0109](Decision.md#adr-0109)). La tentazione era scrivere `journal=False` come predefinito,
+«tanto è quello che fa già pymongo»: ma un valore scritto è un valore dichiarato, e il giorno in cui
+il predefinito del driver cambia mentre il nostro resta fermo, due misure di due giorni diversi
+smettono di essere accostabili senza che nessuno se ne accorga. Le altre tre regole: la staleness
+non viaggia mai da sola (con `primary` è un `ConfigurationError` alla costruzione), la preferenza è
+`secondary` e non `secondaryPreferred` perché la ricaduta silenziosa sul primario produrrebbe un
+numero valido per una domanda diversa, e le chiavi portano i nomi dell'URI perché la riga stampata
+a schermo si incolli in una stringa di connessione senza tradurla.
+
+**Il numero dello standalone non era dello standalone.** Il confronto fra le tre architetture —
+otto scrittori, quattro lettori, `--doc-size 2k`, trenta secondi, tre corse per stack, da dentro la
+rete Compose — dava 1 712 scritture/s per lo standalone, 428 per il cluster sharded, 366 per il
+replica set. Rialzando **solo** il client a `CPU_APP=4.0`, lo standalone sale a **2 334**, cioè
++40 %, mentre gli altri due si muovono del 3 % e del 9 %. Il container dell'applicazione ha
+`cpus: 1.0`, e una CPU non basta a saturare uno standalone: la prima misura misurava l'interprete
+Python ([M-056](../app/docs/Sources.md#m-056), [V-079](Sources.md#v-079)). Da lì
+[ADR-0111](Decision.md#adr-0111): il confronto si pubblica **in coppia**, e la riserva sul ferro
+viaggia sulla stessa riga del numero — una nota in fondo alla pagina non arriva sulla slide, il
+numero sì.
+
+**Il disegno che muoveva due variabili insieme.** Il gancio per `maxPoolSize` era scritto da due
+task: `scrittori` doveva salire *sopra* il pool. Eseguito, quel disegno dava una resa che **scende**
+— 4 118, 3 372, 2 632, 2 446 con 8, 16, 24, 32 scrittori — e la lettura comoda era «ecco la
+saturazione». È falsa: un pool saturo non fa scendere la resa, la tiene e allunga le attese. Una
+resa che scende aggiungendo lavoratori vuol dire che si perde lavoro altrove, e in un container con
+una CPU quell'altrove è la contesa fra thread Python. Il disegno buono tiene `scrittori` fermo a 32
+e stringe il pool: la resa non è la variabile (oscilla senza direzione da 2 a 100 connessioni), i
+percentili *migliorano* stringendo — la coda si sposta dal server al driver — e il segnale sta nel
+**massimo**, che salta da 102 ms a 20 000 ms esattamente quando il pool scende sotto il numero
+degli scrittori ([V-080](Sources.md#v-080)).
+
+**Il 23 % che era sbagliato di un nono.** Il prezzo di `j: true` calcolato sulle durate a orologio
+dava −23 %. Dentro quei tempi c'è l'avvio dell'interprete: isolato con `--writes 1 --writers 1`
+vale 0,67–0,78 s su corse di 1,7–2,2 s, cioè il 40 %. Al netto il prezzo è **−32 %**, e la perdita
+si azzera davvero — zero documenti contro i due della corsa senza giornale, dove
+[V-016](Sources.md#v-016) ne aveva contati cento in condizioni diverse
+([V-075](Sources.md#v-075), [M-057](../app/docs/Sources.md#m-057)).
+
+**Il controllo approvava un file rotto.** Con le sette voci `V-` e i tre ADR scritti,
+`make docs-check` ha bocciato: V-079 e V-080 risultavano orfane pur essendo citate. La causa stava
+nel controllo — `RIGA_FONTI` usava `(.+)$` con `re.MULTILINE`, cioè leggeva solo la **prima riga
+fisica** di `**Fonti:**`, e un ADR con sei fonti va a capo. Tutto ciò che stava sotto la prima riga
+spariva in silenzio. Corretto in TDD con due prove: una che il blocco raccolga le righe di
+continuazione, una che si fermi alla prima riga vuota, alla prima etichetta in grassetto e al primo
+separatore. Su centoundici ADR il buco ne toccava esattamente uno — quello appena scritto — e per
+gli altri centodieci l'abitudine di tenere le fonti sulla prima riga aveva funzionato per caso.
+
+**Le righe saldate diventano rimandi, e una si apre.** Le sette righe di «cosa questa pagina non
+dice» sono state barrate e seguite da un **Saldato** con il collegamento alla misura, non
+cancellate. `replica-set.md` guadagna una riga nuova: con un membro in pausa il replica set scrive
+un ventisettesimo, la maggioranza si raggiunge ancora, e il perché resta aperto
+([V-078](Sources.md#v-078)). Un task che salda debiti può aprirne, se ha misurato qualcosa che non
+sa spiegare.
+
+**`analyzeShardKey` funziona, e resta fuori lo stesso.** Lo scoperto di `sharded-cluster.md` diceva
+che il comando «richiede un campione di query reali che una demo con dati generati non ha»: il
+campione si fabbrica, e `configureQueryAnalyzer` più il carico di `mongolab` danno 576 letture
+campionate, 77,6 % mirate contro un mix generato 75/25 ([V-081](Sources.md#v-081)). La motivazione
+dello scoperto era sbagliata, e va detto. Il comando resta comunque fuori dall'applicazione
+([ADR-0110](Decision.md#adr-0110)) per una ragione di forma: le sette porte servono cose che durano
+ed emettono flussi, `analyzeShardKey` risponde una volta sola.
+
+**Un fallimento intermittente, registrato invece che nascosto.** Su tre esecuzioni complete della suite d'integrazione, una è fallita: `test_dentro_la_rete_il_replica_set_ha_un_primario` non ha trovato il primario, e la stessa prova eseguita da sola passa. L'ipotesi è che una prova precedente riavvii `mongo-rs-1` e che questa arrivi durante l'elezione, ma è un'ipotesi: il fallimento non è ancora stato riprodotto a comando. È un punto aperto nel registro dell'applicazione, non una correzione — mettere un'attesa nella prova senza aver riprodotto il guasto renderebbe la suite verde senza sapere perché.
+
+**Note di metodo.**
+
+212. **Un predefinito «uguale a quello della libreria» non è uguale all'assenza.** Scrivere
+     `journal=False` perché tanto è ciò che pymongo fa già sembra innocuo e cambia la natura della
+     riga di base: da «non abbiamo chiesto niente» a «abbiamo chiesto questo». Il giorno in cui il
+     predefinito della libreria cambia, l'assenza segue il cambiamento e il valore scritto no — e
+     due misure di due giorni diversi smettono di essere accostabili senza che niente diventi
+     rosso. La regola pratica: quando una funzione esiste per **rendere misurabile** un
+     comportamento, il suo caso vuoto deve produrre un oggetto identico a quello che si sarebbe
+     costruito senza di lei, e ci vuole una prova che lo asserisca — qui
+     `assert opzioni_di_misura() == {}`.
+
+213. **Una resa che scende quando si aggiungono lavoratori non è saturazione della risorsa
+     condivisa: è contesa dal lato del chiamante.** La distinzione è la differenza fra un
+     esperimento e un aneddoto. Un pool saturo mantiene la resa e allunga le attese, perché il
+     server continua a essere servito allo stesso ritmo dalle connessioni che ci sono; se la resa
+     *cala*, del lavoro si sta perdendo prima di arrivare al server. La regola pratica: prima di
+     attribuire un numero al sistema sotto misura, chiedersi se il misuratore possa essere il collo
+     di bottiglia — e la verifica costa una corsa, alzando il limite del **solo** client e
+     guardando se le altre condizioni restano ferme. Se si muovono tutte, il sospetto è la
+     macchina; se si muove una sola, il sospetto è confermato.
+
+214. **Una mediana intatta con una coda molto più lunga è la firma della contesa dal lato di chi
+     chiede.** Con `cpus: 1.0` il p50 dello standalone è 2,8 ms e il p99 è 40,6; con quattro CPU il
+     p50 resta 2,8 e il p99 scende a 11,0. La maggior parte delle operazioni trova la strada
+     libera e non si accorge di niente; quelle che aspettano aspettano il proprio processo. La
+     regola pratica: quando un limite di risorsa si sposta e la mediana non si muove, guardare i
+     percentili alti prima di concludere che non è cambiato niente.
+
+215. **I percentili pesano le operazioni, non i thread: chi soffre di più è il meno
+     rappresentato.** Con `maxPoolSize` a uno in meno del numero di scrittori c'è un thread che
+     aspetta per tutta la corsa, e p50, p95 e p99 sono indistinguibili dal caso sano — perché quel
+     thread, non scrivendo, non produce campioni. Solo il **massimo** lo denuncia, e il massimo è
+     la statistica meno rispettabile che ci sia. La regola pratica: in un riepilogo di latenze i
+     percentili descrivono il servizio e il massimo descrive il caso peggiore *che sia riuscito a
+     completare*; toglierlo perché «è rumore» significa togliere l'unica colonna che vede la fame.
+
+216. **Un costo fisso dentro una misura di durata non è un errore neutro: comprime le
+     differenze.** Il prezzo di `j: true` calcolato sui tempi lordi dava −23 %, sui netti −32 %.
+     Un addendo uguale sui due lati sposta sempre il rapporto **verso** l'uno, quindi l'errore
+     rende sistematicamente le differenze più piccole di quanto siano. La regola pratica: il costo
+     fisso si isola con la corsa più corta che lo strumento sappia fare e si sottrae prima di
+     dividere — oppure si evita del tutto misurando a durata fissa e contando le operazioni,
+     che è quello che fa il confronto fra architetture.
+
+217. **Un controllo che nessuno controlla è una firma in bianco.** `check_citations.py` leggeva
+     solo la prima riga fisica di `**Fonti:**`: le citazioni andate a capo sparivano in silenzio, e
+     il file risultava coerente proprio mentre aveva perso un pezzo. Il difetto è emerso solo
+     perché un file **legittimo** è stato bocciato; finché ha promosso file rotti, nessuno poteva
+     accorgersene. La regola pratica: quando uno strumento di verifica boccia qualcosa che si
+     ritiene corretto, la prima ipotesi da escludere è che abbia ragione lo strumento — ma la
+     seconda, prima di aggirarlo, è leggerne il codice. E se il difetto c'è, si corregge con una
+     prova che avrebbe fallito prima, non con un adattamento del documento.
+
+Stato aggiornato: decisioni fino ad **ADR-0111**, verifiche fino a **V-081**, note di metodo fino
+alla **217**. Le suite: **168** prove per gli strumenti, **634** per l'applicazione più **58** di
+integrazione, `mypy --strict` verde su 66 file. Le porte del dominio restano **sette** e gli eventi
+**nove**: questo task non ha toccato il dominio. Prossimo passo: **Task 17** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), le tre pagine che `docs/README.md`
+promette — e adesso hanno le misure di cui parlare.

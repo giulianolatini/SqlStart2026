@@ -1356,20 +1356,149 @@ L'ultima riga è l'unica di questo registro che sia mai **scesa**, ed è la misu
 
 ---
 
+## Task 16 — I debiti di misura, e il controllo che approvava un file rotto
+
+**Fatto il 4 settembre 2026.** Il capitolo che ne esce è
+[17-le-quattro-opzioni-e-i-debiti-di-misura.md](17-le-quattro-opzioni-e-i-debiti-di-misura.md).
+
+Questo task non aggiunge una scena. Salda dei debiti: quattro pagine di `docs/02-architetture`
+avevano scritto per iscritto che una certa misura «ha senso solo sotto carico controllato, cioè con
+l'applicazione Python di `feature/04`, e prima di allora sarebbe aria». Il piano lo mette **prima**
+delle pagine nuove del Task 17 con una motivazione che vale la pena ripetere: una pagina scritta su
+misure che non esistono ancora è esattamente l'aria che quelle righe promettevano di evitare.
+
+Il codice nuovo è una funzione — `opzioni_di_misura` — e quattro opzioni sulla riga di comando. Il
+resto del task è misurare, e tre volte su sette la misura ha corretto chi la stava facendo.
+
+### Il disegno che muoveva due variabili
+
+Il gancio per `maxPoolSize` era scritto da due task: `scrittori` doveva salire **sopra** il pool per
+mostrare la saturazione. Eseguito, quel disegno dava una resa che **scende** — 4 118, 3 372, 2 632,
+2 446 scritture/s con 8, 16, 24, 32 scrittori — e la lettura comoda era «ecco la saturazione».
+
+È falsa, e il motivo è che un pool saturo non fa scendere la resa: la tiene, e allunga le attese,
+perché il server continua a essere servito allo stesso ritmo da quelle connessioni. Una resa che
+*scende* aggiungendo lavoratori vuol dire che si perde lavoro altrove — e in un container con
+`cpus: 1.0` quell'altrove è la contesa fra thread Python.
+
+Il disegno buono tiene `scrittori` fermo a 32, alza il client a `CPU_APP=4.0`, e muove solo il pool.
+Il disegno scartato non è stato cancellato: sta dentro [V-080](../../docs/Sources.md#v-080) come
+lezione di metodo, perché chi lo rifarà lo rifarà meglio sapendo perché.
+
+### Il numero dello standalone non era dello standalone
+
+Lo stesso limite di CPU ha invalidato la prima versione del confronto fra architetture. Rialzando
+**solo** il client a quattro CPU, lo standalone passa da 1 712 a 2 334 scritture/s — **+40 %** —
+mentre replica set e cluster si muovono del 3 % e del 9 %, cioè restano fermi. Il numero del lab
+predefinito misurava l'interprete Python, non il `mongod`.
+
+La firma è la coda e non la mediana: p50 identico a 2,8 ms, p99 da 40,6 a 11,0. Una mediana intatta
+con una coda quattro volte più lunga è **contesa dal lato di chi chiede**. E il controllo che rende
+leggibile la diagnosi è che le altre due architetture non si siano mosse: se fossero salite tutte e
+tre, il sospetto sarebbe stato la macchina e non ci sarebbe stato modo di distinguere
+([M-056](Sources.md#m-056)).
+
+Da qui [ADR-0111](../../docs/Decision.md#adr-0111): il confronto si pubblica **in coppia**, la riga
+riproducibile con un `make` e la riga del controllo, e la riserva sul ferro viaggia sulla stessa
+riga del numero. Una nota in fondo alla pagina non arriva sulla slide; il numero sì.
+
+### Il 23 % che era sbagliato di un nono
+
+Il prezzo di `j: true` calcolato sulle durate a orologio dava −23 %. Dentro quei tempi c'è l'avvio
+dell'interprete, che non ha niente a che vedere con il giornale: isolato con `--writes 1
+--writers 1` vale 0,67–0,78 s su corse di 1,7–2,2 s, cioè il 40 %. Al netto il prezzo è **−32 %**.
+
+Un addendo costante uguale sui due lati comprime sempre le differenze verso lo zero, quindi
+l'errore non era neutro: rendeva il giornale più economico di quanto sia
+([M-057](Sources.md#m-057)). È anche la ragione per cui il confronto fra architetture usa
+`--duration` e non il tempo a orologio.
+
+### Il controllo che approvava un file rotto
+
+Con le sette voci `V-` e i tre ADR scritti, `make docs-check` ha bocciato: V-079 e V-080 risultavano
+orfane pur essendo citate da ADR-0109. La causa stava nel controllo:
+
+```python
+RIGA_FONTI = re.compile(r"^\*\*Fonti:\*\* (.+)$", re.MULTILINE)
+```
+
+`.` non attraversa il newline e `$` con `MULTILINE` è la fine della **riga fisica**. Un ADR con sei
+fonti va a capo, e tutto ciò che stava sotto la prima riga spariva **in silenzio** — il file
+risultava coerente proprio mentre aveva perso un pezzo. È lo stesso modo di sbagliare che la
+funzione `ripetuti`, tre righe più su nello stesso file, esiste per impedire.
+
+Corretto in TDD, con due prove: una che il blocco raccolga le righe di continuazione, una che si
+fermi alla prima riga vuota, alla prima etichetta in grassetto e al primo separatore — senza quei
+tre freni un ADR erediterebbe le citazioni di quello dopo, e uno dei centoundici ADR ha davvero un
+`---` attaccato subito sotto le fonti. Su centoundici ADR il buco ne toccava esattamente uno: quello
+appena scritto. Per gli altri centodieci l'abitudine di tenere le fonti sulla prima riga aveva
+funzionato **per caso**.
+
+Vale la pena scriverlo perché è un difetto che si scopre solo quando un file legittimo viene
+bocciato: finché continuava a promuovere file rotti, nessuno se ne sarebbe accorto.
+
+### Le righe saldate diventano rimandi, non sparizioni
+
+Il Passo 5 chiede che le sezioni «cosa questa pagina non dice» perdano le righe saldate e
+**guadagnino il collegamento**. Le sette righe sono state barrate e seguite da un **Saldato** con il
+rimando alla misura, non cancellate: chi torna su una pagina dopo sei mesi deve poter vedere che
+quello scoperto c'era, e come è stato chiuso.
+
+`replica-set.md` guadagna anche una riga **nuova**, che prima non c'era: con un membro in pausa il
+replica set scrive un ventisettesimo, la maggioranza si raggiunge ancora, e il perché resta aperto
+([V-078](../../docs/Sources.md#v-078)). Un task che salda debiti può aprirne, se ha misurato
+qualcosa che non sa spiegare.
+
+### `analyzeShardKey` funziona, e resta fuori lo stesso
+
+Lo scoperto di `sharded-cluster.md` diceva che il comando «richiede un campione di query reali che
+una demo con dati generati non ha». Il campione si fabbrica: `configureQueryAnalyzer` più il carico
+di `mongolab` danno 576 letture campionate, 77,6 % mirate contro un mix generato 75/25. La
+motivazione dello scoperto era sbagliata, e va detto.
+
+Il comando resta comunque fuori da `mongolab` ([ADR-0110](../../docs/Decision.md#adr-0110)), per una
+ragione di forma e non di difficoltà: le sette porte servono cose che *durano* ed emettono flussi,
+`analyzeShardKey` risponde una volta sola. Metterla dietro una porta significherebbe inventare un
+evento per un fatto senza durata.
+
+### Numeri
+
+| | Prima | Dopo |
+|---|---|---|
+| Prove unitarie | 619 | **634** |
+| Prove di integrazione | 58 | 58 |
+| File controllati da mypy | 66 | 66 |
+| Prove degli strumenti | 166 | **168** |
+| ADR del repository | 108 | **111** |
+| Verifiche empiriche del repository | 74 | **81** |
+| Fonti esterne nel registro dell'app | 17 | 17 |
+| Misure nel registro dell'app | 53 | **57** |
+| Porte del dominio | 7 | 7 |
+| Eventi del dominio | 9 | 9 |
+
+Le tre righe ferme al centro sono la firma del task: nessuna porta nuova, nessun evento nuovo,
+nessun file nuovo per mypy. Quello che cresce sono le righe di `Sources.md` — sette verifiche e
+quattro misure — e le due prove che hanno chiuso un buco in uno strumento.
+
+---
+
 ## Che cosa manca
 
-I task dal 13 al 18 non sono ancora stati eseguiti. Le pagine dei principi dicono, dove descrivono il
-futuro, che lo stanno facendo. L'avviso di stato in testa a
+Restano da eseguire i task 17 e 18: le tre pagine che `docs/README.md` promette, e le registrazioni
+del Blocco 2 con la chiusura della feature. Le pagine dei principi dicono, dove descrivono il futuro,
+che lo stanno facendo, e vanno riscritte man mano che il futuro arriva: l'avviso di stato in testa a
 [04-eventi-del-driver-e-concorrenza.md](04-eventi-del-driver-e-concorrenza.md) è stato riscritto al
-Task 7, perché quella pagina descriveva un codice che adesso esiste.
+Task 7, e il §6.3 di [06](06-carico-tentativi-e-latenze.md) al Task 16, perché entrambi
+descrivevano una misura che adesso esiste.
 
 I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 
 | Aperto | Dove è dichiarato | Quando si chiude |
 |---|---|---|
 | ~~Uno store che **fallisce** le scritture: oggi nessun doppio sa rompersi~~ | [registro, Task 4](#task-4--i-doppi-scritti-prima-del-codice-che-dovranno-verificare) | **chiuso** al Task 5 |
-| La saturazione di `maxPoolSize`: `scrittori` è il gancio, non la misura | [06](06-carico-tentativi-e-latenze.md#il-gancio-per-maxpoolsize-e-la-misura-che-non-cè) | Task 16 |
-| La coda è illimitata: sotto un carico lungo cresce in memoria | [A-010, riserve](Sources.md#a-010) | Task 16 |
+| ~~La saturazione di `maxPoolSize`: `scrittori` è il gancio, non la misura~~ | [06](06-carico-tentativi-e-latenze.md#il-gancio-per-maxpoolsize-e-la-misura-che-adesso-cè) | **chiuso** al Task 16, e non con il disegno che il gancio prometteva: far salire `scrittori` sopra il pool muove due variabili insieme. Il pool si stringe con `--max-pool-size` a `scrittori` fermo, e il segnale non è la resa — è il **massimo**, che salta a gradino quando il pool scende sotto il numero degli scrittori ([V-080](../../docs/Sources.md#v-080), [M-054](Sources.md#m-054)) |
+| `test_dentro_la_rete_il_replica_set_ha_un_primario` è **intermittente**: al Task 16 è fallito una volta su tre esecuzioni complete (`stats --target rs` non trovava il primario), e passa sempre se eseguito da solo. L'ipotesi è che una prova precedente riavvii `mongo-rs-1` e che questa arrivi durante l'elezione | [registro, Task 16](#task-16--i-debiti-di-misura-e-il-controllo-che-approvava-un-file-rotto) | non prima di aver riprodotto il fallimento con `-p no:randomly` e l'ordine registrato: una correzione fatta sull'ipotesi renderebbe verde la suite senza sapere perché |
+| La coda è illimitata: sotto un carico lungo cresce in memoria | [A-010, riserve](Sources.md#a-010) | **resta aperto oltre il Task 16**: le corse del confronto hanno fatto passare ~51 000 eventi in trenta secondi dentro un container da 512 MB senza OOM, il che dice che a questi ritmi la coda drena — non che sia limitata. La profondità non è mai stata **misurata**, e nessuno dei task 17 e 18 la misura |
 | L'invariante del §6.3 è difeso *per quello che è* da una sola prova | [registro, Task 5](#task-5--il-generatore-di-carico-i-tentativi-le-latenze) | se i conteggi lasciassero il ciclo di drenaggio |
 | `$group` non è nel dialetto di `InMemoryStore` | il messaggio di `NonSupportato`, e [02](02-porte-e-doppi.md#dove-il-doppio-non-sa-solleva) | la prima prova che lo chiederà |
 | Il rifiuto dei booleani in `_come_intero` non è coperto da nessuna prova | [M-006, riserve](Sources.md#m-006) | la prima prova che dipenderà da lui |

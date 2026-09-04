@@ -337,12 +337,19 @@ def riassumi(campioni: Sequence[float]) -> Latenze:
 class WorkloadRunner:
     """Genera il carico di scritture, ritenta ciò che fallisce, racconta tutto.
 
-    `scrittori` è il gancio del §6.3: è il numero di thread che scrivono insieme, ed è
-    **il parametro che il Task 16 farà salire sopra `maxPoolSize`** per mostrare la
-    saturazione del connection pool di pymongo. Qui la saturazione non si misura e non si
-    può: contro `InMemoryStore` non c'è nessun pool da saturare, e una prova che
-    pretendesse di mostrarla misurerebbe il doppio. Il piano lo dichiara materiale
-    didattico e ne fissa la sede; questa riga è il gancio, non la misura.
+    `scrittori` è il gancio del §6.3: è il numero di thread che scrivono insieme. Qui la
+    saturazione del pool non si misura e non si può: contro `InMemoryStore` non c'è nessun
+    pool da saturare, e una prova che pretendesse di mostrarla misurerebbe il doppio.
+    Questa riga è il gancio, non la misura.
+
+    **La misura c'è, ed è altrove** ([V-080](../../../../docs/Sources.md#v-080), Task 16). Si
+    fa con `--max-pool-size` contro uno stack vero, tenendo `scrittori` **fermo** a 32: il
+    primo disegno faceva l'opposto — pool fermo, scrittori crescenti — e muoveva due
+    variabili insieme, la pressione sul pool e la contesa sulla CPU del client. Il
+    risultato è che la resa non è la variabile interessante (oscilla senza direzione da 2 a
+    100 connessioni) e che il segnale sta nel **massimo**: con `maxPoolSize` a uno in meno
+    degli scrittori un thread aspetta per tutta la corsa, e p50, p95 e p99 non se ne
+    accorgono — perché chi aspetta non scrive, e chi non scrive non entra nei percentili.
     """
 
     def __init__(

@@ -59,7 +59,7 @@ from enum import Enum
 import math
 from pathlib import Path
 import sys
-from typing import Annotated, Callable, Final
+from typing import Annotated, Any, Callable, Final, Mapping
 
 import typer
 
@@ -101,6 +101,7 @@ from mongolab.infrastructure.bersagli import (
     collezione_di_carico,
     connetti,
     credenziali_di,
+    opzioni_di_misura,
     punto_di_vista,
     radice,
 )
@@ -153,6 +154,7 @@ __all__ = [
     "mentre_disegna",
     "nodo_di",
     "regia_di",
+    "riga_delle_opzioni",
     "servizi_di",
     "sink_di",
     "strumento_di",
@@ -647,6 +649,24 @@ def watch(
         cliente.close()
 
 
+def riga_delle_opzioni(opzioni: Mapping[str, Any]) -> str:
+    """La riga che annuncia com'è configurato il client, o niente se è quello di sempre.
+
+    Riceve **la stessa mappa** che va a `connetti`, e non i parametri da cui è stata
+    costruita. Due funzioni che descrivono la stessa configurazione — una che la fa, una
+    che la racconta — divergono alla prima opzione aggiunta a una sola delle due, e il
+    modo in cui ci si accorge è una registrazione che dichiara una misura diversa da
+    quella eseguita. Qui la parafrasi non esiste: si stampa il dizionario.
+
+    Vuoto vuol dire vuoto. Una corsa senza opzioni di misura non annuncia «predefinito»,
+    perché la riga in più a schermo darebbe l'impressione che il Task 16 abbia toccato
+    anche la corsa di base, e il §6.4 la vuole identica a com'era.
+    """
+    if not opzioni:
+        return ""
+    return "opzioni " + " · ".join(f"{nome}={valore}" for nome, valore in opzioni.items())
+
+
 @app.command()
 def workload(
     target: Bersaglio_,
@@ -665,13 +685,76 @@ def workload(
         ),
     ] = DIMENSIONE_PREDEFINITA,
     duration: Annotated[
-        float, typer.Option("--duration", help="Per quanti secondi far girare il carico.")
-    ] = DURATA_WORKLOAD_S,
+        float | None,
+        typer.Option(
+            "--duration",
+            help="Secondi di carico. Predefinito 120, se non si dà --writes.",
+        ),
+    ] = None,
+    writes: Annotated[
+        int | None,
+        typer.Option(
+            "--writes",
+            help="Quante scritture fare, invece di quanti secondi durare.",
+        ),
+    ] = None,
+    journal: Annotated[
+        bool | None,
+        typer.Option(
+            "--journal/--no-journal",
+            help="Chiede j: true, cioè la conferma dopo il giornale.",
+        ),
+    ] = None,
+    retry_writes: Annotated[
+        bool | None,
+        typer.Option(
+            "--retry-writes/--no-retry-writes",
+            help="La rete di sicurezza del driver: accesa o spenta.",
+        ),
+    ] = None,
+    max_staleness: Annotated[
+        int | None,
+        typer.Option(
+            "--max-staleness",
+            help="Secondi di ritardo tollerati; implica la lettura da un secondario.",
+        ),
+    ] = None,
+    max_pool_size: Annotated[
+        int | None,
+        typer.Option("--max-pool-size", help="Quante connessioni può tenere aperte."),
+    ] = None,
     sink: Resa_ = Resa.RICH,
 ) -> None:
-    """Manda carico contro lo stack, e alla fine dice come è andata."""
+    """Manda carico contro lo stack, e alla fine dice come è andata.
+
+    **Due limiti, e mai tutti e due** (ADR-0107, esteso qui dal Task 16). `--duration` è
+    la riga del §6.4 e resta il predefinito; `--writes` è quello che serve a confrontare
+    architetture diverse, perché a durata uguale due stack con throughput diverso non
+    hanno fatto lo stesso lavoro — è la stessa scoperta che al Task 15 ha riscritto
+    `demo sharding`, applicata al confronto fra le tre architetture.
+
+    **Le quattro opzioni di misura** (ADR-0109) saldano altrettanti debiti scritti nelle
+    pagine delle architetture, e ognuna vale come mezza misura: `--journal` contro
+    `--no-journal`, `--retry-writes` contro `--no-retry-writes`. Chi ne cita una sola in
+    una voce di `Sources.md` sta riportando la buona notizia senza il suo prezzo.
+    """
+    if writes is not None and duration is not None:
+        # Il rifiuto sta qui e non in `WorkloadRunner.esegui`, che pure ha già la regola:
+        # là scatterebbe dopo che il client è aperto e la collezione annunciata, cioè dopo
+        # aver fatto credere che la corsa fosse partita.
+        raise typer.BadParameter(
+            "una corsa si limita in un modo solo: --writes, quante scritture fare, "
+            "oppure --duration, per quanti secondi andare avanti. Con tutti e due il "
+            "primo che scade smentirebbe l'altro."
+        )
     cablaggio = cabla(target, sink)
     genera = con_dimensione(DataGenerator().documento, byte_di(doc_size))
+    misura = opzioni_di_misura(
+        journal=journal,
+        retry_writes=retry_writes,
+        max_staleness_s=max_staleness,
+        max_pool_size=max_pool_size,
+    )
     # **Non `COLLEZIONE`**: il carico ha la propria, e il nome cambia a ogni corsa. Il
     # perché sta in `bersagli.collezione_di_carico`, ed è un E11000 misurato, non una
     # precauzione. Che la scelta si faccia qui e non dentro `WorkloadRunner` è la regola
@@ -679,7 +762,10 @@ def workload(
     # riceve una porta senza sapere quale collezione ci sia dietro.
     destinazione = collezione_di_carico(cablaggio.orologio.now())
     typer.echo(f"carico in {DATABASE}.{destinazione}")
-    cliente = connetti(cablaggio.bersaglio)
+    annuncio = riga_delle_opzioni(misura)
+    if annuncio:
+        typer.echo(annuncio)
+    cliente = connetti(cablaggio.bersaglio, **misura)
     try:
         corsa = WorkloadRunner(
             PymongoStore(cliente[DATABASE][destinazione]),
@@ -688,8 +774,13 @@ def workload(
             scrittori=writers,
             lettori=readers,
         )
+        limite = (
+            {"scritture": writes}
+            if writes is not None
+            else {"durata_s": duration if duration is not None else DURATA_WORKLOAD_S}
+        )
         esito = mentre_disegna(
-            cablaggio.sink, lambda: corsa.esegui(durata_s=duration, genera=genera)
+            cablaggio.sink, lambda: corsa.esegui(genera=genera, **limite)
         )
     finally:
         cliente.close()
@@ -743,6 +834,13 @@ def failover(
     recupero: Annotated[
         float, typer.Option("--recupero", help="Secondi di carico dopo il rientro.")
     ] = DURATA_RECUPERO_S,
+    retry_writes: Annotated[
+        bool | None,
+        typer.Option(
+            "--retry-writes/--no-retry-writes",
+            help="La rete di sicurezza del driver durante l'elezione: accesa o spenta.",
+        ),
+    ] = None,
     sink: Resa_ = Resa.RICH,
 ) -> None:
     """Carico attivo, il primario cade, l'elezione, i due numeri. È l'Atto II.
@@ -757,11 +855,23 @@ def failover(
     resta vivo ma irraggiungibile, e il client prende un timeout invece di un connection
     refused. È la differenza fra un server morto e una rete partizionata, e vale i trenta
     secondi che costa.
+
+    **`--no-retry-writes` è la terza** (ADR-0109), e non ha bisogno di codice suo: è la
+    stessa scena con la rete di sicurezza del driver spenta, ed esiste perché
+    `replica-set.md` aveva intestato qui la misura di che cosa vede un'applicazione senza
+    di essa. Vale come mezza misura: il numero che conta è la differenza con la corsa
+    identica in cui i tentativi sono accesi.
     """
     _niente_step_con_la_tui(step, sink)
     cablaggio = cabla(target, sink)
     ponte = SdamBridge(cablaggio.orologio)
-    cliente = connetti(cablaggio.bersaglio, event_listeners=ponte.ascoltatori)
+    misura = opzioni_di_misura(retry_writes=retry_writes)
+    annuncio = riga_delle_opzioni(misura)
+    if annuncio:
+        typer.echo(annuncio)
+    cliente = connetti(
+        cablaggio.bersaglio, event_listeners=ponte.ascoltatori, **misura
+    )
     try:
         try:
             attendi_il_primario(cliente)

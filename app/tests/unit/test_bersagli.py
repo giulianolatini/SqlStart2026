@@ -36,6 +36,7 @@ from mongolab.infrastructure.bersagli import (
     collezione_di_carico,
     connetti,
     credenziali_di,
+    opzioni_di_misura,
     punto_di_vista,
     radice,
 )
@@ -544,5 +545,118 @@ def test_l_attesa_del_primario_finisce_e_lo_dice_nel_linguaggio_di_questo_strato
     try:
         with pytest.raises(SenzaPrimario):
             attendi_il_primario(cliente)
+    finally:
+        cliente.close()
+
+
+# --- Le opzioni di misura del Task 16 ---------------------------------------------------
+#
+# `connetti` accetta `**extra` dal Task 5, e la sua docstring diceva già a chi servisse.
+# Questa è quella mappa, costruita in un posto solo (ADR-0109): quattro debiti di misura
+# scritti nelle pagine delle architetture diventano quattro opzioni della riga di comando,
+# e ogni voce `V-` può citare il comando che la riproduce invece di uno script scomparso.
+
+
+def test_senza_chiedere_niente_la_mappa_e_vuota() -> None:
+    """Il predefinito non tocca **nessuna** opzione del client.
+
+    È la condizione perché il confronto del Passo 3 misuri le tre architetture e non le
+    tre configurazioni: se questa mappa portasse un valore anche solo «uguale al
+    predefinito di pymongo», la riga di base misurata oggi non sarebbe più quella che il
+    §6.4 scrive, e il numero di ieri non si potrebbe più accostare a quello di domani.
+    """
+    assert opzioni_di_misura() == {}
+
+
+def test_il_giornale_acceso_e_quello_spento_si_dichiarano_tutti_e_due() -> None:
+    # `j: false` esplicito non è la stessa cosa di non dire niente: è la controprova di
+    # V-016, e va potuta chiedere.
+    assert opzioni_di_misura(journal=True) == {"journal": True}
+    assert opzioni_di_misura(journal=False) == {"journal": False}
+
+
+def test_i_tentativi_del_driver_si_possono_spegnere() -> None:
+    assert opzioni_di_misura(retry_writes=False) == {"retryWrites": False}
+
+
+def test_la_staleness_porta_con_se_la_preferenza_di_lettura() -> None:
+    """`maxStalenessSeconds` da solo è un errore, e lo dice il driver alla costruzione.
+
+    `Read preference primary cannot be combined with maxStalenessSeconds`: misurato, non
+    dedotto. Un limite alla vecchiaia di ciò che si legge non ha senso su un membro che
+    per definizione è aggiornato, quindi chiedere la staleness **è** chiedere di leggere
+    da un secondario. Le due opzioni viaggiano insieme perché separate producono un
+    comando che non parte.
+    """
+    assert opzioni_di_misura(max_staleness_s=90) == {
+        "readPreference": "secondary",
+        "maxStalenessSeconds": 90,
+    }
+
+
+def test_il_pool_si_puo_stringere() -> None:
+    assert opzioni_di_misura(max_pool_size=4) == {"maxPoolSize": 4}
+
+
+def test_le_quattro_opzioni_stanno_insieme_e_in_ordine_fisso() -> None:
+    """L'ordine non è estetica: è ciò che rende la riga annunciata a schermo confrontabile.
+
+    La stessa mappa che va al client va anche a video, e due corse chieste allo stesso
+    modo devono stampare la stessa riga — altrimenti due `.cast` della stessa misura
+    sembrano due misure diverse.
+    """
+    assert list(
+        opzioni_di_misura(
+            journal=True, retry_writes=False, max_staleness_s=90, max_pool_size=4
+        )
+    ) == [
+        "journal",
+        "retryWrites",
+        "readPreference",
+        "maxStalenessSeconds",
+        "maxPoolSize",
+    ]
+
+
+def test_le_opzioni_di_misura_arrivano_davvero_al_client() -> None:
+    """Che la mappa sia giusta lo dicono le prove qui sopra; che pymongo la **onori** no.
+
+    Il nome di un'opzione sbagliato di una lettera produce una mappa perfetta e un client
+    che si comporta come prima, e nessuna delle prove precedenti se ne accorgerebbe. Qui
+    si guarda il client costruito: il write concern, i tentativi, la dimensione del pool.
+    """
+    cliente = connetti(
+        BERSAGLI["standalone"],
+        punto=PuntoDiVista.HOST,
+        connect=False,
+        **opzioni_di_misura(journal=True, retry_writes=False, max_pool_size=4),
+    )
+    try:
+        assert cliente.write_concern.document == {"j": True}
+        assert cliente.options.retry_writes is False
+        assert cliente.options.pool_options.max_pool_size == 4
+        # La collezione eredita: è il punto per cui accendere il giornale sul **client**
+        # basta a cambiare come scrive `PymongoStore`, che riceve una collezione e non sa
+        # da quale client venga.
+        assert cliente["lab"]["ordini"].write_concern.document == {"j": True}
+    finally:
+        cliente.close()
+
+
+def test_la_staleness_arriva_al_client_come_preferenza_di_lettura() -> None:
+    cliente = connetti(
+        BERSAGLI["rs"],
+        punto=PuntoDiVista.HOST,
+        connect=False,
+        **opzioni_di_misura(max_staleness_s=90),
+    )
+    try:
+        # Il `document` e non il `mode`: è la forma che il driver manda al server, e un
+        # numero di modo asserito a memoria è verde per il motivo sbagliato appena si
+        # sbaglia numero — `secondary` è il 2, non l'1.
+        assert cliente.read_preference.document == {
+            "mode": "secondary",
+            "maxStalenessSeconds": 90,
+        }
     finally:
         cliente.close()

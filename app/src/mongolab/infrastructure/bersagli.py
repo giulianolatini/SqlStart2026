@@ -69,6 +69,7 @@ __all__ = [
     "collezione_di_carico",
     "connetti",
     "credenziali_di",
+    "opzioni_di_misura",
     "punto_di_vista",
     "radice",
 ]
@@ -478,6 +479,58 @@ def attendi_il_primario(cliente: MongoClient[dict[str, Any]]) -> None:
         raise SenzaPrimario(str(scaduta)) from scaduta
 
 
+def opzioni_di_misura(
+    *,
+    journal: bool | None = None,
+    retry_writes: bool | None = None,
+    max_staleness_s: int | None = None,
+    max_pool_size: int | None = None,
+) -> dict[str, Any]:
+    """Le opzioni del client che il Task 16 accende e spegne per misurare (ADR-0109).
+
+    Quattro pagine di architettura avevano scritto per iscritto che certe misure «hanno
+    senso solo sotto carico controllato, cioè con l'applicazione Python di `feature/04`».
+    Questa è la mappa che le rende possibili: `j: true` contro lo standalone,
+    `retryWrites=false` e `maxStalenessSeconds` sul replica set, `maxPoolSize` stretto
+    sotto il numero degli scrittori. Va a `connetti(**extra)`, che dal Task 5 aveva già
+    il gancio e ne aveva già scritto il perché.
+
+    **Chi non chiede non riceve.** Un argomento lasciato a `None` non compare nella mappa,
+    e il client resta byte per byte quello di prima. Non è avarizia: è la condizione
+    perché il confronto fra le tre architetture misuri le architetture. Se qui comparisse
+    un valore «tanto è uguale al predefinito», la riga di base non sarebbe più quella del
+    §6.4, e i numeri di due giorni diversi smetterebbero di essere accostabili.
+
+    **La staleness non viaggia mai da sola.** `maxStalenessSeconds` con la preferenza
+    predefinita è un `ConfigurationError` alla costruzione del client — «Read preference
+    primary cannot be combined with maxStalenessSeconds» — e ha ragione il driver: un
+    limite alla vecchiaia di ciò che si legge non dice niente su un membro che per
+    definizione è aggiornato. Chiedere la staleness **è** chiedere di leggere da un
+    secondario, quindi le due opzioni escono insieme da qui invece di dover essere
+    ricordate insieme da chi scrive il comando.
+
+    La preferenza è `secondary` e non `secondaryPreferred` apposta: con il ripiego sul
+    primario una selezione fallita per staleness diventerebbe una lettura riuscita, cioè
+    la misura si nasconderebbe da sola.
+
+    **I nomi sono quelli dell'URI**, non quelli di Python — `retryWrites`, non
+    `retry_writes`. pymongo accetta le opzioni della stringa di connessione come argomenti
+    con lo stesso nome, e tenerli così vuol dire che la riga stampata a schermo si può
+    incollare in un URI e in una `MONGO_URI` senza tradurla.
+    """
+    opzioni: dict[str, Any] = {}
+    if journal is not None:
+        opzioni["journal"] = journal
+    if retry_writes is not None:
+        opzioni["retryWrites"] = retry_writes
+    if max_staleness_s is not None:
+        opzioni["readPreference"] = "secondary"
+        opzioni["maxStalenessSeconds"] = max_staleness_s
+    if max_pool_size is not None:
+        opzioni["maxPoolSize"] = max_pool_size
+    return opzioni
+
+
 def connetti(
     bersaglio: Bersaglio,
     *,
@@ -501,8 +554,13 @@ def connetti(
     ([M-018](../../../docs/Sources.md#m-018)) — e `PymongoStore` rifiuta di costruirsi
     senza, il che rende questa riga difficile da perdere per sbaglio.
 
-    `extra` esiste per il Task 16, che dovrà accendere e spegnere `retryWrites` e
-    `maxPoolSize` sulla stessa mappa senza scriverne una seconda.
+    `extra` esisteva per il Task 16, che doveva accendere e spegnere `retryWrites` e
+    `maxPoolSize` sulla stessa mappa senza scriverne una seconda. Quella mappa adesso c'è
+    e si chiama `opzioni_di_misura`: la costruisce lei, la stampa la riga di comando, e
+    la riceve questa funzione senza sapere che cosa contenga. È rimasto `**extra` e non è
+    diventato un parametro tipato perché gli altri usi non sono spariti — `connect=False`
+    nelle prove unitarie, `event_listeners` per il ponte SDAM — e ognuno di quelli è un
+    argomento di pymongo che questo strato ha il permesso di conoscere.
     """
     dove = punto if punto is not None else punto_di_vista(variabili)
     vista = bersaglio.vista(dove)

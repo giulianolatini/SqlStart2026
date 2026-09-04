@@ -2880,3 +2880,109 @@ Fonte: [`app/docs/Sources.md`, M-051](../app/docs/Sources.md#m-051),
 mostrata in due righe e senza spiegazioni — e perché tradurre lo stadio in un booleano significherebbe
 tenere aggiornato un dizionario al posto del server. Nota per chi presenta: l'ordine degli shard che
 il server restituisce **non è stabile**, e la scena li ordina apposta.
+
+---
+
+### Il numero non misurava il server, misurava il client
+
+> Stesso carico, stesso dataset, tre architetture. Lo standalone fa **1 712** scritture al secondo.
+> Si alza da una a quattro CPU il **solo** container dell'applicazione, e lo standalone fa
+> **2 334**: +40 %. Il replica set e il cluster si muovono del 3 % e del 9 %, cioè restano fermi.
+
+Fonte: [V-079](Sources.md#v-079),
+[`app/docs/Sources.md`, M-056](../app/docs/Sources.md#m-056),
+[ADR-0111](Decision.md#adr-0111).
+
+**Perché una slide:** perché è la lezione che il pubblico può portarsi a casa e usare lunedì. Non
+c'era niente nel riepilogo che denunciasse il problema — zero errori, zero ritentativi, latenze
+plausibili — e la verifica costa una corsa sola: si alza il limite del **solo** client e si guarda
+se le altre condizioni restano ferme. Se si muovono tutte, il sospetto è la macchina; se si muove
+una sola, il numero era del misuratore.
+
+---
+
+### Una mediana intatta con una coda quattro volte più lunga
+
+> `p50 2,8 ms → 2,8 ms` · `p99 40,6 ms → 11,0 ms`. La metà delle operazioni non si accorge di
+> niente. **Contesa dal lato di chi chiede, non lentezza dal lato di chi risponde.**
+
+Fonte: [`app/docs/Sources.md`, M-056](../app/docs/Sources.md#m-056),
+[V-079](Sources.md#v-079).
+
+**Perché una slide:** perché insegna a leggere due colonne che di solito si guardano separate.
+Chiunque abbia un cruscotto ha una mediana e un p99 davanti agli occhi ogni giorno; la coppia dice
+*dove* sta il collo di bottiglia, e il grafico della sola mediana non lo dirà mai.
+
+---
+
+### Il thread che soffre di più è il meno rappresentato
+
+> Con `maxPoolSize` a uno **in meno** del numero di scrittori, p50, p95 e p99 sono indistinguibili
+> dal caso sano. Solo il massimo dice qualcosa: **20 004 ms**, cioè un thread che ha aspettato per
+> tutta la corsa e non ha mai scritto. Se aspetta non scrive, e se non scrive non compare.
+
+Fonte: [V-080](Sources.md#v-080),
+[`app/docs/Sources.md`, M-054](../app/docs/Sources.md#m-054).
+
+**Perché una slide:** perché è controintuitivo e si dimostra in una riga: i percentili pesano le
+**operazioni**, non i thread. È anche la difesa del massimo, la statistica che tutti tolgono per
+prima dai cruscotti perché «è rumore» — ed è l'unica colonna che qui vede la fame.
+
+---
+
+### `j: true`: la perdita si azzera davvero, e costa un terzo
+
+> Senza giornale: **2** documenti confermati e spariti dopo un `SIGKILL`, ≈ 4 900 scritture/s.
+> Con `j: true`: **0** persi, ≈ 3 330 scritture/s. **−32 %.**
+
+Fonte: [V-075](Sources.md#v-075), [V-016](Sources.md#v-016),
+[ADR-0109](Decision.md#adr-0109).
+
+**Perché una slide:** perché le due metà stanno sulla stessa riga. È facile mostrare lo zero e
+tacere il prezzo, o mostrare il prezzo e tacere che il problema esiste davvero: un confronto che
+riporta solo la buona notizia non è un confronto. E il numero vero è −32 % solo dopo aver tolto
+l'avvio dell'interprete dal tempo a orologio — sui tempi lordi sembrava −23 %.
+
+---
+
+### «Può fare solo 6 chunk»
+
+> `analyzeShardKey` su `{stato: 1}` non risponde «è una chiave mediocre». Rifiuta: quella chiave
+> può produrre **sei** chunk, e sei chunk non si distribuiscono su niente. Una chiave a bassa
+> cardinalità non è lenta — è **inutilizzabile**, e il server lo dice prima che tu ci provi.
+
+Fonte: [V-081](Sources.md#v-081),
+[`02-architetture/sharded-cluster.md`](02-architetture/sharded-cluster.md#cosa-questa-pagina-non-dice).
+
+**Perché una slide:** perché la cardinalità della shard key è il primo errore che si fa, e questo è
+il modo più breve di spiegarla: non un consiglio, un rifiuto con un numero dentro.
+
+---
+
+### Il replica set legge più in fretta dello standalone, e non è un merito
+
+> Sotto lo stesso carico, mediana di lettura: replica set **2,0 ms**, standalone **3,4 ms**. Non
+> perché legga meglio — perché scrivendo cinque volte meno tiene i nodi molto meno occupati.
+
+Fonte: [V-079](Sources.md#v-079).
+
+**Perché una slide:** perché è il promemoria che in una misura di sistema nessuna colonna è
+indipendente dalle altre, e che il numero migliore della tabella può essere il sintomo del numero
+peggiore. Chi cita la riga delle letture senza quella delle scritture sta vendendo un vantaggio che
+non esiste.
+
+---
+
+### Un controllo che nessuno controlla è una firma in bianco
+
+> `RIGA_FONTI = re.compile(r"^\*\*Fonti:\*\* (.+)$", re.MULTILINE)` — `.` non attraversa il
+> newline. Un elenco di fonti che va a capo perde tutto ciò che sta sotto la prima riga, **in
+> silenzio**. Il difetto è emerso solo quando ha bocciato un file corretto: finché ha promosso
+> file rotti, nessuno poteva accorgersene.
+
+Fonte: [registro operativo, nota 217](registro-operativo-sviluppo.md),
+[`app/docs/17`](../app/docs/17-le-quattro-opzioni-e-i-debiti-di-misura.md#il-controllo-che-approvava-un-file-rotto).
+
+**Perché una slide:** perché è la stessa classe di rischio delle prove che passano per il motivo
+sbagliato, applicata all'automazione che dovrebbe proteggerci. Su centoundici ADR il buco ne
+toccava esattamente uno; per gli altri centodieci l'abitudine aveva funzionato **per caso**.

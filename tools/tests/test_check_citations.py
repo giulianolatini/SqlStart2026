@@ -27,6 +27,49 @@ def test_riconosce_un_adr_senza_fonti_dichiarato_organizzativo():
     assert parse_decisions(testo) == {"ADR-0015": set()}
 
 
+def test_legge_le_fonti_anche_quando_lelenco_va_a_capo():
+    """Un ADR con sei fonti non sta in una riga, e andare a capo non è un errore.
+
+    Finché il controllo leggeva solo la prima riga fisica, le citazioni sulle
+    righe di continuazione sparivano **in silenzio**: l'ADR sembrava citarne
+    meno, e la fonte che ci contava veniva dichiarata orfana. È lo stesso modo
+    di sbagliare che `ripetuti` esiste per impedire — restare coerenti agli
+    occhi del controllo proprio mentre si è perso un pezzo.
+    """
+    testo = """
+## ADR-0109 — Le opzioni di misura entrano dalla riga di comando
+**Fonti:** [V-075](Sources.md#v-075), [V-076](Sources.md#v-076),
+[V-079](Sources.md#v-079), [V-080](Sources.md#v-080),
+[ADR-0107](#adr-0107)
+"""
+    assert parse_decisions(testo) == {
+        "ADR-0109": {"V-075", "V-076", "V-079", "V-080"}
+    }
+
+
+def test_lelenco_delle_fonti_finisce_dove_finisce_il_blocco():
+    """Andare a capo allunga l'elenco, non lo apre su tutto il resto del file.
+
+    Il blocco si chiude alla prima riga vuota, alla prima etichetta in
+    grassetto e al primo separatore: senza questo, un ADR erediterebbe le
+    citazioni di quello dopo.
+    """
+    testo = """
+## ADR-0060 — Quanti membri ha un insieme
+**Fonti:** [V-052](Sources.md#v-052)
+---
+
+## ADR-0061 — Che cosa chiede la sonda
+**Fonti:** [S-024](Sources.md#s-024)
+
+**Conseguenze:** un paragrafo che nomina [S-999](Sources.md#s-999) e non lo cita.
+"""
+    assert parse_decisions(testo) == {
+        "ADR-0060": {"V-052"},
+        "ADR-0061": {"S-024"},
+    }
+
+
 def test_estrae_una_fonte_con_il_collegamento_inverso():
     testo = """
 <a id="s-001"></a>

@@ -41,6 +41,7 @@ from mongolab.cli import (
     mentre_disegna,
     nodo_di,
     regia_di,
+    riga_delle_opzioni,
     servizi_di,
     sink_di,
     strumento_di,
@@ -65,6 +66,7 @@ from mongolab.infrastructure.bersagli import (
     Credenziali,
     PuntoDiVista,
 )
+from mongolab.infrastructure.bersagli import opzioni_di_misura
 from mongolab.infrastructure.regia import RegiaAnnunciata, RegiaCompose
 from mongolab.presentation.null import NullSink
 from mongolab.presentation.plain import PlainSink
@@ -1072,3 +1074,104 @@ def test_il_restore_rinomina_verso_il_database_che_gli_si_chiede() -> None:
 
     assert riga[riga.index("--nsTo") + 1] == f"{DATABASE_RIPRISTINO}.*"
     assert riga[riga.index("--nsInclude") + 1] == f"{DATABASE}.*"
+
+
+# --- Le opzioni di misura del Task 16 --------------------------------------------------
+#
+# Quattro debiti di misura scritti nelle pagine delle architetture, e quattro opzioni per
+# saldarli (ADR-0109). La ragione per cui stanno qui e non in uno script di sonda è che
+# una voce `V-` deve poter citare **il comando che la riproduce**: uno script scritto per
+# l'occasione muore con la sessione, e la misura diventa una cifra di cui fidarsi.
+
+
+def test_workload_ha_le_opzioni_di_misura_del_task_16() -> None:
+    codice, testo = esegui("workload", "--help")
+
+    assert codice == 0
+    for opzione in (
+        "--writes",
+        "--journal",
+        "--retry-writes",
+        "--max-staleness",
+        "--max-pool-size",
+    ):
+        assert opzione in testo, opzione
+
+
+def test_le_tre_opzioni_a_due_facce_hanno_anche_la_faccia_negativa() -> None:
+    """`--no-journal` esiste, e non è simmetria per bellezza.
+
+    Il Passo 1 del Task 16 è un **confronto**: `j: true` contro il predefinito. Poterlo
+    scrivere per esteso da tutte e due le parti — `--no-journal` e `--journal` — vuol dire
+    che le due righe di comando della misura differiscono per una parola e non per
+    l'assenza di una parola, e chi rilegge la voce `V-` non deve ricostruire che cosa
+    fosse sottinteso nella prima.
+    """
+    codice, testo = esegui("workload", "--help")
+
+    assert codice == 0
+    assert "--no-journal" in testo
+    assert "--no-retry-writes" in testo
+
+
+def test_i_due_limiti_di_workload_non_si_danno_insieme() -> None:
+    """`--writes` e `--duration` insieme si fermano **prima** di aprire una connessione.
+
+    `WorkloadRunner.esegui` già rifiuta i due limiti insieme, ma lo fa dopo che il client
+    è stato costruito e la collezione di carico annunciata. È la stessa regola di
+    `--doc-size 2gb`: un argomento impossibile si scopre alla lettura degli argomenti.
+    """
+    codice, testo = esegui(
+        "workload", "--target", "rs", "--writes", "100", "--duration", "30"
+    )
+
+    assert codice != 0
+    assert "--writes" in testo
+    assert "--duration" in testo
+
+
+def test_senza_limiti_espliciti_workload_resta_la_riga_del_design() -> None:
+    """I 120 secondi del §6.4 restano il predefinito anche ora che `--writes` esiste.
+
+    Il predefinito è dovuto sparire dalla firma — con due limiti alternativi, un valore
+    predefinito su uno dei due li renderebbe sempre entrambi presenti — ma non è dovuto
+    sparire dal comportamento né dall'aiuto. Se `--help` smettesse di dire 120, la riga
+    del design e la riga eseguita comincerebbero a divergere in silenzio.
+    """
+    codice, testo = esegui("workload", "--help")
+
+    assert codice == 0
+    assert "120" in testo
+
+
+def test_senza_opzioni_di_misura_non_si_annuncia_niente() -> None:
+    assert riga_delle_opzioni({}) == ""
+
+
+def test_la_riga_annunciata_e_la_stessa_mappa_che_va_al_client() -> None:
+    """A schermo va la mappa, non una sua parafrasi.
+
+    Due funzioni che descrivono la stessa configurazione — una che la costruisce, una che
+    la racconta — divergono alla prima opzione aggiunta a una sola delle due, e il modo in
+    cui lo si scopre è un `.cast` che dichiara una misura diversa da quella eseguita.
+    """
+    misura = opzioni_di_misura(journal=True, retry_writes=False, max_pool_size=4)
+
+    assert (
+        riga_delle_opzioni(misura)
+        == "opzioni journal=True · retryWrites=False · maxPoolSize=4"
+    )
+
+
+def test_demo_failover_puo_spegnere_i_tentativi_del_driver() -> None:
+    """La perdita con `retryWrites=false` si misura dove c'è un failover.
+
+    `replica-set.md` intesta la misura accanto a V-033, che è la scena del failover: senza
+    un primario che cade, i tentativi del driver non hanno niente da riprendere e la
+    misura direbbe zero contro zero.
+    """
+    codice, testo = esegui("demo", "failover", "--help")
+
+    assert codice == 0
+    assert "--retry-writes" in testo
+    assert "--no-retry-writes" in testo

@@ -492,24 +492,24 @@ l'applicazione c'è. Questo task va eseguito **prima** delle pagine nuove del Ta
 scritta su misure che non esistono ancora è esattamente l'aria che quelle righe promettevano di
 evitare.
 
-- [ ] **Passo 1.** `j: true` contro lo standalone, la controprova di [V-016](../Sources.md#v-016) —
+- [x] **Passo 1.** `j: true` contro lo standalone, la controprova di [V-016](../Sources.md#v-016) —
       100 scritture confermate e sparite. La riserva dice che `j: true` dovrebbe azzerare la perdita
       **al prezzo della velocità**: misurare entrambi i lati, perché un confronto che riporta solo
       la buona notizia non è un confronto.
-- [ ] **Passo 2.** `retryWrites=false` e `maxStalenessSeconds` sul replica set, i due scoperti
+- [x] **Passo 2.** `retryWrites=false` e `maxStalenessSeconds` sul replica set, i due scoperti
       dichiarati in «cosa questa pagina non dice» di `replica-set.md`.
-- [ ] **Passo 3.** Il **confronto di prestazioni fra le tre architetture**, sotto lo stesso carico e
+- [x] **Passo 3.** Il **confronto di prestazioni fra le tre architetture**, sotto lo stesso carico e
       lo stesso dataset deterministico. È il debito che tutte e tre le pagine hanno intestato qui.
       Ogni numero porta la sua riserva sulla stessa riga, come vuole la disciplina del repository:
       un lab su un portatile non è un datacenter, e va scritto accanto al numero, non in una nota in
       fondo.
-- [ ] **Passo 4.** La saturazione di `maxPoolSize`, che il design chiama «materiale didattico» e il
+- [x] **Passo 4.** La saturazione di `maxPoolSize`, che il design chiama «materiale didattico» e il
       Task 5 ha lasciato in sospeso. E `analyzeShardKey`, scoperto dichiarato di
       `sharded-cluster.md`.
-- [ ] **Passo 5.** Ogni misura è una voce `V-` con esiti e riserve; le sezioni «cosa questa pagina
+- [x] **Passo 5.** Ogni misura è una voce `V-` con esiti e riserve; le sezioni «cosa questa pagina
       non dice» perdono le righe saldate e **guadagnano il collegamento**. Le righe non si
       cancellano in silenzio: diventano rimandi.
-- [ ] **Passo 6.** `make docs-check`. Commit: `docs: i debiti di misura, saldati sotto carico`.
+- [x] **Passo 6.** `make docs-check`. Commit: `docs: i debiti di misura, saldati sotto carico`.
 
 ---
 

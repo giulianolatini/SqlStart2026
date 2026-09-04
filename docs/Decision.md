@@ -6792,3 +6792,208 @@ fixture cancella.
 
 **Fonti:** [M-053](../app/docs/Sources.md#m-053), [M-042](../app/docs/Sources.md#m-042),
 [A-017](../app/docs/Sources.md#a-017), [ADR-0099](#adr-0099)
+
+---
+
+<a id="adr-0109"></a>
+## ADR-0109 — Le opzioni di misura entrano dalla riga di comando, e chi non chiede non riceve
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** il Task 16 doveva saldare quattro debiti che quattro pagine avevano intestato
+all'applicazione Python: `j: true` sullo standalone, `retryWrites=false` e `maxStalenessSeconds` sul
+replica set, la saturazione di `maxPoolSize`. Il piano li descrive come lavoro di documentazione — i
+suoi file sono `Sources.md`, `Decision.md` e le tre pagine di `02-architetture`.
+
+Nessuna delle quattro misure era però producibile con `mongolab` così com'era. `connetti` accettava
+`**extra`, quindi le opzioni si potevano passare da Python, ma non dalla riga di comando: ogni
+misura sarebbe stata uno script buttato via alla fine della sessione, e la voce `V-` che la cita
+avrebbe puntato a un comando che nessuno può rieseguire. Un repository che pretende che ogni numero
+porti il proprio comando non può registrare numeri prodotti da comandi che non esistono più.
+
+C'era anche un problema di confrontabilità. `workload` accettava solo `--duration`, e due corse a
+pari durata contro due architetture diverse fanno **quantità di lavoro diverse**: è la lezione di
+[ADR-0107](#adr-0107), dove il limite del Blocco 3 è diventato un conteggio proprio perché due corse
+a tempo non si confrontano.
+
+**Decisione:** quattro opzioni di misura su `workload`, una su `demo failover`, e un limite
+alternativo a `--duration`.
+
+- `--journal/--no-journal`, `--retry-writes/--no-retry-writes`, `--max-staleness N`,
+  `--max-pool-size N` su `mongolab workload`.
+- `--retry-writes/--no-retry-writes` anche su `mongolab demo failover`, che è la scena in cui quella
+  differenza si vede.
+- `--writes N` su `workload`, mutuamente esclusivo con `--duration`: quando si confrontano
+  architetture, il limite è il lavoro fatto, non il tempo passato.
+
+Le quattro opzioni passano per una funzione sola, `opzioni_di_misura`, che sta in
+`infrastructure/bersagli.py` e restituisce una `dict[str, Any]` con i nomi dell'**URI** —
+`journal`, `retryWrites`, `readPreference`, `maxStalenessSeconds`, `maxPoolSize`. La CLI non importa
+niente di pymongo: le sue opzioni sono `bool | None`, `int | None`, e la guardia del repository che
+tiene `pymongo` sotto `infrastructure/` resta intatta.
+
+Quattro regole dentro quella funzione, e sono la decisione vera:
+
+1. **Chi non chiede non riceve.** Un argomento lasciato a `None` non compare nella mappa. Il client
+   di partenza è byte per byte quello di sempre, quindi ogni misura senza opzioni resta confrontabile
+   con tutte le misure precedenti.
+2. **La staleness non viaggia mai da sola.** `maxStalenessSeconds` senza una preferenza di lettura è
+   un `ConfigurationError` in costruzione; la funzione aggiunge sempre `readPreference`.
+3. **`secondary` e non `secondaryPreferred`.** Un ripiego sul primario nasconderebbe una selezione
+   fallita facendola sembrare riuscita — e il punto di quella misura è vedere quando la selezione
+   fallisce ([V-077](Sources.md#v-077)).
+4. **I nomi sono quelli dell'URI, non quelli di Python.** Chi legge la riga annunciata sullo schermo
+   deve poterla incollare in una stringa di connessione.
+
+Ed è annunciata: `riga_delle_opzioni` compone `opzioni journal=True · retryWrites=False` a partire
+**dalla stessa mappa** che va a `connetti`, non dai parametri da cui è stata costruita. Se un giorno
+la mappa e l'annuncio divergessero, sarebbe perché la mappa è cambiata — e allora l'annuncio deve
+cambiare con lei. Mappa vuota, riga assente: un annuncio che dice «nessuna opzione» sarebbe rumore
+su una registrazione.
+
+**Conseguenze:** le sette misure del Task 16 ([V-075](Sources.md#v-075) … [V-081](Sources.md#v-081))
+citano tutte un comando `make app-workload` che chiunque può rieseguire. Il gancio che il Task 5
+aveva lasciato in `WorkloadRunner` — «`scrittori` è il parametro che il Task 16 farà salire sopra
+`maxPoolSize`» — si chiude, e con l'altra manopola la prova è diventata anche più pulita: si tiene
+fermo il numero di scrittori e si stringe il pool ([V-080](Sources.md#v-080)).
+
+La superficie della CLI cresce di sei opzioni, che è il costo. È contenuto dal fatto che siano tutte
+opzioni di **misura**: nessuna cambia che cosa la scena racconta, tutte cambiano solo come il client
+è configurato mentre la racconta.
+
+`**extra` resta su `connetti` e non diventa un parametro tipato: gli altri usi non sono spariti —
+`connect=False` nelle prove unitarie, `event_listeners` per il ponte SDAM.
+
+**Alternative scartate.**
+
+- *Script di prova, buttati a fine sessione.* È ciò che il repository chiama esplicitamente aria: la
+  voce `V-` citerebbe un comando irripetibile, e la misura non sarebbe verificabile da nessuno.
+- *Una variabile d'ambiente per ogni opzione.* Non comparirebbe nella riga di comando che finisce
+  nella voce `V-`, quindi due corse con configurazioni diverse sarebbero indistinguibili nella
+  documentazione — che è esattamente il difetto da evitare.
+- *Un'unica opzione `--client-opt chiave=valore` ripetibile.* Più corta da scrivere e senza tipi:
+  `--client-opt maxstaleness=90` passerebbe la validazione della CLI e fallirebbe in pymongo, dove
+  l'errore non sa più da quale opzione venga.
+- *Lasciare `--duration` come unico limite.* Rende impossibile il Passo 3 del piano: tre architetture
+  a pari tempo fanno lavori diversi, ed è la stessa ragione per cui ADR-0107 ha scelto un conteggio.
+
+**Fonti:** [V-075](Sources.md#v-075), [V-076](Sources.md#v-076), [V-077](Sources.md#v-077),
+[V-079](Sources.md#v-079), [V-080](Sources.md#v-080),
+[M-054](../app/docs/Sources.md#m-054), [M-055](../app/docs/Sources.md#m-055),
+[ADR-0107](#adr-0107), [ADR-0088](#adr-0088)
+
+---
+
+<a id="adr-0110"></a>
+## ADR-0110 — `analyzeShardKey` resta fuori da `mongolab`: risponde una volta, e l'applicazione emette flussi
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** il Passo 4 del Task 16 chiede di saldare `analyzeShardKey`, scoperto dichiarato di
+[`sharded-cluster.md`](02-architetture/sharded-cluster.md). La domanda che si apre subito è dove
+metterlo: un sottocomando di `mongolab`, come `demo sharding`, o un comando amministrativo citato
+nella pagina?
+
+`mongolab` è costruita intorno a una cosa sola: un flusso di eventi di dominio che tre rese
+disegnano in modi diversi ([ADR-0091](#adr-0091)). Ogni comando esistente produce eventi mentre
+qualcosa accade nel tempo — scritture che riescono e falliscono, un primario che cambia, un dump che
+avanza. `analyzeShardKey` non ha niente di tutto questo: si dà una volta, legge una collezione ferma,
+e risponde con un documento.
+
+**Decisione:** `analyzeShardKey` non entra in `mongolab`. La misura si esegue come comando
+amministrativo attraverso il `mongos`, e la pagina la cita così — con il comando per intero, come
+ogni altra misura del repository.
+
+**Conseguenze:** [V-081](Sources.md#v-081) cita un `docker compose run --entrypoint python` invece di
+un sottocomando di `mongolab`. È una riga più lunga, e l'onestà di questa decisione sta nel dire che
+è il costo: chi vuole rifare la misura scrive più caratteri.
+
+In cambio, nessuna porta nuova, nessun evento nuovo, e la guardia che tiene gli eventi di dominio a
+nove ([ADR-0103](#adr-0103)) non deve discutere se un verdetto sia un evento. La conseguenza
+didattica è la migliore delle due: durante il talk il confine si può nominare a voce — «questo non è
+un comando dell'applicazione, è un comando di amministrazione, e la differenza è che non c'è niente
+da guardare mentre accade».
+
+**Alternative scartate.**
+
+- *`mongolab shard-key --analyze`.* Costringerebbe a inventare un evento per un verdetto che non ha
+  durata, o a bucare la resa facendo stampare qualcosa che non passa dal flusso — cioè a rompere
+  proprio la proprietà che rende l'applicazione un esempio.
+- *Una porta `ShardKeyAnalyzer` accanto a `QueryPlanner`.* Sette porte hanno una ragione ciascuna
+  scritta nel design; un'ottava per un comando che si dà una volta sola sarebbe una porta per un
+  caso, non per un ruolo.
+- *Metterlo dentro `demo sharding`.* Quella scena confronta due corse di carico; un verdetto sulla
+  chiave lì dentro sarebbe una schermata che risponde a una domanda che nessuno ha fatto in quel
+  momento.
+
+**Fonti:** [V-081](Sources.md#v-081), [S-067](Sources.md#s-067), [ADR-0091](#adr-0091),
+[ADR-0103](#adr-0103), [ADR-0064](#adr-0064)
+
+---
+
+<a id="adr-0111"></a>
+## ADR-0111 — Il confronto fra architetture si pubblica in coppia, e la riserva del ferro viaggia con ogni numero
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** il Passo 3 del Task 16 ha prodotto il confronto che tutte e tre le pagine di
+`02-architetture` si erano intestate. Ha prodotto anche una scoperta che rende la pubblicazione una
+decisione invece di una trascrizione: **nel lab così com'è, il numero dello standalone non misura lo
+standalone**. Il container dell'applicazione ha `cpus: 1.0`, e a quel ritmo l'interprete Python
+satura la propria CPU prima che il server saturi la sua. Con quattro CPU al client lo standalone
+guadagna il 40 %; il replica set il 3 % e lo sharded il 9 %, cioè rumore
+([V-079](Sources.md#v-079)).
+
+Ci sono quindi due numeri veri e diversi per la stessa riga, e la domanda è quale va sulla slide.
+
+Il numero del lab predefinito è quello che chiunque riproduce con un `make`, ed è quindi l'unico
+onesto verso chi rifà la prova a casa. Il numero a quattro CPU è quello che confronta le
+architetture invece dei limiti di Compose, ed è l'unico onesto verso la domanda che il confronto
+pone.
+
+**Decisione:** si pubblicano **entrambi**, sempre insieme, e il rapporto citabile è quello del
+controllo. Ogni numero porta la propria riserva **sulla stessa riga**, e non in una nota in fondo:
+la disciplina del repository su questo è esplicita, e un lab su un portatile non è un datacenter.
+
+La riserva che viaggia con ogni numero del confronto è duplice e va scritta tutta e due le volte:
+
+1. **Le tre architetture non hanno lo stesso ferro**, per costruzione — 1,0 CPU al `mongod` singolo,
+   0,75 a ogni membro del replica set, 0,5 a ogni shard dietro un router da 0,5. Il budget è stato
+   distribuito perché il portatile potesse tenere accesi tutti e tre gli stack insieme, che è la
+   ragione per cui il lab esiste. Una parte della distanza è la scelta di Compose, non
+   l'architettura, e non è separabile senza cambiare il lab.
+2. **La semantica dell'ack non è la stessa.** Lo standalone conferma con `w: 1` senza giornale, il
+   replica set con `w: "majority"` e giornale sulla maggioranza, lo shard con `w: "majority"` su un
+   membro solo — perché in questo cluster **ogni shard ha un membro solo**. Chi confronta i tre
+   numeri senza dirlo sta misurando la durabilità e chiamandola velocità.
+3. **Un dettaglio di stato sposta il numero di un ordine di grandezza.** Con un membro del replica
+   set in pausa la maggioranza si raggiunge ancora, e la resa crolla di un fattore ventisette
+   ([V-078](Sources.md#v-078)). Il rapporto pubblicato vale per tre stack **sani e a riposo**: non
+   è una proprietà dell'architettura, è una fotografia con le sue condizioni scritte accanto. La
+   riserva viaggia con il numero anche per questo — la stessa architettura, in un altro stato, dà
+   un altro numero, e chi cita 6,2× senza dire «a riposo» sta citando una coincidenza.
+
+**Conseguenze:** le tre pagine di `02-architetture` ricevono lo stesso rimando a
+[V-079](Sources.md#v-079) invece di tre tabelle divergenti, e la tabella sta in un posto solo. Chi
+prepara la slide ha due numeri da far stare dove ce ne stava uno; è il prezzo, ed è preferibile a una
+slide che dice 4,7× quando il numero vero è 6,2×.
+
+Lo stack 01 guadagna un debito che questa decisione non salda: il limite di CPU del suo `mongod` non
+è parametrizzato — è scritto `cpus: 1.0` a mano, mentre gli stack 02 e 03 hanno `CPU_MEMBRO`,
+`CPU_SHARD`, `CPU_MONGOS`. Finché resta così non si può sapere a quale ritmo lo standalone
+saturerebbe davvero, e [V-079](Sources.md#v-079) lo dichiara fra le riserve.
+
+**Alternative scartate.**
+
+- *Pubblicare solo il numero del lab predefinito.* È riproducibile e sbagliato: darebbe 4,7× fra
+  standalone e replica set quando il rapporto vero è 6,2×, e la differenza non è un dettaglio.
+- *Pubblicare solo il numero del controllo.* Nessuno lo riprodurrebbe con un `make`, e il repository
+  smetterebbe di poter dire «ogni numero porta il suo comando».
+- *Pareggiare il ferro fra i tre stack e rimisurare.* Cambierebbe i tre stack che il talk descrive,
+  per far tornare una tabella. Le architetture sono il soggetto, il confronto è un capitolo.
+- *Mettere la riserva in una nota in fondo alla pagina.* Una nota in fondo non arriva sulla slide,
+  e il numero sì.
+
+**Fonti:** [V-078](Sources.md#v-078), [V-079](Sources.md#v-079),
+[ADR-0031](#adr-0031), [ADR-0032](#adr-0032),
+[ADR-0046](#adr-0046), [ADR-0068](#adr-0068), [ADR-0072](#adr-0072)
