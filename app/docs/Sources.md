@@ -2709,3 +2709,48 @@ il puntatore e il motivo per cui riguardano `mongolab`.
   rapporto fra i due è più solido delle due cifre. Il costo fisso è misurato con `DOVE=host`; da
   dentro la rete Compose ci sarebbe in più la creazione del container, che è molto più grande e
   altrettanto fissa, e non è stata misurata.
+
+
+<a id="m-058"></a>
+
+### M-058 — Le 634 prove unitarie passano in 3,9 s con il socket di Docker che non esiste
+
+- **Data:** 2026-09-04
+- **Comando:** la suite unitaria eseguita due volte, la seconda con il client Docker puntato su un
+  socket inesistente:
+
+```
+make app-test
+DOCKER_HOST=unix:///percorso/che/non/esiste.sock make app-test
+```
+
+- **Output:**
+
+```
+634 passed in 3.96s          4,24 real   2,18 user   0,34 sys
+634 passed in 3.86s          4,14 real   2,10 user   0,33 sys
+```
+
+- **Che cosa dimostra:** che l'affermazione «la suite unitaria non ha bisogno di Docker» è una
+  misura e non un proposito. Con `DOCKER_HOST` che punta a un socket che non esiste, qualunque prova
+  che provasse a parlare con un demone fallirebbe subito: **nessuna lo fa**, e il conteggio è
+  identico. I due tempi sono indistinguibili — 3,96 s contro 3,86 s — il che dice anche che nessuna
+  prova sta pagando un tempo di attesa nascosto verso un servizio esterno.
+
+  Il numero interessante non è il 3,9 ma il rapporto con l'altra suite: l'integrazione, che gli
+  stack li accende davvero, ci mette **circa 110 secondi**, cioè quasi trenta volte tanto. È quella
+  differenza a rendere praticabile eseguire le unitarie dopo ogni modifica, ed è il ritorno concreto
+  delle dipendenze che puntano verso l'interno: gli adattatori veri stanno tutti dietro una porta, e
+  al loro posto la suite mette un doppio.
+
+  La separazione non è un'abitudine, è configurata: `testpaths = ["tests/unit"]` in
+  `app/pyproject.toml` fa sì che un `pytest` nudo — quello che si digita distrattamente — non
+  raccolga l'integrazione, che va chiesta per nome con `make app-test-integration`.
+- **Riserve:** una coppia di corse su una macchina sola, a stack accesi (che è il caso peggiore per
+  questa prova: se una dipendenza da Docker ci fosse, con i container in piedi avrebbe potuto
+  passare inosservata proprio nella corsa senza `DOCKER_HOST`). La prova esclude il **demone**
+  Docker, non ogni forma di rete: un test che si collegasse a un `mongod` già in ascolto su
+  `localhost` non verrebbe intercettato da questa misura. Che non ce ne siano si appoggia alla
+  configurazione di `testpaths` e alla revisione dei marcatori `stack01`/`stack02`/`stack03`, non a
+  un esperimento. I 110 s dell'integrazione sono un valore osservato più volte durante i Task 8-16,
+  non una misura ripetuta apposta qui.

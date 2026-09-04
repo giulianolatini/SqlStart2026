@@ -6551,3 +6551,129 @@ integrazione, `mypy --strict` verde su 66 file. Le porte del dominio restano **s
 **nove**: questo task non ha toccato il dominio. Prossimo passo: **Task 17** del
 [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), le tre pagine che `docs/README.md`
 promette — e adesso hanno le misure di cui parlare.
+
+---
+
+## 2026-09-04 — `feature/04`, Task 17: le tre pagine dovute, e l'ultima cosa che il repository diceva di sé e non era più vera
+
+Il Task 17 non scrive codice. Scrive le tre pagine che [`docs/README.md`](README.md) intestava a
+questo branch da settimane — `06-sviluppo/architettura-app.md`, `06-sviluppo/tdd-e-doppi.md`,
+`03-amministrazione/statistiche-monitoraggio.md` — e finché non esistevano, quelle righe dell'indice
+erano promesse travestite da collegamenti.
+
+Ne escono tre pagine per **1 037 righe**, **sei** verifiche empiriche nuove (`V-082`…`V-087`), una
+misura lato applicazione (`M-058`), **due** ADR, sette citazioni per le slide, e sette righe d'indice
+o di stato che il repository dedicava a sé stesso e che non erano più vere. Le suite non si muovono
+— 634 unitarie, 58 di integrazione, 168 per gli strumenti, `mypy --strict` verde su 66 file — perché
+non è stata toccata una riga di `app/src/`.
+
+**La pagina sul monitoraggio non è un elenco di campi.** La forma ovvia sarebbe stata commentare i
+campi di `serverStatus`, ed è anche la forma inutile: quell'elenco esiste già, è il manuale, ed è più
+completo di qualunque cosa questo repository possa scrivere. La campagna di misura ha però prodotto
+sei risultati che il manuale non dice e che contraddicono ciascuno una lettura corrente, e la pagina
+si organizza attorno a quelli ([ADR-0112](Decision.md#adr-0112)): `serverStatus` risponde **45, 52 e
+36 sezioni** sui tre nodi e al router ne mancano **venti**, fra cui `wiredTiger`, `globalLock` e
+`repl`, senza che nessun errore lo segnali ([V-082](Sources.md#v-082)); sotto un carico che satura il
+client il server non mette in coda **niente** e dichiara **67 µs** di latenza dove il client ne
+misura **2,8 ms** ([V-083](Sources.md#v-083), [V-079](Sources.md#v-079)); il pool dei ticket di
+scrittura non è la costante 128 che circola ma sta fra **7 e 12** e si muove da solo; il ritardo di
+replica letto nel modo standard vale **10 000 ms su un insieme sano a riposo** e diventa **negativo**
+se lo si chiede al secondario ([V-084](Sources.md#v-084)); ogni scrittura ripetibile costa
+**un'operazione replicata in più** ([V-085](Sources.md#v-085)); e il router conta le operazioni del
+client alla singola unità ma somma i filesystem degli shard, dichiarando un disco grande il doppio di
+quello che esiste, senza dire che uno dei due shard non ha visto **nessuna** operazione
+([V-086](Sources.md#v-086)).
+
+La conseguenza operativa più scomoda è che **il ritardo di replica non si mostra dal vivo**, e la
+pagina dice perché invece di esibirlo con una nota accanto: la nota non arriva sulla slide, il numero
+sì ([ADR-0111](Decision.md#adr-0111)). Al suo posto la pagina indica `opcountersRepl.insert` sul
+secondario — che nella misura coincide **esattamente** con le scritture confermate al client, 9 139
+contro 9 139 — e `metrics.repl.buffer`, che è la coda vera.
+
+**Il rapporto di compressione è una proprietà dei dati, non del motore.** Stessa istanza, stessa
+`snappy`: `lab.ordini` restituisce **3,06×**, la collezione di carico **0,97×** — l'archiviazione è
+più grande dei dati. La zavorra dei documenti di carico è base64 di uno `shake_128`, cioè byte
+pseudocasuali, e i byte casuali non si comprimono; il 3 % in più è il costo delle strutture di
+WiredTiger su un contenuto che non le ripaga. Nella stessa misura è emerso che il database `lab`
+aveva **38 collezioni, 37 delle quali di carico**, per ~3 GB di `dataSize` che non interessano più a
+nessuno: `dbStats` le somma tutte ([V-087](Sources.md#v-087)).
+
+**«La suite unitaria non ha bisogno di Docker» è diventata una misura.** Era un'affermazione ripetuta
+da tredici task e mai provata; basta un `import` di troppo perché smetta di essere vera senza rumore.
+Eseguendo la suite con la variabile del client Docker puntata a un socket che non esiste: **634
+passate in 3,86 s**, contro 3,96 s dell'esecuzione normale ([M-058](../app/docs/Sources.md#m-058)).
+È il numero su cui poggia tutta la pagina sull'architettura, che lo mette accanto ai ~110 s della
+suite di integrazione.
+
+**Due pagine sullo stesso codice che `app/docs/` documenta già.** Senza una regola, l'esito è
+garantito: o le pagine nuove riassumono i diciassette capitoli, e allora divergono alla prima
+modifica del codice, oppure li ripetono, e il repository ha due verità sullo stesso soggetto.
+[ADR-0113](Decision.md#adr-0113) risolve distinguendo **per lettore** e non per argomento —
+`app/docs/` per chi apre i sorgenti, `docs/06-sviluppo/` per chi non li aprirà mai — e ne trae una
+regola verificabile a occhio: **nelle due pagine nuove non compare nessun blocco di codice
+dell'applicazione**. Il legame fra le due sedi diventa reciproco, e un collegamento rotto lo trova
+`make docs-check`.
+
+**L'ultima cosa che il repository diceva di sé e non era più vera.** Il `README.md` di radice
+dichiarava `app/` «**non ancora nel repository**». Correggendola è saltata fuori la riga
+immediatamente sopra: `docker/` diceva che «`01-standalone` è nel repository, gli altri due no»,
+mentre la tabella quindici righe più in basso li dava tutti e tre dentro. Due righe della stessa
+tabella, invecchiate insieme e per lo stesso motivo — nessuno rilegge una riga di stato quando ne sta
+correggendo un'altra.
+
+Resta nel registro, non annotata, la riga dell'entrata del 2 settembre che dice «la cartella
+`06-sviluppo/` non esiste ancora»: era vera quando è stata scritta ed è diventata falsa lo stesso
+giorno. Un registro cronologico non si riscrive; il saldo si legge qui.
+
+### Note di metodo
+
+218. **Un'assenza di dipendenza si prova togliendo la dipendenza, non leggendo gli `import`.**
+    «Questa suite non ha bisogno di Docker» era stata affermata per tredici task senza che nessuno
+    l'avesse tolta di mezzo per vedere. La lettura statica non basta: un adattatore costruito per
+    comodità dentro una prova, un `import` in cima a un modulo di supporto, e la dipendenza rientra
+    senza rumore. La regola pratica: si punta il client all'endpoint inesistente — un socket che non
+    c'è, un host che non risolve — e si riesegue. Se la suite passa **identica**, l'affermazione è
+    una misura; se cambia anche solo un tempo, era una speranza. Costa una corsa, e vale per
+    qualunque dipendenza si dichiari assente.
+
+219. **Due sedi che documentano lo stesso codice si distinguono per lettore, non per argomento.**
+    Dividere per argomento è la scelta istintiva e non funziona, perché gli argomenti sono gli
+    stessi: se una sede tratta «le porte» e l'altra pure, l'unica differenza possibile è la
+    lunghezza, cioè un riassunto — e un riassunto diverge alla prima modifica del codice. Dividere
+    per lettore dà invece due mestieri diversi sullo stesso soggetto: *com'è fatto* accanto al
+    codice, *che cosa si guadagna* dove sta il pubblico. La regola pratica: la distinzione va scritta
+    in testa a ciascuna delle due pagine, e le va data una forma **verificabile a occhio**. Qui è
+    «nella pagina divulgativa non compare nessun blocco di codice»: chi la viola se ne accorge
+    mentre scrive, non in revisione sei mesi dopo.
+
+220. **Una media di sistema è la media di una popolazione che nessuno ha dichiarato.** `dbStats`
+    riportava `avgObjSize` 1 984 B per il database `lab`, che non descrive **nessuna** delle sue
+    collezioni: è la media pesata su una popolazione dominata dalle 37 collezioni di carico da
+    2 048 B, mentre i documenti veri ne pesano 121. Lo stesso vale per il rapporto di compressione,
+    che sul database non significa niente e sulla collezione significa tutto — 3,06× contro 0,97×.
+    La regola pratica: prima di citare una media che uno strumento offre già calcolata, chiedersi
+    **di che cosa** è la media; se la popolazione è mista e nessuno l'ha scelta, il numero descrive
+    la storia dell'ambiente e non il sistema.
+
+221. **Le righe di stato di un elenco invecchiano insieme, e si correggono insieme.** Il piano
+    chiedeva di aggiornare *la* riga che dichiarava l'applicazione inesistente; la riga sopra, sugli
+    stack, era falsa da tre branch. Nessuno la rileggeva perché non era quella che si stava
+    correggendo. La regola pratica: quando si aggiorna un'affermazione che il repository fa su sé
+    stesso, si rilegge **tutta la tabella o l'elenco che la contiene**, e si controlla che non la
+    contraddica un'altra parte dello stesso documento — qui la stessa pagina si smentiva a quindici
+    righe di distanza.
+
+222. **Una metrica senza il nodo su cui leggerla è una ricetta rotta.** Le tre architetture di questo
+    lab rispondono a `serverStatus` con tre insiemi di sezioni diversi, e al `mongos` ne mancano
+    venti — fra cui quelle che un manuale di monitoraggio nomina per prime. Il modo in cui si
+    sbaglia non è ricevere un errore: è ricevere un oggetto valido in cui la chiave cercata non c'è,
+    e leggerla come uno zero perfettamente plausibile. La regola pratica: in una procedura di
+    monitoraggio ogni metrica si scrive con il nodo accanto; e prima di concludere che un valore sia
+    zero, si verifica che la **sezione** esista su quel ruolo.
+
+Stato aggiornato: decisioni fino ad **ADR-0113**, verifiche fino a **V-087**, note di metodo fino
+alla **222**. Le suite non si muovono: **168** prove per gli strumenti, **634** per l'applicazione
+più **58** di integrazione, `mypy --strict` verde su 66 file. Porte **sette**, eventi **nove**:
+questo task non ha toccato `app/src/`. Prossimo passo: **Task 18** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), l'ultimo — la chiusura di
+`feature/04` e la sua PR.

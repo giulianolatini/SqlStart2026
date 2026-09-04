@@ -1482,10 +1482,82 @@ quattro misure — e le due prove che hanno chiuso un buco in uno strumento.
 
 ---
 
+## Task 17 — Le pagine per chi non aprirà mai questi file
+
+Il Task 17 è l'unico della feature che non tocca `app/src/`. Scrive tre pagine in `docs/`, e due
+delle tre parlano di questa applicazione: `06-sviluppo/architettura-app.md` e
+`06-sviluppo/tdd-e-doppi.md`. Il che pone un problema che riguarda direttamente questo registro —
+gli stessi argomenti hanno già diciassette capitoli qui.
+
+### Due sedi sullo stesso codice, e la regola che le tiene distinte
+
+Senza una regola l'esito è garantito: o le pagine nuove riassumono questi capitoli, e allora
+divergono alla prima modifica del codice, oppure li ripetono, e il repository ha due verità sullo
+stesso soggetto.
+
+[ADR-0113](../../docs/Decision.md#adr-0113) risolve distinguendo **per lettore** e non per argomento.
+`app/docs/` scrive per chi apre i sorgenti: nomi di classi, firme, file, prove — è la documentazione
+normativa dell'applicazione, e quando il codice cambia cambia lei. `docs/06-sviluppo/` scrive per chi
+non li aprirà mai, racconta **che cosa si guadagna** e **come lo si è misurato**, e per ogni dettaglio
+realizzativo rimanda al capitolo di qui che lo possiede.
+
+La regola operativa che ne discende è verificabile a occhio: **nelle due pagine nuove non compare
+nessun blocco di codice dell'applicazione**. Un nome di classe sì, quando serve a puntare; il corpo
+no. Se scrivendo viene voglia di copiare dieci righe da qui, quelle dieci righe stanno già dove
+devono e va messo un collegamento.
+
+Il legame è reciproco: il paragrafo «Rapporto con `docs/`» dell'[indice](README.md) smette di
+promettere le due pagine al futuro e le collega. Un collegamento rotto, da una parte o dall'altra, lo
+trova `make docs-check`.
+
+### La sola misura nuova: la suite unitaria senza Docker
+
+«La suite unitaria non ha bisogno di Docker» è scritta in questo registro dal Task 1 e ripetuta in
+[05](05-tipi-prove-e-guardie.md). Non era mai stata **provata**. È il tipo di affermazione che smette
+di essere vera senza rumore: basta un adattatore costruito per comodità dentro una prova, o un
+`import` in cima a un modulo di supporto, e la dipendenza rientra.
+
+Eseguendo la suite con la variabile del client Docker puntata a un socket che non esiste, l'esito è
+**634 passate in 3,86 s**, contro 3,96 s dell'esecuzione normale
+([M-058](Sources.md#m-058)) — cioè nessuna differenza oltre il rumore. La riserva è dichiarata nella
+fonte: la sonda esclude il **demone** Docker, non ogni forma di rete.
+
+Il numero serve alla pagina sull'architettura, che lo mette accanto ai ~110 s della suite di
+integrazione. È il modo in cui quella pagina risponde alla domanda «che cosa ha reso questa forma»
+senza usare un aggettivo.
+
+### Che cosa questo task ha lasciato intatto
+
+Nessuna porta nuova, nessun evento nuovo, nessun file nuovo per mypy, nessuna prova nuova. Le sei
+verifiche empiriche del Task 17 (`V-082`…`V-087`) sono misure **sul server**, prese con `mongosh`, di
+cui `mongolab` è stato solo il generatore di carico: stanno in `docs/Sources.md` e la pagina che le
+usa è quella di amministrazione. Qui resta la sola `M-058`, perché misura l'applicazione.
+
+### Numeri
+
+| | Prima | Dopo |
+|---|---|---|
+| Prove unitarie | 634 | 634 |
+| Prove di integrazione | 58 | 58 |
+| File controllati da mypy | 66 | 66 |
+| Prove degli strumenti | 168 | 168 |
+| ADR del repository | 111 | **113** |
+| Verifiche empiriche del repository | 81 | **87** |
+| Fonti esterne nel registro dell'app | 17 | 17 |
+| Misure nel registro dell'app | 57 | **58** |
+| Porte del dominio | 7 | 7 |
+| Eventi del dominio | 9 | 9 |
+
+Una sola colonna dell'applicazione si muove, ed è quella delle misure. È la firma giusta per un task
+che documenta invece di costruire: se si fossero mosse anche le altre, vorrebbe dire che scrivendo la
+documentazione si stava scrivendo codice — cioè che il codice non era finito.
+
+---
+
 ## Che cosa manca
 
-Restano da eseguire i task 17 e 18: le tre pagine che `docs/README.md` promette, e le registrazioni
-del Blocco 2 con la chiusura della feature. Le pagine dei principi dicono, dove descrivono il futuro,
+Resta da eseguire il task 18, l'ultimo: le registrazioni del Blocco 2 e la chiusura della feature con
+la sua PR. Le tre pagine che `docs/README.md` prometteva esistono dal Task 17. Le pagine dei principi dicono, dove descrivono il futuro,
 che lo stanno facendo, e vanno riscritte man mano che il futuro arriva: l'avviso di stato in testa a
 [04-eventi-del-driver-e-concorrenza.md](04-eventi-del-driver-e-concorrenza.md) è stato riscritto al
 Task 7, e il §6.3 di [06](06-carico-tentativi-e-latenze.md) al Task 16, perché entrambi
@@ -1560,6 +1632,7 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | Senza permessi su `config` il primario resta ignoto, e una `Distribuzione` senza primario si legge come «non è un cluster» | [ADR-0104, conseguenze](../../docs/Decision.md#adr-0104) | dichiarata: è la degradazione che c'era prima, ristretta a un caso che questo laboratorio non incontra |
 | `Distribuzione` non vieta la quarta combinazione, `primario None` e `distribuita True` | [ADR-0104, alternative](../../docs/Decision.md#adr-0104) | dichiarata: sarebbe una guardia contro chi costruisce l'oggetto, non contro un fatto del mondo, in un dominio che di validazione non ne ha altrove |
 | Il `ping` di `_scopri()` è una chiamata in più su ogni ispettore appena costruito | [ADR-0108, conseguenze](../../docs/Decision.md#adr-0108) | dichiarata: succede una volta sola per client, e il monitoraggio di PyMongo fa il resto |
+| Il carico non sa chiedere un write concern diverso dal predefinito: la corsa con `w: 1` che isolerebbe i 18 390 µs del primario non è eseguibile | [V-083, riserve](../../docs/Sources.md#v-083) e [ADR-0112, conseguenze](../../docs/Decision.md#adr-0112) | aperto al **Task 17**. `opzioni_di_misura` espone `--journal`, `--retry-writes` e `--max-pool-size`, non il write concern. Il campo `opLatencies.writes` vale 67 µs sullo standalone e 18 390 µs sul primario di un replica set: la lettura coerente è che sul primario il cronometro del server includa l'attesa della maggioranza, ma per provarlo serve la stessa corsa con `w: 1`, e l'opzione oggi non c'è |
 
 ---
 

@@ -522,20 +522,20 @@ evitare.
 `docs/README.md` intesta tre pagine a questo branch: finché non esistono, quelle righe sono promesse
 invece che collegamenti.
 
-- [ ] **Passo 1.** `architettura-app.md`: stratificazione, porte, modello a eventi, composition
+- [x] **Passo 1.** `architettura-app.md`: stratificazione, porte, modello a eventi, composition
       root. La pagina spiega **perché** le dipendenze puntano verso l'interno mostrando che cosa si
       guadagna — la suite unitaria che gira senza Docker — non citando un principio.
-- [ ] **Passo 2.** `tdd-e-doppi.md`: separazione fra suite unitaria e di integrazione, fake contro
+- [x] **Passo 2.** `tdd-e-doppi.md`: separazione fra suite unitaria e di integrazione, fake contro
       mock, e «come si prova il failover senza aspettarlo», che è la domanda a cui `FakeClock`
       risponde. Il materiale l'hanno prodotto i Task 4-6: qui si scrive, non si inventa.
-- [ ] **Passo 3.** `statistiche-monitoraggio.md`: `serverStatus`, `dbStats`, metriche di replica,
+- [x] **Passo 3.** `statistiche-monitoraggio.md`: `serverStatus`, `dbStats`, metriche di replica,
       **cosa guardare sotto carico**. Le misure sono quelle del Task 16.
-- [ ] **Passo 4.** Nel `README.md` di radice, la riga che dichiara l'applicazione non ancora
+- [x] **Passo 4.** Nel `README.md` di radice, la riga che dichiara l'applicazione non ancora
       esistente smette di essere vera e va aggiornata. È l'ultimo punto in cui il repository dice di
       sé una cosa che non è più così.
-- [ ] **Passo 5.** Le frasi che meritano una slide vanno in `docs/citazioni-riportare-slide.md`
+- [x] **Passo 5.** Le frasi che meritano una slide vanno in `docs/citazioni-riportare-slide.md`
       **adesso**, non a fine progetto.
-- [ ] **Passo 6.** `make docs-check`. Commit: `docs: le tre pagine dovute a feature/04`.
+- [x] **Passo 6.** `make docs-check`. Commit: `docs: le tre pagine dovute a feature/04`.
 
 ---
 

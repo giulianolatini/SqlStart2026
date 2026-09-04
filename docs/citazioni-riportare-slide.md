@@ -2986,3 +2986,108 @@ Fonte: [registro operativo, nota 217](registro-operativo-sviluppo.md),
 **Perché una slide:** perché è la stessa classe di rischio delle prove che passano per il motivo
 sbagliato, applicata all'automazione che dovrebbe proteggerci. Su centoundici ADR il buco ne
 toccava esattamente uno; per gli altri centodieci l'abitudine aveva funzionato **per caso**.
+
+---
+
+### Il ritardo di replica di un insieme sano vale diecimila millisecondi
+
+> Su un replica set sano e a riposo, il ritardo letto nel modo standard dichiara **10 000 ms**,
+> quantizzati al secondo. Chiesto al secondario invece che al primario, lo stesso ritardo diventa
+> **negativo**. Il ritardo vero di questo lab, misurato altrimenti, è ≈ **1,6 ms**.
+> Fonte: [V-084](Sources.md#v-084), [V-027](Sources.md#v-027).
+
+**Perché una slide:** perché è la metrica che tutti citano, e su un insieme in ottima salute produce
+il numero più allarmante della serata. Non misura il ritardo: misura la distanza fra l'ultima
+scrittura replicata e adesso, e a riposo non ci sono scritture da replicare. È il caso più puro di
+allarme falso strutturale — cresce quando il sistema **non ha niente da fare**. La pagina sul
+monitoraggio ha deciso di non mostrarla dal vivo e di dire perché
+([ADR-0112](Decision.md#adr-0112)).
+
+---
+
+### Il server dichiara 67 microsecondi, il client ne misura 2 800
+
+> Sotto lo stesso carico: `opLatencies.writes` lato server **67 µs**, p50 misurato dal client
+> **2,8 ms**. Un fattore quaranta. Nessuno dei due numeri è sbagliato: misurano due cose diverse, e
+> quella che l'utente subisce è la seconda.
+> Fonte: [V-083](Sources.md#v-083), [V-079](Sources.md#v-079).
+
+**Perché una slide:** perché il numero del server è quello che finisce sui cruscotti, ed è quello
+che assolve il database. La differenza è tutto ciò che sta fuori dal cronometro del server —
+attraversamento di rete, driver, attesa in coda lato client — cioè quasi tutta la latenza. Sullo
+stesso campo, sul primario di un replica set, il valore sale a **18 390 µs**: non è la stessa
+metrica più grande, è una metrica che **cambia significato** con l'architettura.
+
+---
+
+### Il pool dei ticket di scrittura non è 128, e non sta fermo
+
+> Il numero 128 circola come una costante di WiredTiger. Misurato dentro questi container, il pool
+> di scrittura sta fra **7 e 12**, e si muove da solo mentre il carico gira: nella 7.0 lo dimensiona
+> un controllore.
+> Fonte: [V-083](Sources.md#v-083).
+
+**Perché una slide:** perché è la premessa nascosta di ogni allarme scritto come «ticket disponibili
+sotto la soglia X». La soglia si sceglie rispetto a un totale che non è costante e che nessuno
+dichiara: l'allarme non misura la saturazione, misura quanto il controllore ha deciso di concedere
+in quel momento.
+
+---
+
+### `dataSize` non è spazio su disco: tre volte sui dati veri, zero sulla zavorra
+
+> Stessa istanza, stesso motore, stessa compressione. `lab.ordini`: `size`/`storageSize` = **3,06×**.
+> La collezione di carico: **0,97×** — l'archiviazione è più grande dei dati. La zavorra è base64 di
+> uno `shake_128`, cioè byte pseudocasuali, e i byte casuali non si comprimono.
+> Fonte: [V-087](Sources.md#v-087).
+
+**Perché una slide:** perché il rapporto di compressione non è una proprietà del database ma **dei
+dati**, e un solo numero medio su un database misto non dice quanto disco serve né quanto si sta
+risparmiando. Il corollario pratico costa poco e si dimentica sempre: si misura sulla collezione,
+non si stima sul database.
+
+---
+
+### Il ritorno di un'architettura si misura in secondi, non in aggettivi
+
+> 634 prove unitarie, **3,86 secondi**, con la variabile d'ambiente del client Docker puntata a un
+> socket che non esiste. La suite di integrazione, sulle stesse macchine, ne chiede **circa 110** e
+> undici container.
+> Fonte: [M-058](../app/docs/Sources.md#m-058).
+
+**Perché una slide:** perché «le dipendenze puntano verso l'interno» è una frase che nessuno può
+contestare e nessuno può verificare, mentre quattro secondi contro due minuti si contano. Ed è la
+differenza fra una suite che si esegue dopo ogni modifica e una che si esegue quando ci si ricorda —
+cioè fra una rete di sicurezza e un rituale.
+
+---
+
+### Un contratto copiato non è un contratto
+
+> Dodici verifiche scritte **una volta sola**, eseguite in due posti: dal doppio in memoria nella
+> suite veloce, dall'adattatore vero contro lo stack acceso. Alla prima esecuzione hanno trovato due
+> bugiardi, e il secondo era MongoDB.
+> Fonte: [`docs/06-sviluppo/tdd-e-doppi.md`](06-sviluppo/tdd-e-doppi.md),
+> [M-017](../app/docs/Sources.md#m-017), [M-022](../app/docs/Sources.md#m-022).
+
+**Perché una slide:** perché la tentazione è duplicare il corpo delle verifiche nei due file, e
+sembra innocua: sono identiche. Divergono al primo fallimento, quando qualcuno corregge la copia che
+ha davanti per farla passare e l'altra resta indietro **senza che niente diventi rosso**. Un doppio
+ben scritto è convincente, ed è precisamente per questo che serve qualcuno che lo interroghi con le
+stesse domande dell'originale.
+
+---
+
+### Una regola che nessuna prova esegue non è una regola: è un commento
+
+> «Dopo trenta secondi senza primario, smetti di ritentare» è rimasta una frase nel documento di
+> design per mesi, perché nessuno mette in una suite veloce una prova che aspetta mezzo minuto. Con
+> il tempo preso da una porta invece che dall'orologio di sistema, la stessa regola si verifica in
+> centesimi di secondo, con il valore atteso **esatto** invece che tollerante: sei letture; e con la
+> pazienza a 1001 ms, sette.
+> Fonte: [`docs/06-sviluppo/tdd-e-doppi.md`](06-sviluppo/tdd-e-doppi.md).
+
+**Perché una slide:** perché mostra che cosa compra davvero l'inversione delle dipendenze, in un
+caso in cui il guadagno non è teorico: non solo la prova diventa istantanea, ma diventa **più
+severa**. Un millisecondo di pazienza in più è un giro in più — cioè si verifica che la soglia
+scatti quando deve *e non prima*, distinzione che con un'attesa vera non sarebbe misurabile.

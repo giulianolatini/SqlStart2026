@@ -6997,3 +6997,143 @@ saturerebbe davvero, e [V-079](Sources.md#v-079) lo dichiara fra le riserve.
 **Fonti:** [V-078](Sources.md#v-078), [V-079](Sources.md#v-079),
 [ADR-0031](#adr-0031), [ADR-0032](#adr-0032),
 [ADR-0046](#adr-0046), [ADR-0068](#adr-0068), [ADR-0072](#adr-0072)
+
+
+---
+
+<a id="adr-0112"></a>
+
+## ADR-0112 — La pagina sul monitoraggio mostra sei numeri che smentiscono la lettura ingenua, e dichiara inutilizzabile la metrica di ritardo invece di esibirla
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** `docs/README.md` intesta a `feature/04` una pagina
+`03-amministrazione/statistiche-monitoraggio.md` descritta così: «`serverStatus`, `dbStats`,
+metriche di replica, cosa guardare sotto carico». La forma ovvia di quella pagina è un elenco
+commentato dei campi di `serverStatus`. È anche la forma inutile: quell'elenco esiste già, è il
+manuale, ed è più completo di qualunque cosa questo repository possa scrivere
+([ADR-0024](#adr-0024) separa da tempo il materiale divulgativo dalla documentazione normativa).
+
+La campagna di misura fatta per questa pagina ha però prodotto **sei risultati che il manuale non
+dice e che contraddicono ciascuno una lettura corrente**:
+
+1. `serverStatus` non risponde la stessa cosa su tre nodi — 45, 52 e 36 sezioni — e al router ne
+   mancano venti, fra cui `wiredTiger`, `globalLock`, `locks` e `repl`, senza che nessun errore lo
+   segnali ([V-082](Sources.md#v-082)).
+2. Sotto un carico che satura il client, il server non mette in coda **niente**, e la latenza che
+   dichiara — 67 µs — è quaranta volte più piccola di quella che il client misura
+   ([V-083](Sources.md#v-083)). Lo stesso campo sul primario di un replica set vale 18 390 µs: non è
+   la stessa metrica più grande, è una metrica che **cambia significato** con l'architettura.
+3. Il pool dei ticket di scrittura non è la costante 128 che circola: nella 7.0 lo dimensiona un
+   controllore e in questi container sta fra 7 e 12, muovendosi da solo ([V-083](Sources.md#v-083)).
+4. Il ritardo di replica letto come lo legge `rs.printSecondaryReplicationInfo()` è **quantizzato al
+   secondo**, vale **10 000 ms su un insieme sano a riposo** e diventa **negativo** se lo si chiede
+   al secondario ([V-084](Sources.md#v-084)) — mentre il ritardo vero di questo lab, misurato
+   diversamente, è ≈ 1,6 ms ([V-027](Sources.md#v-027)).
+5. Un router conta le operazioni del client alla singola unità, ma somma i filesystem degli shard e
+   dichiara un disco grande il doppio di quello che esiste; e non dice che uno dei due shard, per
+   tutta la corsa, non ha visto **nessuna** operazione ([V-086](Sources.md#v-086)).
+
+6. `dataSize` non è spazio su disco, e il rapporto con `storageSize` è una proprietà **dei
+   dati**, non del motore: 3,06× sulla collezione di dati veri, **0,97×** su quella di carico, la
+   cui zavorra pseudocasuale non si comprime ([V-087](Sources.md#v-087)).
+
+A questi si aggiunge il raddoppio di `apply.ops` dovuto alle scritture ripetibili
+([V-085](Sources.md#v-085)): una metrica di replica che vale il doppio del carico vero per una
+ragione che sta nel driver, non nel database.
+
+**Decisione:** la pagina si organizza **attorno alla domanda «cosa guardare, e cosa non credere»**,
+non attorno alla struttura di `serverStatus`. Ogni sezione parte da una metrica che si guarderebbe
+per istinto, mostra il numero misurato, e dice perché quel numero non risponde alla domanda che si
+credeva di aver posto. Il campo di riferimento resta il manuale, e la pagina ci rimanda.
+
+Tre conseguenze operative della decisione, esplicite perché sono ciò che la distingue da un elenco:
+
+- **Il ritardo di replica non si mostra dal vivo, e la pagina dice perché.** Non è una rinuncia
+  didattica: è il risultato. La metrica che tutti citano, su questo lab, produce il valore più
+  allarmante nello stato migliore. Al suo posto la pagina indica `opcountersRepl.insert` sul
+  secondario, che nella misura coincide **esattamente** con le scritture confermate al client
+  (9 139 = 9 139), e `metrics.repl.buffer`, che è la coda vera.
+- **Ogni metrica viene dichiarata insieme al nodo su cui va letta.** Le tre architetture del lab
+  hanno tre insiemi di sezioni diversi, e una ricetta senza il nodo è una ricetta rotta.
+- **I numeri della pagina sono quelli del Task 16 e di questa campagna, con le loro riserve
+  accanto**, secondo [ADR-0111](#adr-0111). Nessun numero di questa pagina è preso dal manuale.
+
+**Conseguenze:** la pagina è più corta di un elenco di campi e più difficile da scrivere, perché
+ogni sezione deve avere una misura sotto. Chi cerca «cosa vuol dire `wiredTiger.cache.bytes read
+into cache`» non lo trova qui, e la pagina glielo dice in «Cosa questa pagina non dice» invece di
+lasciarglielo scoprire. Nasce inoltre un debito che questa decisione non salda: la conclusione che i
+18 390 µs del primario contengano l'attesa della maggioranza è coerente ma **non isolata** — la
+prova che la chiuderebbe è la stessa corsa con `w: 1` sul replica set, ed è dichiarata fra le
+riserve di [V-083](Sources.md#v-083).
+
+**Alternative scartate.**
+
+- *L'elenco commentato dei campi di `serverStatus`.* Duplica il manuale, invecchia a ogni versione
+  minore, e nessuna delle cinque scoperte ci starebbe dentro: sono tutte relazioni fra un numero e
+  un'aspettativa, non definizioni di campi.
+- *Mostrare comunque il ritardo di replica, con una nota.* La nota non arriva sulla slide e il
+  numero sì ([ADR-0111](#adr-0111)). Mostrare 10 000 ms di ritardo su un insieme sano davanti a un
+  pubblico significa insegnare un allarme falso.
+- *Rimandare la pagina finché la prova con `w: 1` non chiude il punto sui 18 ms.* Le altre quattro
+  scoperte sono complete e la pagina è dovuta a questo branch. Un debito dichiarato in una riserva
+  costa meno di una pagina che non esiste.
+- *Mettere le misure in `app/docs/` perché le ha prodotte l'applicazione.* Sono misure **sul
+  server**, prese con `mongosh`, di cui l'applicazione è solo il generatore di carico. Chi le cerca
+  le cerca in `03-amministrazione`.
+
+**Fonti:** [V-027](Sources.md#v-027), [V-079](Sources.md#v-079), [V-082](Sources.md#v-082),
+[V-083](Sources.md#v-083), [V-084](Sources.md#v-084), [V-085](Sources.md#v-085),
+[V-086](Sources.md#v-086), [V-087](Sources.md#v-087),
+[ADR-0024](#adr-0024), [ADR-0111](#adr-0111)
+
+---
+
+<a id="adr-0113"></a>
+
+## ADR-0113 — Le pagine divulgative sull'applicazione rimandano ad `app/docs/` invece di riassumerlo, e si distinguono per il lettore, non per l'argomento
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** il Task 17 crea `docs/06-sviluppo/architettura-app.md` e
+`docs/06-sviluppo/tdd-e-doppi.md`. Gli stessi argomenti — stratificazione, porte, eventi, radice di
+composizione, doppi di prova, separazione fra suite — hanno già diciassette capitoli in
+[`app/docs/`](../app/docs/README.md), scritti dai Task 1-16 mentre il codice nasceva. Senza una
+regola, due esiti sono garantiti: o le pagine nuove riassumono quelle vecchie, e allora divergono
+alla prima modifica del codice, oppure le ripetono, e allora il repository ha due verità sullo
+stesso soggetto. [ADR-0024](#adr-0024) distingue già il materiale divulgativo da quello normativo,
+ma non dice che cosa fare quando i due parlano dello stesso codice.
+
+**Decisione:** la distinzione non è per argomento ma **per lettore**, e la si dichiara in testa a
+ciascuna delle due pagine.
+
+- `app/docs/` scrive per **chi apre i sorgenti**: nomi di classi, firme, file, prove. È la
+  documentazione normativa dell'applicazione, e quando il codice cambia cambia lei.
+- `docs/06-sviluppo/` scrive per **chi non li aprirà mai** — il pubblico del talk, chi valuta se
+  adottare l'impianto, chi legge il repository da fuori. Racconta **che cosa si guadagna** e **come
+  lo si è misurato**, e per ogni dettaglio realizzativo rimanda al capitolo di `app/docs/` che lo
+  possiede.
+
+La regola operativa che ne discende: **nelle due pagine nuove non compare nessun blocco di codice
+dell'applicazione**. Un nome di classe sì, quando serve a puntare; il corpo no. Un numero
+misurato sì, sempre con la sua fonte. Se scrivendo viene voglia di copiare dieci righe da
+`app/docs/`, quelle dieci righe stanno già dove devono e va messo un collegamento.
+
+**Conseguenze:** le due pagine restano corte e invecchiano piano — un rinomino di classe non le
+tocca. In cambio non si possono leggere da sole per capire *come* è fatta una cosa: sono una porta,
+e chi vuole i dettagli fa un salto in più. È il prezzo giusto, perché il lettore per cui sono
+scritte quel salto non lo farebbe comunque. `app/docs/README.md` smette di promettere le due pagine
+al futuro e le collega; il legame diventa reciproco, e un collegamento rotto lo trova
+`make docs-check`.
+
+**Alternative scartate.**
+
+- *Una pagina sola in `docs/` che riassume tutto `app/docs/`.* È la forma che diverge più in fretta,
+  perché riassumere è ricopiare con meno controlli.
+- *Nessuna pagina in `docs/`, solo il rimando a `app/docs/`.* Il piano le pretende, e con ragione:
+  chi legge `docs/` non sa che `app/docs/` esiste, e soprattutto `app/docs/` risponde a «com'è
+  fatto», non a «perché conviene». La seconda domanda è quella del talk.
+- *Spostare i capitoli di `app/docs/` sotto `docs/06-sviluppo/`.* Allontanerebbe la documentazione
+  dal codice che descrive, che è esattamente ciò che la fa marcire.
+
+**Fonti:** nessuna (decisione organizzativa), [ADR-0024](#adr-0024), [ADR-0078](#adr-0078)

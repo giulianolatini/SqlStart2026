@@ -4307,7 +4307,7 @@ apre e si autentica. Una media su dieci giri di cui uno è il riscaldamento non 
   set è a riposo e la collezione di prova è vuota; sotto il carico della demo dell'applicazione i
   numeri saranno altri, e vanno rimisurati là invece che estrapolati da qui.
 - **Data:** 2026-08-31
-- **Usata da:** ADR-0043, ADR-0046
+- **Usata da:** ADR-0043, ADR-0046, ADR-0112
 
 ---
 
@@ -8670,7 +8670,7 @@ lab        primary: shard1rs   partitioned: False
   **client**: il limite del server non è parametrizzato nello stack 01 e non è stato toccato, quindi
   non si sa a quale ritmo lo standalone saturerebbe davvero.
 - **Data:** 2026-09-04
-- **Usata da:** ADR-0109, ADR-0111
+- **Usata da:** ADR-0109, ADR-0111, ADR-0112
 
 ---
 
@@ -8863,5 +8863,454 @@ queryAnalysisWriterIntervalSecs = 90
   diventato disponibile: solo che entro 150 s c'era.
 - **Data:** 2026-09-04
 - **Usata da:** ADR-0110
+
+---
+
+<a id="v-082"></a>
+
+### V-082 — `serverStatus` non risponde la stessa cosa su tre nodi: 45, 52 e 36 sezioni, e il router ne perde venti
+
+- **Comandi:** su ciascuno dei tre stack accesi insieme,
+
+```
+docker exec -i <nodo> mongosh --quiet --host localhost [--username … --password …] admin \
+  --eval 'const s = db.serverStatus();
+           const k = Object.keys(s).sort();
+           print("N=" + k.length); print("BYTES=" + bsonsize(s)); print(k.join(","))'
+```
+
+  con `<nodo>` fra `mongo-standalone`, `mongo-rs-1` (il primario) e `sh-mongos`.
+- **Ambiente:** MongoDB 7.0.40, stack 01, 02 e 03 accesi contemporaneamente, tutti a riposo.
+- **Che cosa si voleva sapere:** se «guarda `serverStatus`» sia un consiglio che si può dare senza
+  dire su quale nodo, cioè se uno script di monitoraggio scritto su un `mongod` funzioni contro un
+  `mongos`.
+
+- **Esito, primo punto — i tre insiemi di sezioni, e le loro dimensioni:**
+
+| nodo | sezioni di primo livello | dimensione BSON della risposta |
+|---|---|---|
+| `mongo-standalone` | **45** | 73 614 byte |
+| `mongo-rs-1` (primario) | **52** | 75 865 byte |
+| `sh-mongos` (router) | **36** | **26 445 byte** |
+
+- **Esito, secondo punto — lo standalone è un sottoinsieme stretto del replica set.** Verificato
+  come insiemi: tutte e 45 le sezioni dello standalone esistono sul primario. Le **sette** in più
+  del replica set sono `$clusterTime`, `defaultRWConcern`, `operationTime`, `oplogTruncation`,
+  `queryAnalyzers`, `readPreferenceCounters`, `repl`. Chi passa da uno stack all'altro non perde
+  niente in quella direzione: aggiunge.
+
+- **Esito, terzo punto — il router non è un sottoinsieme: toglie venti sezioni e ne aggiunge
+  quattro.** Le **venti** che mancano rispetto al primario:
+
+```unknown
+batchedDeletes      catalogStats        electionMetrics   featureCompatibilityVersion
+flowControl         globalLock          indexBuilds       indexStats
+locks               opcountersRepl      oplogTruncation   profiler
+readConcernCounters readPreferenceCounters                repl
+shardSplits         storageEngine       tenantMigrations  twoPhaseCommitCoordinator
+wiredTiger
+```
+
+  Le **quattro** che solo lui ha: `health`, `hedgingMetrics`, `sharding`, `shardingStatistics`.
+  Le sezioni comuni a tutti e tre i nodi sono **28**.
+
+  L'elenco delle venti non è una curiosità: contiene esattamente le sezioni su cui si appoggia
+  qualunque ricetta di monitoraggio scritta per un `mongod` — `wiredTiger` per la cache e i ticket,
+  `globalLock` per le code, `locks` per la contesa, `repl` e `opcountersRepl` per la replica. Uno
+  script che le legge non dà un errore contro un router: `serverStatus` risponde `ok: 1` e le
+  chiavi non ci sono. Il fallimento arriva più tardi, sotto forma di `undefined`, e nella riga
+  sbagliata. La mancanza di `wiredTiger` era già stata misurata da un'altra direzione
+  ([V-058](#v-058)); questa prova dice **quante altre** ne mancano.
+
+- **Esito, quarto punto — la risposta del router pesa un terzo.** 26 445 byte contro 73 614: la
+  differenza non è solo il numero di sezioni ma la loro profondità, perché ciò che manca è la parte
+  che descrive un motore di archiviazione che il router non ha.
+
+- **Riserve:** una lettura per nodo, a riposo. L'insieme delle sezioni dipende dalla versione e —
+  per alcune — dal fatto che la funzione sia mai stata usata da quando il processo è partito, il
+  che vale per esempio per `queryAnalyzers` sul primario, comparso dopo la prova di
+  [V-081](#v-081). Le sezioni si contano di primo livello: `metrics` è una sola voce qui e contiene
+  decine di sotto-alberi. Il conteggio dice **quali capitoli esistono**, non quanti numeri ci sono
+  dentro.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112
+
+---
+
+<a id="v-083"></a>
+
+### V-083 — Sotto carico il server non mette in coda niente, e la latenza che dichiara non è quella che vede il client
+
+- **Comandi:** un campionatore di `serverStatus` una volta al secondo per 45 s, aperto **prima** del
+  carico e chiuso dopo, dentro una sola sessione `mongosh` — un `docker exec` per campione costerebbe
+  mezzo secondo di orologio e falserebbe la cadenza:
+
+```
+docker exec -i mongo-standalone mongosh --quiet --host localhost admin --eval "$(cat campiona.js)"
+```
+
+  e in parallelo, dall'host:
+
+```
+make app-workload TARGET=standalone \
+  ARGS="--duration 30 --doc-size 2k --writers 8 --readers 4 --sink null"
+```
+
+  Il campionatore stampa una riga TSV con `opcounters`, `connections`,
+  `wiredTiger.concurrentTransactions.write` (`out`, `available`, `totalTickets`, `queueLength`,
+  `totalTimeQueuedMicros`), `globalLock.currentQueue`, `globalLock.activeClients`,
+  `wiredTiger.cache`, `opLatencies.writes` e `mem.resident`. Sul primario del replica set lo stesso
+  con in più il ritardo di ogni membro.
+- **Ambiente:** MongoDB 7.0.40, stack 01 e 02, `mongod` con `cpus: 1.0` e `mem_limit: 1024m` (stack
+  01) e `0.75` / `768m` per membro (stack 02); applicazione nel container con `cpus: 1.0`, cioè il
+  lab predefinito di [V-079](#v-079).
+- **Che cosa si voleva sapere:** che cosa **guardare** mentre il carico gira, e se i numeri che il
+  server dichiara raccontino la stessa storia dei percentili misurati dal client.
+
+- **Esito, primo punto — due corse sullo standalone, viste dal server:**
+
+| | corsa A | corsa B |
+|---|---|---|
+| inserimenti totali nei 30 s attivi | 42 242 | 50 664 |
+| inserimenti/s medi (min–max) | 1 408 (1 151–1 698) | **1 689** (1 170–1 851) |
+| `globalLock.currentQueue.writers` | **0** sempre | **0** sempre |
+| `globalLock.currentQueue.readers` | **0** sempre | **0** sempre |
+| `concurrentTransactions.write.queueLength` | **0** sempre | **0** sempre |
+| `totalTimeQueuedMicros`, delta sui 45 s | **0 µs** | **9 840 µs** |
+| `opLatencies.writes` medio | **84 µs** | **67 µs** |
+| cache WiredTiger | 191 → 207 MiB, dirty max 9,2 MiB | 188 → 206 MiB, dirty max 8,9 MiB |
+| `mem.resident` | 462–463 MB | 461–462 MB |
+| connessioni create nei 45 s | 35 | 36 |
+
+  **Il server non ha mai messo in coda una scrittura.** Nella corsa B ha accumulato in tutto 9,8
+  **millisecondi** di attesa per un ticket, distribuiti su 50 664 scritture: 0,19 µs a scrittura.
+  Nella corsa A, zero. Le tre metriche che si guardano per prime quando «il database è lento» —
+  coda dei writer, coda dei ticket, tempo accumulato in coda — dicono all'unisono che il collo di
+  bottiglia **non era qui**, ed è la conferma lato server di ciò che [V-079](#v-079) aveva concluso
+  dal lato del client: in quel lab il numero era del client.
+
+- **Esito, secondo punto — 67 µs contro 2,8 ms, cioè un fattore quaranta.** Il server dichiara una
+  latenza media di scrittura di 67 µs; il client, sulla stessa corsa, misura un p50 di **2,8 ms**
+  ([V-079](#v-079)). I due numeri non sono in disaccordo: misurano tratti diversi dello stesso
+  percorso. `opLatencies` conta il tempo passato dentro il comando, il client conta anche
+  serializzazione, socket, attraversamento della rete Compose e ritorno. **Guardare solo
+  `opLatencies` su uno standalone significa non vedere il 97 % del tempo che l'utente aspetta.**
+
+- **Esito, terzo punto — sul replica set lo stesso numero dice quasi tutto.** Stessa misura sul
+  primario dello stack 02: 10 928 scritture, `opLatencies.writes` medio **18 390 µs**. Contro i 67
+  µs dello standalone è un fattore **274**, mentre il rapporto di resa fra le due architetture è
+  6,2× ([V-079](#v-079)). La differenza fra i due server sta quindi in ciò che il primario conta e
+  lo standalone no: l'attesa della conferma di maggioranza rientra nella durata del comando. Sul
+  replica set il numero del server e quello del client sono dello stesso ordine (p50 9,0 ms, p95 ≈
+  75 ms); sullo standalone no. **Non è la stessa metrica che diventa più grande: è una metrica che
+  cambia significato quando cambia l'architettura.**
+
+- **Esito, quarto punto — il pool dei ticket di scrittura non è 128, ed è vivo.** Il valore che
+  circola come costante di WiredTiger è 128. Misurato:
+
+```unknown
+standalone, corsa A:  totalTickets 12 → 11   (available 11–12, out 0–1)
+standalone, corsa B:  totalTickets  9 →  8   (available  6–9,  out 0–3)
+primario rs:          totalTickets  8 →  7   (available … ,    out 0–1)
+```
+
+  Nella 7.0 il pool è governato da un controllore che lo dimensiona da solo, e in questi container
+  si è assestato fra **7 e 12**. Chi allarma su «ticket disponibili sotto una soglia fissa» sta
+  confrontando una misura viva con una costante che non vale più. Il numero da guardare è
+  `queueLength` — quanti stanno aspettando — non `available`.
+
+- **Riserve:** due corse sullo standalone e una sul replica set, tutte di 30 s di carico dentro una
+  finestra di campionamento di 45 s. Il campionamento a un secondo **non vede** picchi più brevi: una
+  coda che si forma e si smaltisce fra due campioni non lascia traccia in `queueLength`, e per
+  questo la conclusione «non ha mai messo in coda» si appoggia a `totalTimeQueuedMicros`, che è
+  cumulativo e non può nascondere niente. L'interpretazione del terzo punto — che i 18 ms del
+  primario contengano l'attesa della maggioranza — è coerente con i numeri ma **non è stata
+  isolata**: servirebbe la stessa corsa con `w: 1` sul replica set. Il costo del campionatore è
+  stato controllato a parte e sta nel rumore (+1,4 % e −5,9 % su due coppie, segno che cambia).
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112
+
+---
+
+<a id="v-084"></a>
+
+### V-084 — Il ritardo di replica letto nel modo standard è inutilizzabile qui: quantizzato al secondo, 10 s a riposo, negativo dal secondario
+
+- **Comandi:** durante la stessa corsa di [V-083](#v-083), sul primario dello stack 02, il ritardo
+  di ogni membro calcolato come lo calcola `rs.printSecondaryReplicationInfo()`:
+
+```
+const r = db.adminCommand({ replSetGetStatus: 1 });
+// optimeDate del primario meno optimeDate di ciascun membro
+```
+
+  e in parallelo, su `mongo-rs-2` (secondario), `metrics.repl.apply.batches.num`,
+  `metrics.repl.apply.ops`, `opcountersRepl.insert`, `metrics.repl.buffer` e la vista che il
+  secondario ha del proprio ritardo.
+- **Ambiente:** MongoDB 7.0.40, stack 02 sano, tre membri `1P,2S,3S` per tutti i 45 campioni.
+- **Che cosa si voleva sapere:** quale metrica di replica si può mostrare dal vivo, dato che il
+  ritardo reale su questo lab è già stato misurato in **≈ 1,6 ms** con un metodo diretto
+  ([V-027](#v-027)).
+
+- **Esito, primo punto — la serie del ritardo, per il membro 2, campionata al secondo:**
+
+```unknown
+0, 10000, 10000, 0, 0, 0, 0, 1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000,
+1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000, 1000,
+2000, 1000, 0, 1000, 0, 0, 0, 0, 0, 0, 0, 0, 0     (millisecondi)
+```
+
+  Il membro 3 dà la stessa forma. Tre fatti in una riga sola:
+
+  1. **I valori sono solo 0, 1000 e 2000.** Non esistono valori intermedi perché `optimeDate` ha
+     granularità di **un secondo**: la differenza fra due date arrotondate al secondo è un multiplo
+     di mille millisecondi. Un ritardo di 1,6 ms non è rappresentabile in questa metrica.
+  2. **I due campioni da 10 000 ms sono a riposo**, prima che il carico partisse, su un insieme
+     sano. Sono la firma del fatto che senza scritture l'optime non avanza: il primario ha scritto
+     dieci secondi fa, il secondario ha applicato tutto, e la sottrazione dice «dieci secondi
+     indietro» mentre il secondario è allineato. **Il valore più allarmante della serie è quello
+     dello stato migliore.**
+  3. **Sotto carico oscilla fra 1 000 e 2 000** con la regolarità di un metronomo, perché la vista
+     che il primario ha degli altri arriva dagli heartbeat, che sono ogni 2 000 ms
+     (`heartbeatIntervalMillis`, [V-031](#v-031)): si sta guardando un dato vecchio fino a due
+     secondi, arrotondato al secondo.
+
+- **Esito, secondo punto — dal secondario lo stesso conto è negativo.** Ventidue campioni su 45
+  danno **−1 000 ms**, e uno **−10 000 ms**:
+
+```unknown
+0, 0, 0, 0, -10000, 0, 0, 0, 0, -1000, 0, -1000, 0, -1000, … , 0, 0, 0, 0, 0
+```
+
+  Il secondario conosce il proprio optime **adesso** e quello del primario **dall'ultimo
+  heartbeat**: quando applica in fretta, il suo optime è più recente di quello che crede sia del
+  primario, e la differenza cambia segno. Un ritardo negativo non è un errore da segnalare: è la
+  prova che i due termini della sottrazione **non sono contemporanei**. Chiunque scriva un allarme
+  su questa metrica deve decidere prima da quale nodo la legge.
+
+- **Esito, terzo punto — che cosa si può guardare invece, misurato sul secondario nei 30 s di
+  carico:**
+
+| metrica | delta | lettura |
+|---|---|---|
+| `opcountersRepl.insert` | **9 139** | **identico** agli inserimenti confermati al client |
+| `metrics.repl.apply.batches.num` | 6 501 | ≈ 217 lotti/s sui 30 s attivi |
+| `metrics.repl.apply.ops` | 18 280 | 2,8 operazioni per lotto |
+| `metrics.repl.buffer.count` (massimo) | **3** | il secondario non ha mai accumulato arretrato |
+| `metrics.repl.buffer.sizeBytes` (massimo) | 7 023 | sette kilobyte |
+
+  `opcountersRepl.insert` sul secondario coincide **esattamente** con il numero che il client ha
+  visto confermare. È la metrica che risponde alla domanda «sta applicando tutto?» senza dipendere
+  da nessun orologio. E il buffer, che è la coda vera del percorso di replica, non ha mai contenuto
+  più di tre operazioni: **il secondario non era in ritardo, e nessuna metrica temporale sapeva
+  dirlo.**
+
+- **Esito, quarto punto — sul primario le metriche di applicazione non si muovono.**
+  `metrics.repl.apply.batches.num` sul primario ha delta **0** su tutti i 45 campioni, pur avendo un
+  valore cumulativo non nullo — l'eredità di quando era secondario. Il valore assoluto non dice il
+  ruolo; solo il delta lo dice. Su un cruscotto che mostra il totale, primario e secondario si
+  somigliano.
+
+- **Riserve:** una sola corsa, un solo secondario campionato dei due. La serie del ritardo è di
+  questo lab, con tre container sulla stessa macchina: su nodi separati da una rete vera i valori
+  sarebbero più grandi e la quantizzazione al secondo peserebbe meno. La coincidenza di
+  `opcountersRepl.insert` con le scritture confermate vale perché il carico fa **solo inserimenti**
+  a documento singolo; con aggiornamenti, batch o scritture ripetibili il conto cambia — è
+  esattamente quello che misura [V-085](#v-085). `heartbeatIntervalMillis` è il valore predefinito,
+  non una scelta di questo repository.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112
+
+---
+
+<a id="v-085"></a>
+
+### V-085 — Ogni scrittura ripetibile costa un'operazione replicata in più: `apply.ops` raddoppia
+
+- **Comandi:** notato che sul secondario `metrics.repl.apply.ops` cresceva del **doppio** degli
+  inserimenti (18 280 contro 9 139, [V-084](#v-084)), tre prove in scala decrescente per isolarne la
+  causa. La decisiva è una coppia, a parità di tutto il resto:
+
+```
+make app-workload TARGET=rs ARGS="… --no-retry-writes"     # 800 inserimenti
+make app-workload TARGET=rs ARGS="… --retry-writes"        # 800 inserimenti
+```
+
+  con `opcountersRepl` e `metrics.repl.apply.ops` letti sul secondario prima e dopo ciascuna.
+- **Ambiente:** MongoDB 7.0.40, stack 02, tre membri sani.
+- **Che cosa si voleva sapere:** perché il secondario applica il doppio delle operazioni di quante
+  ne arrivano.
+
+- **Esito, primo punto — le due prove che hanno ristretto il campo.** Un `insertMany` controllato di
+  100 documenti **non riproduce** il raddoppio: `apply.ops` +104, `opcountersRepl.insert` +100. Una
+  corsa concorrente limitata a 800 inserimenti lo riproduce: `apply.ops` +1 613 su +800 inserimenti.
+  Non è quindi il volume né il batching: è qualcosa che l'applicazione fa e lo script no.
+
+- **Esito, secondo punto — la coppia decisiva:**
+
+| corsa | `apply.ops` | `opcountersRepl.insert` | `opcountersRepl.update` |
+|---|---|---|---|
+| `--no-retry-writes` | **+802** | +800 | **+0** |
+| `--retry-writes` | **+1 603** | +800 | **+800** |
+
+  Ogni scrittura ripetibile scrive un record di sessione in `config.transactions`, e **quel record
+  si replica come un `update`**. Ottocento inserimenti diventano milleseicento operazioni sul
+  secondario. Il raddoppio non è un artefatto della misura: è il prezzo, in lavoro replicato, di una
+  garanzia che il driver attiva **per impostazione predefinita**: `retryWrites` è acceso di suo, e
+  [V-076](#v-076) l'ha misurato spegnendolo.
+
+- **Esito, terzo punto — che cosa cambia per chi guarda.** `apply.ops` **non** è il numero di
+  documenti che stanno arrivando al secondario, e leggerlo così porta a credere che il carico sia il
+  doppio di quello che è. Il numero che risponde alla domanda vera è `opcountersRepl.insert`. Le due
+  operazioni in più oltre a `2 × 800` (802 e 1 603 invece di 800 e 1 600) sono traffico interno del
+  set — `noop` periodici — e sono il residuo che dice che la misura non è stata addomesticata.
+
+- **Riserve:** una coppia sola, 800 inserimenti per lato, sullo stack 02. Il rapporto 1:1 fra
+  scrittura ripetibile e `update` replicato vale per inserimenti a documento singolo; con
+  inserimenti multipli in un comando solo il record di sessione è uno per comando, non per
+  documento, ed è probabilmente la ragione per cui l'`insertMany` da 100 non ha mostrato niente —
+  ma **non è stato verificato separatamente**. L'attribuzione a `config.transactions` è dedotta dal
+  fatto che gli `update` compaiono solo con `retryWrites` acceso: la collezione non è stata
+  interrogata direttamente durante la corsa.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112
+
+---
+
+<a id="v-086"></a>
+
+### V-086 — Il router conta esatto quello che gli hai chiesto, somma i filesystem degli shard, e non sa dirti che uno shard sta fermo
+
+- **Comandi:** `opcounters` letti su `sh-mongos`, `sh-shard1a` e `sh-shard2a` prima e dopo
+
+```
+make app-workload TARGET=sharded \
+  ARGS="--duration 30 --doc-size 2k --writers 8 --readers 4 --sink null"
+```
+
+  e `db.stats()` su `lab` chiesto al router e ai due shard.
+- **Ambiente:** MongoDB 7.0.40, stack 03, due shard da un membro, `lab` **non partizionato** con
+  primary shard `shard1rs` ([V-079](#v-079)).
+- **Che cosa si voleva sapere:** che cosa un `mongos` sa dire di sé, dato che gli mancano venti
+  sezioni di `serverStatus` ([V-082](#v-082)).
+
+- **Esito, primo punto — i contatori del router sono quelli del client, alla singola operazione:**
+
+| | prima | dopo | delta | il client dice |
+|---|---|---|---|---|
+| `opcounters.insert` (router) | 120 873 | 133 414 | **+12 541** | **12 541 scritture** |
+| `opcounters.query` (router) | 134 357 | 147 360 | **+13 003** | **13 003 letture** |
+
+  Coincidenza esatta su entrambe le righe. Il router è il posto giusto per rispondere a «quante
+  operazioni sono state chieste al cluster», ed è l'**unico** posto dove quel numero è quello del
+  client.
+
+- **Esito, secondo punto — sotto, il carico è andato tutto su uno shard:**
+
+| | insert | query | connessioni |
+|---|---|---|---|
+| `shard1a` | 98 288 → 110 834 (**+12 546**) | 104 885 → 117 902 (**+13 017**) | 16 → 28 |
+| `shard2a` | 25 868 → 25 868 (**+0**) | 53 811 → 53 811 (**+0**) | 14 → 14 |
+
+  **Zero.** Non «poco»: nessuna operazione. È la conferma quantitativa della riserva che
+  [V-079](#v-079) dichiarava a parole — la collezione di carico non è distribuita, quindi vive
+  intera sul primary shard. Le cinque operazioni di scarto fra router e shard (+12 546 contro
+  +12 541) sono traffico di servizio del `mongod`, non del client.
+
+  Questa è la misura che smonta l'errore più comune davanti a un cluster: **un cluster sharded non
+  distribuisce il carico, distribuisce le collezioni partizionate.** Con `lab` non partizionato,
+  metà del ferro sta a guardare, e il router lo dice solo a chi va a chiederlo shard per shard.
+
+- **Esito, terzo punto — `dbStats` sul router somma cose che non si sommano.** Chiesto a
+  `sh-mongos`, su `lab`: 17 chiavi, di cui `raw` con una voce per shard.
+
+```unknown
+router:  fsTotalSize 125 342 195 712   fsUsedSize 63 012 814 848   objects 99 699
+shard1a: fsTotalSize  62 671 097 856   fsUsedSize 31 506 227 200   objects 89 559
+```
+
+  125 342 195 712 = **2 × 62 671 097 856**, esattamente. Ma i due shard sono due container sulla
+  **stessa** macchina e vedono lo **stesso** `/dev/vda1` da 62 671 097 856 byte. Il router dichiara
+  un disco che non esiste, grande il doppio del vero, e lo stesso vale per lo spazio occupato. Le
+  righe che si sommano legittimamente — `objects`, `dataSize`, `storageSize`, `indexSize` — sono
+  corrette; quelle che descrivono **il ferro** non lo sono, perché sommare presuppone che gli shard
+  siano su macchine diverse. In un cluster vero lo sarebbero; in un lab su un portatile, e in
+  qualunque cluster con più shard sullo stesso host, quel numero è finzione.
+
+- **Riserve:** una corsa sola. La coincidenza esatta fra client e router vale per un carico di sole
+  operazioni singole: con operazioni in lotto i contatori del router contano i **comandi**, non i
+  documenti. Lo scarto di cinque insert sullo shard non è stato attribuito a una causa precisa. Il
+  numero di connessioni sul router **scende** durante la corsa (8 → 4) perché il pool del client
+  viene chiuso alla fine e la lettura di «dopo» arriva dopo: non va letto come un calo di carico.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112
+
+---
+
+<a id="v-087"></a>
+
+### V-087 — `dataSize` non è spazio su disco: 3,06× sui dati veri, 0,97× sulla zavorra, e trentasette collezioni dimenticate
+
+- **Comandi:** su `mongo-standalone`, database `lab`:
+
+```
+db.stats()
+db.getCollection("ordini").stats()
+db.getCollection("carico-20260904-133649").stats()
+db.getCollectionNames().length
+```
+
+- **Ambiente:** MongoDB 7.0.40, stack 01, compressione predefinita (`snappy` sui blocchi,
+  `prefix` sugli indici), dopo una giornata di corse di carico.
+- **Che cosa si voleva sapere:** che cosa risponde davvero `dbStats` alla domanda «quanto occupa
+  questo database», visto che la pagina di monitoraggio deve dire quale numero guardare.
+
+- **Esito, primo punto — `dbStats` sullo standalone, quattordici chiavi:**
+
+```unknown
+collections   38            objects    1 505 885     avgObjSize     1 984
+dataSize      2 987 746 740 storageSize 3 169 259 520 indexSize     18 321 408
+fsUsedSize   31 512 723 456 fsTotalSize 62 671 097 856
+```
+
+  `freeStorageSize` **non c'è**: va chiesto (`db.stats({freeStorage: 1})`), e chi lo cerca senza
+  chiederlo trova `undefined` invece di zero. Sono quattordici chiavi contro le diciassette del
+  router ([V-086](#v-086)), che ne aggiunge tre sue.
+
+- **Esito, secondo punto — il rapporto fra dati e archiviazione cambia di tre volte a seconda di che
+  cosa c'è dentro:**
+
+| collezione | documenti | `avgObjSize` | `size` | `storageSize` | `size`/`storageSize` |
+|---|---|---|---|---|---|
+| `lab.ordini` | 50 000 | 121 B | 6 094 260 | 1 990 656 | **3,06×** |
+| `lab.carico-20260904-133649` | 49 690 | 2 048 B | 101 765 120 | 105 021 440 | **0,97×** |
+
+  Sulla collezione di dati veri la compressione restituisce tre volte lo spazio; sulla collezione di
+  carico **non restituisce niente**, e l'archiviazione è del 3 % più grande dei dati. La ragione sta
+  nel generatore, non nel motore: la zavorra dei documenti di carico è base64 di uno `shake_128`,
+  cioè byte pseudocasuali, e i byte casuali non si comprimono. Il 3 % in più è il costo delle
+  strutture di WiredTiger su un contenuto che non le ripaga.
+
+  **Conseguenza pratica:** `dataSize` sommato su un database misto non dice quanto disco serve, e
+  nemmeno `storageSize` da solo dice quanto si sta risparmiando. Il rapporto è una proprietà **dei
+  dati**, e va misurato sulla collezione, non stimato sul database.
+
+- **Esito, terzo punto — trentotto collezioni, trentasette delle quali di carico.** Ogni corsa di
+  `workload` crea una collezione nuova, chiamata con l'istante di partenza. Dopo una giornata di
+  misure il database `lab` ne ha 37, per 1,5 milioni di documenti e ~3 GB di `dataSize` che non
+  interessano più a nessuno. Nessuno le cancella, e `dbStats` le somma tutte: il numero di
+  `dbStats` sul database è quindi il numero **di tutta la spazzatura accumulata**, e va letto
+  sapendolo. Su un lab si sistema con un `drop`; su un sistema vero, il fatto che nessuno guardi
+  `collections` è il modo tipico in cui un disco si riempie senza spiegazione.
+
+- **Riserve:** una lettura sola, a riposo, su un database in uno stato che dipende da quante corse
+  siano state fatte quel giorno — i valori assoluti non si riproducono, il rapporto sì.
+  `avgObjSize` di 1 984 byte sul database è la media pesata su una popolazione dominata dai
+  documenti di carico da 2 048 byte, non una proprietà dei dati del lab. La compressione non è stata
+  cambiata: `snappy` è il predefinito e non è stato confrontato con `zstd` o `zlib`, che darebbero
+  altri rapporti sulla stessa collezione `ordini` e — verosimilmente — quasi gli stessi sulla
+  zavorra.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112
 
 ---

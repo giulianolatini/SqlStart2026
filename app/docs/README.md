@@ -76,10 +76,13 @@ pagine non la contraddicono e non la duplicano: dove serve una decisione o una f
 la **citano** invece di ricopiarla, perché un contenuto duplicato è un contenuto che prima o poi
 diverge.
 
-Le pagine divulgative promesse dal piano — `docs/06-sviluppo/architettura-app.md` e
-`docs/06-sviluppo/tdd-e-doppi.md`, al Task 17 — nasceranno **rimandando qui**, non ripetendo. Il loro
-mestiere è diverso: raccontano l'applicazione a chi ha visto il talk e non aprirà mai `app/src/`.
-Queste pagine parlano a chi il codice lo apre.
+Le due pagine divulgative sull'applicazione esistono dal Task 17 e **rimandano qui** invece di
+ripetere ([ADR-0113](../../docs/Decision.md#adr-0113)):
+[`docs/06-sviluppo/architettura-app.md`](../../docs/06-sviluppo/architettura-app.md) e
+[`docs/06-sviluppo/tdd-e-doppi.md`](../../docs/06-sviluppo/tdd-e-doppi.md). Il loro mestiere è
+diverso: raccontano l'applicazione a chi ha visto il talk e non aprirà mai `app/src/`, e per ogni
+dettaglio realizzativo puntano al capitolo di qui che lo possiede — al punto che **non contengono
+nessun blocco di codice dell'applicazione**. Queste pagine parlano a chi il codice lo apre.
 
 Perché due `Sources.md` e non uno solo è spiegato nell'intestazione di [Sources.md](Sources.md): in
 breve, il controllo automatico delle citazioni del repository considera **orfana** una fonte che
