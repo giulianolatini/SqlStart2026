@@ -1,0 +1,11 @@
+{"version": 2, "width": 100, "height": 30, "timestamp": 1788540133, "env": {"SHELL": "/bin/zsh", "TERM": "xterm-256color"}, "title": "feature/04 — mongolab watch: la cronaca dell'elezione, senza carico (Blocco 2, Atto I)"}
+[0.306526, "o", " Container sqlstart-02-replicaset-app-run-a5fdc44e74f9 Creating \r\n"]
+[0.357106, "o", " Container sqlstart-02-replicaset-app-run-a5fdc44e74f9 Created \r\n"]
+[1.352822, "o", "16:42:15.022  TOPOLOGIA  sconosciuta → replica set senza primario\r\n"]
+[1.856791, "o", "16:42:15.025  LATENZA    heartbeat 0.8 ms\r\n16:42:15.025  LATENZA    heartbeat 0.7 ms\r\n16:42:15.026  LATENZA    heartbeat 1.4 ms\r\n"]
+[2.859563, "o", "16:42:16.026  SERVER     mongo-rs-2:27017 sconosciuto → secondario\r\n16:42:16.026  TOPOLOGIA  replica set senza primario → replica set senza primario\r\n16:42:16.026  SERVER     mongo-rs-3:27017 sconosciuto → secondario\r\n16:42:16.026  TOPOLOGIA  replica set senza primario → replica set senza primario\r\n16:42:16.026  SERVER     mongo-rs-1:27017 sconosciuto → primario\r\n16:42:16.026  TOPOLOGIA  replica set senza primario → replica set con primario\r\n"]
+[12.875819, "o", "16:42:26.047  SERVER     mongo-rs-1:27017 primario → irraggiungibile\r\n16:42:26.047  TOPOLOGIA  replica set con primario → replica set senza primario\r\n16:42:26.047  TOPOLOGIA  replica set senza primario → replica set senza primario\r\n"]
+[21.916017, "o", "16:42:35.077  TOPOLOGIA  replica set senza primario → replica set senza primario\r\n16:42:35.077  TOPOLOGIA  replica set senza primario → replica set senza primario\r\n"]
+[22.416395, "o", "16:42:36.082  TOPOLOGIA  replica set senza primario → replica set senza primario\r\n16:42:36.082  SERVER     mongo-rs-2:27017 secondario → primario\r\n16:42:36.082  TOPOLOGIA  replica set senza primario → replica set con primario\r\n16:42:36.083  TOPOLOGIA  replica set con primario → replica set con primario\r\n"]
+[32.964584, "o", "16:42:46.135  TOPOLOGIA  replica set con primario → replica set con primario\r\n"]
+[42.490206, "o", "16:42:55.866  LATENZA    heartbeat 1.9 ms\r\n16:42:56.147  SERVER     mongo-rs-1:27017 irraggiungibile → secondario\r\n16:42:56.149  TOPOLOGIA  replica set con primario → replica set con primario\r\n"]

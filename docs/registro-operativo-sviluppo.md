@@ -4441,3 +4441,2767 @@ codice, e la misura che li ha confermati l'abbiamo fatta qui.
 Stato aggiornato: decisioni fino a **ADR-0077**, verifiche fino a **V-072**, note di metodo fino
 alla **136**. La suite resta a **143** prove. La PR #4 resta aperta: le due review sono state
 arbitrate eseguendo, e l'unione spetta al PO.
+
+---
+
+## 2026-09-02 — `feature/04`, avvio: una data anticipata, un worktree che ha murato la sessione, e un rischio già chiuso
+
+Il branch dell'applicazione è aperto, e come la `03` ha tre cose da mettere per iscritto prima di
+toccare un file: perché comincia oggi invece del 4, che cosa è successo chiudendo il worktree
+precedente, e quale pezzo del design non vale più.
+
+**Perché oggi.** [ADR-0057](Decision.md#adr-0057) aveva chiuso l'anticipo della `03` con una
+clausola secca: «`feature/04` non si muove dal 4 settembre». `feature/03` è finita il 2, con undici
+task su undici e la PR #4 aperta. La tentazione era leggere la clausola come un divieto e aspettare
+un giorno; la lettura giusta stava nelle **alternative scartate** dello stesso ADR, che bocciavano
+«spostare `feature/04` di due giorni» perché avrebbe prodotto un branch **frammentato**, cioè
+lavorato a pezzi separati. Chiudendo il 2, i giorni dal 2 all'11 sono contigui: la condizione la cui
+assenza motivava il rifiuto c'è. [ADR-0078](Decision.md#adr-0078) modifica la clausola di data e
+lascia intatto il resto — la scadenza dell'11 non si muove, e i due giorni guadagnati restano
+margine.
+
+**Un worktree rimosso ha murato la sessione.** Chiudendo la `03` il worktree è stato eliminato
+mentre una sessione ci stava dentro, e da quel momento la sessione non ha più potuto fare niente:
+ogni comando di shell e ogni scrittura rifiutati, perché nessuna directory di lavoro può risolvere
+dentro un percorso che non esiste. Restava la sola lettura. L'isolamento non è uno stato del
+filesystem né del repository: è un **percorso assoluto registrato all'avvio**, e `git worktree
+remove` non ha modo di aggiornarlo. Il comando che ha fatto il danno era quello giusto, dato fuori
+ordine.
+
+La via d'uscita esiste ed è stata misurata ([V-073](Sources.md#v-073)): `ExitWorktree` in modalità
+`keep` sgancia l'aggancio **anche quando il worktree è già stato cancellato** e **anche quando
+l'isolamento veniva dall'avvio** invece che da un `EnterWorktree` — la sua documentazione dice il
+contrario, e la documentazione ha torto. Poi `EnterWorktree` con il percorso nuovo. Il rientro
+diretto non funziona, e il branch che il messaggio di successo annuncia non viene mai creato: un
+messaggio corretto nella forma e falso nel contenuto, che è la categoria di errore più cara.
+[ADR-0079](Decision.md#adr-0079) fissa l'ordine vincolante della chiusura — **si sgancia chi sta
+dentro, poi si rimuove** — e la procedura completa, apertura e chiusura, sta in
+[`06-sviluppo/worktree-e-branch-di-lavoro.md`](06-sviluppo/worktree-e-branch-di-lavoro.md), che
+prima non esisteva: la manovra si tramandava a voce, ed è esattamente il modo in cui la si sbaglia
+due volte.
+
+È la seconda volta che il repository scopre la stessa cosa sullo stesso comando.
+[ADR-0056](Decision.md#adr-0056) era nato perché `git worktree remove` porta via i file **ignorati**
+insieme alla directory; ADR-0079 nasce perché porta via anche il terreno sotto i **processi**. In
+entrambi i casi il comando esce `0` e in entrambi i casi la perdita è di qualcosa che git non
+considera suo.
+
+**Il rischio numero uno del design è chiuso da otto giorni, e il design non lo sa.** Il §7 di
+[`2026-08-24-design.md`](00-progetto/2026-08-24-design.md) elenca come rischio 1 il supporto di
+`testcontainers-python` ai replica set e scrive: «la verifica è il primo passo di `feature/04`;
+l'esito è un ADR in ogni caso». Quell'ADR esiste dal 25 agosto: è
+[ADR-0020](Decision.md#adr-0020), che supera [ADR-0011](Decision.md#adr-0011) e sceglie gli stack
+del repository invece di un facsimile. Il primo passo di questo branch **non** è quella verifica, e
+per la stessa ragione è superata la riga del §7 che vuole le fixture con «un Compose minimale
+proprio, non quello di `docker/`»: ADR-0020 dice il contrario ed è del giorno dopo. Il piano lo
+dichiara in testa, perché è l'unico posto dove chi esegue guarderà.
+
+**Il primo passo vero è un appuntamento.** [ADR-0058](Decision.md#adr-0058) aveva trasformato la
+clausola «appena escono i binari» in due date: il 3 settembre, «alla chiusura di `feature/03`», e il
+16. Le due coordinate si sono separate — l'evento è arrivato il 2 — e ADR-0078 stabilisce che vale
+**l'evento**, perché è l'evento a portare la ragione pratica: montare l'applicazione su una versione
+e ripinnarla il giorno dopo significa rigirare le registrazioni. Il controllo della 8.0.30 è quindi
+il Task 1 di questo branch, e lascia una voce in `Sources.md` in ogni caso.
+
+**Il piano è scritto:** [`2026-09-02-piano-feature-04-app-python.md`](00-progetto/2026-09-02-piano-feature-04-app-python.md),
+diciotto task. È l'opposto della `03`: lì lo spike del 25 agosto faceva da mappa e il branch partiva
+con la topologia già montata, qui si comincia da **zero righe di codice** e la mappa è il §6 del
+design. Il piano porta anche i debiti che quattro pagine hanno intestato per iscritto a questa
+feature — le misure che «hanno senso solo sotto carico controllato» — e le tre pagine che
+`docs/README.md` promette qui. Scrivendo l'indice è saltata fuori una quinta assenza: il piano della
+`03` era stato scritto il 1º settembre e **mai iscritto** in `docs/README.md`. Il controllo dei
+collegamenti verifica quelli che ci sono; una pagina che nessuno cita non ha un'ancora da
+controllare.
+
+**Note di metodo.**
+
+137. **Le alternative scartate di un ADR contengono il ragionamento che la decisione comprime.** La
+     clausola di ADR-0057 diceva «non prima del 4 settembre» e sembrava chiusa. Il perché stava
+     dodici righe più sotto, fra le alternative: si era rifiutato di anticipare per non
+     **frammentare** il branch, non per la data in sé. Con la `03` chiusa il 2, la frammentazione
+     non c'era, e la decisione originale — letta per intero — **permetteva** ciò che la sua clausola
+     sembrava vietare. La regola operativa: prima di concludere che una decisione passata vieta
+     qualcosa, leggerne le alternative scartate. Una clausola è un riassunto, e i riassunti perdono
+     proprio le condizioni.
+138. **Un documento superato è più pericoloso dove assegna lavoro che dove afferma un fatto.** Il §7
+     del design assegna a `feature/04` la verifica di `testcontainers`. Un'affermazione sbagliata
+     dà fastidio quando qualcuno la controlla; un **compito** sbagliato invece si autoconserva,
+     perché resta nella lista, sembra da fare, e chi lo esegue non ha motivo di sospettare — ha
+     appena letto il documento che glielo assegna. ADR-0020 esisteva da otto giorni ed era corretto:
+     nessuno dei due documenti era sbagliato da solo. Quando si supera una decisione, vale la pena
+     chiedersi non solo quali affermazioni cadono, ma **quali compiti restano intestati a qualcuno**
+     che non saprà di poterli saltare.
+139. **Uno strumento che non vede lo stato di un altro non può proteggerlo, e la difesa è l'ordine.**
+     `git worktree remove` non conosce le sessioni vive più di quanto conosca i file ignorati: esce
+     `0` e ha ragione, perché tutto ciò che git considera suo è stato gestito. Il danno non viene da
+     un difetto del comando, viene dal fatto che il suo dominio è più stretto di quello del
+     problema. Quando due strumenti si dividono un pezzo di filesystem, l'unica protezione possibile
+     non è un controllo — nessuno dei due può implementarlo — ma una **sequenza**: si sgancia prima
+     di rimuovere, come si smonta un disco prima di staccarlo. Ed è per questo che una sequenza del
+     genere va scritta in una pagina invece che ricordata: un controllo che non esiste non può
+     ricordarsela al posto tuo.
+
+Stato aggiornato: decisioni fino ad **ADR-0079**, verifiche fino a **V-073**, note di metodo fino
+alla **139**. La suite resta a **143** prove. La PR #4 è stata unita in `develop` dal PO — il merge è
+`ca6f3d0` — e questo branch ci parte sopra.
+
+---
+
+## 2026-09-02 — `feature/04`, Task 1: l'appuntamento onorato, e uno zero che stavolta si può leggere
+
+Il primo passo del branch non è codice: è la data che [ADR-0058](Decision.md#adr-0058) aveva fissato
+e che [ADR-0078](Decision.md#adr-0078) ha fatto cadere qui. **La 8.0.30 non è pubblicata**
+([V-074](Sources.md#v-074)), e il lab resta su 7.0.40 — [ADR-0080](Decision.md#adr-0080).
+
+**La risposta è la stessa di ieri, la verifica no.** V-051 aveva interrogato due canali; ADR-0028 ne
+nominava tre, e il terzo — `mongodb/mongodb-community-server` — era rimasto scoperto, dichiarato fra
+le riserve. Interrogato adesso, dà zero sulla 8.0.30 e **centosessantaquattro** tag sulla 8.0.29, fra
+cui ricostruzioni marcate `20260902T071320Z`, cioè di stamattina. È la differenza fra un canale che
+tace e un canale che parla e dice un'altra cosa. Chiusa anche la seconda riserva di V-051: riletto
+il changelog, `SERVER-125742` è **ancora** sotto la 8.0.30 e non è slittato altrove
+([S-028](Sources.md#s-028)) — il numero da attendere è rimasto quello. La documentazione della patch
+è pubblicata, i binari no, e nessuna delle pagine consultate contiene una data prevista.
+
+**Il piano si è sbagliato su se stesso, e il controllo l'ha visto.** Il Task 1 diceva: se la 8.0.30
+non c'è, «non serve altro ADR — ADR-0058 prevede questo esito». Scritto V-074, `check_citations.py`
+ha rifiutato: una fonte che nessun ADR cita è orfana. La regola aveva ragione, e non per un cavillo:
+ADR-0058 aveva **programmato** un controllo, non preso in anticipo la decisione di oggi. Chi arriva
+al 16 settembre — la seconda e ultima data — deve poter sapere che il primo controllo è stato fatto
+e che cosa ha trovato, senza rifarlo di fretta. ADR-0080 è quella sede, ed estende la procedura da
+due canali a tre.
+
+**Note di metodo.**
+
+140. **Un'assenza si legge solo accanto a una prova che il canale è vivo.** `count: 0` da un servizio
+     remoto è indistinguibile da `count: 0` di un filtro rotto, di un endpoint deprecato o di un
+     repository abbandonato: la risposta è identica in tutti e quattro i casi, ed è la risposta che
+     si sperava. La difesa è una **seconda interrogazione di controllo** che deve dare un numero
+     diverso da zero — qui `name=8.0.29` che ne dà 164, con marche temporali di poche ore prima. Non
+     costa nulla e trasforma un'assenza dichiarata in un'assenza misurata. È il seguito della nota
+     91: lì il problema era una risposta ben formata a una domanda diversa, qui è una risposta
+     identica a domande diverse. In entrambi i casi la difesa non è leggere meglio, è **chiedere una
+     seconda volta in un modo che sappia fallire**.
+141. **Una regola che blocca non ha sempre torto: a volte segnala che manca una sede, non che è di
+     troppo.** L'abitudine di questo repository, quando un controllo automatico ostacola qualcosa di
+     legittimo, è aprire la sede che manca invece di aggirare la regola. Qui il caso si è presentato
+     nella forma meno ovvia: era il **piano** a sbagliare, non il controllo. Il piano aveva concluso
+     «nessun ADR» ragionando sull'esito — la versione non cambia, nessun file si tocca — mentre la
+     decisione da registrare non era sulla versione ma sul **calendario**: due appuntamenti diventati
+     uno. Un controllo che rifiuta va guardato prima come ipotesi che come attrito; qui ha trovato un
+     buco che nessun essere umano aveva visto, e l'ha trovato contando.
+
+Stato aggiornato: decisioni fino ad **ADR-0080**, verifiche fino a **V-074**, note di metodo fino
+alla **141**. La suite resta a **143** prove. Prossimo passo: **Task 2** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), lo scheletro di `app/`.
+
+---
+
+## 2026-09-02 — `feature/04`, Task 2: uno scheletro che non fa niente, e una guardia rotta apposta
+
+`app/` esiste: `pyproject.toml`, il pacchetto `mongolab` con i quattro strati del §6.1 e
+`cli.py`, la suite divisa in unitaria e di integrazione, tre bersagli `make`. Non fa niente, e lo
+fa in modo verificabile — **5 prove**, `mypy --strict` verde su 12 file, `make tools-test` sempre a
+143. L'ambiente è Python **3.13.15**, con `requires-python = ">=3.13,<3.14"`: l'host ha la 3.14.7,
+che il design dichiara troppo recente per garantire il supporto di tutte le dipendenze di test, e il
+tetto lo scrive invece di lasciarlo alla fortuna della risoluzione.
+
+**La prova che conta è una guardia.** Percorre i sorgenti di `domain` e `application` con `ast` e
+boccia ogni import che non sia della libreria standard o del pacchetto stesso. È il vincolo che
+rende la suite unitaria istantanea, e adesso è codice invece che buona intenzione. **Ed è stata
+rotta apposta:** aggiunto `import pymongo` a `domain/__init__.py`, la prova è fallita dicendo
+`domain/__init__.py importa ['pymongo']`, e la violazione è stata tolta. Senza quel giro la guardia
+sarebbe indistinguibile da una che non può fallire.
+
+**Tre trappole schivate scrivendo, e una lasciata dov'era.** La prima: copiare
+`tools/pyproject.toml` porterebbe con sé `pythonpath = ["."]`, che lì serve e qui disfarebbe il
+layout `src/` — gli import continuerebbero a funzionare, ma dall'albero dei sorgenti invece che dal
+pacchetto installato, cioè le prove smetterebbero di verificare ciò che si distribuisce. La seconda:
+`testpaths = ["tests"]` avrebbe trascinato l'integrazione dentro la suite veloce dal Task 8 in poi,
+senza che nessuno l'avesse deciso; è `tests/unit`, e l'integrazione si chiede per nome. La terza:
+`mypy` ha rifiutato due `conftest.py` omonimi, e la soluzione è quella che suggerisce lui —
+`__init__.py` nelle directory di test. La quarta non è mia e resta dov'è: `failover-02-maggioranza`
+è lungo 23 caratteri e sballa già l'incolonnamento di `make help`, che ne prevede 16. Toccarlo
+adesso vorrebbe dire cambiare la resa di tutti i bersagli dentro un commit che parla d'altro.
+
+**Note di metodo.**
+
+142. **Un controllo scritto quando non può fallire va rotto apposta, subito.** La guardia sul
+     dominio è passata dal primo istante, perché in quell'istante `domain` conteneva solo una
+     docstring. Un controllo che passa perché non ha niente da guardare e un controllo che passa
+     perché tutto è a posto danno lo stesso verde, e la differenza si scopre mesi dopo, quando
+     serviva. Costa trenta secondi introdurre la violazione, vedere il messaggio e toglierla — e
+     quei trenta secondi verificano due cose in una: che il controllo scatti, e che quando scatta
+     dica **dove**. Vale il doppio per le guardie architetturali, che per definizione nascono
+     davanti a un albero vuoto.
+143. **Un codice d'uscita che significa «non ho fatto niente» va tradotto, non nascosto.** Su una
+     directory di prove vuota `pytest` esce **5**, che non è un errore e non è un successo: dice
+     «non ho raccolto nulla». Lasciarlo passare come fallimento manda a cercare Docker chi non ha
+     ancora niente da eseguire; sopprimerlo con un `|| true` insegna che il verde di quel bersaglio
+     non vuol dire niente, e l'insegnamento sopravvive al Task 8, quando le prove ci saranno
+     davvero. La terza via è tradurlo: intercettare **quel** codice e stampare la frase che spiega
+     perché. È il rovescio della nota 135 — lì c'era il messaggio senza il codice, qui il codice
+     senza il messaggio — e la regola è la stessa vista dall'altro lato: le due cose servono a due
+     lettori diversi, e nessuna delle due copre l'altra.
+
+Stato aggiornato: decisioni fino ad **ADR-0080**, verifiche fino a **V-074**, note di metodo fino
+alla **143**. Le suite: **143** prove per gli strumenti, **5** per l'applicazione. Prossimo passo:
+**Task 3** del [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), gli otto eventi
+congelati e le cinque porte.
+
+## 2026-09-02 — `feature/04`, Task 3: otto eventi congelati, cinque porte, e una guardia che si è rivelata superflua
+
+Il dominio c'è: `modelli.py` con i dati che le porte si scambiano, `eventi.py` con gli otto eventi
+del §6.3, `porte.py` con le cinque `Protocol` del §6.2. Nessun import di terze parti — la guardia
+del Task 2 lo verifica adesso su codice vero e non più su un albero vuoto. **19 prove** per
+l'applicazione, `mypy --strict` verde su 16 file, `make tools-test` sempre a 143, `docs-check`
+pulito.
+
+**Tre scelte prese scrivendo, e scritte dove servono.** La prima: gli eventi hanno una base
+`Evento` che porta un solo campo, `istante`. Serve a dare a `EventSink.emit` un tipo solo da
+accettare, e costa l'ordine dei parametri — `istante` viene sempre per primo. La seconda:
+quell'istante è un **campo**, non una chiamata all'orologio dentro l'evento. È la condizione che
+rende esatta un'asserzione con `FakeClock` invece che una tolleranza, ed è anche la differenza fra
+il momento in cui il fatto è accaduto e quello in cui qualcuno si è ricordato di registrarlo — che
+sotto carico è proprio la latenza che si sta misurando. La terza: `BackupTool.restore` restituisce
+un `Iterator[Progress]` come `dump`, mentre il design nomina solo il tipo di ritorno di `dump`. Il
+copione mostra anche il restore mentre avviene, e due firme diverse per due operazioni simmetriche
+costringerebbero `presentation` a due strade dove ne basta una. La ragione sta nella docstring, non
+qui: chi legge il codice deve trovarla lì.
+
+**La guardia rotta apposta ha risposto una cosa che non mi aspettavo.** Applicando la nota 142 al
+controllo riflessivo sugli eventi — quello che li scopre invece di elencarli — ho introdotto un
+nono evento mutabile per vederlo fallire. Non è fallito: Python si è rifiutato di creare la classe,
+`TypeError: cannot inherit non-frozen dataclass from a frozen one`. L'asserzione su `frozen` non
+poteva fallire, perché il linguaggio la garantisce già a partire dalla base congelata; e per la
+stessa ragione non poteva fallire quella sull'ordine dei campi, dato che i campi della base
+precedono sempre quelli di chi eredita. Restava viva solo `slots`, che si dimentica in silenzio: un
+nono evento `frozen=True` senza `slots=True` nasce senza protestare, e le sue istanze tornano ad
+avere un `__dict__`. Quella variante ha fatto fallire due prove nominando la classe colpevole. Il
+controllo è stato riscritto in due: uno sulla base — l'unico punto dove `frozen` e l'ordine si
+possono ancora perdere, e infatti togliendo `slots=True` a `Evento` fallisce — e uno sulle
+sottoclassi che asserisce solo ciò che può ancora andare storto.
+
+**Il limite dei `Protocol` a runtime è scritto come prova, non come commento.** Le cinque porte sono
+`@runtime_checkable` perché una prova mostri che a un oggetto incompleto la porta si chiude. Ma
+`isinstance` contro un `Protocol` guarda i **nomi** dei metodi, non le firme: un orologio con
+`sleep(self)` senza argomenti passa il controllo a runtime e viene bocciato da `mypy`. La prova che
+lo dice **asserisce che quell'oggetto passa** — è verde, e sarebbe la prima a fallire se un giorno
+Python stringesse la regola. Il guardiano vero resta `make app-check`; questa riga dice perché.
+
+**Note di metodo.**
+
+144. **Rompere una guardia apposta può rivelare che è superflua, non che è debole.** La nota 142
+     prescrive di introdurre la violazione e vedere il messaggio. Ci sono tre esiti, non due: il
+     controllo scatta e va bene; il controllo tace e va corretto; oppure **la violazione non è
+     costruibile**, perché il linguaggio o il compilatore la vietano prima. Il terzo esito è il più
+     facile da leggere male, perché somiglia al primo: entrambi finiscono con la suite verde. La
+     differenza è che nel terzo caso l'asserzione è decorazione — controlla il compilatore, e chi
+     la legge crede che stia sorvegliando qualcosa che invece nessuno può violare. Va tolta, e va
+     tolta **nominando l'esperimento** che l'ha dimostrata superflua: senza, il prossimo lettore la
+     riaggiunge in buona fede. Quel che resta è la sola proprietà che può ancora perdersi, e su
+     quella la guardia va vista fallire davvero.
+145. **Un limite noto si scrive come prova che passa, non come commento.** Che `isinstance` contro
+     un `Protocol` guardi i nomi e non le firme è una frase che in un commento invecchia senza
+     dirlo. Scritta come prova — un oggetto con la firma sbagliata che **supera** il controllo, e
+     l'asserzione che dice proprio questo — diventa due cose insieme: documentazione che il lettore
+     incontra dove serve, e sentinella che fallirebbe il giorno in cui il comportamento cambiasse.
+     Costa una prova verde in più, e la si paga volentieri: è l'unico modo di far sì che un buco
+     conosciuto resti conosciuto anche quando chi lo conosceva non c'è più.
+
+Stato aggiornato: decisioni fino ad **ADR-0080**, verifiche fino a **V-074**, note di metodo fino
+alla **145**. Le suite: **143** prove per gli strumenti, **19** per l'applicazione. Prossimo passo:
+**Task 4** del [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), i doppi in memoria —
+non mock, ma implementazioni vere delle porte.
+
+---
+
+## 2026-09-03 — `feature/04`, fuori dai task: la documentazione dell'applicazione, e tre modi di sbagliare che si assomigliano
+
+Il PO ha chiesto una cosa che il piano non prevedeva, e aveva ragione a chiederla: molto di quello
+che era stato spiegato scrivendo il dominio — perché `frozen` non basta, perché `isinstance` contro
+un `Protocol` guarda i nomi e non le firme, perché il listener di PyMongo deve tacere e uscire — è
+materiale didattico, ed è **esattamente** ciò che il talk esiste per trasmettere. Viveva in tre
+posti dove invecchia male: nelle docstring, dove lo legge solo chi apre quel file; qui dentro, che è
+cronologico e non si consulta per argomento; e in chat, che non è un posto.
+
+**Nove pagine in `app/docs/`**, e [ADR-0081](Decision.md#adr-0081) che dice perché stanno lì e non
+in `docs/06-sviluppo/`. Cinque sui principi — l'architettura esagonale, le porte e i doppi, gli
+eventi congelati, la concorrenza dei listener, i tipi e le guardie — più un registro di sviluppo
+dell'applicazione raccontato per task invece che per giornata, una mappa delle decisioni che la
+vincolano, un `Sources.md` proprio e un indice.
+
+**Perché non in `docs/`.** Due ostacoli, uno di lettore e uno di macchina. `docs/06-sviluppo/` ha un
+altro lettore — chi ha visto il talk e non aprirà mai `app/src/` — e le sue due pagine
+sull'applicazione sono promesse al Task 17, cioè dopo che il codice di cui parlano sarà già scritto.
+L'ostacolo di macchina è più interessante: le fonti di queste spiegazioni sono documentazione di
+linguaggio e di strumenti, che **nessun ADR cita né deve citare**, perché sono vincoli del
+linguaggio e non scelte del progetto. Messe in `docs/Sources.md` sarebbero tutte orfane, e
+`check_citations.py` avrebbe bocciato la build. La regola non aveva torto: stava dicendo che quelle
+voci non appartengono a quel registro. Prefissi distinti — `A-` per le fonti esterne, `M-` per le
+misure — e le voci canoniche si puntano, mai si copiano.
+
+**Una citazione falsa, presa per caso.** Scrivendo `app/docs/Sources.md` avevo attribuito ad
+[ADR-0024](Decision.md#adr-0024) la regola «il registro operativo non si riscrive». ADR-0024 dice
+tutt'altro: parla della gerarchia delle fonti. E **nessun ADR** enuncia quella regola — è una pratica
+costante del repository, con il precedente di [ADR-0068](Decision.md#adr-0068) («resta com'è, con la
+sua data»), ma non è mai stata scritta come decisione. Il rimando è stato sostituito con un rinvio
+alla pratica e a quel precedente.
+
+**Una misura che ha corretto la voce di ieri.** Il Task 3 aveva scritto che senza `slots` gli eventi
+«tornano ad avere un `__dict__` in cui due thread possono scriversi di nascosto». Misurato: il
+`__dict__` c'è, ma l'assegnazione normale resta bloccata da `frozen`; passano solo
+`object.__setattr__` e la scrittura diretta nel `__dict__`. La formulazione giusta è «`frozen`
+protegge da una distrazione, `slots` protegge anche da chi conosce la scorciatoia». Questa voce non
+si riscrive: la correzione sta in `app/docs/Sources.md` (M-003), nella pagina sugli eventi, e nella
+docstring della prova, che portava la stessa frase troppo larga.
+
+**Il controllo dei collegamenti è stato esteso, ed è servito.** `make docs-check` esegue ora
+`check_links.py docs app/docs README.md`. Al primo passaggio, su nove pagine nuove e più di sessanta
+rimandi ad ancore di `Decision.md` e `Sources.md`, un solo collegamento è risultato rotto — e non
+era un'ancora sbagliata ma un rimando a una cartella invece che a un file. Fino a quel momento
+**nessuno di quei sessanta rimandi era mai stato verificato**, compreso `#adr-0068` scritto mezz'ora
+prima.
+
+**Note di metodo.**
+
+146. **Una citazione plausibile è più pericolosa di una mancante.** Un'affermazione senza fonte si
+     vede: è nuda, e chi legge sa di doversi fidare dell'autore. Un'affermazione con accanto
+     `[ADR-0024]` sembra già verificata, e nessuno la apre — men che meno in un repository dove
+     citare è la norma, perché lì la presenza del rimando è il segnale di qualità e smette di essere
+     una domanda. La difesa non è citare di meno, è **aprire il documento nel momento in cui si
+     scrive il numero**, non dopo: il numero giusto si ricorda quasi sempre, e «quasi sempre» è
+     precisamente la frequenza con cui questo errore passa. Vale il doppio quando si cita a memoria
+     un documento che si è scritto, perché la fiducia nella propria memoria è più alta e la memoria
+     non lo sa.
+147. **Quando un controllo rifiuta materiale legittimo, la sede che manca può essere un registro
+     intero, non una voce.** La nota 141 aveva stabilito che un controllo che ostacola qualcosa di
+     legittimo va guardato come ipotesi: di solito segnala che manca una sede, e la sede era un ADR.
+     Qui la stessa domanda ha dato una risposta di taglia diversa. Non mancava una voce in
+     `Sources.md`: mancava un **secondo registro**, con un proprio spazio di numerazione, perché le
+     fonti che non appartenevano lì non erano una o due ma un'intera categoria — la documentazione
+     del linguaggio, che nessuna decisione di progetto cita né deve citare. Il segnale che distingue
+     i due casi è **quante voci** il controllo rifiuterebbe: una è una dimenticanza, tutte quelle di
+     un tipo sono una sede mancante. E aprire il secondo registro impone subito una scelta che
+     conviene fare bene la prima volta, cioè prefissi diversi: due registri con la stessa
+     numerazione producono `S-042` ambigui, e l'ambiguità arriva quando qualcuno cita di fretta.
+148. **Un controllo che riceve i percorsi da esaminare non fallisce su ciò che non gli hanno dato:
+     tace.** `check_links.py` prende i percorsi come argomenti, ed è la scelta giusta — decidere da
+     sé che cosa guardare vorrebbe dire indovinare. La conseguenza è che un albero di documentazione
+     nuovo nasce **invisibile**: nessun errore, nessun avviso, il verde di sempre. È la stessa forma
+     della nota 142 — un controllo che passa perché non ha niente da guardare — con la differenza
+     che qui il materiale c'è e la lacuna sta nella riga del `Makefile`. La regola operativa:
+     **creare una cartella di documentazione e aggiungerla al bersaglio sono lo stesso atto**, e la
+     verifica che l'atto sia compiuto è banale — introdurre un rimando rotto apposta e vedere il
+     controllo nominarlo. Senza, la prima cosa che si scopre è quanti collegamenti erano rotti da
+     mesi.
+
+Stato aggiornato: decisioni fino ad **ADR-0081**, verifiche fino a **V-074**, note di metodo fino
+alla **148**. Le suite: **143** prove per gli strumenti, **19** per l'applicazione. Prossimo passo:
+**Task 4** del [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).
+
+---
+
+## 2026-09-03 — `feature/04`, Task 4: i doppi, e tre modi in cui un doppio può mentire
+
+Cinque doppi, uno per porta, in `app/tests/doppi/`: `InMemoryStore`, `FakeInspector`, `FakeBackup`,
+`FakeClock`, `RecordingSink`. Sono scritti **prima** dei casi d'uso che dovranno verificare — i Task
+5 e 6 fanno TDD contro di loro — e la ragione è la stessa per cui si scrive prima la prova: un
+doppio disegnato guardando il codice sotto prova concorda con lui per costruzione. Le prove
+dell'applicazione passano da **19 a 54**.
+
+La regola era già scritta in `app/docs/02-porte-e-doppi.md` prima che i doppi esistessero: **un
+doppio implementa il comportamento, un mock registra le chiamate**. `InMemoryStore` conserva davvero
+i documenti, li filtra davvero, li impagina davvero. `FakeClock` fa passare il tempo per davvero.
+Scrivendoli è emerso che la regola ha un rovescio, ed è il rovescio che ha insegnato qualcosa.
+
+**Il rovescio: che cosa fa un doppio quando non sa.**
+
+`InMemoryStore` parla un dialetto piccolo — uguaglianza su campi di primo livello, `$match`,
+`$limit`, `$count` — e tutto il resto solleva `NonSupportato` nominando ciò che non sa fare. La
+tentazione opposta non è restituire un risultato sbagliato: è **ignorare in silenzio** l'operatore
+che non si conosce. Un `$gt` ignorato restituisce tutti i documenti, la prova che lo usa diventa
+verde, e nessuno ha scritto una riga di codice difettoso. Il difetto è nell'attrezzo di misura.
+
+Che il rifiuto sia verificato quanto il comportamento non è un'opinione: rompendo `_corrisponde`
+perché restituisse sempre `True` falliscono **sette** prove, e due delle sette falliscono con
+`DID NOT RAISE NonSupportato` ([M-006](../app/docs/Sources.md#m-006)). Terzo esito della nota 144 —
+la guardia c'è e si è vista sparare.
+
+**Diversamente dal previsto — avevo rifiutato ciò che andava implementato.**
+
+La prima versione di `InMemoryStore` rifiutava anche `{"campo": None}`, con questa motivazione
+scritta nella docstring: `dict.get` restituisce `None` per un campo assente, quindi arriverebbe alla
+semantica di MongoDB **per caso**, e per caso è il modo peggiore di essere giusti. Il ragionamento
+sembrava solido finché non ho aperto il manuale: «The `{ metacritic : null }` query matches
+documents that contain the `metacritic` field with a `null` value **or** do not contain the
+`metacritic` field» ([A-006](../app/docs/Sources.md#a-006)).
+
+Quella semantica è **dichiarata**. Non è un caso: è la regola, e una regola dichiarata si implementa
+deliberatamente, con la citazione accanto e la prova che la fissa. Rifiutarla era la scelta più
+debole, non la più prudente. Il rifiuto è rimasto dov'era giusto, cioè sul confronto con un
+sottodocumento intero, che MongoDB risolve «including the field order»
+([A-007](../app/docs/Sources.md#a-007)) mentre `dict` di Python l'ordine lo ignora.
+
+Le due decisioni sembrano opposte e obbediscono allo stesso criterio, che è la nota 150.
+
+**Diversamente dal previsto — una riga che cambia *quando*, e nessun tipo se ne accorge.**
+
+`FakeBackup.dump` registra la richiesta e **restituisce** un generatore, invece di essere una
+funzione generatrice. Scritta con `yield from` nel corpo — la forma che viene più naturale — la
+chiamata non eseguirebbe niente: «The execution starts when one of the generator's methods is
+called» ([A-005](../app/docs/Sources.md#a-005)). Nel doppio vuol dire che la richiesta non viene
+registrata; nell'adattatore del Task 9 vorrà dire che `mongodump` non parte.
+
+Rotta apposta, la forma sbagliata fa fallire **una** prova e lascia `mypy --strict` **verde**: le
+due forme hanno lo stesso tipo annotato, `Iterator[Progress]`
+([M-007](../app/docs/Sources.md#m-007)). Insieme a M-004 — `isinstance` contro un `Protocol` accetta
+una firma sbagliata — compone un promemoria in due direzioni: mypy è l'unico posto in cui la
+conformità alle porte è verificata, e non verifica tutto.
+
+**Una riserva scritta male, e la misura che l'ha corretta.**
+
+Scrivendo M-006 avevo aggiunto una riserva plausibile: la misura mostra che *quelle* prove reggono a
+*quella* rottura, e non ad altre — per esempio un `$limit` che tagliasse dalla coda invece che dalla
+testa. Sono andato a controllare prima di lasciarlo scritto: la prova sull'aggregazione asserisce
+`[1, 2]`, quindi un `$limit` dalla coda **fallirebbe**. L'esempio era falso.
+
+Cercando una rottura davvero scoperta l'ho trovata al secondo tentativo: togliendo da `_come_intero`
+il rifiuto dei booleani le prove restano **54 verdi**, perché nessuna chiede `{"$limit": True}`.
+Quel rifiuto è oggi una precauzione non verificata, ed è scritto nella riserva al posto
+dell'esempio inventato.
+
+**Che cosa è stato rimandato, e perché non è un debito.**
+
+`$group` non c'è: nessuna prova l'ha chiesto. Un `topology()` che solleva non c'è: al Task 6 un
+cluster irraggiungibile si racconta con una topologia senza primario. Uno store che fallisce le
+scritture non c'è, e il Task 5 lo chiederà — arriverà allora, insieme alla prova che ne ha bisogno.
+Ogni messaggio di `NonSupportato` dice per nome che cosa manca e che cosa farne, così chi lo incontra
+non deve indovinare se sia una dimenticanza.
+
+**Note di metodo.**
+
+149. **Un doppio che tace su ciò che non sa è più pericoloso di uno che non c'è.** Un doppio
+     mancante si nota: il codice non compila, la prova non parte. Un doppio che riceve un operatore
+     che non conosce e lo ignora restituisce un risultato plausibile, e la prova diventa verde **per
+     il motivo sbagliato** senza che nessuno abbia scritto una riga di codice difettoso — il difetto
+     è nell'attrezzo di misura, che è il posto in cui si guarda per ultimo. La regola operativa è
+     che ogni doppio dichiari il proprio dialetto e sollevi su tutto il resto, **nominando** ciò che
+     non sa fare e dicendo che cosa farne: insegnarglielo insieme alla prova che lo verifica, mai
+     riscrivere la prova per chiedergli qualcosa di più semplice. E il rifiuto va provato come il
+     comportamento: senza un `pytest.raises`, il silenzio torna alla prima distrazione.
+150. **Fra due imitazioni ugualmente ovvie, la fonte dice quale è giusta; se nessuna lo è, si
+     rifiuta.** Imitare un sistema esterno costringe a scegliere nei punti in cui l'ovvio del
+     linguaggio ospite diverge dall'originale, e i due casi vanno separati prima di decidere. Se
+     l'originale **dichiara** il proprio comportamento — `{campo: null}` prende anche i documenti
+     senza quel campo — allora un'implementazione giusta esiste, e la si scrive deliberatamente con
+     la citazione accanto: arrivarci per caso e rifiutare per prudenza sono entrambi modi di non
+     aver deciso. Se invece l'originale fa qualcosa che il linguaggio ospite non sa fare —
+     confrontare documenti rispettando l'ordine delle chiavi — nessuna implementazione ovvia è
+     quella giusta, e allora imitare male è peggio che dichiarare di non saper fare. Il discrimine
+     non è la difficoltà: è se esista una risposta giusta da scrivere.
+151. **Un errore di *quando* non è un errore di tipo.** Una funzione generatrice e una funzione che
+     restituisce un generatore hanno la stessa annotazione, `Iterator[T]`, e `mypy --strict` le
+     accetta entrambe; ma la prima non esegue niente finché qualcuno non scorre il risultato. Ogni
+     effetto che la porta promette **alla chiamata** — registrare, avviare un processo, prendere un
+     lock — sparisce senza che un tipo se ne accorga. La regola pratica è che quando una porta
+     promette «avvia X e produce l'avanzamento mentre procede», l'implementazione fa l'avvio nel
+     corpo e **restituisce** l'iteratore; e la prova che lo verifica è quella che chiama senza
+     scorrere. Vale in generale: i sistemi di tipi controllano *che cosa*, quasi mai *quando*.
+152. **Anche una riserva è un'affermazione, e va misurata come le altre.** Scrivere «questa misura
+     non copre X» è il gesto più onesto della pagina, ed è proprio per questo che nessuno lo
+     verifica: la modestia sembra al riparo dall'errore. Non lo è — un esempio di rottura scoperta
+     inventato a tavolino può essere falso, e il mio lo era: la prova che credevo cieca vedeva
+     benissimo. È la nota 146 applicata al proprio codice invece che alle proprie citazioni, con
+     l'aggravante che qui il documento da aprire è la suite, e basta un minuto. Il modo di trovare
+     una lacuna vera è **rompere e guardare**, non immaginare; e quando si rompe a caso si scopre
+     l'altra faccia della cosa, cioè che una guardia scritta per prudenza e mai provata sopravvive
+     alla revisione ma non alla mutazione.
+
+Stato aggiornato: decisioni fino ad **ADR-0081**, verifiche fino a **V-074**, note di metodo fino
+alla **152**. Le suite: **143** prove per gli strumenti, **54** per l'applicazione. Prossimo passo:
+**Task 5** del [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), il generatore di
+carico — che chiederà al doppio la prima cosa che oggi non sa fare: fallire.
+
+---
+
+## 2026-09-03 — `feature/04`, Task 5: il carico e i tentativi, un percentile che non era un numero, e una rottura che non fallisce
+
+`WorkloadRunner` è il primo caso d'uso vero dell'applicazione: genera scritture, ritenta quelle che
+falliscono, misura quanto ci mettono, e racconta tutto emettendo eventi. Non sa che esiste MongoDB —
+parla con `DocumentStore`, `Clock` ed `EventSink`, e con nient'altro. Le prove
+dell'applicazione passano da **54 a 106**, `mypy --strict` verde su 25 file.
+
+Il debito che il Task 4 aveva dichiarato per nome è stato pagato qui: nessun doppio sapeva rompersi,
+e una politica di tentativi non è provabile contro un archivio che riesce sempre. Sono nati
+`ArchivioCheRompe` e `ArchivioLento`, che non riscrivono `InMemoryStore` ma lo **avvolgono** —
+e si compongono fra loro, perché ciascuno annota l'archivio interno con la porta e non con la
+classe. È la regola del repository applicata alla lettera: la capacità si aggiunge insieme alla
+prova che ne ha bisogno, mai semplificando la prova.
+
+**Il rosso c'era, ma era povero.**
+
+Le prove scritte per prime fallivano tutte con un `ModuleNotFoundError`. È un rosso vero, ma dice
+«manca tutto», non «questa guardia serve». Alla prima esecuzione dopo l'implementazione la suite è
+passata intera, e a quel punto la domanda onesta non è «è verde?» ma «quali di queste prove
+avrebbero visto un errore?». La risposta si compra solo rompendo: cinque rotture deliberate, una
+alla volta, con ripristino da copia ([M-010](../app/docs/Sources.md#m-010)).
+
+La quinta ha trovato una guardia **scoperta**. Togliendo da `PoliticaTentativi.attesa_ms` il rifiuto
+del primo tentativo — quello che non attende, perché non ha niente da ritentare — la suite è rimasta
+verde su 105. Nessuna prova la interrogava. La rottura non ha confermato una difesa: ne ha rivelato
+l'assenza, che è il terzo esito della nota 144 nella sua forma più utile. La prova
+`test_l_attesa_del_primo_tentativo_non_esiste` è nata lì, e da allora sono 106.
+
+**Diversamente dal previsto — la quarta rottura non fallisce, si pianta.**
+
+Il §6.3 del design impone che i worker non tocchino la TUI: pubblicano su una `queue.Queue`, e un
+thread solo drena. `WorkloadRunner` applica la stessa disciplina un livello più in basso — i worker
+non toccano il **sink** — e per sapere quando smettere di drenare conta le sentinelle: ogni worker,
+qualunque cosa accada, mette in coda un `None` come ultimo gesto, dentro un `finally`.
+
+Spostando quel `put` fuori dal `finally` mi aspettavo un rosso. Ho ottenuto un blocco. Il worker
+muore prima di segnalare, il chiamante aspetta un `None` che non arriverà, e la suite resta ferma al
+68 % finché il `timeout` non la uccide: `Error 143`. Nessun `FAILED`, nessun messaggio, nessun punto
+del codice indicato.
+
+Ai tre esiti della nota 144 se ne aggiunge un quarto, ed è il più difficile da leggere, perché
+somiglia a un problema della macchina molto più che a un difetto: davanti a una suite che non torna
+si pensa a Docker, alla rete, al portatile.
+
+**Diversamente dal previsto — «p95» non era un numero.**
+
+Avevo scritto `percentile` come una cosa ovvia. Poi ho misurato. Su un campione con un gradino — 95
+latenze da 1 ms, poi 50, 60, 70, 80 e 900 — il novantacinquesimo percentile vale **1,0** per rango
+più vicino, **3,45** con `statistics.quantiles(method='inclusive')`, **47,55** con `'exclusive'`; la
+media, per confronto, 12,55 ([M-009](../app/docs/Sources.md#m-009)). Quarantasette volte l'uno
+dall'altro, e nessuno dei tre sbaglia: rispondono a tre domande diverse. Le due forme di `quantiles`
+stimano un quantile della popolazione e per farlo interpolano, e la documentazione lo dichiara
+apertamente — «if a cut point falls one-third of the distance between two sample values, 100 and
+112, the cut-point will evaluate to 104» ([A-009](../app/docs/Sources.md#a-009)).
+
+La scelta non è cambiata: rango più vicino, perché ogni numero che finisce su una slide deve poter
+essere ritrovato nel campione. È cambiato il suo statuto, da abitudine a decisione documentata, con
+la fonte accanto e con la riserva scritta, che è scomoda: su quel campione il p95 per rango cade in
+cima al pianerottolo e della coda non dice niente. Lì la coda la mostra il p99 (80,0) e la dice
+tutta il massimo (900,0). È la ragione per cui il riepilogo porta **sei** numeri e non uno.
+
+Nello stesso conto è caduta una domanda che poteva restare un dubbio: `ceil` su un prodotto in
+virgola mobile è la combinazione in cui un ulp diventa un rango sbagliato di uno. Verificato contro
+l'aritmetica esatta di `Fraction` su cinque quantili e duecentomila taglie di campione: zero
+divergenze ([M-008](../app/docs/Sources.md#m-008)). Con la riserva giusta — è una verifica esaustiva
+**su un intervallo**, non una dimostrazione.
+
+**Lo zero che sembra una misura.** La prima stesura del riepilogo restituiva latenze a zero quando
+non c'era nessun campione. Un p95 di zero millisecondi su una corsa in cui tutto è fallito legge
+«velocissimo» dove la verità è «mai arrivato». Ora è `latenze=None`, e `riassumi` su un campione
+vuoto solleva invece di inventare.
+
+**Un aiutante di prova che spegneva il controllo.** Il filtro `_specie(eventi, WriteSucceeded)`
+tornava `list[Evento]`, e `mypy --strict` ha bocciato **dieci** asserzioni in un colpo:
+`"Evento" has no attribute "durata_ms"`. A runtime sarebbero passate tutte. La correzione è un
+parametro di tipo — `def _specie[E: Evento](eventi: list[Evento], tipo: type[E]) -> list[E]`, PEP 695,
+che mypy 1.13 su Python 3.13.15 accetta senza cerimonie.
+
+**Che cosa resta aperto, dichiarato.** La saturazione di `maxPoolSize` è materiale didattico del
+design, e qui non si può misurare: contro `InMemoryStore` non c'è nessun pool da saturare. Resta il
+gancio — il parametro `scrittori` — e la misura è del Task 16, dove andrà guardata anche la coda,
+che con `maxsize=0` è illimitata ([A-010](../app/docs/Sources.md#a-010)). E un avvertimento che vale
+la pena portarsi dietro: oggi la violazione del §6.3 è vista *per quello che è* da **una sola**
+prova, quella che confronta gli identificatori di thread; le altre cinque che falliscono insieme a
+lei lo fanno per effetto collaterale, perché i conteggi vivono nel ciclo di drenaggio.
+
+**Note di metodo.**
+
+153. **Una rottura deliberata ha un quarto esito, e non fallisce: pianta.** La nota 144 ne elencava
+     tre — la guardia scatta, la guardia tace, l'oggetto non è più costruibile. Ne manca uno, e si
+     vede solo rompendo codice concorrente: togliendo la garanzia che un worker segnali sempre la
+     propria fine, la suite non produce nessun `FAILED`, nessun messaggio, nessun punto del codice
+     indicato — resta ferma finché un `timeout` non la uccide, e l'unica traccia è un codice
+     d'uscita. È l'esito più insidioso perché **un blocco senza messaggio somiglia a un guasto
+     dell'ambiente**: la reazione naturale è sospettare Docker, la rete, la macchina. La regola
+     pratica ne discende: le prove concorrenti si eseguono sempre sotto un `timeout`, e il primo
+     sospetto davanti a una suite che non torna dopo una modifica è la modifica, non il portatile.
+154. **Un percentile senza la sua definizione non è un numero.** «p95 = 47,55 ms» sembra un fatto e
+     non lo è: sullo stesso campione, tre modi legittimi di calcolarlo danno 1,0, 3,45 e 47,55 —
+     quarantasette volte l'uno dall'altro — perché rispondono a tre domande diverse. Chi stima un
+     quantile della popolazione interpola, e ottiene un valore che nessuno ha misurato; chi riferisce
+     ciò che ha misurato prende un valore osservato, e paga con l'effetto pianerottolo. Nessuno dei
+     due sbaglia; sbaglia chi pubblica il numero senza dire quale dei due sta facendo. La regola:
+     ogni indicatore aggregato porta con sé la propria definizione, e mai da solo — un percentile che
+     non è accompagnato almeno dal massimo è un modo di non guardare la coda.
+155. **Zero è la peggiore risposta mancante, perché ha la faccia di una misura.** Restituire `0.0`
+     per una latenza che non è stata misurata, `0` per un conteggio che non è stato fatto, una lista
+     vuota per una domanda a cui non si è risposto: sono tutti valori che attraversano i controlli di
+     tipo, si sommano, si stampano e si mediano. Un p95 di zero millisecondi su una corsa in cui ogni
+     scrittura è fallita legge «velocissimo» dove la verità è «mai arrivato», e a differenza di
+     un'eccezione non lo dice a nessuno. È la regola del doppio che solleva (nota 149) portata dai
+     doppi ai dati: **dove non c'è una risposta giusta, il tipo deve poter dire di non averla** —
+     `None`, o un errore, mai un valore neutro.
+156. **Un aiutante di prova che perde il tipo spegne il controllo dove serviva di più.** Un filtro
+     che riceve eventi di dieci specie e ne restituisce una sola ha, nella firma ingenua, il tipo
+     della lista di partenza; le asserzioni che seguono toccano i campi della specie filtrata, cioè
+     esattamente ciò che quel tipo non promette. `mypy --strict` ha bocciato dieci asserzioni in un
+     colpo, e a runtime sarebbero passate tutte. La lezione non è «annotare meglio»: è che il codice
+     di prova va tipizzato **almeno** quanto quello di produzione, perché è lì che le asserzioni sono
+     più specifiche, ed è lì che una perdita di tipo passa inosservata più a lungo — nessuno rilegge
+     un aiutante di tre righe. Quando un aiutante *sa* qualcosa che il chiamante userà, glielo si fa
+     dire con un parametro di tipo.
+
+Stato aggiornato: decisioni fino ad **ADR-0081**, verifiche fino a **V-074**, note di metodo fino
+alla **156**. Le suite: **143** prove per gli strumenti, **106** per l'applicazione. Prossimo passo:
+**Task 6** del [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), l'osservatore della
+topologia — che chiederà a `FakeInspector` la sequenza di stati per cui è stato disegnato.
+
+---
+
+## 2026-09-03 — `feature/04`, Task 6: la macchina a stati della topologia, due numeri, e due volte l'arnese che mente
+
+`TopologyWatcher` è l'occhio dell'applicazione sul cluster: guarda la topologia, racconta che cosa è
+cambiato, e calcola i due numeri per cui il talk esiste — **quanto è durata l'interruzione** e
+**quante scritture confermate sono sparite**. Come tutto ciò che sta in `application/`, non sa che
+esiste MongoDB: parla con `ClusterInspector`, `Clock` ed `EventSink`. Le prove dell'applicazione
+passano da **106 a 153**, `mypy --strict` verde su 28 file.
+
+Il caso che conta non è uno stato, è un **passaggio**: primario, nessun primario, primario
+**diverso**. Tre fotogrammi, e solo il terzo dice «failover» — se torna lo stesso primario è stata
+un'interruzione, non un cambio di guardia. La distinzione vive in `Interruzione`, che tiene i due
+indirizzi e non solo i due istanti.
+
+I due numeri stanno qui e non nella TUI. Una durata calcolata dentro il ciclo di disegno la si può
+provare solo aspettandola davvero; calcolata dietro la porta `Clock`, il valore atteso è **esatto** —
+250,0 ms, non «fra 200 e 300» — e la prova gira in millisecondi. È la ragione per cui `Clock` è una
+porta, scritta in ADR-0007 e finalmente riscossa.
+
+**Diversamente dal previsto — la regola del §6.2 ha chiesto un nono evento, e una guardia gliel'ha
+fatto pagare.**
+
+«Dopo 30 s senza primario, smetti di ritentare» era una frase del design senza codice. Tradurla ha
+chiesto che la resa fosse **detta**, e nessuno degli otto eventi del §6.3 sapeva dirla senza mentire:
+`WriteFailed` racconta una scrittura che qui nessuno ha tentato, `RetryAttempted` annuncia un
+tentativo che non ci sarà — al Task 5 era già stato stabilito, con una prova, che l'ultimo evento di
+una resa non può essere un tentativo mai eseguito — e `TopologyChanged` riferisce il cluster, mentre
+la resa è una decisione di chi osserva.
+
+Aggiungere l'evento faceva fallire `test_gli_eventi_del_design_sono_otto_e_sono_quelli`, la guardia
+scritta al Task 3 perché il dominio non crescesse in silenzio. Ha funzionato esattamente come doveva:
+non ha impedito la modifica, ne ha reso **visibile il costo**, e ha costretto la decisione a passare
+per la sede giusta. [ADR-0082](Decision.md#adr-0082) porta gli eventi a nove con
+`PrimaryWaitAbandoned`, che dichiara `atteso_ms`, `pazienza_ms` e `ultimo_primario`. I due numeri
+viaggiano insieme perché «ho aspettato 30 000 ms» non si legge finché non si sa quanta pazienza
+c'era, e dal vivo la pazienza si abbassa apposta per non tenere ferma la sala.
+
+**Diversamente dal previsto — due rapporti falsi prima di un rapporto vero.**
+
+Ventun rotture deliberate sull'osservatore, una alla volta, con ripristino da copia
+([M-011](../app/docs/Sources.md#m-011)). I primi due esiti erano sbagliati entrambi, e per ragioni
+diverse.
+
+Il primo diceva *ventuno su ventuno catturate*, e non aveva eseguito **una sola prova**: era rimasta
+in riga di comando un'opzione inesistente, `pytest` usciva con **4** — errore d'uso — per tutte e
+ventuno, e lo script leggeva «diverso da zero» come «una prova ha fallito». Il repository conosceva
+già il codice 5, «nessuna prova raccolta» ([M-005](../app/docs/Sources.md#m-005)), e non aveva
+imparato la lezione generale.
+
+Il secondo attribuiva a rotture diverse la stessa prova fallita, il che è impossibile. Python decide
+se ricompilare un modulo confrontando **data di modifica in secondi e dimensione in byte** del
+sorgente: le rotture 5 e 6 sono la stessa sostituzione in due punti, producono file identici in
+lunghezza — 16 036 byte — e vengono scritte a meno di un secondo l'una dall'altra. La corsa della 6
+eseguiva il bytecode della 5. Stessa cosa per la coppia 9/10, entrambe 16 033.
+
+Il segnale d'allarme, tutte e due le volte, è stato lo stesso: **un rapporto troppo pulito**. Ventuno
+su ventuno era il risultato più desiderabile e il meno probabile; due mutazioni distinte catturate
+dalla stessa identica prova era un'impossibilità logica travestita da conferma.
+
+**Quattro guardie scoperte, e una prova che osservava il risultato giusto per il motivo sbagliato.**
+
+Al netto degli arnesi: diciassette rosse, **quattro mute**. La più istruttiva è la quarta. Una prova
+sull'ordine per indirizzo dei `ServerStateChanged` esisteva già; togliendo `sorted` restava verde,
+perché in quella prova anche l'ordine di comparsa dei server era alfabetico. La guardia non era
+provata — era **accompagnata** da un caso che le dava ragione senza interrogarla. La prova nuova
+elenca i server al contrario nella descrizione di partenza.
+
+**Che cosa resta aperto, dichiarato.** Questo osservatore **interroga**, non ascolta: la risoluzione
+della misura è l'intervallo di campionamento, e l'errore sulla durata è al più un intervallo. Il
+valore predefinito di 500 ms è scelto, non misurato. La misura vera arriva al Task 7, con
+`SdamBridge` e i callback di PyMongo, che riferiscono il cambiamento quando accade invece che al
+sondaggio successivo. Nessun `ClusterInspector` reale esiste ancora, e per il `TopologyWatcher` non
+c'è l'invariante di thread che il Task 5 ha dato al generatore di carico.
+
+**Note di metodo.**
+
+157. **Un codice d'uscita non è un booleano, e trattarlo come tale rovescia il verdetto.** Uno script
+     che rompe il codice apposta chiede a `pytest`: «hai fallito?». Ma `pytest` risponde con almeno
+     quattro cose diverse — 0 tutto verde, 1 una prova ha fallito, 4 errore d'uso, 5 nessuna prova
+     raccolta — e solo l'**1** è la risposta cercata. Un'opzione scritta male produce 4 su ogni
+     corsa, e uno script che legge «diverso da zero» come «la guardia ha scattato» riferisce
+     ventuno successi senza aver eseguito niente. La regola: un arnese che classifica esiti
+     **elenca** i codici che conosce e tratta come guasto proprio quello che non riconosce; e chi lo
+     scrive controlla che l'output non sia vuoto, perché un rapporto pieno di verdetti e privo di
+     testo è il ritratto di uno strumento che non ha mai chiamato lo strumento vero. La forma più
+     generale: **il caso più pericoloso non è la prova che fallisce, è la prova che non è stata
+     eseguita** — le due si assomigliano solo se si guarda un numero invece di una riga.
+158. **Due modifiche della stessa dimensione, scritte nello stesso secondo, sono la stessa modifica.**
+     Python decide se ricompilare un sorgente confrontando la sua data di modifica **in secondi** e
+     la sua dimensione **in byte** con quanto registrato nell'intestazione del `.pyc`; il contenuto
+     non lo guarda. Un ciclo di rotture deliberate viola entrambe le ipotesi implicite di quel
+     controllo: scrive più versioni al secondo, e produce versioni della stessa lunghezza ogni volta
+     che sostituisce un nome con un altro della stessa misura. Il risultato è che una corsa esegue il
+     bytecode della corsa prima, e il rapporto attribuisce a una mutazione l'effetto di un'altra. La
+     regola pratica: chi genera codice a macchina disattiva il bytecode (`PYTHONDONTWRITEBYTECODE=1`)
+     e cancella i `__pycache__` prima di ogni corsa. La regola generale: **ogni cache ha un criterio
+     di invalidazione, e va conosciuto prima di usarla in un ciclo automatico** — quello di CPython è
+     pensato per un umano che salva un file ogni tanto, non per uno script che ne salva venti al
+     minuto.
+159. **Una guardia si prova solo con un caso in cui, se non ci fosse, si vedrebbe.** Una prova
+     asseriva che gli eventi escono in ordine di indirizzo; togliendo l'ordinamento restava verde,
+     perché nel suo scenario i server comparivano già in ordine alfabetico. Osservava il risultato
+     giusto per il motivo sbagliato: confermava l'ordine senza mai metterlo alla prova. È la forma
+     più subdola di prova inutile, perché non è né sbagliata né incompleta — asserisce esattamente
+     ciò che deve, e non potrebbe fallire. La regola sta prima della prova, nella sua costruzione:
+     **prima di scriverla, si nomina la modifica al codice di produzione che la farebbe fallire**;
+     se non se ne trova una, il caso scelto è complice. Per una guardia sull'ordine questo significa
+     un ingresso disordinato; per una sul filtro, un elemento da scartare; per una sul limite, un
+     valore oltre.
+160. **Un numero può sbagliare verso il rassicurante, e può sbagliare verso lo spettacolare: il
+     secondo è più difficile da vedere.** La nota 155 diceva di non inventare zeri. Il seguito è che
+     l'errore ha due direzioni, e l'attenzione ne guarda una sola. Un'interruzione già in corso al
+     primo sguardo, se la si misurasse dall'istante in cui la si è vista, darebbe un minimo:
+     sbaglierebbe per difetto, e chi legge lo sospetta. Un'interruzione già chiusa, se ogni sguardo
+     successivo ne spostasse la fine, crescerebbe a ogni giro: sbaglierebbe per eccesso, e nessuno lo
+     sospetta, perché il numero grosso conferma la tesi che si sta esponendo. Nella prima corsa di
+     rotture era il secondo caso a non essere coperto da nessuna prova. La regola: **quando un
+     numero finisce su una slide a sostegno di un'affermazione, la prova che serve è quella che lo
+     impedirebbe di crescere**, non quella che lo impedirebbe di sparire; e dove il valore onesto non
+     esiste, il tipo dice `None` invece di scegliere una direzione.
+
+Stato aggiornato: decisioni fino ad **ADR-0082**, verifiche fino a **V-074**, note di metodo fino
+alla **160**. Le suite: **143** prove per gli strumenti, **153** per l'applicazione, `mypy --strict`
+verde su 28 file. Prossimo passo: **Task 7** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), `SdamBridge` — dove le topologie
+smetteranno di essere finte, e i callback di PyMongo andranno **osservati**, non solo letti.
+
+## 2026-09-03 — `feature/04`, Task 7: il ponte SDAM, una documentazione che sbaglia un'unità, e una rottura che non rompe
+
+`SdamBridge` è il primo modulo che importa PyMongo davvero, e il punto in cui l'applicazione smette
+di **interrogare** il cluster e comincia ad **ascoltarlo**. Quattro ascoltatori — server, topologia,
+battiti, comandi — una coda sola, e una regola sola: ogni callback costruisce un evento congelato, lo
+deposita, ritorna. Le prove dell'applicazione passano da **153 a 193**, `mypy --strict` verde su 30
+file.
+
+La regola non è igiene. La documentazione di PyMongo dice che «Application threads block waiting for
+event handlers … to return» ([S-010](Sources.md#s-010)): il thread che aspetta è il monitor del
+driver, quello che si accorge della caduta del primario. Un callback che disegna una tabella allunga
+**proprio il failover che si sta cronometrando**. Il numero sulla slide diventerebbe più grande per
+colpa dello strumento che lo misura — non una degradazione, una falsificazione.
+
+**Quattro classi non sono una scelta di stile.** `ServerListener` e `TopologyListener` dichiarano gli
+stessi tre metodi, e il driver smista per `isinstance`. Una classe che le implementasse entrambe
+riceverebbe due tipi di evento sulla stessa firma, e dovrebbe distinguerli a mano nel percorso caldo
+— esattamente ciò che [ADR-0019](Decision.md#adr-0019) vieta. Separate, la distinzione la fa il
+driver, gratis.
+
+**Diversamente dal previsto — la documentazione di PyMongo sbaglia un'unità di misura, e sarebbe
+costata una tabella di zeri.**
+
+La docstring di `ServerHeartbeatSucceededEvent.duration` dice «The duration of this heartbeat in
+microseconds». Il valore che ci arriva è `round_trip_time`, che viene da `_monotonic_duration`, che
+restituisce `max(0.0, time.monotonic() - start)`: **secondi**. Tre passaggi nel sorgente installato,
+nessuna lettura alternativa possibile. L'altro evento, `CommandSucceededEvent.duration_micros`, è
+invece davvero in microsecondi: due famiglie, due unità, e solo una documentata bene.
+
+Credere alla docstring avrebbe prodotto latenze di battito nell'ordine di 10⁻⁶ ms, che nel riepilogo
+dei percentili sarebbero comparse come **zeri**. È la nota 155 — uno zero inventato è la peggiore
+risposta mancante — fatta scattare non da una scelta nostra ma da una riga di documentazione altrui.
+Il patto di lettura di `app/docs` prevedeva questo caso in astratto («dove le due non concordano, la
+riserva è scritta»); è la prima volta che capita, ed è registrato in
+[`app/docs/Sources.md`, M-012](../app/docs/Sources.md#m-012) con i tre punti del sorgente.
+
+**Il driver applica a sé stesso la regola di ADR-0019.** Misurando da quale thread arriva ciascun
+callback si scopre che server e topologia **non** sono consegnati dal codice che scopre il
+cambiamento: quel codice fa `self._events.put(...)`, e un thread di nome `pymongo_events_thread`
+drena la coda e chiama i listener. Battiti e comandi invece arrivano sul thread del monitor e su
+quello applicativo. Metà dei listener di PyMongo passano quindi dalla stessa forma — coda più
+drenatore — che ADR-0019 impone all'applicazione, e nessuna pagina di documentazione lo dice
+([M-014](../app/docs/Sources.md#m-014)). Vale come conferma indipendente della decisione, ed è un
+punto che il talk può usare: non è un'idea del relatore, è quello che fa il driver.
+
+La regola non cambia per questo. Quel thread è **uno solo**: un callback lento lì accoda tutti gli
+altri cambi di topologia, compreso quello che annuncia il primario nuovo.
+
+**Un valore nuovo nel dominio, e stavolta senza ADR.** `RuoloServer.ALTRO`. Il driver conosce
+`RSOther`, `RSGhost`, `LoadBalancer`; mandarli su `SCONOSCIUTO` è una traduzione sbagliata proprio
+nel momento della demo, perché un membro che riparte sta qualche secondo in `RECOVERING` e il driver
+lo chiama `RSOther`. «Sconosciuto» direbbe *il client non ha capito*, mentre il client ha capito
+benissimo. I tre stati dell'assenza sono ora distinti: `SCONOSCIUTO` è l'assenza di un'osservazione,
+`IRRAGGIUNGIBILE` è un'osservazione, `ALTRO` è il contrario di entrambi. Nessun ADR perché
+`RuoloServer` non è enumerato nel design — a differenza dei nove eventi, che al Task 6 avevano
+richiesto [ADR-0082](Decision.md#adr-0082) per diventare nove. La guardia esiste dove il design
+enumera; dove non enumera, la sede è il registro.
+
+**I tipi hanno impedito una stringa sbagliata a schermo.** I callback non sono tipizzati con le
+classi di PyMongo ma con sei `Protocol` scritti qui, che dichiarano solo gli attributi letti. Serve a
+provare la traduzione **senza PyMongo vivo**; ma siccome le classi ereditano davvero da quelle del
+driver, `mypy --strict` deve dimostrare che le classi vere soddisfino i nostri `Protocol` — un
+controllo di compatibilità gratuito, a ogni `make app-check`. Ed è servito subito: la prima stesura
+dichiarava `address: tuple[str, int]`, mypy ha rifiutato perché in PyMongo la porta è opzionale, e
+senza quel rifiuto la cronaca avrebbe mostrato `mongo-1:None` — che nessun doppio scritto a mano
+avrebbe colto, perché chi scrive il doppio la porta ce la mette sempre.
+
+**Ventotto rotture, ventisette rosse, e nessuna prova nuova.** È il contrario del Task 6, dove
+quattro guardie su ventuno mancavano: qui le prove erano state scritte contro un contratto già
+**misurato**, non contro un'idea del comportamento. La ventottesima è quella che vale: una tabella di
+Rich dentro il callback fa fallire la prova cronometrata con tre ordini di grandezza di margine. Il
+vincolo di ADR-0019 non è un principio, è una cosa che si vede.
+
+La quindicesima resta verde, e la prima ipotesi è sbagliata. Vedi la nota 161.
+
+**Le protezioni delle note 157–159 c'erano dall'inizio, e la 153 è arrivata lo stesso.** Prima
+batteria di rotture costruita con gli arnesi già a posto: esito letto dal codice di uscita mappato
+per nome, bytecode disattivato, `__pycache__` cancellati, e la verifica che ogni sostituzione cambi
+davvero il file. Nessun falso rapporto. Ma la rottura «`drena` guarda ma non svuota», nella sua prima
+forma, era un ciclo infinito: la batteria si è piantata dopo sette minuti senza dire niente. Da lì
+una quarta protezione — limite di 90 secondi per corsa, con un esito `APPESO` che ha un nome proprio
+e non si confonde con un fallimento.
+
+### Note di metodo
+
+161. **Prima di concludere che manca una guardia, va escluso che manchi la differenza.** Una
+     modifica deliberata ha lasciato la suite verde: leggere l'indirizzo del server dalla descrizione
+     *di prima* invece che da quella *di dopo*. L'ipotesi ovvia — una guardia scoperta, come nella
+     nota 159 — era falsa. Il driver pubblica quel cambio in un punto solo di tutto il suo codice, e
+     ricava la descrizione vecchia indicizzando per l'indirizzo di quella nuova: i due lati portano
+     **sempre** lo stesso indirizzo, per costruzione. Non sono due letture di cui una giusta, sono la
+     stessa lettura scritta in due modi. Le tre uscite della nota 144, e la quarta della 153, danno
+     tutte per scontato che una modifica cambi il comportamento; questa è la quinta, e va cercata
+     per prima quando una rottura tace. La cura non è inventare una prova: costruire a mano il caso
+     che il driver non può produrre farebbe passare la rottura da verde a rossa e sembrerebbe una
+     guardia, ma aggiungerebbe copertura senza aggiungere verità. La cura è **verificare
+     l'invariante alla fonte e scriverlo dove il codice lo usa**, con file e riga, così che chi
+     rifarà la stessa domanda trovi la risposta invece di riscoprirla.
+162. **Una soglia si misura prima di scriverla, e si dichiara che cosa non prende.** La prova che
+     verifica il vincolo di ADR-0019 confronta il costo di un callback con quello di un inserimento
+     in coda, e chiede che il rapporto stia sotto dieci. Il dieci non è un numero tondo scelto a
+     occhio: viene da tre misure. Il callback onesto sta a 2,9, stabile su cinque ripetizioni; una
+     tabella di Rich lo porta a 883. In mezzo c'è una `f-string`, che arriva a 5,5 e **passa** — cioè
+     la prova non prende un caso che il codice vieta. Una soglia a quattro lo prenderebbe, e
+     fallirebbe anche su una macchina carica, con un messaggio indistinguibile dal rumore; una prova
+     che fallisce a caso viene disattivata da qualcuno, prima o poi. La regola ha due metà, e la
+     seconda è quella che di solito manca: si sceglie la soglia dove il vincolo diventa un **danno
+     misurabile** — a ottocento comandi al secondo, 386 µs per evento sono 0,31 secondi di CPU per
+     ogni secondo di orologio — e si scrive accanto alla prova **che cosa resta fuori**, invece di
+     lasciar credere che la copertura arrivi fino al divieto. Una soglia che non dichiara il proprio
+     buco è una riserva non scritta, e la nota 152 dice che una riserva è un'asserzione.
+
+Stato aggiornato: decisioni fino ad **ADR-0082**, verifiche fino a **V-074**, note di metodo fino
+alla **162**. Le suite: **143** prove per gli strumenti, **193** per l'applicazione, `mypy --strict`
+verde su 30 file. Prossimo passo: **Task 8** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), gli adattatori veri contro uno stack
+vero — dove i battiti e i cambi di ruolo, finora costruiti a mano, dovranno arrivare da un cluster
+che cade sul serio.
+
+---
+
+## 2026-09-03 — `feature/04`, Task 8: il contratto che ha trovato il bugiardo prima che l'originale esistesse
+
+Il Task 8 è il punto in cui l'applicazione incontra un MongoDB vero: `PymongoStore`,
+`PymongoInspector`, un generatore deterministico, e una seconda suite che accende gli stack di
+questo repository e ci gira contro — con i `make up-0X` che ci sono, non con un facsimile, perché
+[ADR-0020](Decision.md#adr-0020) dice che si prova l'artefatto che il pubblico eseguirà. Le prove
+dell'applicazione passano da **193 a 214** unitarie, più **33** di integrazione;
+`mypy --strict` verde su **39** file.
+
+La notizia non è che funzioni. È che cosa si è rotto, e quanto era invisibile prima.
+
+**Il primo difetto è saltato fuori senza toccare un cluster.** Il Passo 4 chiedeva di far girare le
+prove del Task 4 anche contro l'adattatore vero. L'ordine naturale sarebbe stato: scrivo
+l'adattatore, poi condivido le prove. È stato fatto al contrario — prima il file condiviso,
+`app/tests/contratto_archivio.py`, eseguito **soltanto** contro `InMemoryStore` — e la prima
+esecuzione ha dato `1 failed, 10 passed`. Il doppio rispondeva `[{"quanti": 0}]` a un `$count` su
+zero documenti; MongoDB non risponde niente, e nemmeno `$group` con `_id: null` lo fa. Un difetto
+che stava lì da quattro task, invisibile perché nessuna prova aveva mai chiesto quel caso, e trovato
+da un file che non conteneva ancora una riga di integrazione.
+
+Il modo in cui sarebbe esploso merita di essere scritto: `risultato[0]["quanti"]` dà zero sul doppio
+e `IndexError` contro il cluster, cioè la suite veloce resta verde e la demo si rompe al primo
+fotogramma, quando la collezione è ancora vuota. È la **nota 155** vista dall'altro lato — lì una
+risposta mancante scambiata per uno zero, qui uno zero inventato dove la risposta manca.
+
+**Il secondo bugiardo era l'originale.** `find_page(quanti=0)` restituisce la lista vuota sul doppio
+e la collezione intera contro MongoDB: «A `limit()` value of 0 (i.e. `.limit(0)`) is equivalent to
+setting no limit». Il valore non lo digita nessuno, ci si arriva per sottrazione — quante righe
+restano nella finestra, quanti mancano alla fine dell'elenco — cioè nel caso limite di un calcolo,
+che è quello che nessuno prova a mano. In scena sarebbero state cinquantamila righe dove ne erano
+state chieste zero.
+
+**Una scelta che tutti consigliano, rifiutata da una misura.** `ordered=False` per il caricamento
+massivo stava per essere adottato per abitudine. Ventimila documenti per configurazione, tre giri
+alternati sullo stack 01: mediane per lotto fra 2,48 e 2,70 ms **da entrambe le parti**, con il
+terzo giro in cui l'ordinato è il più veloce. Non c'è niente da guadagnare, e il predefinito dà in
+cambio un errore più semplice da leggere. La riserva è scritta accanto ai numeri: loopback, istanza
+singola, niente `w: majority`, niente sharding — le tre condizioni in cui il confronto potrebbe
+ribaltarsi sono tutte fuori dalla misura.
+
+**Due trappole della connessione che nessuna pagina dichiara.** `replicaSet=rs0` dall'host contro lo
+stack 02 **sano** fallisce dopo 4,2 secondi con `ReplicaSetNoPrimary` e tutti e tre i membri
+irrisolvibili, perché il set si annuncia con i nomi di servizio Compose:
+[ADR-0021](Decision.md#adr-0021) visto dal lato che fa male, e una diagnosi indistinguibile da un
+primario caduto davvero — cioè da quella che il Blocco 2 esiste per mostrare. La seconda è che
+`tz_aware` è predefinito a `False`: le date tornano ingenue, il confronto con quelle scritte riesce
+lo stesso, e lo sbaglio si vede come un orario storto sullo schermo. Un difetto che non fallisce è
+l'unico caso in cui una guardia nel costruttore si giustifica, e `PymongoStore` ne ha esattamente
+una.
+
+**Una regola del repository ostacolava una cosa legittima, e mancava la sede.** Le prove accendono
+gli stack, `make up-02` legge `PASSWORD_AMMINISTRATORE` dal `.env`, e
+[ADR-0056](Decision.md#adr-0056) dice che quel file vive nel checkout principale, non in un
+worktree. Copiarlo avrebbe creato una seconda copia di un segreto che invecchia in silenzio;
+scrivere un percorso assoluto nelle prove avrebbe messo la macchina di chi sviluppa dentro un file
+versionato. Invece di aggirare la regola si è aperta la sede mancante:
+[ADR-0083](Decision.md#adr-0083), il collegamento simbolico — il file resta uno, il versionamento
+non lo vede, e Compose non sa di nulla perché apre un percorso e il sistema operativo lo segue.
+
+**Il manuale non diceva quello che stavo per fargli dire.** La prima stesura di `_chunk_per_shard`
+spiegava che «dalla 5.0 `config.chunks` non contiene più il campo `ns`». Andata a controllare, la
+pagina non lo afferma da nessuna parte e non nomina la 5.0 a questo proposito: prescrive l'unione
+per `uuid`, e basta. La docstring è stata riscritta separando le due cose — il Tip è del manuale,
+l'assenza di `ns` è una constatazione sul 7.0.40 di **questo** repository, dove nessuno dei cinque
+chunk ha quel campo e cercarlo restituisce zero senza sollevare. Un difetto silenzioso perfetto:
+zero chunk su uno shard che ne ha due, cioè «i dati non sono distribuiti» detto esattamente dove lo
+sono.
+
+**Un commento prometteva più di quanto la protezione mantenga.** Il `pyproject.toml` diceva che
+`--strict-markers` protegge dagli errori di battitura nei marcatori. Eseguito: `@pytest.mark.stack3`
+in un decoratore è intercettato con un errore di raccolta, ma `pytest -m stack3` sulla riga di
+comando deseleziona trentatré prove ed esce zero, senza una parola. Il commento adesso dice
+entrambe le cose, e il buco che resta è dichiarato accanto alla protezione che non lo copre.
+
+**La rete di sicurezza che nessuno aveva chiesto.** Ogni prova di integrazione riceve un database
+usa-e-getta col prefisso `mongolab_prove_`, e `sveglia()` accende lo stack se non risponde: da
+`make down-01` a diciannove prove verdi in 8,1 secondi, senza che nessuno digiti `make up-01`. Gli
+stack alla fine **non** si spengono, ed è deliberato — fermare uno stack che l'operatore aveva già
+acceso sarebbe un effetto che le prove non hanno causato, e chi prepara la demo si troverebbe la
+scena smontata da una suite di test.
+
+### Note di metodo
+
+163. **Estrarre un contratto condiviso è già una prova, prima ancora di condividerlo.** Il file che
+     raccoglie le verifiche comuni fra un doppio e l'originale è stato scritto per essere eseguito
+     in due posti, e ha trovato il primo difetto **eseguito in uno solo**. La ragione è che scrivere
+     una verifica pensando «questa deve valere anche contro il server vero» costringe a formularla
+     in termini di comportamento osservabile invece che di implementazione, e le domande che ne
+     escono sono diverse da quelle che si pongono guardando il doppio. Il valore non sta tutto nel
+     confronto: metà sta nel cambio di punto di vista che il confronto obbliga a fare.
+
+164. **Quando esiste già una seconda implementazione corretta, il caso che giustifica una guardia
+     non si inventa: si esegue.** La **nota 159** dice che una guardia è provata solo da un caso in
+     cui la sua assenza si vedrebbe, e costruire quel caso è di solito la parte difficile. Con due
+     implementazioni della stessa porta la difficoltà sparisce: si scrive la verifica, la si fa
+     girare da entrambe le parti, e se una passa e l'altra no il caso è già lì. `find_page(quanti=0)`
+     è stato scoperto così, e la guardia è stata scritta dopo aver visto la riga rossa.
+
+165. **Una scelta che tutti consigliano va misurata come una qualsiasi.** La **nota 162** dice che
+     una soglia si misura prima di scriverla; questa è il caso complementare, ed è più insidioso,
+     perché non c'è nessun numero da inventare — c'è un consenso da ereditare. `ordered=False` è la
+     raccomandazione standard per il caricamento massivo, e su questo carico non fa differenza. Il
+     costo di misurarlo è stato di due minuti; il costo di non misurarlo sarebbe stato una riga di
+     codice che nessuno avrebbe mai rimesso in discussione, perché «si sa».
+
+166. **Una constatazione su una versione non è una regola di versione.** Misurare che il 7.0.40 non
+     ha un certo campo autorizza a scrivere «sul 7.0.40 quel campo non c'è, misurato». Non
+     autorizza a scrivere «dalla 5.0 quel campo è stato tolto», che è un'affermazione su tutte le
+     versioni e va cercata nella documentazione — dove, in questo caso, non c'è. La differenza fra
+     le due frasi non si vede leggendo, perché entrambe spiegano bene lo stesso codice; si vede il
+     giorno in cui qualcuno ci costruisce sopra una decisione su una versione che non ha mai
+     provato.
+
+167. **Un commento che descrive una protezione va verificato come la protezione.** Il commento su
+     `--strict-markers` era plausibile, utile e sbagliato per metà. Un commento del genere non è
+     documentazione: è un'asserzione su un comportamento, e nessuno la rimetterà in discussione
+     proprio perché sta accanto alla riga che dovrebbe garantirla. La **nota 152** dice che una
+     riserva è un'asserzione; questa aggiunge che anche una rassicurazione lo è, e che si eseguono
+     tutte e due.
+
+Stato aggiornato: decisioni fino ad **ADR-0083**, verifiche fino a **V-074**, note di metodo fino
+alla **167**. Le suite: **143** prove per gli strumenti, **214** per l'applicazione più **33** di
+integrazione, `mypy --strict` verde su 39 file. Prossimo passo: **Task 9** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).
+
+---
+
+## 2026-09-03 — `feature/04`, Task 9: lo strumento che ha perso cinquantamila documenti ed è uscito zero
+
+Il Task 9 attacca la porta `BackupTool` a `mongodump` e `mongorestore`. È il primo adattatore che
+non parla con una libreria ma con un **processo**, e le differenze rispetto a `PymongoStore` vengono
+tutte da lì: la credenziale attraversa un confine di sistema operativo invece che una chiamata di
+funzione, l'avanzamento è testo da riconoscere riga per riga invece che un valore di ritorno, il
+verdetto è un intero che decide qualcun altro, e il processo **sopravvive** a chi lo ha lanciato.
+Le prove dell'applicazione passano da **214 a 243** unitarie e da **33 a 43** di integrazione;
+`mypy --strict` verde su **42** file.
+
+Tre cose sono state scoperte eseguendo, e nessuna delle tre era nel piano.
+
+**Il motivo scritto nel piano era sbagliato, mentre la regola era giusta.** Il Passo 2 prescrive di
+lanciare il processo con gli argomenti in lista e mai con una stringa di shell, «perché una stringa
+di shell fa comparire la password nella tabella dei processi di chiunque guardi». La lista è la
+scelta giusta. Il motivo no: con `-p <valore>` come **elemento della lista** — nessuna shell
+coinvolta da nessuna parte — un `ps -eo args` dentro il container mostra il segreto per intero,
+sedici campioni su sedici presi a cinquanta millisecondi l'uno dall'altro. La tabella dei processi
+legge `argv`, e ad `argv` non importa da dove è arrivato. Quello che protegge davvero il segreto è
+**omettere `-p`**: gli strumenti allora chiedono la password e la leggono dallo `stdin` anche quando
+lo `stdin` non è un terminale. La lista resta comunque necessaria, per la ragione che il piano non
+nomina — senza shell non c'è nessuno a interpretare uno spazio, un apice o un `$` dentro una
+password o dentro un percorso.
+
+**`mongorestore` ha perso cinquantamila documenti ed è uscito zero.** Un restore ripetuto sulla
+stessa destinazione ricade su `_id` che esistono già — lo strumento **inserisce**, non fonde — e
+dichiara `0 document(s) restored successfully. 50000 document(s) failed to restore.` prima di
+restituire **0** al sistema operativo. Chi controlla il processo nel modo in cui si controlla un
+processo, cioè guardando l'intero che restituisce, riceve «riuscito». È
+[ADR-0077](Decision.md#adr-0077) visto dal lato opposto: lì la regola nasceva guardando gli script
+che scriviamo noi, qui è lo strumento ufficiale di MongoDB a scrivere l'avviso e a non cambiare il
+codice d'uscita. Da qui [ADR-0084](Decision.md#adr-0084): quando lo strumento di qualcun altro
+commette quell'errore, l'adattatore che lo incapsula è il posto in cui si ripara, e
+`RestoreIncompleto` mette il verdetto che `mongorestore` non ha messo.
+
+**Quella guardia non è stata progettata: l'ha scoperta il codice che la contiene.** Le prime due
+prove di integrazione sul restore davano per **idempotente** un restore ripetuto, e la premessa era
+scritta a chiare lettere nella docstring di una di loro, come una cosa ovvia. Eseguite,
+`RestoreIncompleto` è stata sollevata, e la parte sbagliata era l'assunzione della prova. È il caso
+speculare della **nota 164**: lì una seconda implementazione corretta rivela il difetto
+dell'originale, qui il codice di produzione rivela il difetto dell'affermazione fatta dalla prova.
+
+**Il comando arriva dal costruttore, e la ragione è un privilegio.** `SubprocessBackup` non sa come
+si raggiunge `mongodump`: lo riceve, `("docker", "exec", "-i", "mongo-rs-1", "mongodump")` dalle
+prove sull'host e `("mongodump",)` dal container al Task 12. Se la politica di esecuzione stesse
+dentro l'adattatore, l'applicazione containerizzata di [ADR-0012](Decision.md#adr-0012) si
+porterebbe dietro una dipendenza dal **socket Docker** — cioè il permesso di comandare il demone che
+fa girare l'intero laboratorio — per fare una cosa che dal suo container sa già fare da sé. Un
+adattatore che decide come raggiungere lo strumento decide anche, senza volerlo, quali privilegi
+servono per usarlo.
+
+**Le prove unitarie lanciano processi veri, e non è purismo.** Metà di ciò che l'adattatore deve
+garantire — che il figlio parta alla chiamata e non al primo `next()`, che la password non finisca
+fra i suoi argomenti, che l'iteratore abbandonato non lasci un processo orfano — riguarda proprio il
+confine col sistema operativo, cioè esattamente la parte che un mock sostituirebbe con la propria
+opinione. Un mock che dicesse «sì, ho ricevuto `kill`» non dimostrerebbe che il processo è morto. Al
+posto di `mongodump` c'è un programma Python di sei righe che scrive pid e argomenti in un diario,
+legge lo `stdin` e stampa su `stderr` **le righe misurate**; il pid nel diario è ciò che permette
+alla prova sulla chiusura di chiedere al sistema operativo se quel processo è ancora vivo.
+
+**Sei mutazioni, cinque rosse e una verde.** L'adattatore è stato rotto una volta alla volta —
+password rimessa in `argv`, sommario ridotto ad avviso, `dump` trasformata in funzione generatrice,
+`kill` tolto, codice d'uscita ignorato, base 1024 cambiata in 1000 — pretendendo che una prova
+**precisa** se ne accorgesse. Le prime cinque sono diventate rosse subito. La sesta è rimasta verde,
+perché l'unica prova sulle barre usava il formato senza unità di `mongodump`, dove il
+moltiplicatore non entra mai in gioco. Le due prove nate da lì giudicano contro la dimensione vera
+del file, letta con `stat` dentro il container: `6094260` byte annunciati come `5.81MB`, che in base
+1000 farebbero `6.09`.
+
+**La nota 158 si è ripresentata identica, e questo è il fatto interessante.** Alla prima esecuzione
+della sesta mutazione `pytest` riportava un numero che nel sorgente su disco non c'era: `1024**2` e
+`1000**2` hanno la **stessa lunghezza in byte**, lo script riscriveva il file entro lo stesso
+secondo, e il `.pyc` vecchio è stato considerato valido. È esattamente la **nota 158**, scritta al
+Task 5 di questo stesso branch, con la sua regola pratica già formulata —
+`PYTHONDONTWRITEBYTECODE=1` e pulizia dei `__pycache__`. Non ha impedito niente, perché lo script
+delle mutazioni del Task 9 è stato scritto da capo e nessuno rilegge le note di metodo prima di
+scrivere venti righe di utilità. Vale la pena registrarlo così com'è: una lezione scritta protegge
+chi la ricorda, e uno strumento nuovo non la eredita. La conseguenza è che le tre trappole
+dell'arnese — il codice d'uscita che non è un booleano, il `.pyc` condiviso, e la mutazione verde
+che era equivalente invece che scoperta — hanno adesso una sede versionata in
+[`app/docs/05-tipi-prove-e-guardie.md`](../app/docs/05-tipi-prove-e-guardie.md), accanto alle prove,
+che è dove si va a guardare prima di scrivere lo script e non dopo.
+
+### Note di metodo
+
+168. **Il motivo scritto accanto a una regola giusta va eseguito come la regola.** La **nota 167**
+     dice che un commento che descrive una protezione è un'asserzione. Questa è la stessa cosa un
+     passo prima: il «perché» scritto in un piano è formulato **prima** di misurare, quindi è
+     un'ipotesi, e una regola giusta sostenuta da un'ipotesi sbagliata è più pericolosa di una
+     regola assente — perché chi la legge smette di cercare. «Gli argomenti in lista, altrimenti la
+     password finisce nella tabella dei processi» avrebbe fatto scrivere il codice giusto e
+     smettere di pensare al punto esatto in cui il codice giusto non basta.
+
+169. **Rompere il codice a mano trova l'asserzione che non hai scritto.** Una suite verde dice che
+     le prove che ci sono passano, non che le prove che servono esistano. Il modo più economico di
+     misurare la differenza è cambiare un comportamento alla volta e pretendere che una prova
+     **nominata in anticipo** diventi rossa: se resta verde, non è la mutazione a essere innocua, è
+     la prova a non esserci. Sull'adattatore del Task 9 il conto è stato cinque su sei, e la sesta
+     mancava proprio dove il codice faceva la cosa meno ovvia.
+
+170. **Una verifica giudicata contro una copia della stessa scelta non è una verifica.** La prova
+     sulla conversione delle unità stava per confrontare un `1024**2` scritto nella prova con un
+     `1024**2` scritto nel codice: due copie della stessa decisione coincidono sempre, anche quando
+     la decisione è sbagliata. Il metro deve venire da fuori — qui la dimensione vera del file letta
+     con `stat`. Vale ogni volta che una prova contiene una costante che il codice contiene uguale:
+     quella costante non sta verificando niente.
+
+171. **La docstring di una prova è un'asserzione, e può essere lei la parte sbagliata.** Il verso
+     abituale è che la prova giudica il codice, e quando una prova diventa rossa la prima ipotesi è
+     sempre che il codice sia da correggere. Qui è successo l'opposto: `RestoreIncompleto` ha
+     bocciato una premessa scritta nella docstring della prova — «il restore è idempotente sulla
+     stessa destinazione» — che era falsa e che nessuno avrebbe rimesso in discussione, perché il
+     testo di una prova è la parte del repository che meno persone rileggono. La regola pratica:
+     davanti a una prova rossa scritta contro codice nuovo, prima di correggere il codice si legge
+     ad alta voce che cosa la prova **afferma**, e ci si chiede chi l'ha verificato. La **nota 164**
+     dice che una seconda implementazione corretta rivela il difetto della prima; questa è il caso
+     ulteriore, in cui a rivelare il difetto della prova è il codice che la prova doveva giudicare.
+
+172. **Una lezione scritta protegge chi la ricorda, non chi scrive lo strumento dopo.** La **nota
+     158** — due modifiche della stessa dimensione nello stesso secondo condividono il `.pyc` — è
+     stata scritta al Task 5 e reincontrata identica al Task 9, sullo stesso branch, dalla stessa
+     persona. Non ha impedito niente, perché lo script delle mutazioni è stato riscritto da capo e
+     nessuno rilegge il registro prima di scrivere venti righe di utilità. La conseguenza operativa
+     non è «rileggere di più»: è che una lezione utile va messa **dove verrà letta** — accanto al
+     codice a cui si applica, non solo nel registro che la spiega. Le tre trappole delle rotture
+     deliberate stanno ora in `app/docs/05-tipi-prove-e-guardie.md`, che è la pagina che si apre
+     prima di scrivere una prova. Il registro resta la sede del *perché*; la sede del *promemoria* è
+     un'altra, e vanno tenute distinte.
+
+Stato aggiornato: decisioni fino ad **ADR-0084**, verifiche fino a **V-074**, note di metodo fino
+alla **172**. Le suite: **143** prove per gli strumenti, **243** per l'applicazione più **43** di
+integrazione, `mypy --strict` verde su 42 file. Prossimo passo: **Task 10** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).
+
+---
+
+## 2026-09-03 — `feature/04`, Task 10: una promessa mantenuta per caso, e otto righe riservate a server che non esistono
+
+Il Task 10 costruisce la presentazione: `RichTui` per la sala, `PlainSink` per le registrazioni e
+per chi reindirizza su file, `NullSink` per le prove e per le misure del Task 16. Tre rese dello
+stesso flusso di eventi, e un solo thread che disegna. I file previsti dal piano erano tre, quelli
+scritti sono cinque: `presentation/righe.py` e `presentation/scena.py` esistono perché il Passo 4
+vieta di provare `RichTui`, e tutto ciò che nella presentazione è una **decisione** — la riga di un
+evento, il budget di sala, la coda, la cronaca — è stato spostato dove una prova può guardarlo. Le
+prove unitarie passano da **243 a 280**, `mypy --strict` da 42 a **48** file; le 43 di integrazione
+e le 143 degli strumenti restano quelle che erano, e restano verdi.
+
+Quattro cose sono state scoperte eseguendo. Due sono errori del progetto, e sono le più utili.
+
+**La promessa di ADR-0019 era falsa, e lo era da quando è stata scritta.** [ADR-0019](Decision.md#adr-0019)
+prometteva «un solo thread tocca `Live`», e la prometteva sulla base di
+[S-018](Sources.md#s-018): la documentazione di Rich non nomina mai i thread. Il progetto aveva
+trattato quel silenzio come una garanzia — se non se ne parla, non ce ne sono — e aveva scelto il
+disegno giusto per una ragione che nessuno aveva verificato. Aprendo `rich/live.py` della 15.0.0
+installata si legge che con le impostazioni predefinite `Live.start()` avvia un `_RefreshThread`
+demone che chiama `refresh()` per conto suo ([M-027](../app/docs/Sources.md#m-027)). Non sarebbe
+stato scorretto: dentro `Live` c'è un `RLock`, e la libreria è pensata per reggerlo. Ma «corretto
+per caso» e «corretto per costruzione» sono due cose diverse, e la seconda è l'unica che si può
+scrivere in un ADR. Da lì `auto_refresh=False` e [ADR-0085](Decision.md#adr-0085), che mantiene la
+decisione di ADR-0019 e ne sostituisce il presupposto con una misura.
+
+**La prima sonda ha risposto di no alla domanda giusta.** Il primo tentativo di contare i thread
+chiamava `threading.enumerate()` **dopo** `live.stop()`, trovava zero thread in più e concludeva
+che non ce n'erano. La risposta era vera e inutile: il `_RefreshThread` viene fermato e unito
+proprio da `stop()`. La domanda «esiste un thread in più?» ha senso solo nell'istante in cui la
+risposta conta, cioè dentro il `with`. La prova che ora difende ADR-0085 confronta
+`set(threading.enumerate())` prima e durante, e fallisce nominando il thread che ha trovato.
+
+**Il prezzo si è potuto misurare, e il piano andava disatteso alla lettera per rispettarlo.** Il
+Passo 1 chiede che `refresh_per_second` sia «passato esplicitamente, con il valore scritto accanto
+alla ragione per cui è quello». Con `auto_refresh=False` quel parametro diventa **inerte**: mille
+al secondo per mezzo secondo scrivono sette byte, cioè quelli dell'unico `refresh()` chiesto a mano
+([M-027](../app/docs/Sources.md#m-027)). Passarlo a `Live` avrebbe messo nel codice un numero che
+non fa niente, con accanto una motivazione che descrive un comportamento che non avviene: la forma
+più difficile da smentire di una spiegazione sbagliata. Il numero vive quindi nel periodo del ciclo,
+`self._periodo = 1.0 / ritmo`, dove agisce davvero. La deviazione è dichiarata in ADR-0085 e nella
+pagina [11](../app/docs/11-tre-rese-e-un-solo-thread-che-disegna.md).
+
+**Dieci al secondo, e il costo non è la ragione.** Un disegno della schermata più cara costa
+**0,76 ms** ([M-028](../app/docs/Sources.md#m-028)): a dieci giri al secondo è lo 0,8% di un core,
+e anche a sessanta si resterebbe sotto il 5%. Il ritmo lo decide l'altro lato — il ritardo massimo
+fra un fatto e la sua comparsa, cento millisecondi a dieci, duecentocinquanta ai quattro
+predefiniti di Rich. In una scena in cui i tempi **sono** il contenuto, quel quarto di secondo si
+vede.
+
+**Il numero che giustificava il ritmo era stato scritto prima di misurarlo.** La docstring di
+`RITMO_PREDEFINITO` diceva «0,86 ms misurati» e citava un codice `M-0NN` di una misura che non
+esisteva ancora: un segnaposto che avevo intenzione di sostituire dopo. È il modo in cui un
+repository con una regola severa sulle fonti la viola senza rumore. Un numero senza fonte si nota
+subito, perché la regola esiste apposta; un numero **con** una fonte ben formata attraversa ogni
+rilettura. La misura vera, quando è arrivata, lo smentiva del 35%.
+
+**Otto righe riservate a server che non esistono.** `SERVER_MOSTRATI = 8` era giustificato così:
+«due shard da due membri, tre config server, un `mongos`». Sono due errori in una frase sola. Il
+primo è di conteggio — gli shard dello stack 03 hanno **tre** membri ciascuno, e i container
+`mongo` di quello stack sono undici. Il secondo riguarda il **modello**, ed è quello che conta: la
+tabella dell'intestazione non elenca i container dello stack, elenca la `TopologyDescription` che
+il driver espone, e **un client di un `mongos` vede il `mongos`**. Chiesto ai tre stack accesi, il
+caso peggiore è **tre**: il replica set scoperto ([M-029](../app/docs/Sources.md#m-029)). Le
+cinque righe di troppo non erano gratis — `ALTEZZA_INTESTAZIONE = 4 + SERVER_MOSTRATI`, e in una
+schermata alta trenta ogni riga dell'intestazione è una riga tolta alla cronaca, che è passata da
+sedici a ventuno. Corretto il layout, la misura del costo è stata rifatta: la prima correzione ha
+aggiustato il numero, la seconda la cosa misurata.
+
+**Il taglio non è silenzioso, e questa è una decisione.** Un replica set a cinque membri esiste
+legittimamente fuori da questo lab. `server_da_mostrare` mostra i primi due e scrive «… e altri 3»:
+un elenco troncato in silenzio non è una schermata incompleta, è una schermata che **afferma il
+falso** — si legge come un cluster più piccolo di quello che è, e nessuno ha modo di accorgersene.
+
+**Undici rotture, due sopravvissute, e il divieto del Passo 4 letto due volte.** Rompendo il codice
+una riga alla volta, nove mutazioni su undici sono diventate rosse subito. Le due superstiti erano
+tutte e due in `rich_tui.py`: `auto_refresh=True` — cioè la riga su cui poggia ADR-0085 — e
+l'ultimo `aggiorna()` dopo il ciclo, cioè l'evento che chiude la scena e che nessuno vedrebbe mai.
+Sopravvivevano perché il Passo 4 era stato letto come «di `RichTui` non si prova niente». Ma
+nessuna delle due **è** disegno: la prima è quanti thread esistono, la seconda è se la coda è vuota
+quando il ciclo finisce, e si osservano entrambe senza guardare un pixel. Con le due prove
+aggiunte, undici su undici. Il fatto da tenere: le uniche due righe di quel modulo che il resto del
+progetto **cita** — una in un ADR, una in ogni scenario del talk — erano anche le uniche senza
+guardia.
+
+Restano dichiarati aperti: `PlainSink` non gestisce `BrokenPipeError`; non esiste ancora un
+`Orologio` di sistema, e sarà il Task 11 a fornirlo; nessuna prova guarda che cosa Rich disegna
+davvero, e il controllo sarà la registrazione del Task 18; il costo di un disegno è misurato su
+`StringIO` e non su un terminale vero; `_RefreshThread` è privato di Rich e può cambiare, e la
+difesa è la prova che conta i thread.
+
+### Note di metodo
+
+173. **Quando una decisione si giustifica con il silenzio di una documentazione, quel silenzio va
+     misurato prima di trattarlo come una garanzia.** ADR-0019 aveva fatto la cosa prudente —
+     davanti a una lacuna, cambiare disegno invece di indovinare — e aveva scritto la prudenza come
+     se fosse una proprietà della libreria. Ma un silenzio ha due letture, «non succede» e «non è
+     documentato», e la seconda è quasi sempre quella giusta. La regola pratica: se una lacuna è
+     abbastanza importante da entrare in un ADR, è abbastanza importante da andare a guardare nel
+     sorgente installato, che è lì, sul disco, e risponde in cinque minuti. Il disegno scelto era
+     giusto; la ragione scritta accanto era falsa, e sarebbe rimasta scritta.
+
+174. **Un numero inventato accanto a una fonte ben formata è invisibile.** Un repository con una
+     regola sulle fonti si difende bene dal numero **senza** citazione: la regola esiste, chi
+     rilegge la conosce, la mancanza salta all'occhio. Non si difende affatto dal numero scritto
+     insieme a un codice `M-0NN` sintatticamente perfetto che rimanda a una misura che si ha
+     intenzione di fare dopo. La forma è quella conforme, e la conformità della forma è esattamente
+     ciò che ferma la rilettura. La regola pratica è che la citazione si scrive **dopo** aver
+     scritto la fonte, mai prima, e che un segnaposto, se proprio deve esistere, va scritto in una
+     forma che non passa un controllo automatico.
+
+175. **Una giustificazione plausibile è la forma più duratura di un errore di modello.**
+     `SERVER_MOSTRATI = 8` non era un numero buttato lì: aveva accanto una frase che elencava
+     shard, config server e `mongos`, cioè aveva l'aspetto di un numero derivato. Sbagliava il
+     conteggio, ma soprattutto contava la cosa sbagliata — i container dello stack invece di ciò
+     che il driver espone. Un numero nudo invita a chiedere «da dove viene?»; un numero con una
+     derivazione plausibile scritta accanto chiude la domanda. La regola pratica: quando una
+     costante descrive **quello che un sistema esterno mostrerà**, la si chiede al sistema esterno,
+     e la prosa accanto riporta la misura, non il ragionamento che l'ha anticipata.
+
+176. **Una sonda può rispondere di no alla domanda giusta.** Contare i thread dopo `live.stop()` è
+     una misura corretta, ripetibile e priva di significato, perché è `stop()` a chiudere il thread
+     che si stava cercando. Un risultato negativo va letto sempre due volte: la prima per il
+     risultato, la seconda per chiedersi se lo strumento era acceso nel momento in cui il fenomeno
+     accade. Vale in particolare per tutto ciò che nasce e muore dentro un blocco `with`.
+
+177. **Un divieto di provare qualcosa si onora spostando altrove ciò che va provato, non
+     rinunciando a provarlo.** «Non provare la TUI» significa «non provare Rich», e Rich ha già le
+     sue prove. Non significa che le decisioni prese dentro quel modulo restino senza guardia: la
+     riga di un evento, il budget di sala, la coda, il taglio dell'elenco sono decisioni del
+     progetto e vanno in moduli che non conoscono Rich. Quello che resta dentro va guardato per
+     ciò che **è osservabile senza disegnare**: un thread esiste o no, una coda è vuota o no. La
+     regola pratica: davanti a un divieto di provare, chiedersi *che cosa* esattamente vieta, e
+     spostare tutto il resto fuori.
+
+178. **Un elenco troncato in silenzio non è una schermata incompleta: è una schermata che afferma
+     il falso.** Mostrare tre server su cinque senza dirlo produce una lettura precisa e sbagliata
+     — «il cluster ha tre membri» — e chi guarda non ha modo di sospettarlo. Il costo di dirlo è
+     una riga, «… e altri 2». Vale per ogni resa che ha un budget di spazio: la parte omessa va
+     dichiarata, e il numero degli omessi è il dato più importante fra quelli che stanno per essere
+     nascosti.
+
+Stato aggiornato: decisioni fino ad **ADR-0085**, verifiche fino a **V-074**, note di metodo fino
+alla **178**. Le suite: **143** prove per gli strumenti, **280** per l'applicazione più **43** di
+integrazione, `mypy --strict` verde su 48 file. Prossimo passo: **Task 11** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).
+
+---
+
+## 2026-09-03 — `feature/04`, Task 11: la radice di composizione, e tre difetti che solo l'esecuzione poteva mostrare
+
+Il Task 11 scrive `cli.py`, cioè l'unico punto dell'applicazione che conosce le classi concrete:
+costruisce `PymongoStore`, `PymongoInspector`, `SdamBridge`, `SystemClock` e le tre rese, e le
+inietta in componenti che continuano a vedere solo porte. Con lui arrivano i tre comandi diretti del
+§6.4 — `stats`, `watch`, `workload` — la mappa fra `--target` e stack in un posto solo, e il
+`--sink` come opzione invece che come condizione sparsa. Le prove unitarie passano da **280 a 425**,
+`mypy --strict` da 48 a **57** file; le 43 d'integrazione e le 143 degli strumenti restano quelle
+che erano, e restano verdi.
+
+I file scritti sono più di quelli che il piano elenca, e l'allargamento è dichiarato:
+`infrastructure/orologio.py` (la porta `Clock` non aveva un'implementazione di produzione),
+`infrastructure/bersagli.py`, `infrastructure/zavorra.py` (`--doc-size`),
+`presentation/rapporto.py` (l'uscita di `stats`), `--readers` e `--duration` in
+`application/workload.py`, `[project.scripts]` in `app/pyproject.toml`, tre target nel `Makefile`.
+Tutte le quattro opzioni di `workload` sono state implementate perché il Task 16 misurerà
+**quella** riga di comando, e una riga misurata che non si può digitare non serve.
+
+Poi lo stack 01 è stato acceso, e i tre comandi eseguiti per la prima volta contro un MongoDB vero.
+**Due su tre erano sbagliati.** Nessuno dei due lo era per una svista: tutti e due vivevano nella
+giuntura fra componenti che, presi uno per uno, erano corretti e provati.
+
+**Il carico scriveva nella collezione seminata, e nessuno se ne accorgeva.** La prima corsa ha
+risposto `38 scritture · 0 confermate · 38 fallite`, ed è uscita con **zero**. L'errore, per
+intero: `E11000 duplicate key error collection: lab.ordini index: _id_ dup key: { _id: 0 }`
+([M-032](../app/docs/Sources.md#m-032)). `DataGenerator` numera i documenti da zero — è ciò che
+rende il dataset una funzione pura di `(seme, indice)` — e il seed occupa già gli `_id` da 0 a
+49 999. La forma del guasto pesa più del guasto: la cronaca scorreva, le letture riuscivano — 4 833
+su 4 833 — e lo schermo era pieno di attività. Dal fondo della sala è una demo che funziona.
+Nessuna prova unitaria poteva trovarlo: `InMemoryStore` accetta gli `_id` che gli si danno e non ha
+un seed, quindi il fatto vive in nessuno dei due componenti. Che il carico dovesse scrivere altrove
+era peraltro già scritto in due posti — `generatore.py` («le due popolazioni non si incontrano mai
+nella stessa collezione») e `tools/reset-demo.sh` (`const superstiti = ["ordini"]`). A sbagliare era
+il cablaggio, non il disegno. La correzione è una collezione per corsa,
+`lab.carico-<AAAAMMGG-hhmmss>`, e il comando che dice dove scrive prima di cominciare
+([ADR-0088](Decision.md#adr-0088)). Rifatta la stessa corsa: **8 245 scritture, 8 245 confermate, 0
+fallite.**
+
+**Il failover si raccontava due volte, e la colpa non era di PyMongo.** `watch` stampava ogni
+transizione due volte, a mezzo secondo di distanza. Invece di crederlo, il driver è stato messo alla
+prova nudo — un `MongoClient` con un ascoltatore che stampa, e nient'altro in mezzo: la transizione
+la emette **una volta sola** ([M-033](../app/docs/Sources.md#m-033)). Il doppione era nostro.
+`watch` aveva due narratori sullo stesso fatto: `SdamBridge`, che traduce i callback (spinto), e
+`TopologyWatcher`, che rilegge la stessa `TopologyDescription` ogni mezzo secondo (tirato). Il
+ritardo di un giro fra i due rendeva la ripetizione difficile da riconoscere come tale — sembrava
+che fosse successo due volte. Che è precisamente il danno: chi guarda **conta** le transizioni per
+capire che cosa è successo, e la scena centrale del talk avrebbe mentito. La correzione è una riga
+in meno nel cablaggio, non un filtro: il §6.3 assegna la cronaca al ponte, e la sentinella conserva
+l'altra cosa che sa fare — misurare l'interruzione — per lo scenario di failover del Task 13
+([ADR-0089](Decision.md#adr-0089)). Deduplicare nel sink era la scorciatoia ovvia, ed è stata
+scartata per un motivo che vale la pena scrivere: due transizioni identiche e ravvicinate sono anche
+la firma di un membro che *flappa*, cioè esattamente ciò che una demo di failover deve mostrare.
+
+**La fotografia diceva `sconosciuto` di un server sano.** `mongolab stats --target standalone`
+stampava `localhost:27017 sconosciuto` sopra tre righe che dimostravano il contrario.
+`client.topology_description` riferisce ciò che il client crede **in questo istante**, e su un
+client appena costruito quella credenza è «non lo so ancora»: il primo battito non è tornato
+([M-031](../app/docs/Sources.md#m-031)). Non è un difetto del driver — è la proprietà che rende
+visibile l'attimo in cui, durante un'elezione, il client non sa, cioè la scena per cui `watch`
+esiste. Diventa un difetto solo se la si legge per prima. La correzione è nell'ordine di lettura di
+`rapporto()`: `server_status()` per primo, perché esegue un comando e obbliga il driver a guardare;
+`topology()` per ultimo. L'ordine di lettura è l'opposto dell'ordine di stampa, e siccome è
+esattamente il genere di dettaglio che il prossimo refactoring cancella per errore, c'è una prova
+che conta l'ordine delle chiamate — validata con una mutazione deliberata.
+
+**L'orologio, che era una porta senza casa.** `Clock` esisteva come porta e come doppio; in
+produzione nessuno. L'implementazione ovvia è una riga, `datetime.now().astimezone()`, ed è
+sbagliata per l'uso che questa applicazione ne fa. La porta serve a **datare** e a **misurare**:
+`WorkloadRunner._scrivi` sottrae due `now()` e chiama il risultato latenza. L'orologio da parete di
+questa macchina dichiara `monotonic=False` ([M-030](../app/docs/Sources.md#m-030)), cioè per
+contratto non promette di andare avanti; un salto all'indietro non solleva niente, produce una
+latenza negativa che entra nei percentili. `SystemClock` legge il muro **una volta sola** e da lì
+somma il contatore monotono, restituendo ore vere le cui differenze sono durate vere
+([ADR-0086](Decision.md#adr-0086)). Nel fuso locale e non in UTC, perché a Ancona due ore di scarto
+dall'orologio in fondo alla sala sarebbero la prima domanda del pubblico.
+
+**Il `Makefile` non indovina.** `make app-stats` senza `TARGET` stampa «manca TARGET: make
+app-stats TARGET=rs (standalone, rs, sharded)» ed esce con **2**, che è lo stesso codice con cui
+Typer rifiuta un `--target` sbagliato ([M-034](../app/docs/Sources.md#m-034)). Sbagliare la riga di
+`make` e sbagliare la riga di `mongolab` sono lo stesso errore per chi legge un CI, e meritano lo
+stesso numero. `--target` non ha, e non avrà, un valore predefinito: durante il talk si passa da uno
+stack all'altro tre volte, e un carico mandato al bersaglio sbagliato non fallisce — riesce,
+altrove.
+
+Restano dichiarati aperti, oltre a quelli che il registro dell'applicazione già elenca: sullo stack
+03 la collezione del carico **non è distribuita**, perché `init/30-dati-demo.js` distribuisce solo
+`lab.ordini`, e il confronto fra architetture del Task 16 dovrà o distribuirla o dichiarare che sta
+misurando un solo shard — **è la prima cosa che quel task deve decidere**; la riga
+`TOPOLOGIA singola → singola` è vera e non utile; il ciclo di `watch` vive in `cli.py` fino al Task
+13; le letture fallite si contano ma non emettono nessun evento.
+
+### Note di metodo
+
+179. **Una suite verde non prova che il programma sia mai stato eseguito.** 425 prove unitarie, 43
+     d'integrazione e `mypy --strict` su 57 file non hanno impedito che il primo `workload` vero
+     fallisse ogni singola scrittura. I difetti stavano nella **giuntura** fra componenti corretti:
+     un generatore che numera da zero e una collezione già numerata; un ponte e una sentinella che
+     osservano la stessa struttura. Nessuno dei due appartiene a un componente, quindi nessuna prova
+     di componente poteva vederli. La regola pratica: la prima esecuzione contro l'ambiente vero è
+     una prova che nessuna suite contiene, e va messa in conto come un passo del lavoro, non come
+     una formalità dopo il commit.
+
+180. **Il guasto da temere non è quello che solleva: è quello che esce con zero e stampa numeri
+     plausibili.** Il carico rotto usciva zero, riempiva lo schermo di letture riuscite e mostrava un
+     consuntivo dall'aria normale. È la stessa forma dell'errore che [ADR-0084](Decision.md#adr-0084)
+     ha trovato in `mongorestore` e della latenza negativa che
+     [ADR-0086](Decision.md#adr-0086) previene: tre volte, in questo progetto, il pericolo è stato
+     un'uscita che non si lamenta e non è vera. La regola pratica: davanti a un consuntivo, chiedersi
+     quale suo numero sarebbe **zero** se tutto fosse rotto, e verificare che non lo sia.
+
+181. **Prima di accusare la libreria, misurare la libreria nuda.** Che PyMongo emettesse due volte
+     la stessa transizione era l'ipotesi più comoda: avrebbe spostato il difetto fuori dal nostro
+     codice. Cinque minuti con un `MongoClient` e un ascoltatore che stampa hanno mostrato che la
+     emette una volta sola, e da lì il colpevole era ovvio. Il costo della verifica è stato
+     inferiore al costo di scrivere il filtro che avrebbe nascosto il problema vero.
+
+182. **Su uno stesso fatto, un narratore solo.** Se due componenti osservano la stessa struttura,
+     uno spinto (i callback) e uno tirato (l'interrogazione periodica), la ripetizione non è un
+     rischio: è una certezza. Il ritardo fra i due la rende difficile da riconoscere come
+     ripetizione — sembra che il fatto sia successo due volte. E la cura sbagliata è tentante:
+     deduplicare a valle sopprime anche le ripetizioni **vere**, che in una demo di failover sono
+     proprio la cosa che si vuole vedere. Si guarisce togliendo un osservatore, non aggiungendo un
+     filtro.
+
+183. **Quando l'ordine in cui si legge non è l'ordine in cui si stampa, serve una prova che conti le
+     chiamate.** `rapporto()` interroga `server_status()` per primo perché *esegue un comando* e
+     costringe il driver a una selezione, e `topology()` per ultimo perché fino a quel momento il
+     driver non sa niente. Nel testo stampato l'ordine è l'inverso. Un dettaglio così non
+     sopravvive a un riordino fatto per leggibilità, a meno che non ci sia un doppio che annota in
+     che ordine gli è stato chiesto qualcosa. La prova è stata validata rimettendo `topology()` per
+     prima e guardandola diventare rossa: una prova che non si è mai vista fallire non protegge
+     niente.
+
+184. **L'implementazione ovvia di una porta va guardata dal verso in cui sbaglia, non da quello in
+     cui funziona.** `datetime.now()` come `Clock` è corretto quasi sempre, e la volta che non lo è
+     produce numeri invece che eccezioni. Il criterio che ha deciso non è «funziona?» ma «che cosa
+     succede quando la macchina si risincronizza mentre misuro una latenza?» — e la risposta,
+     scritta nel flag `monotonic=False`, era già lì da leggere. La regola pratica: per ogni porta,
+     enumerare gli usi (datare, misurare, ordinare) e chiedersi se una sola implementazione li
+     soddisfa davvero tutti.
+
+185. **Un valore predefinito comodo è un errore silenzioso in attesa.** `--target` senza predefinito
+     costringe a scriverlo tre volte durante il talk; con un predefinito, una sola distrazione manda
+     il carico allo stack sbagliato — e quel comando non fallisce, **riesce**, sul bersaglio
+     sbagliato. La stessa severità è nel `Makefile`, che esce con 2 invece di indovinare. Il criterio
+     per decidere se un predefinito è legittimo: se sbagliarlo produce un errore visibile, mettilo;
+     se produce un risultato plausibile ma di un'altra cosa, non metterlo.
+
+Stato aggiornato: decisioni fino ad **ADR-0089**, verifiche fino a **V-074**, note di metodo fino
+alla **185**. Le suite: **143** prove per gli strumenti, **425** per l'applicazione più **43** di
+integrazione, `mypy --strict` verde su 57 file. Prossimo passo: **Task 12** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).
+
+---
+
+## 2026-09-03 — `feature/04`, Task 12: la riserva di ADR-0012 chiusa due volte, e una motivazione che era falsa
+
+Il Task 12 mette `mongolab` dentro la rete Compose degli stack, che è il motivo per cui
+[ADR-0012](Decision.md#adr-0012) esiste da due mesi: da fuori, un replica set con tre membri sani si
+legge `ReplicaSetNoPrimary` ([M-019](../app/docs/Sources.md#m-019)), e per farlo funzionare bisogna
+spegnere la scoperta — cioè spegnere la cosa che il talk deve mostrare. Ne escono un
+[`app/Dockerfile`](../app/Dockerfile), un servizio `app` in ognuno dei tre `compose.yaml` sotto il
+profilo `strumenti`, una variabile d'ambiente che dice da che parte si sta, e quattro ADR. Le prove
+unitarie passano da **425 a 462**, quelle d'integrazione da **43 a 47**, quelle degli strumenti da
+**143 a 166**; `mypy --strict` da 57 a **58** file; `make stack-check` dice «Stack conformi: 3.» e
+il preflight chiude «Superati: 9 · Avvisi: 1 · Errori: 0 · Pronto.»
+
+**La riserva di ADR-0012 si è chiusa due volte, e nessuna delle due nel posto in cui la cercava.**
+L'ADR dichiarava che la documentazione di PyMongo non afferma che il driver usi gli host
+memorizzati nella configurazione del set, e che per affermarlo bisognava mostrarlo in demo. È
+ancora vero del manuale di PyMongo. Non è vero della specifica *Server Discovery And Monitoring* di
+`mongodb/specifications` ([A-016](../app/docs/Sources.md#a-016)), che tutti i driver ufficiali
+implementano e che lo prescrive in maiuscolo: «While no known primary, client MUST **add** servers
+non-primaries' host lists, but MUST NOT remove». La stessa specifica definisce la *seed list* come
+«server addresses provided client in initial configuration» — da dove si parte, non dove si arriva.
+Un driver non implementa il proprio manuale: implementa una specifica scritta una volta per tutti i
+linguaggi, e quella specifica sta in un repository pubblico che non ha l'aria della documentazione.
+
+La seconda chiusura è una misura, e ha richiesto un disegno. La configurazione di produzione passa
+**tre** semi al replica set, e con tre semi trovarne tre non dimostra niente. La prova parte da
+**uno**, e non dal primario: `mongo-rs-2:27017`. Il client ha trovato tre membri e ha scritto su
+`mongo-rs-1`, un nome che nessuno gli aveva mai dato ([M-036](../app/docs/Sources.md#m-036)). Resta
+fuori il caso senza primario, che la specifica tratta a parte e che si vedrà al Task 13.
+
+**Una decisione ha dovuto correggere la propria motivazione.**
+[ADR-0093](Decision.md#adr-0093) stabilisce che un servizio che dichiara `build:` è esente dalla
+regola sull'immagine pinnata e soggetto alla stessa regola un livello più in basso: le righe `FROM`
+del suo Dockerfile devono essere pinnate per digest, e per un digest che `tools/images.env` conosce.
+La regola regge. L'argomento con cui era stata scritta no: diceva che «un'immagine costruita in
+locale non ha un digest», che suona ovvio ed è falso. Con l'archivio immagini di containerd —
+quello attivo su questa Docker Desktop — l'`Id` di un'immagine **è** il digest del suo manifesto
+anche per ciò che nessuno ha mai pubblicato, e `docker image inspect mongolab@sha256:…` la trova
+([M-037](../app/docs/Sources.md#m-037)). Il punto vero è che quel digest **nessun registro l'ha mai
+servito**: non è verificabile da fuori e cambia a ogni ricostruzione, quindi in `images.env` darebbe
+a `pull-images.sh --verify` una cosa da cercare in rete che in rete non c'è. Quando la misura è
+arrivata, la premessa sbagliata era già scritta in cinque posti.
+
+**Un difetto trovato da un dato nuovo, non da una svista.** La prima esecuzione dal container ha
+stampato `mongo-standalone:27017standalone`: `_riga_server` impaginava l'indirizzo su ventidue
+colonne, e `mongo-standalone:27017` ne misura esattamente ventidue
+([M-038](../app/docs/Sources.md#m-038)). Il modulo aveva ventuno prove verdi, e nessuna poteva
+vederlo perché tutte usavano `localhost:<porta>`, che di colonne ne prende quindici. La larghezza
+adesso si calcola sul più lungo degli indirizzi di quella fotografia, con ventidue come minimo.
+
+**Un punto aperto che sembrava chiudersi, e non si è chiuso.** Il registro dell'applicazione
+elencava «uccidere il client `docker exec` non uccide `mongodump` dentro il container», con Task 12
+come scadenza e la motivazione che dal container non ci sarebbe più stato nessun `docker exec` in
+mezzo. Prima di segnarlo chiuso è stato guardato: l'immagine contiene l'interprete e `mongolab`,
+non gli strumenti da riga di comando di MongoDB ([M-039](../app/docs/Sources.md#m-039)). Oggi non fa
+danno, perché nessun comando della CLI collega la porta `BackupTool`; la scelta fra installarli — con
+una terza base da pinnare e un'immagine più pesante — e restare su `docker exec` è del Task 14.
+
+### Note di metodo
+
+186. **Quando una fonte tace, la risposta può stare a un livello diverso di quello in cui si
+     cerca.** La riserva di ADR-0012 era formulata contro la documentazione di PyMongo, e contro
+     quella era corretta. La frase che serviva stava nella specifica *cross-driver* che PyMongo
+     implementa: un livello sopra, in un repository che nessuno apre perché non sembra
+     documentazione. La regola pratica: prima di dichiarare che una cosa non è affermata da
+     nessuna parte, chiedersi **di che cosa** quello strumento è un'implementazione, e andare a
+     leggere quella.
+
+187. **Una prova che non potrebbe fallire non dimostra niente, anche quando passa.** Misurare la
+     scoperta dei membri con i tre semi della configurazione di produzione sarebbe stato circolare:
+     trovare tre server avendone dati tre è compatibile con un driver che non scopre nulla. Il
+     disegno che dimostra è un seme solo, scelto fra i **non** primari, e la verifica che il client
+     finisca per parlare con un indirizzo che non gli è mai stato dato. La regola pratica: prima di
+     scrivere l'asserzione, chiedersi quale osservazione la falsificherebbe — se non ce n'è una,
+     l'esperimento è decorativo.
+
+188. **Una premessa plausibile e mai verificata sopravvive a tutte le revisioni.** «Un'immagine
+     costruita in locale non ha un digest» è falsa, ed è rimasta in piedi attraverso una decisione,
+     una docstring, tre file Compose e un commento di preflight, perché nessuno mette in dubbio
+     ciò che suona ovvio. A smentirla è bastato un `docker image inspect`. E c'è un'aggravante che
+     vale come avvertimento: con il vecchio archivio a grafo di Docker quella premessa sarebbe
+     stata **vera per caso**, il che l'avrebbe resa ancora più difficile da cogliere. La regola
+     pratica: le frasi che iniziano con «ovviamente» sono candidate a diventare una misura.
+
+189. **Una regola del repository che vieta qualcosa di legittimo si sposta di livello, non si
+     eccettua.** Il controllo degli stack pretendeva un digest per ogni servizio, e il servizio
+     dell'applicazione non poteva averne uno utile. L'eccezione avrebbe lasciato le sue basi libere
+     di essere tag mobili — cioè avrebbe abbandonato lo scopo per salvare la lettera. Spostare la
+     regola sulle righe `FROM` del Dockerfile la mantiene intera: nessun bit arriva dalla rete senza
+     che qualcuno l'abbia fissato. La regola pratica: davanti a un divieto scomodo, chiedersi che
+     cosa protegge, e cercare il livello a cui quella protezione continua a valere.
+
+190. **Una guardia che passa alla prima esecuzione non è ancora una prova.** Le cinque prove nuove
+     su `tools/tests/test_coerenza_repo.py` sorvegliano una configurazione già corretta, quindi
+     erano verdi appena scritte — cioè indistinguibili da cinque prove che non controllano niente.
+     Ognuna è stata mutata: si perturba il file sorvegliato, si verifica che la guardia scatti con
+     un messaggio leggibile, si ripristina e si riverifica il verde. La regola pratica: per ogni
+     guardia scritta su uno stato già conforme, la mutazione fa parte della scrittura, non della
+     revisione.
+
+191. **Tradurre uno strumento in un altro linguaggio ne cambia la semantica, e la mutazione lo
+     scopre.** La prova che verifica il `sed` del preflight ne riscriveva l'espressione in Python
+     con `[^ ]*`, che in Python attraversa gli a capo mentre `sed` lavora **una riga per volta**.
+     L'asserzione falliva con `'mongolab:0.1.0\n\n' == 'mongolab:0.1.0'`: la prima delle cinque
+     guardie, mutandola, ha trovato un difetto in sé stessa. La regola pratica: quando una prova
+     riscrive in un linguaggio ciò che un altro strumento fa, la differenza da cercare non è nella
+     sintassi dell'espressione, è nell'unità su cui lo strumento lavora.
+
+192. **Un'asserzione banalmente vera passa con qualunque risultato.** La prova sullo sharded
+     cercava `"sharded" in uscita`, e l'uscita comincia con il titolo `sharded (docker/03-sharded)`:
+     sarebbe passata anche se la topologia letta fosse stata un'altra. Adesso prende la riga
+     `topologia` e ne confronta le parole. La regola pratica: se la stringa cercata compare anche
+     nell'intestazione, nel nome del bersaglio o nel comando, non sta provando ciò che sembra.
+
+193. **Prima di segnare chiuso un punto aperto, guardare se lo è.** Il registro dava per chiuso al
+     Task 12 il limite del `docker exec` sul dump, con una motivazione scritta tre task prima e mai
+     riverificata. Un comando ha mostrato che nell'immagine `mongodump` non c'è. Un punto aperto
+     chiuso per inerzia è peggio di un punto aperto: sparisce dall'elenco e riappare in sala. La
+     regola pratica: le scadenze scritte nei registri sono previsioni, e alla data prevista si
+     verificano come qualunque altra affermazione.
+
+194. **Un dato nuovo trova i difetti che nessuna prova cercava.** L'indirizzo incollato al ruolo
+     stava in un modulo con ventuno prove verdi, ed è comparso al primo indirizzo lungo ventidue
+     caratteri — che dall'host non poteva esistere. Non è un buco nella copertura: è che il valore
+     non era mai passato di lì. La regola pratica: quando cambia la **provenienza** dei dati — non
+     il codice — vale la pena rieseguire a occhio le uscite che nessuno ha più guardato da quando
+     erano corrette.
+
+Stato aggiornato: decisioni fino ad **ADR-0093**, verifiche fino a **V-074**, note di metodo fino
+alla **194**. Le suite: **166** prove per gli strumenti, **462** per l'applicazione più **47** di
+integrazione, `mypy --strict` verde su 58 file. Prossimo passo: **Task 13** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).
+
+---
+
+## 2026-09-04 — `feature/04`, Task 13: la scena centrale, la sesta porta, e i due numeri che tengono
+
+Il Task 13 costruisce l'Atto II del Blocco 2: carico attivo, il primario che cade, la cronaca
+dell'elezione con il timestamp al millisecondo, e in fondo **durata dell'interruzione** e
+**scritture perse**. È la scena per cui l'applicazione esiste — le altre si potrebbero fare con
+`mongosh` e pazienza, questa no. Ne escono `app/src/mongolab/application/scenari.py`, la sesta
+porta del dominio, il decimo evento, la sottocomanda `demo failover`, e sei ADR. Le prove unitarie
+passano da **462 a 523**, quelle d'integrazione da **47 a 48**, `mypy --strict` da 58 a **64** file.
+
+**La scena, eseguita per la prima volta, si è rivelata impossibile per un processo solo.** La
+cronaca dell'elezione esiste solo se il client fa scoperta, e la scoperta funziona solo da dentro
+la rete Compose — è la conclusione del Task 12. Il guasto è un `docker compose kill`, e vuole il
+socket del demone, che il container dell'applicazione **non ha** per una scelta deliberata dello
+stesso Task 12. Dall'host, per giunta, il primario si chiama `localhost:27021`, che non è il nome
+di nessun servizio che si possa fermare. Da qui [ADR-0095](Decision.md#adr-0095): la porta `Regia`
+con quattro verbi e **due adattatori opposti** — `RegiaCompose` esegue e vive sull'host,
+`RegiaAnnunciata` annuncia la riga esatta e si blocca finché un umano non l'ha eseguita. La
+conseguenza va portata al PO: la scena dal vivo richiede due terminali.
+
+**Il piano diceva `stop`, e le slide dicevano un altro numero.** Il Passo 2 nomina alla lettera
+`docker compose stop`; eseguito, `stop` manda `SIGTERM`, e `mongod` cede il ruolo con ordine —
+574, 480, 486 ms secondo [V-029](Sources.md#v-029), **senza elezione da raccontare**. Con `docker
+kill` sono 9 812, 10 619 e 10 943 ms, che sono i numeri già proiettati come «forbice 8-10 s»
+([V-031](Sources.md#v-031)). Le slide riportano una misura fatta, il piano ha una svista:
+[ADR-0097](Decision.md#adr-0097) fissa `kill -s SIGKILL` come guasto predefinito e tiene `stop`
+documentato e configurabile, perché il confronto è il pezzo di didattica migliore dei due.
+
+**Guardare non è aspettare.** Contro un replica set sanissimo, `demo failover` usciva con «nessun
+primario in vista su «rs»»: `Inspector.topology()` legge la descrizione che il driver **ha già**,
+e subito dopo `connetti` quella descrizione è vuota, perché la scoperta comincia in quel momento
+([M-042](../app/docs/Sources.md#m-042)). Gli altri comandi non ci inciampavano per caso — `stats`
+chiede `serverStatus`, che aspetta la selezione, e `watch` guarda la topologia proprio mentre
+cambia. La correzione è un `ping`, che essendo un comando su `admin` va sul primario per
+impostazione predefinita ([A-017](../app/docs/Sources.md#a-017)) e quindi aspetta. Il posto comodo
+era `cli.py`, e `test_pymongo_si_importa_solo_nell_infrastruttura` lo vieta: la guardia non è stata
+toccata, e il codice è finito meglio di dove voleva andare
+([ADR-0099](Decision.md#adr-0099)).
+
+**Il confronto del Passo 5 è la vera chiusura del task.** Contro lo stack vero, dal container, con
+un processo che faceva da umano: interruzione **10 019 ms**, **0 scritture perse** su 15 229
+confermate, primario passato da `mongo-rs-1:27017` a `mongo-rs-3:27017`
+([M-043](../app/docs/Sources.md#m-043)). I 10 019 ms cadono dentro la forbice di V-029; lo zero
+ripete [V-033](Sources.md#v-033), che ne aveva confermate 12 901 e perdute nessuna. Il piano
+chiedeva di fermarsi se non avessero coinciso: coincidono, e nessuno dei due va corretto.
+
+Lo zero, però, ha una spiegazione che cambia la frase da dire in sala. Il `WriteConcern` del client
+è **vuoto**: `mongolab` non chiede niente, e `w: majority` arriva dal server come default
+*implicito* ([M-041](../app/docs/Sources.md#m-041), MongoDB 7.0.40). Non «la mia applicazione usa
+`w: majority`», che sarebbe falso, ma «nessuno qui ha chiesto niente, e il server ha scelto bene».
+
+**Un rifiuto invece di una gentilezza.** `--step` legge da stdin sul thread della scena, e il
+`Live` di Rich ridisegna sul suo: il prompt «Invio per proseguire» finisce sotto il ridisegno
+successivo, e chi tiene la tastiera dal palco non vede più che cosa sta aspettando. La
+combinazione è rifiutata come errore di parametro, prima che la scena cominci
+([ADR-0098](Decision.md#adr-0098)). Degradare in silenzio a `plain` sarebbe stato più gentile e
+peggiore: una scena che cambia da sola la propria resa mostra dal vivo qualcosa di diverso da
+quello che si è provato la sera prima.
+
+Fuori copione, il ciclo di `watch` ha lasciato `cli.py` ed è diventato `sorveglia`: dentro la
+radice di composizione era provabile solo aprendo una connessione, e la sua regola più delicata —
+si aspetta `giri - 1` volte e non `giri` — non aveva nessuna prova.
+
+### Note di metodo
+
+195. **Quando due requisiti legittimi non stanno nello stesso processo, la risposta è una porta con
+     due adattatori — non un compromesso.** La scena voleva la scoperta, che c'è solo dentro la rete,
+     e il socket Docker, che c'è solo sull'host. Le vie di mezzo erano tutte peggiori: montare il
+     socket nel container (e proiettare in sala il modo più diretto di prendere la macchina),
+     rinunciare alla cronaca (e perdere metà dell'Atto II), o inventare un agente che riceva ordini
+     dal container. Dichiarare il verbo come porta e dare due implementazioni ha lasciato intatti
+     entrambi i vincoli, e ha reso il vincolo stesso **didattico**: in sala si vede che quel
+     container non può toccare il demone. La regola pratica: davanti a due requisiti che non
+     convivono, prima di cercare la scorciatoia, chiedersi se la separazione non sia essa stessa
+     ciò che c'è da mostrare.
+
+196. **Un piano è un documento, e la sua lettera si verifica come qualunque altra affermazione.**
+     Il piano scriveva `docker compose stop`; eseguito, produce mezzo secondo e nessuna elezione,
+     cioè una scena in cui non succede la cosa che il talk annuncia. Le slide, scritte da una
+     misura, dicevano dieci secondi. La correzione è andata al piano e non alle slide, ed è stata
+     scritta in un ADR invece che applicata in silenzio. La regola pratica: quando il piano e una
+     misura si contraddicono, vince la misura — e la contraddizione va **registrata**, perché è la
+     sola traccia che qualcuno ci ha pensato.
+
+197. **Fra un fallimento immediato e un'informazione mancante, il costo è tutto dalla parte
+     dell'informazione mancante.** `RegiaCompose` trasforma un'uscita diversa da zero in
+     un'eccezione che ferma la scena. Se non lo facesse, un `kill` fallito lascerebbe il primario in
+     piedi e la scena arriverebbe in fondo con zero millisecondi di interruzione e zero scritture
+     perse: **i numeri di un failover perfetto**, prodotti dall'assenza del failover. La regola
+     pratica: quando un'operazione fallita produce un risultato *plausibile* invece di un errore,
+     fermarsi non è prudenza, è l'unica difesa che esista.
+
+198. **Guardare non è aspettare, ed è una distinzione che i doppi non insegnano.** Una lettura pura
+     che restituisce lo stato corrente e una chiamata che blocca finché lo stato non è quello giusto
+     hanno la stessa firma e sembrano intercambiabili. Contro un doppio lo sono, perché il doppio
+     risponde subito: cinquecento prove verdi non hanno visto niente. Contro un sistema vero, la
+     prima è una fotografia di un istante in cui non era ancora successo nulla. La regola pratica:
+     per ogni chiamata che legge uno stato appena creato, chiedersi **chi** garantisce che lo stato
+     ci sia già — e se la risposta è «di solito fa in tempo», serve un'attesa esplicita.
+
+199. **Una guardia che dà fastidio ha spesso ragione, e il codice esce migliore dall'averle
+     obbedito.** L'attesa del primario stava comodamente in `cli.py`, e la guardia che vieta
+     `pymongo` fuori dall'infrastruttura l'ha respinta. Obbedire ha prodotto due cose invece di una:
+     `SenzaPrimario`, che è un fatto dell'infrastruttura, e `niente_da_fermare`, che è la frase che
+     la riga di comando ne ricava — e che, restituendo l'eccezione invece di sollevarla, si prova
+     senza dover fabbricare un replica set malato. La regola pratica: quando una regola del
+     repository blocca qualcosa di legittimo, la prima ipotesi non è che la regola sia troppo
+     rigida, è che il codice stia nel posto sbagliato.
+
+200. **Una prova che ricostruisce un fatto invece di leggerlo dichiarato può passare per la ragione
+     sbagliata.** L'asserzione sull'elezione prendeva la prima riga `SERVER … → primario`, che è la
+     scoperta iniziale: nominava il primario di sempre. Il fallimento era rumoroso e innocuo; il
+     pericolo era il caso opposto, perché una prova così passerebbe anche se il guasto non fosse
+     mai arrivato. Adesso legge la riga di continuazione `da … a …`, che la cronaca stampa solo se
+     qualcuno ha davvero preso il posto di qualcun altro — cioè verifica ciò che la sala legge. La
+     regola pratica: quando una prova deriva un fatto da dati grezzi, chiedersi se esista una riga
+     che quel fatto lo **dichiara**, e asserire su quella.
+
+201. **Una banda larga scelta apposta prova più di una soglia stretta.** La prova d'integrazione
+     accetta un'interruzione fra 5 e 15 secondi, non i 10 019 ms misurati. Non è indulgenza: la
+     soglia stretta fallirebbe sul portatile di qualcun altro senza che niente sia rotto, e sarebbe
+     spenta entro un mese. La banda intercetta l'errore di **categoria** — zero, cioè il guasto non
+     è arrivato; sessanta secondi, cioè l'elezione non è avvenuta — e il numero preciso vive nel
+     registro delle misure, che è il posto dei numeri precisi. La regola pratica: separare che cosa
+     la suite deve **impedire** da che cosa il registro deve **ricordare**, e non chiedere alla
+     prima di fare il mestiere del secondo.
+
+202. **Un numero giusto per una ragione che non è la propria è una frase sbagliata in attesa di
+     essere detta.** «Zero scritture perse» è vero, ed è facile attribuirlo all'applicazione. Il
+     `WriteConcern` del client è vuoto: `w: majority` lo impone il server come default implicito, e
+     `getDefaultRWConcern` lo dichiara. Detta male, la frase diventa falsa e — peggio — non
+     riproducibile su un cluster con un default diverso. La regola pratica: prima di portare un
+     numero su una slide, risalire a **chi** lo produce; se la risposta è «qualcun altro», è quella
+     la cosa da dire.
+
+Stato aggiornato: decisioni fino ad **ADR-0099**, verifiche fino a **V-074**, note di metodo fino
+alla **202**. Le suite: **166** prove per gli strumenti, **523** per l'applicazione più **48** di
+integrazione, `mypy --strict` verde su 64 file.
+
+---
+
+## 2026-09-04 — `feature/04`, Task 14: il backup a caldo, e una finestra che non si poteva scegliere
+
+Il Task 14 costruisce l'Atto III del Blocco 2: `mongodump --readPreference=secondary --oplog`
+**sotto carico**, con il ritmo di prima e quello di durante messi sulla stessa riga, e poi il
+restore con i conteggi a schermo. Ne escono due sottocomandi — `demo backup-live` e `demo restore`
+— tre ADR, cinque misure, e la §8 applicativa della pagina canonica dei backup. Le prove unitarie
+passano da **523 a 582**, quelle d'integrazione da **48 a 49**, `mypy --strict` resta verde su 64
+file.
+
+**Il debito del Task 9 è stato saldato provando, e la strada corta non funziona.** Nell'immagine
+dell'applicazione `mongodump` non c'è ([M-039](../app/docs/Sources.md#m-039)), e la scelta fra
+installarlo e restare su `docker exec` era rimandata a qui. Un `Dockerfile` a due stadi che copia i
+binari dall'immagine `mongo` pinnata dentro quella `python` pinnata **si costruisce senza un
+avviso**, e poi esce con **127**: `libgssapi_krb5.so.2: cannot open shared object file`
+([M-044](../app/docs/Sources.md#m-044)). I due strumenti sono compilati contro le librerie Kerberos
+del sistema dell'immagine `mongo`, e `python:3.13-slim` è slim proprio perché non le ha. Il guasto
+non arriva al `build`, che sarebbe il momento buono: arriva alla prima esecuzione.
+
+Le altre tre strade sono state scartate senza provarle, ognuna perché avrebbe disfatto una
+decisione già presa — `apt-get install mongodb-database-tools` aggiunge un pacchetto che nessun
+`FROM` dichiara e vuole rete al `build` ([ADR-0093](Decision.md#adr-0093)); il socket Docker nel
+container rovescia la decisione da cui è nata la sesta porta ([ADR-0095](Decision.md#adr-0095)); il
+volume condiviso non serve, perché il dump sopravvive nel filesystem del nodo fra i due comandi. È
+[ADR-0100](Decision.md#adr-0100): **gli strumenti restano dove sono già**, e l'Atto III si gira
+dall'host — l'esatto contrario dell'Atto II, che dall'host si rifiuta.
+
+**La finestra della seconda misura non si poteva scegliere.** Il `mongodump` della collezione della
+demo dura **476 ms** ([M-045](../app/docs/Sources.md#m-045)). Se la fase «durante» durasse i venti
+secondi che uno sceglierebbe a tavolino, il dump occuperebbe il due per cento del campione: un
+crollo totale del throughput per tutta la sua durata comparirebbe come un calo del due per cento, e
+la promessa del copione risulterebbe verificata da una misura incapace di smentirla. Da qui
+`finche` in `WorkloadRunner.esegui`, che **si somma** al limite invece di sostituirlo, e il rifiuto
+di riceverlo da solo con un `ValueError` invece che con un predefinito silenzioso
+([ADR-0101](Decision.md#adr-0101)).
+
+**Il calo esce negativo, e resta negativo.** Contro lo stack vero: `ritmo prima 595/s · durante
+692/s · calo -16.2%` ([M-047](../app/docs/Sources.md#m-047)). Il ritmo è **salito**, perché la
+finestra è mezzo secondo e su mezzo secondo il rumore pesa più del dump. Sarebbe stato facile
+scrivere «il dump non ha impatto» e avere ragione quel giorno; il rapporto scrive la percentuale con
+il segno e lascia concludere alla sala. I numeri che contano sono accanto: 279 scritture durante il
+dump, tutte confermate, p95 da 66,3 a 68,7 ms.
+
+**Un punto aperto di `feature/02` si chiude.** `docs/03-amministrazione/backup-restore.md` elencava
+`--readPreference=secondary` fra le cose non misurate — «è probabilmente la prima cosa da fare in
+produzione». Contando `serverStatus().opcounters.query` sui tre membri prima e dopo lo stesso dump:
+senza l'opzione il primario prende **+15** letture, con l'opzione ne prende **+0** e le quindici si
+spostano sui due secondari ([M-046](../app/docs/Sources.md#m-046)). La pagina riceve la sua §8
+applicativa, e il rimando che
+[`docs/04-mongosh/guida-mongosh.md`](04-mongosh/guida-mongosh.md) le faceva — «sono materia di
+`feature/04`, insieme al backup a caldo» — diventa un collegamento vero.
+
+**Un `ping` che riesce e non basta.** Dall'host si arriva a un nodo solo, con `directConnection`, e
+su un secondario un `ping` riesce lo stesso perché la lettura è ammessa: il guasto comparirebbe alla
+prima scrittura, con il carico partito e la collezione a metà. Serve un controllo esplicito su
+`topology().ha_primario`, e serve sapere quanto si aspetta: dopo l'Atto II, `mongo-rs-1` si riprende
+il ruolo in **4,0 secondi** grazie al suo `priority: 2` ([M-048](../app/docs/Sources.md#m-048)).
+Sono quattro secondi di scaletta fra un atto e l'altro, e chi presenta li deve avere.
+
+**Il restore scrive accanto, e non è solo prudenza.** `--into lab` è rifiutato perché i 106
+documenti che alla copia mancano **sono ancora nell'originale**: un restore sopra `lab` li
+lascerebbe dove sono, i conteggi combacerebbero, e la differenza sparirebbe *proprio perché* il
+restore è riuscito. La scena mostrerebbe zero e insegnerebbe il contrario di quello che deve
+insegnare ([ADR-0102](Decision.md#adr-0102)).
+
+**Accettato dal PO, lo stesso giorno.** Le due conseguenze di palco sono state portate al PO
+alla chiusura del task e accettate entrambe: l'Atto III si gira **da un altro terminale** rispetto
+all'Atto II, e i **quattro secondi** di attesa del primario entrano in scaletta invece di essere
+compressi. Resta aperto il caso diverso di [ADR-0095](Decision.md#adr-0095), dove i due terminali
+non si alternano ma servono **contemporaneamente**.
+
+### Note di metodo
+
+203. **Provare la strada corta costa meno che discuterla, e il risultato è più solido.** La copia
+     dei binari nell'immagine era la strada che sembrava ovvia. Provarla è costato cinque minuti e
+     ha prodotto un fatto — exit 127, con il nome della libreria mancante — invece di
+     un'argomentazione. La parte istruttiva è che **il `build` riesce**: una prova fermata al
+     «compila?» avrebbe concluso il contrario. La regola pratica: quando una scelta d'architettura
+     dipende da un fatto verificabile in cinque minuti, verificarlo, e assicurarsi che la verifica
+     arrivi fino all'**esecuzione** e non si fermi alla costruzione.
+
+204. **Una finestra di misura più larga dell'evento è una misura che non può smentire la propria
+     tesi.** Venti secondi di fase attorno a mezzo secondo di dump diluiscono un crollo totale in un
+     calo del due per cento: il numero sarebbe vero, la conclusione infondata, e nessuno se ne
+     accorgerebbe perché la tesi verrebbe confermata. La regola pratica: prima di scegliere la
+     durata di una misura, chiedersi quale risultato la smentirebbe; se nessuno lo può, la finestra
+     è sbagliata, non lo strumento.
+
+205. **Un limite che dipende da un processo esterno non è un limite.** `finche` è la condizione
+     giusta — la corsa finisce quando finisce il dump — ma se `mongodump` si pianta resta vera per
+     sempre. Riceverla da sola è un `ValueError` con la spiegazione dentro il messaggio, invece di
+     un predefinito silenzioso che avrebbe funzionato in tutte le prove e fallito una volta, dal
+     vivo. La regola pratica: ogni condizione di terminazione che interroga qualcosa fuori dal
+     processo va accompagnata da un tetto, e il codice deve **pretenderlo** invece di supplirlo.
+
+206. **La pulizia di una prova va scritta per il cammino che fallisce, non per quello che riesce.**
+     Il helper che lancia la scena chiamava `check_returncode()` prima di restituire l'output, e
+     lasciava spazzatura nel cluster: il nome della collezione da cancellare lo annuncia la scena
+     stessa, sulla prima riga, quindi sollevando prima di restituire il testo il chiamante non ha
+     mai saputo che cosa pulire — e la collezione era già stata creata e riempita. Il fallimento è
+     esattamente il caso in cui la pulizia serve di più. La regola pratica: un helper di prova non
+     solleva; restituisce il codice di uscita insieme all'output, e l'asserzione viene **dopo** che
+     il chiamante ha raccolto quello che gli serve per rimettere a posto.
+
+207. **Una prova che fallisce una volta e poi passa va spiegata, non rieseguita.** Una prova
+     d'integrazione è caduta con «`mongo-rs-3` sconosciuto» e «`mongod` attivo da 1 m 14 s». Da
+     sola: verde; l'intera suite da uno stack assestato: verde. La spiegazione è la scia dei
+     failover fatti a mano poco prima — scoperta SDAM incompleta in un container appena avviato — e
+     non un difetto del codice nuovo. Fermarsi al «ora passa» avrebbe lasciato in casa una prova
+     ritenuta capricciosa, che è il primo passo verso una suite che nessuno guarda. La regola
+     pratica: davanti a un fallimento non riproducibile, cercare **che cosa era diverso**, e
+     scriverlo; se non si trova, dirlo, ma non archiviarlo come rumore.
+
+Stato aggiornato: decisioni fino ad **ADR-0102**, verifiche fino a **V-074**, note di metodo fino
+alla **207**. Le suite: **166** prove per gli strumenti, **582** per l'applicazione più **49** di
+integrazione, `mypy --strict` verde su 64 file. Prossimo passo: **Task 15** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), `demo sharding`, dove l'evento
+`ChunkMigrated` trova finalmente chi lo emette — o si scopre che nessuno può.
+
+## 2026-09-04 — `feature/04`, Task 15: nessuno emette `ChunkMigrated`, e la sala partiva da un client freddo
+
+Il Task 15 costruisce il Blocco 3: la stessa corsa di scritture fatta **due volte**, su una
+collezione che nessuno ha distribuito e su `lab.ordini` che lo è, con i conteggi per shard
+accostati, più le due righe di `explain()` che contrappongono query mirata e scatter-gather. Ne
+escono un sottocomando `demo sharding`, la settima porta, sei ADR, cinque misure — e un evento del
+dominio **in meno**. Le prove unitarie passano da **582 a 619**, quelle d'integrazione da **49 a
+58**, `mypy --strict` resta verde e sale da 64 a **66** file.
+
+Tre dei quattro passi del piano hanno prodotto una risposta diversa da quella che chiedevano, e in
+tutti e tre i casi perché sono stati eseguiti invece che ragionati.
+
+**Il Passo 2 chiedeva chi emette `ChunkMigrated`, e la risposta è che nessuno può.** Il passo era
+scritto con la sua via d'uscita già dentro — «se non è osservabile dal client, va detto» — ma la via
+d'uscita è servita per un'altra ragione. Prima di scrivere l'emittente valeva la pena chiedersi se
+ci fosse qualcosa da emettere: `balancerStatus` dice `mode: "full"` e **1 153 giri**, e
+`config.changelog`, che conserva le voci dall'`addShard` del giorno dell'inizializzazione, ha **due
+`merge` e zero migrazioni** — non una sola voce `moveChunk`, `moveRange` o `migrate`
+([M-049](../app/docs/Sources.md#m-049)). Non è l'osservabilità a mancare: è la migrazione. Con una
+chiave `{_id: "hashed"}` i due shard restano pari per costruzione, e non c'è nessuno squilibrio da
+correggere — cosa che [ADR-0069](Decision.md#adr-0069) aveva già scritto un task prima, dal lato
+dell'infrastruttura. L'evento è uscito dal dominio ([ADR-0103](Decision.md#adr-0103)), la guardia
+dei nomi scende da dieci a nove, e al suo posto resta un commento che dice quando è uscito e con
+quale misura.
+
+**Due pagine erano stantìe da prima, e nessuna guardia le copriva.** Rimuovendo l'evento è venuto
+fuori che `app/docs/03-eventi-immutabili.md` elencava dieci eventi ma **non aveva mai aggiunto
+`FaseIniziata`**, arrivata al Task 13, e che `app/docs/02-porte-e-doppi.md` diceva ancora «Le
+cinque porte» senza `Regia`, arrivata dallo stesso task. `make docs-check` verifica citazioni e
+collegamenti; i conteggi raccontati in prosa non li vede nessuno.
+
+**«Lo stesso carico due volte» non lo era.** La prima esecuzione vera, con il limite ancora
+espresso in secondi come nelle altre tre scene, ha stampato `carico 4288 senza chiave · 4415 con
+chiave · non è lo stesso carico` ([M-052](../app/docs/Sources.md#m-052)). La riga di garanzia ha
+funzionato, e ciò che denunciava era un difetto di disegno: sei secondi per corsa incontrano due
+throughput diversi e producono due conteggi diversi, e la differenza fra le colonne non è più
+attribuibile alla sola chiave di shard. Nessuna prova unitaria poteva vederlo — i doppi scrivono
+esattamente quanto il copione chiede, quindi `confrontabile` era sempre verde. Da lì `demo
+sharding` è l'unica delle quattro scene **senza** `--carico`: il limite è `--scritture`,
+predefinito 5 000 ([ADR-0107](Decision.md#adr-0107)), e le due corse diventano uguali per
+costruzione. Il prezzo sono quattordici secondi invece di dieci.
+
+**A client freddo la prima fotografia negava un cluster acceso.** Sullo stack 03 sano, la
+fotografia di *prima* diceva `distribuita=False, primario=None, conti=()` di una `lab.ordini` che
+le righe subito sotto mostravano ripartita su due shard, con la riga del bilancio a trattini
+([M-053](../app/docs/Sources.md#m-053)). `PymongoInspector._e_sharded()` guardava la descrizione
+della topologia **come il client la conosce**, e un client appena costruito non conosce niente:
+PyMongo scopre i server alla prima operazione, non alla costruzione, e fino a lì ogni seme è
+`SCONOSCIUTO` — che nel dominio significa «assenza di un'osservazione», non «osservato assente».
+La correzione è un `ping` fatto **solo se nessun ruolo è ancora noto**, e con
+`read_preference=NEAREST`: un comando su `admin` va sul primario per impostazione predefinita e non
+torna finché un primario non c'è ([A-017](../app/docs/Sources.md#a-017)), quindi con la preferenza
+predefinita quella riga avrebbe piantato `stats` durante l'Atto II
+([ADR-0108](Decision.md#adr-0108)). È la **seconda volta** — [M-042](../app/docs/Sources.md#m-042)
+è la stessa cosa un task prima, in `demo failover` — e la parte che vale è perché nessuna prova
+d'integrazione la vedesse: la fixture di sessione chiama `spazza(client)` prima di consegnare il
+client, quindi ogni prova partiva da un client già caldo. Solo la sala partiva da uno freddo.
+
+**La tupla vuota aveva due significati, e adesso ne ha uno.** `shard_distribution()` restituiva
+`()` sia per «non è uno sharded cluster» sia per «lo è, ma questa collezione non è distribuita»; la
+pagina 09 lo dichiarava e concludeva che per le scene di questa applicazione la distinzione non
+serviva. Il Blocco 3 è la scena in cui serve, perché accostare le due colonne è tutto il suo
+contenuto. Il ritorno è `Distribuzione(collezione, distribuita, primario, conti)`
+([ADR-0104](Decision.md#adr-0104)), e il criterio che separa i tre stati è stato **misurato**: su
+una collezione distribuita e *vuota* `$shardedDataDistribution` produce comunque la sua riga con i
+due shard a zero, su una non distribuita e piena di cinquanta documenti non ne produce nessuna
+([M-050](../app/docs/Sources.md#m-050)). Nella stessa decisione la collezione è passata dal
+costruttore dell'ispettore al metodo: la difesa scritta al Task 8 impediva la scena invece di un
+errore, e si è spostata dal costruttore al **dato**, perché `Distribuzione` porta con sé il nome
+della collezione di cui parla e la presentazione lo stampa.
+
+**La settima porta.** `explain()` non stava in nessuna delle sei. Allargare `DocumentStore` era la
+strada corta e sarebbe stata una promessa che la maggioranza delle sue implementazioni non
+mantiene — i doppi in memoria non hanno un piano da restituire. `QueryPlanner` ha un metodo solo
+([ADR-0105](Decision.md#adr-0105)), e che `PymongoStore` ne soddisfi due non è un'eccezione: è ciò
+che si ottiene quando le porte sono `Protocol` strutturali e nessuno le eredita. Le tre cose lette
+da `winningPlan` sono misurate sui tre stack ([M-051](../app/docs/Sources.md#m-051)): lo stadio sta
+sempre in `winningPlan.stage` e va a schermo verbatim, gli shard compaiono solo attraverso un
+router, e il loro ordine **non è stabile** — il server risponde `['shard2rs', 'shard1rs']` — quindi
+l'adattatore li ordina prima di consegnarli.
+
+**L'accoppiamento accettato dal PO non si è pagato.** La decisione era di scrivere in `lab.ordini`,
+riaprendo l'accoppiamento col numero del seme che [ADR-0088](Decision.md#adr-0088) aveva scartato.
+Misurato: `lab.ordini` contiene 34 415 documenti, 20 000 con `_id` intero che sono il seed e 14 415
+con `_id` `ObjectId` che sono le corse dell'applicazione, e non si sono mai scontrati. **Non
+possono**: le scene di `demo` scrivono con `documento_progressivo`, che l'`_id` non lo tocca, e
+l'unico che numera gli `_id` da zero è `mongolab workload`, che ha la propria collezione per corsa
+([ADR-0106](Decision.md#adr-0106)). L'invariante dichiarata in `generatore.py` — «le due
+popolazioni non si incontrano mai nella stessa collezione» — è diventata falsa ed è stata
+riscritta invece di essere lasciata a contraddire il codice; quella che regge riguarda solo l'`_id`,
+e dà anche il criterio per la pulizia, `{_id: {$type: "objectId"}}`, che `tools/reset-demo.sh`
+adesso conta prima che il seed ricostruisca la collezione.
+
+**Per la stessa ragione la scena misura gli arrivi e non i totali.** Misurata sui totali, una corsa
+finita per l'ottanta per cento su un solo shard risultava sbilanciata di **tre centesimi di punto**:
+i ventimila documenti del seed diluiscono qualunque squilibrio, e la schermata avrebbe dichiarato un
+equilibrio perfetto mentre il carico era tutto da una parte.
+
+**Accettato dal PO, lo stesso giorno.** Le due decisioni di scena erano state portate al PO
+all'apertura del task: scrivere in `lab.ordini` sapendo di riaprire l'accoppiamento, e girare lo
+stesso carico due volte accettando lo sforo di scaletta — «sforo leggermente, ho margine». Sono i
+quattordici secondi contro i dieci delle altre scene, ed è il prezzo della seconda colonna: senza,
+la prima non dimostra niente.
+
+### Note di metodo
+
+208. **Prima di scrivere chi emette un evento, misurare se l'evento esiste.** Il passo del piano
+     diceva «`ChunkMigrated` trova finalmente chi lo emette», e la strada naturale era attaccarsi al
+     `changelog` o a un listener e vedere che cosa arriva. Cinque minuti di interrogazione hanno
+     mostrato che in quel cluster non è mai arrivata **nemmeno una** migrazione da quando esiste, e
+     hanno cambiato il passo da «implementare» a «rimuovere e documentare». La differenza pratica è
+     che un'assenza misurata si può scrivere in un ADR con un numero accanto, mentre un emittente
+     scritto e mai innescato sarebbe rimasto in casa come codice che sembra funzionare. La regola
+     pratica: quando un piano chiede di produrre un segnale, la prima domanda non è «come lo
+     produco» ma «quante volte è successo finora».
+
+209. **Una riga di garanzia va lasciata a schermo anche quando il difetto che denunciava è stato
+     corretto alla radice.** `confrontabile` è nato per dire in sala se le due corse hanno scritto
+     lo stesso numero di documenti, ed è la riga che ha scoperto che con un limite di tempo non lo
+     facevano. Corretto il limite — un conteggio invece di una durata — le due corse sono uguali per
+     costruzione, e la tentazione era togliere il controllo diventato ridondante. Non lo è: se una
+     delle due corse scrivesse meno per un altro motivo, il pubblico deve vedere il numero e la sua
+     smentita. La regola pratica: una garanzia che nessuno controlla è una speranza, e il costo di
+     tenerla è una riga.
+
+210. **Una fixture che prepara l'ambiente nasconde i difetti dello stato iniziale che nessuno le ha
+     chiesto di preparare.** Il difetto del client freddo era in produzione da due task e la suite
+     d'integrazione non poteva vederlo, perché la fixture di sessione chiama `spazza(client)` prima
+     di consegnare il client e la scoperta SDAM avveniva come **effetto collaterale della pulizia**.
+     Ogni prova partiva da uno stato che in sala non esiste. La regola pratica: quando un difetto
+     dipende dal primo istante di vita di un oggetto, la prova che lo copre deve costruire
+     quell'oggetto da sé, fuori dalla fixture, e va scritto nel commento perché.
+
+211. **Un'asserzione su una sottostringa corta può essere verde per il motivo sbagliato.** In fase
+     rossa, `test_su_un_replica_set_non_c_e_nessun_router_a_cui_chiedere` **passava**: il messaggio
+     di Typer per un comando che ancora non esisteva — «No such command 'sharding'» — contiene
+     `shard`. La prova non stava verificando il rifiuto, stava verificando l'assenza del comando. Le
+     asserzioni sono diventate `"sharded cluster"`, `"--target sharded"` e `"router"`. La regola
+     pratica: quando si asserisce su un messaggio d'errore, scegliere una stringa che **non possa**
+     comparire nel messaggio generico dello strumento che lo stamperebbe al posto tuo — e se la fase
+     rossa è verde, la colpa è dell'asserzione, non del codice.
+
+Stato aggiornato: decisioni fino ad **ADR-0108**, verifiche fino a **V-074**, note di metodo fino
+alla **211**. Le suite: **166** prove per gli strumenti, **619** per l'applicazione più **58** di
+integrazione, `mypy --strict` verde su 66 file. Le porte del dominio sono **sette**, gli eventi
+**nove** — l'unico conteggio di questo registro che sia mai sceso. Prossimo passo: **Task 16** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), il confronto fra le tre
+architetture, che eredita da qui una scelta già fatta su dove scrivere.
+
+---
+
+## 2026-09-04 — `feature/04`, Task 16: i debiti di misura saldati, e il controllo che approvava un file rotto
+
+Il Task 16 non aggiunge una scena: salda dei debiti. Quattro pagine di `docs/02-architetture`
+avevano scritto per iscritto che una certa misura «ha senso solo sotto carico controllato, cioè con
+l'applicazione Python di `feature/04`, e prima di allora sarebbe aria». Il piano lo colloca
+**prima** delle pagine nuove del Task 17, con una motivazione che vale la pena ripetere: una pagina
+scritta su misure che non esistono ancora è esattamente l'aria che quelle righe promettevano di
+evitare.
+
+Ne escono una funzione (`opzioni_di_misura`), quattro opzioni sulla riga di comando, **sette**
+verifiche empiriche, **quattro** misure lato applicazione, **tre** ADR, sette righe di «cosa questa
+pagina non dice» che diventano rimandi — e una correzione a uno strumento del repository. Le prove
+unitarie passano da **619 a 634**, quelle degli strumenti da **166 a 168**, `mypy --strict` resta
+verde su 66 file, l'integrazione resta a 58.
+
+**Chi non chiede non riceve.** `opzioni_di_misura` restituisce una mappa in cui un argomento
+lasciato a `None` **non compare**, e il client resta byte per byte quello di prima
+([ADR-0109](Decision.md#adr-0109)). La tentazione era scrivere `journal=False` come predefinito,
+«tanto è quello che fa già pymongo»: ma un valore scritto è un valore dichiarato, e il giorno in cui
+il predefinito del driver cambia mentre il nostro resta fermo, due misure di due giorni diversi
+smettono di essere accostabili senza che nessuno se ne accorga. Le altre tre regole: la staleness
+non viaggia mai da sola (con `primary` è un `ConfigurationError` alla costruzione), la preferenza è
+`secondary` e non `secondaryPreferred` perché la ricaduta silenziosa sul primario produrrebbe un
+numero valido per una domanda diversa, e le chiavi portano i nomi dell'URI perché la riga stampata
+a schermo si incolli in una stringa di connessione senza tradurla.
+
+**Il numero dello standalone non era dello standalone.** Il confronto fra le tre architetture —
+otto scrittori, quattro lettori, `--doc-size 2k`, trenta secondi, tre corse per stack, da dentro la
+rete Compose — dava 1 712 scritture/s per lo standalone, 428 per il cluster sharded, 366 per il
+replica set. Rialzando **solo** il client a `CPU_APP=4.0`, lo standalone sale a **2 334**, cioè
++40 %, mentre gli altri due si muovono del 3 % e del 9 %. Il container dell'applicazione ha
+`cpus: 1.0`, e una CPU non basta a saturare uno standalone: la prima misura misurava l'interprete
+Python ([M-056](../app/docs/Sources.md#m-056), [V-079](Sources.md#v-079)). Da lì
+[ADR-0111](Decision.md#adr-0111): il confronto si pubblica **in coppia**, e la riserva sul ferro
+viaggia sulla stessa riga del numero — una nota in fondo alla pagina non arriva sulla slide, il
+numero sì.
+
+**Il disegno che muoveva due variabili insieme.** Il gancio per `maxPoolSize` era scritto da due
+task: `scrittori` doveva salire *sopra* il pool. Eseguito, quel disegno dava una resa che **scende**
+— 4 118, 3 372, 2 632, 2 446 con 8, 16, 24, 32 scrittori — e la lettura comoda era «ecco la
+saturazione». È falsa: un pool saturo non fa scendere la resa, la tiene e allunga le attese. Una
+resa che scende aggiungendo lavoratori vuol dire che si perde lavoro altrove, e in un container con
+una CPU quell'altrove è la contesa fra thread Python. Il disegno buono tiene `scrittori` fermo a 32
+e stringe il pool: la resa non è la variabile (oscilla senza direzione da 2 a 100 connessioni), i
+percentili *migliorano* stringendo — la coda si sposta dal server al driver — e il segnale sta nel
+**massimo**, che salta da 102 ms a 20 000 ms esattamente quando il pool scende sotto il numero
+degli scrittori ([V-080](Sources.md#v-080)).
+
+**Il 23 % che era sbagliato di un nono.** Il prezzo di `j: true` calcolato sulle durate a orologio
+dava −23 %. Dentro quei tempi c'è l'avvio dell'interprete: isolato con `--writes 1 --writers 1`
+vale 0,67–0,78 s su corse di 1,7–2,2 s, cioè il 40 %. Al netto il prezzo è **−32 %**, e la perdita
+si azzera davvero — zero documenti contro i due della corsa senza giornale, dove
+[V-016](Sources.md#v-016) ne aveva contati cento in condizioni diverse
+([V-075](Sources.md#v-075), [M-057](../app/docs/Sources.md#m-057)).
+
+**Il controllo approvava un file rotto.** Con le sette voci `V-` e i tre ADR scritti,
+`make docs-check` ha bocciato: V-079 e V-080 risultavano orfane pur essendo citate. La causa stava
+nel controllo — `RIGA_FONTI` usava `(.+)$` con `re.MULTILINE`, cioè leggeva solo la **prima riga
+fisica** di `**Fonti:**`, e un ADR con sei fonti va a capo. Tutto ciò che stava sotto la prima riga
+spariva in silenzio. Corretto in TDD con due prove: una che il blocco raccolga le righe di
+continuazione, una che si fermi alla prima riga vuota, alla prima etichetta in grassetto e al primo
+separatore. Su centoundici ADR il buco ne toccava esattamente uno — quello appena scritto — e per
+gli altri centodieci l'abitudine di tenere le fonti sulla prima riga aveva funzionato per caso.
+
+**Le righe saldate diventano rimandi, e una si apre.** Le sette righe di «cosa questa pagina non
+dice» sono state barrate e seguite da un **Saldato** con il collegamento alla misura, non
+cancellate. `replica-set.md` guadagna una riga nuova: con un membro in pausa il replica set scrive
+un ventisettesimo, la maggioranza si raggiunge ancora, e il perché resta aperto
+([V-078](Sources.md#v-078)). Un task che salda debiti può aprirne, se ha misurato qualcosa che non
+sa spiegare.
+
+**`analyzeShardKey` funziona, e resta fuori lo stesso.** Lo scoperto di `sharded-cluster.md` diceva
+che il comando «richiede un campione di query reali che una demo con dati generati non ha»: il
+campione si fabbrica, e `configureQueryAnalyzer` più il carico di `mongolab` danno 576 letture
+campionate, 77,6 % mirate contro un mix generato 75/25 ([V-081](Sources.md#v-081)). La motivazione
+dello scoperto era sbagliata, e va detto. Il comando resta comunque fuori dall'applicazione
+([ADR-0110](Decision.md#adr-0110)) per una ragione di forma: le sette porte servono cose che durano
+ed emettono flussi, `analyzeShardKey` risponde una volta sola.
+
+**Un fallimento intermittente, registrato invece che nascosto.** Su tre esecuzioni complete della suite d'integrazione, una è fallita: `test_dentro_la_rete_il_replica_set_ha_un_primario` non ha trovato il primario, e la stessa prova eseguita da sola passa. L'ipotesi è che una prova precedente riavvii `mongo-rs-1` e che questa arrivi durante l'elezione, ma è un'ipotesi: il fallimento non è ancora stato riprodotto a comando. È un punto aperto nel registro dell'applicazione, non una correzione — mettere un'attesa nella prova senza aver riprodotto il guasto renderebbe la suite verde senza sapere perché.
+
+**Note di metodo.**
+
+212. **Un predefinito «uguale a quello della libreria» non è uguale all'assenza.** Scrivere
+     `journal=False` perché tanto è ciò che pymongo fa già sembra innocuo e cambia la natura della
+     riga di base: da «non abbiamo chiesto niente» a «abbiamo chiesto questo». Il giorno in cui il
+     predefinito della libreria cambia, l'assenza segue il cambiamento e il valore scritto no — e
+     due misure di due giorni diversi smettono di essere accostabili senza che niente diventi
+     rosso. La regola pratica: quando una funzione esiste per **rendere misurabile** un
+     comportamento, il suo caso vuoto deve produrre un oggetto identico a quello che si sarebbe
+     costruito senza di lei, e ci vuole una prova che lo asserisca — qui
+     `assert opzioni_di_misura() == {}`.
+
+213. **Una resa che scende quando si aggiungono lavoratori non è saturazione della risorsa
+     condivisa: è contesa dal lato del chiamante.** La distinzione è la differenza fra un
+     esperimento e un aneddoto. Un pool saturo mantiene la resa e allunga le attese, perché il
+     server continua a essere servito allo stesso ritmo dalle connessioni che ci sono; se la resa
+     *cala*, del lavoro si sta perdendo prima di arrivare al server. La regola pratica: prima di
+     attribuire un numero al sistema sotto misura, chiedersi se il misuratore possa essere il collo
+     di bottiglia — e la verifica costa una corsa, alzando il limite del **solo** client e
+     guardando se le altre condizioni restano ferme. Se si muovono tutte, il sospetto è la
+     macchina; se si muove una sola, il sospetto è confermato.
+
+214. **Una mediana intatta con una coda molto più lunga è la firma della contesa dal lato di chi
+     chiede.** Con `cpus: 1.0` il p50 dello standalone è 2,8 ms e il p99 è 40,6; con quattro CPU il
+     p50 resta 2,8 e il p99 scende a 11,0. La maggior parte delle operazioni trova la strada
+     libera e non si accorge di niente; quelle che aspettano aspettano il proprio processo. La
+     regola pratica: quando un limite di risorsa si sposta e la mediana non si muove, guardare i
+     percentili alti prima di concludere che non è cambiato niente.
+
+215. **I percentili pesano le operazioni, non i thread: chi soffre di più è il meno
+     rappresentato.** Con `maxPoolSize` a uno in meno del numero di scrittori c'è un thread che
+     aspetta per tutta la corsa, e p50, p95 e p99 sono indistinguibili dal caso sano — perché quel
+     thread, non scrivendo, non produce campioni. Solo il **massimo** lo denuncia, e il massimo è
+     la statistica meno rispettabile che ci sia. La regola pratica: in un riepilogo di latenze i
+     percentili descrivono il servizio e il massimo descrive il caso peggiore *che sia riuscito a
+     completare*; toglierlo perché «è rumore» significa togliere l'unica colonna che vede la fame.
+
+216. **Un costo fisso dentro una misura di durata non è un errore neutro: comprime le
+     differenze.** Il prezzo di `j: true` calcolato sui tempi lordi dava −23 %, sui netti −32 %.
+     Un addendo uguale sui due lati sposta sempre il rapporto **verso** l'uno, quindi l'errore
+     rende sistematicamente le differenze più piccole di quanto siano. La regola pratica: il costo
+     fisso si isola con la corsa più corta che lo strumento sappia fare e si sottrae prima di
+     dividere — oppure si evita del tutto misurando a durata fissa e contando le operazioni,
+     che è quello che fa il confronto fra architetture.
+
+217. **Un controllo che nessuno controlla è una firma in bianco.** `check_citations.py` leggeva
+     solo la prima riga fisica di `**Fonti:**`: le citazioni andate a capo sparivano in silenzio, e
+     il file risultava coerente proprio mentre aveva perso un pezzo. Il difetto è emerso solo
+     perché un file **legittimo** è stato bocciato; finché ha promosso file rotti, nessuno poteva
+     accorgersene. La regola pratica: quando uno strumento di verifica boccia qualcosa che si
+     ritiene corretto, la prima ipotesi da escludere è che abbia ragione lo strumento — ma la
+     seconda, prima di aggirarlo, è leggerne il codice. E se il difetto c'è, si corregge con una
+     prova che avrebbe fallito prima, non con un adattamento del documento.
+
+Stato aggiornato: decisioni fino ad **ADR-0111**, verifiche fino a **V-081**, note di metodo fino
+alla **217**. Le suite: **168** prove per gli strumenti, **634** per l'applicazione più **58** di
+integrazione, `mypy --strict` verde su 66 file. Le porte del dominio restano **sette** e gli eventi
+**nove**: questo task non ha toccato il dominio. Prossimo passo: **Task 17** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), le tre pagine che `docs/README.md`
+promette — e adesso hanno le misure di cui parlare.
+
+---
+
+## 2026-09-04 — `feature/04`, Task 17: le tre pagine dovute, e l'ultima cosa che il repository diceva di sé e non era più vera
+
+Il Task 17 non scrive codice. Scrive le tre pagine che [`docs/README.md`](README.md) intestava a
+questo branch da settimane — `06-sviluppo/architettura-app.md`, `06-sviluppo/tdd-e-doppi.md`,
+`03-amministrazione/statistiche-monitoraggio.md` — e finché non esistevano, quelle righe dell'indice
+erano promesse travestite da collegamenti.
+
+Ne escono tre pagine per **1 037 righe**, **sei** verifiche empiriche nuove (`V-082`…`V-087`), una
+misura lato applicazione (`M-058`), **due** ADR, sette citazioni per le slide, e sette righe d'indice
+o di stato che il repository dedicava a sé stesso e che non erano più vere. Le suite non si muovono
+— 634 unitarie, 58 di integrazione, 168 per gli strumenti, `mypy --strict` verde su 66 file — perché
+non è stata toccata una riga di `app/src/`.
+
+**La pagina sul monitoraggio non è un elenco di campi.** La forma ovvia sarebbe stata commentare i
+campi di `serverStatus`, ed è anche la forma inutile: quell'elenco esiste già, è il manuale, ed è più
+completo di qualunque cosa questo repository possa scrivere. La campagna di misura ha però prodotto
+sei risultati che il manuale non dice e che contraddicono ciascuno una lettura corrente, e la pagina
+si organizza attorno a quelli ([ADR-0112](Decision.md#adr-0112)): `serverStatus` risponde **45, 52 e
+36 sezioni** sui tre nodi e al router ne mancano **venti**, fra cui `wiredTiger`, `globalLock` e
+`repl`, senza che nessun errore lo segnali ([V-082](Sources.md#v-082)); sotto un carico che satura il
+client il server non mette in coda **niente** e dichiara **67 µs** di latenza dove il client ne
+misura **2,8 ms** ([V-083](Sources.md#v-083), [V-079](Sources.md#v-079)); il pool dei ticket di
+scrittura non è la costante 128 che circola ma sta fra **7 e 12** e si muove da solo; il ritardo di
+replica letto nel modo standard vale **10 000 ms su un insieme sano a riposo** e diventa **negativo**
+se lo si chiede al secondario ([V-084](Sources.md#v-084)); ogni scrittura ripetibile costa
+**un'operazione replicata in più** ([V-085](Sources.md#v-085)); e il router conta le operazioni del
+client alla singola unità ma somma i filesystem degli shard, dichiarando un disco grande il doppio di
+quello che esiste, senza dire che uno dei due shard non ha visto **nessuna** operazione
+([V-086](Sources.md#v-086)).
+
+La conseguenza operativa più scomoda è che **il ritardo di replica non si mostra dal vivo**, e la
+pagina dice perché invece di esibirlo con una nota accanto: la nota non arriva sulla slide, il numero
+sì ([ADR-0111](Decision.md#adr-0111)). Al suo posto la pagina indica `opcountersRepl.insert` sul
+secondario — che nella misura coincide **esattamente** con le scritture confermate al client, 9 139
+contro 9 139 — e `metrics.repl.buffer`, che è la coda vera.
+
+**Il rapporto di compressione è una proprietà dei dati, non del motore.** Stessa istanza, stessa
+`snappy`: `lab.ordini` restituisce **3,06×**, la collezione di carico **0,97×** — l'archiviazione è
+più grande dei dati. La zavorra dei documenti di carico è base64 di uno `shake_128`, cioè byte
+pseudocasuali, e i byte casuali non si comprimono; il 3 % in più è il costo delle strutture di
+WiredTiger su un contenuto che non le ripaga. Nella stessa misura è emerso che il database `lab`
+aveva **38 collezioni, 37 delle quali di carico**, per ~3 GB di `dataSize` che non interessano più a
+nessuno: `dbStats` le somma tutte ([V-087](Sources.md#v-087)).
+
+**«La suite unitaria non ha bisogno di Docker» è diventata una misura.** Era un'affermazione ripetuta
+da tredici task e mai provata; basta un `import` di troppo perché smetta di essere vera senza rumore.
+Eseguendo la suite con la variabile del client Docker puntata a un socket che non esiste: **634
+passate in 3,86 s**, contro 3,96 s dell'esecuzione normale ([M-058](../app/docs/Sources.md#m-058)).
+È il numero su cui poggia tutta la pagina sull'architettura, che lo mette accanto ai ~110 s della
+suite di integrazione.
+
+**Due pagine sullo stesso codice che `app/docs/` documenta già.** Senza una regola, l'esito è
+garantito: o le pagine nuove riassumono i diciassette capitoli, e allora divergono alla prima
+modifica del codice, oppure li ripetono, e il repository ha due verità sullo stesso soggetto.
+[ADR-0113](Decision.md#adr-0113) risolve distinguendo **per lettore** e non per argomento —
+`app/docs/` per chi apre i sorgenti, `docs/06-sviluppo/` per chi non li aprirà mai — e ne trae una
+regola verificabile a occhio: **nelle due pagine nuove non compare nessun blocco di codice
+dell'applicazione**. Il legame fra le due sedi diventa reciproco, e un collegamento rotto lo trova
+`make docs-check`.
+
+**L'ultima cosa che il repository diceva di sé e non era più vera.** Il `README.md` di radice
+dichiarava `app/` «**non ancora nel repository**». Correggendola è saltata fuori la riga
+immediatamente sopra: `docker/` diceva che «`01-standalone` è nel repository, gli altri due no»,
+mentre la tabella quindici righe più in basso li dava tutti e tre dentro. Due righe della stessa
+tabella, invecchiate insieme e per lo stesso motivo — nessuno rilegge una riga di stato quando ne sta
+correggendo un'altra.
+
+Resta nel registro, non annotata, la riga dell'entrata del 2 settembre che dice «la cartella
+`06-sviluppo/` non esiste ancora»: era vera quando è stata scritta ed è diventata falsa lo stesso
+giorno. Un registro cronologico non si riscrive; il saldo si legge qui.
+
+### Note di metodo
+
+218. **Un'assenza di dipendenza si prova togliendo la dipendenza, non leggendo gli `import`.**
+    «Questa suite non ha bisogno di Docker» era stata affermata per tredici task senza che nessuno
+    l'avesse tolta di mezzo per vedere. La lettura statica non basta: un adattatore costruito per
+    comodità dentro una prova, un `import` in cima a un modulo di supporto, e la dipendenza rientra
+    senza rumore. La regola pratica: si punta il client all'endpoint inesistente — un socket che non
+    c'è, un host che non risolve — e si riesegue. Se la suite passa **identica**, l'affermazione è
+    una misura; se cambia anche solo un tempo, era una speranza. Costa una corsa, e vale per
+    qualunque dipendenza si dichiari assente.
+
+219. **Due sedi che documentano lo stesso codice si distinguono per lettore, non per argomento.**
+    Dividere per argomento è la scelta istintiva e non funziona, perché gli argomenti sono gli
+    stessi: se una sede tratta «le porte» e l'altra pure, l'unica differenza possibile è la
+    lunghezza, cioè un riassunto — e un riassunto diverge alla prima modifica del codice. Dividere
+    per lettore dà invece due mestieri diversi sullo stesso soggetto: *com'è fatto* accanto al
+    codice, *che cosa si guadagna* dove sta il pubblico. La regola pratica: la distinzione va scritta
+    in testa a ciascuna delle due pagine, e le va data una forma **verificabile a occhio**. Qui è
+    «nella pagina divulgativa non compare nessun blocco di codice»: chi la viola se ne accorge
+    mentre scrive, non in revisione sei mesi dopo.
+
+220. **Una media di sistema è la media di una popolazione che nessuno ha dichiarato.** `dbStats`
+    riportava `avgObjSize` 1 984 B per il database `lab`, che non descrive **nessuna** delle sue
+    collezioni: è la media pesata su una popolazione dominata dalle 37 collezioni di carico da
+    2 048 B, mentre i documenti veri ne pesano 121. Lo stesso vale per il rapporto di compressione,
+    che sul database non significa niente e sulla collezione significa tutto — 3,06× contro 0,97×.
+    La regola pratica: prima di citare una media che uno strumento offre già calcolata, chiedersi
+    **di che cosa** è la media; se la popolazione è mista e nessuno l'ha scelta, il numero descrive
+    la storia dell'ambiente e non il sistema.
+
+221. **Le righe di stato di un elenco invecchiano insieme, e si correggono insieme.** Il piano
+    chiedeva di aggiornare *la* riga che dichiarava l'applicazione inesistente; la riga sopra, sugli
+    stack, era falsa da tre branch. Nessuno la rileggeva perché non era quella che si stava
+    correggendo. La regola pratica: quando si aggiorna un'affermazione che il repository fa su sé
+    stesso, si rilegge **tutta la tabella o l'elenco che la contiene**, e si controlla che non la
+    contraddica un'altra parte dello stesso documento — qui la stessa pagina si smentiva a quindici
+    righe di distanza.
+
+222. **Una metrica senza il nodo su cui leggerla è una ricetta rotta.** Le tre architetture di questo
+    lab rispondono a `serverStatus` con tre insiemi di sezioni diversi, e al `mongos` ne mancano
+    venti — fra cui quelle che un manuale di monitoraggio nomina per prime. Il modo in cui si
+    sbaglia non è ricevere un errore: è ricevere un oggetto valido in cui la chiave cercata non c'è,
+    e leggerla come uno zero perfettamente plausibile. La regola pratica: in una procedura di
+    monitoraggio ogni metrica si scrive con il nodo accanto; e prima di concludere che un valore sia
+    zero, si verifica che la **sezione** esista su quel ruolo.
+
+Stato aggiornato: decisioni fino ad **ADR-0113**, verifiche fino a **V-087**, note di metodo fino
+alla **222**. Le suite non si muovono: **168** prove per gli strumenti, **634** per l'applicazione
+più **58** di integrazione, `mypy --strict` verde su 66 file. Porte **sette**, eventi **nove**:
+questo task non ha toccato `app/src/`. Prossimo passo: **Task 18** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), l'ultimo — la chiusura di
+`feature/04` e la sua PR.
+
+## 2026-09-04 — `feature/04`, fuori dai task: la quinta opzione di misura, e un debito che era vero solo sulla riga di comando
+
+Il Task 17 si era chiuso registrando fra i punti aperti dell'applicazione che «il carico non sa
+chiedere un write concern diverso dal predefinito, **quindi** la corsa con `w: 1` che isolerebbe i
+18 390 µs del primario non è eseguibile». Il Product Owner ha obiettato al *quindi*: `w` è un
+parametro della stringa di connessione, nella sezione dopo il `?`. Il manuale gli dà ragione
+([S-076](Sources.md#s-076)) — le opzioni di write concern nell'URI sono `w`, `journal`, `wtimeoutMS`
+— e nel codice il meccanismo c'era da tredici task: `opzioni_di_misura` parla i nomi dell'URI dal
+Task 16, `connetti(**extra)` li porta al client dal Task 5. Mancava **la parola sulla riga di
+comando**, non il meccanismo ([ADR-0114](Decision.md#adr-0114)).
+
+Tre righe di codice: `--write-concern` per esteso e non `--w`, testo e non intero perché `majority`
+è un valore legittimo quanto `1`, e `w` prima di `journal` nella mappa perché quello è l'ordine
+dell'URI e le due opzioni si condizionano. Cinque prove nuove, tutte viste fallire: 639 unitarie.
+
+**Il manuale ha cambiato il disegno della prova prima che partisse.** Con `j` non specificato,
+`w: "majority"` **equivale a `j: true`** e `w: <numero>` equivale a `j: false`
+([S-077](Sources.md#s-077)): scendere da `majority` a `1` spegne due cose insieme. Quindi tre corse
+e non due ([V-088](Sources.md#v-088)) — il predefinito, `w: 1` con il giornale acceso, `w: 1` nudo.
+
+La riserva di [V-083](Sources.md#v-083) si chiude e la lettura era giusta: `opLatencies.writes` sul
+primario passa da **18 913 µs a 644**, un fattore 29. Ma a giornale costante la maggioranza costa
+**1,38×** di resa, e a conferme costanti il giornale **2,24×**: la cosa cara che il predefinito fa
+senza dirlo è **il disco, non la rete**. Un confronto a due corse avrebbe dato il numero giusto con
+la spiegazione sbagliata, e non ci sarebbe stato modo di accorgersene guardando i risultati.
+
+Due code sono venute dietro. I 644 µs che restano, contro i 67 dello standalone che non ha nessuno
+da aspettare, sono **quanto costa essere un primario**, prima confuso dentro il fattore 274. E il
+server non metteva in coda niente perché il freno era la maggioranza: con `w: 1`
+`totalTimeQueuedMicros` passa da 10 388 µs a **308 413**, trenta volte tanto. La conclusione di
+V-083 non si rovescia — resta l'1,5 % della latenza — ma la sua *ragione* sì.
+
+Riscritte di conseguenza la sesta sezione di `03-amministrazione/statistiche-monitoraggio.md`, le
+conseguenze di [ADR-0112](Decision.md#adr-0112) e le riserve di V-083. Tre citazioni per le slide.
+
+### Note di metodo
+
+223. **«Non è possibile» e «non è chiedibile» sono due debiti diversi, e uno dei due nessuno lo
+    riapre.** La riga registrata al Task 17 diceva che la misura decisiva non era eseguibile; era
+    vera per metà, e la metà sbagliata è quella che ha tenuto la riserva aperta per un task. Il
+    meccanismo c'era, mancava l'opzione. La regola pratica: quando si registra un limite, si scrive
+    **che cosa manca**, non che cosa non si può fare — «manca l'opzione X sulla riga di comando» si
+    chiude in tre righe di codice, «non è eseguibile» resta lì finché qualcuno non la rilegge con
+    sospetto. Il costo della parola sbagliata non si vede mai nel momento in cui la si scrive.
+224. **Una variabile per volta, anche — soprattutto — quando il manuale ne accoppia due in una riga
+    sola.** Il piano era due corse, `majority` contro `1`. Il manuale dice, dentro una tabella, che
+    `majority` implica `j: true`: le due variabili viaggiano incollate, e un confronto a due avrebbe
+    attribuito alla replica un costo che è per due terzi del disco. La regola pratica: prima di
+    disegnare un confronto, leggere che cosa il valore predefinito **accende oltre a sé stesso**; se
+    ne accende due, le corse sono tre.
+225. **Un collo di bottiglia nasconde il successivo, e misurare a un solo punto di funzionamento
+    significa fotografare quale limite era attivo quel giorno.** «Il server non mette in coda
+    niente» era la conclusione che chiudeva l'indagine, ed era vera e fuorviante insieme: tolto il
+    write concern, la stessa corsa fa il triplo delle scritture e l'attesa cumulativa per un ticket
+    va a 308 ms. La regola pratica: una misura di saturazione vale per il regime in cui è stata
+    presa; per dire *dov'è* il collo bisogna spostare il carico almeno una volta e guardare se il
+    collo si sposta con lui.
+
+---
+
+## 2026-09-04 — `feature/04`, Task 18: le registrazioni del Blocco 2, e chi fa da seconda finestra
+
+L'ultimo task del piano. Cinque registrazioni di terminale dell'applicazione — `stats`, `watch`,
+`demo failover`, `demo backup-live`, `demo restore` — girate contro `docker/02-replicaset` con
+`--sink plain` e **senza** `--step`, cioè con lo stesso codice della scena dal vivo: è la proprietà
+che il Task 13 aveva costruito apposta ([ADR-0098](Decision.md#adr-0098)), ed è ciò che rende la
+registrazione una copia invece di una ricostruzione. La cartella passa da nove scene a
+**quattordici** ([V-089](Sources.md#v-089)).
+
+**La scena centrale non era registrabile, e il motivo era buono.** `demo failover` gira
+l'applicazione dentro la rete Compose, che è l'unico posto da cui si veda la cronaca dell'elezione:
+dall'host il client è `directConnection` su una porta pubblicata, non fa scoperta, e la scena perde
+esattamente ciò che deve mostrare. Ma dentro la rete non c'è il socket del demone, quindi
+l'applicazione annuncia il comando che uccide il primario e si ferma su un `input()`. Dal palco quel
+comando lo dà una persona con un secondo terminale aperto; `tools/registra-terminale.py` invece non
+scriveva **mai** sul lato padrone dello pseudo-terminale, e la registrazione si sarebbe piantata per
+sempre.
+
+Quindi `--regia PREFISSO` ([ADR-0115](Decision.md#adr-0115)): chi registra esegue la riga annunciata
+e poi manda l'Invio — in quest'ordine, perché invertirli produrrebbe una scena che riparte prima che
+il guasto sia avvenuto, cioè un failover raccontato senza failover. Il prefisso è un argomento
+obbligatorio e non un predefinito nascosto: la ricetta dichiara che cosa lo strumento è autorizzato
+a eseguire. L'uscita del comando va su `stderr` di chi registra e **non** nel `.cast`, dove va solo
+ciò che il pubblico vedrebbe. Quattro prove nuove, tutte viste fallire: **172** per gli strumenti.
+
+**Il conto è arrivato alla prima corsa.** `make` fa l'eco della ricetta prima di eseguirla, e l'eco
+comincia con `docker compose ` esattamente come il comando annunciato: la regia ha eseguito l'eco, e
+la scena è ripartita da capo dentro se stessa. Si registra con `make -s`.
+
+I numeri che le scene portano: `mongod 7.0.40` e 50 000 documenti nella fotografia; **10 035 ms** di
+elezione senza carico; **10 019 ms** di interruzione con carico e **zero scritture perse**, 31 952
+confermate contro 31 955 ritrovate; un dump a caldo che costa **l'1,3 %** del ritmo; e 5 886
+documenti all'origine contro 5 740 nella copia, **differenza 146** — la finestra che il dump non
+copre, che sta nell'oplog e che `mongorestore` senza `--oplogReplay` non riapplica.
+
+**La scena del failover ha eletto due volte, e la seconda non era nel copione.** Avviene da sé otto
+secondi dopo il rientro di `mongo-rs-1`, quando si riprende il ruolo: nel tracciato è un
+`ERRORE NotPrimaryError` seguito da `RITENTO tentativo 2 dopo 50 ms`. I tentativi automatici del
+driver l'hanno assorbita, e le scritture perse restano zero anche lì. Non era previsto e non è stato
+tolto: è la miglior risposta che il branch abbia prodotto alla domanda «a che serve `retryWrites`?».
+
+**Due scene su quattordici fanno il 99,9 % della cartella.** Le nove degli stack pesano 31 K, le tre
+dell'applicazione senza carico 4,8 K, le due sotto carico **6,3 M**: `PlainSink` scrive una riga per
+evento e trentaduemila scritture sono sessantaquattromila righe. Restano intere
+([ADR-0116](Decision.md#adr-0116)) — una riserva che dura la metà della scena che sostituisce non è
+la riserva di quella scena — e nel pacchetto del versionatore pesano ~640 K, perché sono righe quasi
+identiche.
+
+Tutte e quattordici sono state riprodotte dentro uno pseudo-terminale e confrontate con l'originale.
+**La regola di normalizzazione scritta nell'indice era insufficiente** e la pagina è stata corretta:
+le dodici corte coincidevano con `\r\r\n` → `\r\n`, le due lunghe fallivano a 66 354 byte, dopo che
+due terzi del file avevano coinciso. La regola buona è comprimere `\r+\n` in `\n` da tutt'e due le
+parti.
+
+**Cinque righe dei punti aperti dicevano «Task 18, con la registrazione che è il controllo». Una
+sola si chiude.** Le cinque scene sono `plain`, quindi non c'è nessun `Live` sopra cui un'eccezione
+possa sparire (M-015 resta aperto), nessun disegno che possa risultare a scatti, e nessuno sguardo
+vero sulla schermata `rich` — che `app/docs/11-tre-rese-e-un-solo-thread-che-disegna.md` prometteva
+per questo task, e la promessa era sbagliata, non la scelta. Il Ctrl-C durante il dump non è stato
+provato: la scena 13 è corsa fino in fondo, che è ciò che una riserva deve mostrare. Quello che si
+chiude davvero è la riga più vecchia delle cinque: il sink testuale esisteva dal Task 10 e non era
+mai stato collegato allo strumento di registrazione. Adesso lo è. Risposta anche alla domanda che il
+piano assegnava a questo task sul `TopologyWatcher`: **nessun comando lo costruisce e nessuna scena
+lo attraversa**; toglierlo è una scelta di progetto, e la raccomandazione è di toglierlo.
+
+### Note di metodo
+
+226. **Se una scena dal vivo ha bisogno di due finestre, lo strumento che la registra deve
+    diventare la seconda — oppure si registra un'altra scena.** L'alternativa gratis c'era: girare
+    la stessa demo dall'host, dove il guasto si dà da soli. Avrebbe prodotto un file con lo stesso
+    nome, la stessa durata e senza la cosa da guardare, perché da lì il client non fa scoperta e non
+    ha transizioni da annunciare. La regola pratica: prima di semplificare il modo in cui si
+    registra una demo, chiedersi quale **osservabile** la semplificazione spegne; se l'osservabile è
+    il motivo della scena, il lavoro è insegnare allo strumento a fare la cosa scomoda.
+227. **Un prefisso su un canale di testo non distingue chi parla.** La regia eseguiva le righe che
+    cominciavano con `docker compose `, e `make` stampa la ricetta prima di eseguirla: la prima
+    registrazione è ripartita da capo dentro se stessa. È il difetto strutturale di ogni protocollo
+    che viaggia sullo stesso canale del testo per gli umani — la stessa famiglia della SQL injection
+    e dell'iniezione di prompt — in una forma abbastanza piccola da starci in tre righe. La regola
+    pratica: quando si riconosce un comando dal testo, si mette per iscritto chi altro può produrre
+    quel testo; qui la risposta era «lo strumento di build», e la difesa è una lettera.
+228. **Una prova può passare per il motivo sbagliato quando asserisce su una stringa che
+    l'infrastruttura stampa comunque.** La prova sul rifiuto di `--regia` durante una riproduzione
+    cercava `--regia` in `stderr` — e argparse ci stampa la riga d'uso, che contiene tutte le
+    opzioni. Passava prima dell'implementazione. Cambiata su una frase che solo il messaggio di
+    rifiuto contiene, è tornata rossa. La regola pratica: se una prova è verde appena scritta,
+    l'asserzione va spostata su qualcosa che **solo** il codice mancante può produrre; guardarla
+    fallire non è un rituale, è l'unico modo di sapere che cosa sta guardando.
+229. **Una regola di normalizzazione tarata sui casi corti fallisce sui lunghi, e fallisce nel modo
+    che somiglia a un guasto vero.** `\r\r\n` → `\r\n` valeva per dodici registrazioni su
+    quattordici; nelle due lunghe compaiono anche `\r\r\r\n`, e il confronto divergeva a due terzi
+    del file dopo che tutto il resto aveva coinciso — cioè con la firma di una registrazione rotta.
+    La diagnosi è venuta da una sonda banale: il **prefisso comune più lungo**, e i due byte che
+    stanno subito dopo. La regola pratica: davanti a un confronto che fallisce tardi, prima si
+    guarda *dove* diverge e cosa c'è in quel punto, poi si formula l'ipotesi; e una regola di
+    pulizia va scritta come classe (`\r+`) e non come caso (`\r\r`).
+230. **Un percentile calcolato su una finestra che contiene un'interruzione descrive i
+    sopravvissuti.** La fase «durante» della scena dichiara un p95 di 49,5 ms, **più basso** delle
+    fasi accanto: dura venticinque secondi, i primi dieci non contengono nessuna scrittura, e i
+    quindici che restano girano contro un primario appena eletto e scarico. Le richieste peggiori
+    non sono lente, sono assenti, e un cruscotto di latenze le conta zero volte. La regola pratica:
+    accanto a un percentile che copre un guasto si scrive sempre il **conteggio** e la **durata
+    dell'interruzione**; il numero che descrive un failover non è un percentile.
+231. **Chiudere i punti aperti vuol dire anche dichiarare quali non si sono chiusi, e perché.**
+    Cinque righe rimandavano a questo task «con la registrazione che è il controllo». La
+    registrazione è `plain` e ne controlla una sola: le altre quattro riguardano la resa `rich`, che
+    per ottime ragioni non è stata registrata. Riscriverle come chiuse sarebbe costato zero e
+    nessuno se ne sarebbe accorto. La regola pratica: quando un task promesso arriva, si rilegge
+    ogni riga che lo nominava e le si risponde **una per una** — «chiuso», «non controllato, ecco
+    perché», «la promessa era sbagliata» sono tre esiti diversi, e solo il primo è una chiusura.
+
+Stato aggiornato: decisioni fino ad **ADR-0116**, verifiche fino a **V-089**, note di metodo fino
+alla **231**. I controlli, tutti: `make preflight` **9 superati · 1 avviso · 0 errori** — l'avviso è
+la cartella dei filmati, che è vuota davvero e dal 18 settembre diventa bloccante —, `make
+docs-check` verde, `make stack-check` **3 stack conformi**, `make tools-test` **172**, `make
+app-test` **639**, `make app-check` con `mypy --strict` verde su **66** file, `make
+app-test-integration` **58** in 87 s, con la prova intermittente passata. Registrazioni di
+terminale: **14**. Porte **sette**, eventi **nove**; `app/src/` non è stata toccata. Prossimo passo:
+**PR di `feature/04` verso `develop`**, mai la scorciatoia di git-flow che salta la revisione; la
+fusione è del Product Owner, e a PR unita il worktree si chiude nell'ordine di
+[ADR-0079](Decision.md#adr-0079) — prima si sgancia la sessione, poi si rimuove la directory — dopo
+aver salvato i `.env` ([ADR-0056](Decision.md#adr-0056)).
+
+## 2026-09-04 — La review di Copilot sulla PR #5: un rilievo solo, vero a metà e con il rimedio sbagliato
+
+Il Product Owner ha chiesto una review automatica della PR #5 a GitHub Copilot. L'esito: 74 file
+esaminati su 129, «review effort: Lite», nessun commento a livello di PR e **un solo commento in
+linea**, su `tools/registra-terminale.py`. Dice che la regia confronta con
+`vista.strip().startswith(regia)`, che `strip()` toglie anche gli spazi a sinistra e quindi «una
+riga indentata può diventare eseguibile anche se il prefisso non è realmente a colonna 0»; propone
+di non togliere niente a sinistra e limitarsi al `\r` finale; aggiunge che «lo stesso problema
+compare anche alla riga 297».
+
+Dentro cinque righe di testo ci sono tre esiti diversi, e per separarli è servito **eseguire**.
+
+**La preoccupazione è fondata.** Riconoscere un comando dal testo che un altro programma stampa è la
+famiglia di problemi della nota 227, e in questo branch il conto è già arrivato una volta: l'eco di
+`make` cominciava con `docker compose ` come il comando annunciato, e la prima registrazione della
+scena 12 è ripartita dentro se stessa. Chiedersi quanto è largo quel confronto è la domanda giusta.
+
+**Il rimedio è sbagliato e romperebbe lo strumento.** `_da_un_altra_finestra`
+(`app/src/mongolab/cli.py`) stampa «▸ da un'altra finestra…» e poi il comando **rientrato di due
+spazi**, perché a schermo va staccato dal testo che lo introduce; la scena 12 registrata lo conferma
+su tutt'e due le righe annunciate. Con il prefisso ancorato alla colonna zero la regia non
+riconoscerebbe **mai** la riga vera. Applicato alla lettera, il rimedio è stato misurato: la suite
+della regia non diventa rossa, **non finisce**. La scena resta appesa all'`input()` e il processo va
+fermato a mano — che è precisamente il guasto che ADR-0115 esisteva per evitare.
+
+**La riga 297 non contiene nessuno `strip()`.** È `uscita = registra(`, il punto di chiamata;
+`strip().startswith` compare una volta sola in tutto il file, alla 191. Quella parte del rilievo è
+inventata, ed è utile saperlo: un recensore che aggiunge un riferimento plausibile e falso costa più
+di uno che non lo aggiunge.
+
+**Quello che la review ha trovato davvero è un buco nelle prove.** Nessuna delle quattro prove della
+regia passava per una riga **rientrata**, cioè per il caso di produzione: tutte annunciavano a
+colonna zero, e il comportamento su cui poggia la scena 12 non era fissato da niente. Adesso ci sono
+due prove in più — una riga rientrata **si esegue**, una riga che il prefisso ce l'ha *dentro*
+invece che davanti **no** — e la seconda è quella che tiene aperta la distanza fra «spazi a
+sinistra» e «prefisso ovunque». `make tools-test`: **174**.
+
+E una correzione di parole, che è la parte del rilievo con cui Copilot aveva ragione senza saperlo:
+ADR-0115, il docstring del modulo, la stringa di `--help` e la ricetta dell'indice delle
+registrazioni dicevano tutti «le righe che cominciano con quel prefisso» — più stretto di ciò che il
+codice fa. Adesso dicono che gli spazi ai due lati si ignorano, e perché; e accanto alla condizione
+c'è il commento che spiega che quello `strip()` è portante e non è pulizia.
+
+### Note di metodo
+
+232. **Un rilievo di review si arbitra eseguendolo, perché «ha ragione» e «il suo rimedio funziona»
+    sono due domande diverse.** Il commento conteneva una preoccupazione fondata, un rimedio che
+    pianta lo strumento e un riferimento a una riga che non esiste. Applicare il rimedio è costato
+    un minuto e ha prodotto la risposta che nessuna rilettura avrebbe dato: la suite non fallisce,
+    si blocca — e un blocco, in una pipeline, si legge come un timeout e non come un difetto. La
+    regola pratica: davanti al suggerimento di un recensore automatico la prima mossa è
+    **applicarlo e girarlo**; e se il verdetto è «non pertinente», la motivazione scritta nel
+    commento di chiusura deve contenere un fatto misurato, non un'opinione.
+233. **Quando la documentazione descrive il codice più stretto di com'è, prima o poi qualcuno lo
+    «corregge» verso la documentazione.** Quattro punti — una decisione, un docstring, un `--help` e
+    una ricetta — dicevano «le righe che cominciano con quel prefisso», e il codice invece ignorava
+    di proposito il rientro con cui l'applicazione annuncia. Il rilievo nasce esattamente lì:
+    leggendo la promessa, il codice sembra troppo largo. La regola pratica: se una condizione
+    tollera qualcosa **di proposito**, la tolleranza si scrive dove sta la condizione — nel commento
+    accanto, non solo nella testa di chi l'ha scritta — e la stessa frase va nei documenti che la
+    promettono, altrimenti la prossima review chiederà di stringere.
+
+Stato aggiornato: decisioni fino ad **ADR-0116**, verifiche fino a **V-089**, note di metodo fino
+alla **233**. Controlli: `make tools-test` **174** e `make docs-check` verde. `app/src/` non è stata
+toccata: la modifica sta in `tools/`, e i tre documenti che la descrivono sono allineati. Nessuna
+citazione nuova per le slide — il rilievo riguarda il metodo di lavoro e non il contenuto del talk.
+Prossimo passo: chiusura del thread di Copilot sulla PR #5 con la motivazione misurata, poi la
+review di `codex` sulla stessa PR.
+
+## 2026-09-04 — La review di `codex` sulla PR #5: quattro rilievi, quattro veri
+
+Dopo Copilot, la stessa PR è stata data a `codex exec` in sandbox di sola lettura, con un prompt che
+dichiarava il contesto — materiale didattico, non software di produzione —, i file da saltare (i
+`.cast`, due dei quali pesano megabyte) e le scelte già decise che non sono rilievi. Ha prodotto
+**quattro rilievi**, tre P1 e un P2, e il verdetto «modifiche da richiedere prima del merge».
+
+Arbitrati uno per uno, eseguendo. **Nessuno è un'allucinazione, e nessuno è un falso positivo.** È
+la differenza che conta rispetto alla review precedente: là un rilievo su uno, con dentro un rimedio
+che rompeva lo strumento e un riferimento a una riga inesistente; qui quattro su quattro, con il
+percorso di verifica scritto accanto a ciascuno.
+
+**1. `--tetto` ferma il carico, non la scena.** `ScenarioBackup._con_dump` passa `tetto_s` a
+`WorkloadRunner` e poi resta, sul thread principale, dentro `for avanzamento in
+self._strumento.dump(...)`. Se `mongodump` si pianta, il carico molla al tetto e la scena no.
+Misurato con un iteratore che non torna mai e `tetto_s = 0,05 s`: dopo **15 secondi**, cioè
+trecento volte il tetto, `esegui()` non era ancora tornata. Il punto che lo rende un difetto e non
+una scomodità è che [ADR-0101](Decision.md#adr-0101) e `app/docs/15-…` promettono l'opposto — «il
+tetto resta, come rete di sicurezza», «terminare la scena anche se il dump non torna più» — e il
+caso che descrivono è precisamente quello che questa sonda ha riprodotto: «uno schermo fermo davanti
+a duecento persone».
+
+**2. Se l'elezione salta, il nodo resta a terra.** In `ScenarioFailover.esegui`, `rompe(...)` sta
+alla riga 371 e `ripara(...)` alla 377, senza niente in mezzo che le leghi. Misurato con un carico
+che solleva alla seconda fase: la regia riceve `[('ferma', 'mongo-rs-1')]` e basta, per tutti e due
+i modi del guasto. Nel modo `sospendi` il container resta **congelato**. Il `finally` che c'è in
+`cli.py` chiude il client e non tocca lo stack.
+
+La correzione è meno ovvia di quanto sembri, ed è la ragione per cui questo punto va al Product
+Owner e non risolto d'ufficio: dentro la rete Compose la regia è `RegiaAnnunciata`, che *annuncia*
+il comando e si ferma su un `input()`. Un `finally` che ripara annuncerebbe la riparazione e
+aspetterebbe l'Invio **proprio mentre qualcuno sta interrompendo la scena**, cioè trasformerebbe un
+Ctrl-C in un blocco. La domanda vera è cosa deve fare il laboratorio quando la scena si rompe a metà:
+rimettere in piedi, o lasciare com'è per farlo guardare.
+
+**3. Il registratore conferma il guasto anche quando il comando è fallito.** `seconda_finestra`
+esegue la riga annunciata, stampa il codice di uscita su `stderr` e poi manda l'Invio —
+**sempre**. Misurato: con un comando annunciato che esce con **7**, la scena riparte, il `.cast`
+contiene una scena in cui il primario non è mai caduto, e il registratore esce **0**. Il rilievo
+è forte perché il repository ha già scritto perché questo è grave, nel docstring di `RegiaCompose`:
+«un `stop` fallito lascerebbe il primario in piedi, e i due numeri finali sarebbero zero
+millisecondi di interruzione e zero scritture perse — cioè un failover perfetto. La sala vedrebbe la
+slide sbagliata senza che nessuno abbia modo di accorgersene.» L'adattatore dell'applicazione alza
+`ComandoFallito` apposta; il percorso della registrazione, che sta al suo posto, non lo fa. È lo
+stesso difetto, reintrodotto dall'altra parte.
+
+**4. Un'eccezione dentro il generatore non ferma il dump — ma il caso grave è più stretto di come è
+descritto.** In `_avanzamento`, `processo.kill()` sta solo nell'`except GeneratorExit`; un
+`KeyboardInterrupt` sollevato mentre il generatore è fermo a leggere `stderr` passa dal solo
+`finally`, che chiude la pipe. Qui l'esecuzione ha aggiunto una distinzione che il rilievo non
+faceva, e che cambia la gravità:
+
+- se l'interruzione arriva **solo al processo Python** — un supervisore, `interrupt_main()`, o una
+  qualunque eccezione sollevata dentro il generatore — il figlio resta **vivo davvero**, stato `S`;
+- se arriva al **gruppo di processi**, cioè il Ctrl-C vero digitato in un terminale, il figlio
+  riceve `SIGINT` per conto suo e muore: quello che resta è uno **zombie non raccolto**, che il
+  sistema riprende quando il processo padre esce.
+
+La prima misura era sbagliata e va detto: `os.kill(pid, 0)` riesce anche su uno zombie, e leggendo
+solo quella la sonda avrebbe dichiarato «vivo» in tutti e due i casi. La distinzione è venuta da
+`ps -o state=`. Il difetto resta — due righe lo chiudono, e comprende il limite di `docker exec` che
+il docstring già dichiara — ma «Ctrl-C dal palco lascia un `mongodump` orfano» non è quello che
+succede.
+
+**Che cosa si è fatto e che cosa no.** I quattro punti sono entrati nella tabella dei punti aperti
+di `app/docs/registro-sviluppo-app.md`, ciascuno con la misura che lo dimostra. Nessuno è stato
+corretto: tre stanno in `app/src/`, cioè nel codice che la PR sottopone al Product Owner, e due di
+quei tre — il tetto sulla scena e la riparazione nel `finally` — sono scelte di disegno e non
+sviste. Correggerli d'ufficio dentro una PR già consegnata vorrebbe dire decidere al posto di chi
+deve fondere.
+
+### Note di metodo
+
+234. **Un recensore a cui si dichiara il contesto sbaglia meno di uno a cui non si dichiara
+    niente.** Le due review della stessa PR sono confrontabili: una ha visto 74 file su 129 senza
+    sapere che cos'è il repository, e ha prodotto un rilievo su uno con dentro un rimedio rotto;
+    l'altra ha ricevuto tre paragrafi di contesto, l'elenco di ciò che è già deciso e la regola «cinque
+    rilievi veri valgono più di venti plausibili», e ha prodotto quattro rilievi veri su quattro. La
+    regola pratica: prima di chiedere una review automatica si scrive **che cosa non è un difetto**
+    in questo progetto — le scelte deliberate, i debiti già registrati, i file generati da saltare —
+    perché il costo di una review non è quello che trova, è quello che fa verificare per niente.
+235. **Una sonda può dare la risposta giusta per una domanda che non è quella che si stava
+    facendo.** Per sapere se un `Ctrl-C` lascia il `mongodump` orfano, la prima sonda ha usato
+    `os.kill(pid, 0)` — che riesce anche su un processo già morto e non ancora raccolto. Rispondeva
+    «vivo» in tutti e due i casi, e uno dei due era uno zombie innocuo. Con `ps -o state=` i due
+    casi si separano, e il rilievo si ridimensiona da «il dump continua a girare» a «il dump continua
+    a girare **se il segnale non arriva al gruppo di processi**». La regola pratica: quando la sonda
+    conferma il sospetto al primo colpo, si controlla che stia misurando la cosa e non un suo
+    surrogato — la conferma facile è il momento in cui si smette di guardare.
+236. **Il difetto che un progetto ha già saputo descrivere può ricomparire dall'altra parte del
+    confine.** Il docstring di `RegiaCompose` spiega, con precisione, perché un comando di guasto
+    fallito e ignorato produce «un failover perfetto» che nessuno può smascherare — e alza
+    un'eccezione. Il registratore, che quando si registra sta esattamente al posto di quella regia,
+    manda l'Invio comunque. Nessuno ha sbagliato a ragionare: il ragionamento non ha attraversato il
+    confine fra l'applicazione e gli strumenti. La regola pratica: quando si scrive un secondo
+    pezzo di codice che **fa la stessa cosa** di uno esistente in un altro contesto — un doppio, un
+    ponte, uno strumento da palco — si rileggono le invarianti scritte nel primo e ci si chiede una
+    per una se valgono anche qui.
+
+Stato aggiornato: decisioni fino ad **ADR-0116**, verifiche fino a **V-089**, note di metodo fino
+alla **236**. Controlli: `make tools-test` **174**, `make app-test` **639**, `make docs-check`
+verde. Nessuna riga di `app/src/` e di `tools/` è stata cambiata da questa voce: i quattro rilievi
+sono **registrati, misurati e aperti**. Prossimo passo: la decisione del Product Owner su quali
+correggere prima della fusione — la raccomandazione è di correggere subito il terzo e il quarto, che
+non hanno alternative di disegno, e di discutere i primi due.
+
+*Il Product Owner ha risposto lo stesso giorno, accogliendo la raccomandazione: il terzo e il quarto
+si correggono subito, il primo e il secondo restano aperti per la discussione. Voce successiva.*
+
+
+## 2026-09-04 — I due rilievi senza alternative: il registratore che confermava un guasto mancato, l'`except` che copriva solo il caso educato
+
+Dei quattro rilievi della review di `codex`, il Product Owner ne ha mandati due in correzione
+immediata — il terzo e il quarto — tenendo aperti i primi due, che sono scelte di disegno e non
+sviste. Il criterio è quello proposto nella voce precedente: si corregge subito ciò che non ha
+alternative, si discute ciò che ne ha.
+
+Tutt'e due per prova prima e codice poi, e tutt'e due il rosso l'hanno dato per la ragione giusta.
+
+**Il quarto: `_avanzamento` uccideva il processo solo su `GeneratorExit`.** La prova nuova apre un
+dump finto, ne consuma il primo avanzamento, e poi rimanda dentro il generatore un
+`KeyboardInterrupt` con `throw()` invece di chiuderlo con `close()`. La differenza è tutta lì:
+`close()` solleva `GeneratorExit`, `throw()` solleva ciò che gli si dà, e il punto di sospensione è
+lo stesso. Rossa, il figlio era ancora vivo dopo **dieci secondi** di attesa, e vivo davvero — non
+uno zombie: nessuno gli aveva mandato niente. La correzione è una parola, `except BaseException` al
+posto di `except GeneratorExit`, e regge perché quell'`except` fa una cosa sola e poi rilancia:
+libera una risorsa esterna. Verde, l'intero file passa in mezzo secondo, cioè il figlio muore
+subito. Resta il limite che il docstring già dichiarava: se il comando è `docker exec …`, ciò che
+muore qui è il client, e lo strumento dentro il container tira dritto.
+
+`throw()` al posto di un segnale vero non è una scorciatoia, è la misura giusta: un `SIGINT` al
+gruppo di processi ammazzerebbe anche il figlio per conto suo, e la prova diventerebbe verde senza
+che il codice sia cambiato. È lo stesso inganno della sonda di ieri, vista dall'altro lato.
+
+**Il terzo: `seconda_finestra` confermava anche dopo un comando fallito.** Qui la correzione sono
+tre cose insieme, e nessuna delle tre da sola basta — è [ADR-0117](Decision.md#adr-0117). L'Invio
+parte solo se il comando annunciato è uscito con zero; la scena viene abbattuta con un `SIGTERM` al
+gruppo, perché il figlio ha fatto `setsid()` ed è capogruppo; lo strumento esce con **125**, il
+codice che `env` e `timeout` usano per «ha fallito lo strumento, non ciò che gli era stato chiesto
+di fare», dato che 126 e 127 parlano già del comando registrato. La seconda delle tre è quella che
+si dimentica: senza l'abbattimento, non mandare l'Invio vorrebbe dire lasciare la scena appesa
+all'`input()` finché qualcuno non se ne accorge, che è il modo di fallire peggiore di tutti — la
+stessa trappola in cui era caduto il rimedio proposto da Copilot poche ore prima, misurata quel
+giorno stesso.
+
+La prova rossa pretende codice 125, `ripartito` assente dal `.cast` e il motivo su `stderr`. C'è
+però una quarta cosa che controlla, «uscita 7» su `stderr`, e quella **il codice rotto la passava
+già**: verificato eseguendo la versione precedente dello strumento, che stampa `regia: … · uscita 7`
+e poi esce **0** con la scena ripartita e il `.cast` che racconta un failover mai avvenuto. È la
+misura esatta di che cosa non bastava.
+
+**Che cosa resta aperto.** Il primo e il secondo, con la misura accanto, nella tabella di
+`app/docs/registro-sviluppo-app.md`: il `--tetto` che ferma il carico e non la scena, e la
+riparazione del nodo che non sta in un `finally`. Sul secondo la domanda per il Product Owner non è
+tecnica: dentro la rete Compose la regia è `RegiaAnnunciata`, e un `finally` che ripara annuncerebbe
+la riparazione fermandosi su un `input()` **mentre qualcuno sta interrompendo la scena**. Che cosa
+deve fare il laboratorio quando la scena si rompe a metà — rimettere in piedi, o lasciare com'è per
+farlo guardare — è una decisione sul laboratorio, non sul codice.
+
+### Note di metodo
+
+237. **Un `except` che nomina l'eccezione educata copre solo il caso educato.** `except
+    GeneratorExit` copre il consumatore che se ne va con ordine, non quello che muore: un Ctrl-C
+    che arriva mentre il generatore è fermo a leggere, un errore che chi disegna rimanda dentro. La
+    domanda da farsi non è «quale eccezione mi aspetto» ma «da qui, il rimedio cambia a seconda di
+    come me ne vado?» — e quando la risposta è no, perché il rimedio è rilasciare una risorsa
+    esterna e rilanciare, la classe da nominare è la più larga. La regola pratica: un `except` che
+    fa pulizia e rilancia prende `BaseException`; un `except` che **decide** qualcosa nomina ciò
+    che sa gestire.
+238. **Fra fallire e piantarsi, piantarsi è peggio — e va deciso quando si scrive il rimedio, non
+    dopo.** Togliere la conferma a un comando fallito è metà correzione: qualcuno stava aspettando
+    quella conferma, e senza di essa resta lì. La stessa forma dello sbaglio si era vista lo stesso
+    giorno nel rimedio proposto dalla review precedente, che non faceva fallire la suite ma non la
+    faceva finire. La regola pratica: ogni volta che si aggiunge un «in questo caso non lo
+    facciamo», si cerca chi aspettava che lo facessimo, e gli si dice qualcosa.
+239. **Un'asserzione che era già verde prima della correzione, dentro una prova che era rossa, non
+    è di troppo: è la misura di ciò che non bastava.** Il registratore stampava già `uscita 7` su
+    `stderr`, e usciva 0 lo stesso. Tenere quell'asserzione nella prova nuova dice due cose che
+    altrove non si leggono — che l'informazione c'era, e che averla non è agire — e impedisce a
+    qualcuno di «semplificare» via la diagnostica pensando che ora sia ridondante. La regola
+    pratica: quando si corregge un difetto di cui il sistema *si lamentava già*, la prova nuova
+    controlla anche il lamento vecchio.
+
+Stato aggiornato: decisioni fino ad **ADR-0117**, verifiche fino a **V-089**, note di metodo fino
+alla **239**. Controlli: `make tools-test` **175**, `make app-test` **640**, `make app-check`
+(mypy `--strict`, 66 file) e `make docs-check` verdi. Prossimo passo: la discussione con il Product
+Owner sui due rilievi rimasti, e la fusione della PR #5, che è sua.
+
+## 2026-09-04 — I due rilievi discussi: il tetto che arrivava a metà, e la ripresa che non stava in un `finally`
+
+I primi due rilievi di `codex` erano stati tenuti aperti perché sono scelte di disegno. Il Product
+Owner li ha decisi tutti e due nella stessa direzione, e con parole che valgono più della decisione:
+il tetto è «una guardia oltre la quale non si può andare», e sul secondo — «l'attrezzo ti fa una
+domanda invece di uscire» — «per me è accettabile e l'approvo». Entrambe le correzioni dentro la
+PR #5, per prova prima e codice poi.
+
+**Il primo: `--tetto` fermava il carico e non la scena.** La misura del rilievo era già in tabella:
+con `tetto_s = 0,05 s` e un iteratore che non torna, `ScenarioBackup.esegui()` era ancora ferma dopo
+quindici secondi, trecento volte il tetto. La correzione ovvia — un thread di guardia che allo
+scadere chiuda l'iteratore — **non esiste**, e la sonda che lo dimostra è la cosa che questa
+giornata lascia: `close()` chiamata da un altro thread mentre il consumatore è dentro il frame,
+fermo su una lettura bloccante, alza `ValueError: generator already executing`. Il dump resta vivo,
+il ciclo resta dov'è. Nella stessa corsa il thread principale è uscito **solo** quando il guardiano
+ha ucciso il processo ([M-059](../app/docs/Sources.md#m-059)).
+
+Chi chiama la porta ha in mano un iteratore; chi la implementa ha in mano il processo. Solo il
+secondo può onorare un tetto, e quindi il tetto è salito sulla porta:
+`BackupTool.dump(destinazione, *, tetto_s=None)`. `SubprocessBackup` lo fa rispettare con un
+`threading.Timer` che abbatte il figlio e alza `DumpTroppoLungo` — un'eccezione propria, perché dal
+palco «mongodump è uscito con codice -9» è il rumore del rimedio e «ha superato il tetto di 300
+secondi» è la notizia. Con lo stesso dump piantato e un tetto di due secondi, la scena esce dopo
+**2,07 s**. È [ADR-0118](Decision.md#adr-0118).
+
+Il dettaglio che si sarebbe dimenticato è il `poll()` nel guardiano. Il cronometro può scadere
+nell'attimo fra la fine del figlio e la lettura del suo codice d'uscita — un dump riuscito mentre
+chi guarda è lento a scorrere — e segnare «scaduto» lì vorrebbe dire dichiarare fallita in sala una
+scena appena riuscita. C'è una prova apposta, e discrimina fra le due implementazioni.
+
+`restore` **non** ha preso il parametro, ed è un debito dichiarato: un tetto lì vorrebbe dire un
+`--tetto` su `demo restore`, cioè superficie di riga di comando che nessuno ha chiesto. È in
+tabella.
+
+**Il secondo: `ripara()` non stava in un `finally`.** `rompe` e `ripara` erano due righe consecutive
+con in mezzo la fase più lunga della scena, e un Ctrl-C al prompt di `--step` — cioè il modo normale
+di abbandonare una scena che va lunga — lasciava il nodo a terra. Col modo `sospendi` è peggio che a
+terra: **in pausa**, cioè vivo, con la sua memoria, e senza rispondere a nessuno.
+
+Due dettagli di posizione sono la correzione vera. Il `try` si apre **dopo** `rompe`: il `finally`
+deve coprire ciò che è stato rotto, non ciò che non si è riusciti a rompere — se `ferma` solleva, il
+nodo non è mai caduto, e con la regia annunciata una ripresa chiesta lì sopra sarebbe una riga sullo
+schermo che dice a qualcuno di riavviare qualcosa che nessuno ha spento. E l'annuncio della ripresa
+resta **dentro** il `try`, con `ripara` da solo nel `finally`: sul percorso normale non cambia
+niente, su quello interrotto la riparazione avviene senza una seconda pausa. È
+[ADR-0119](Decision.md#adr-0119).
+
+Il prezzo che il Product Owner ha approvato è l'`input()` della regia annunciata su un percorso di
+uscita. Vale però solo dove un umano c'è: `_gia_fatto` assorbe l'`EOFError`, perché un'eccezione
+sollevata dentro un `finally` **prende il posto** di quella che passava, e senza terminale `input()`
+alza all'istante. Senza quell'assorbimento, chi guarda leggerebbe «EOF when reading a line» invece
+del motivo per cui la scena si è fermata.
+
+**Le prove.** Sette in più, 640 → **647**. Tre sul tetto in `test_backup.py`, di cui una — il
+predefinito `None` che non impone nessuna scadenza — era **già verde prima della correzione**: è
+tenuta come guardia contro una regressione, non contabilizzata come guida. Due sulla scena
+interrotta in `test_scenari.py`, una per modo. Una sul tetto che arriva allo strumento e non solo al
+carico. Una in `test_cli.py` sulla conferma che non deve coprire l'errore che sta risalendo.
+
+### Note di metodo
+
+240. **Prima di scrivere il rimedio, misurare se il rimedio è possibile.** Il tetto sembrava una
+    riga: un thread che allo scadere chiude l'iteratore. La sonda ha detto che quella riga alza
+    `ValueError: generator already executing`, e la decisione è cambiata di posto — dal chiamante
+    all'implementazione della porta. Trenta righe di sonda hanno risparmiato una correzione che
+    sarebbe passata in revisione e sarebbe stata falsa in sala. La regola pratica: quando il rimedio
+    ovvio tocca un meccanismo del linguaggio che non si usa tutti i giorni — generatori fra thread,
+    segnali, `fork` — la prima cosa che si scrive non è il rimedio, è la sonda che dice se funziona.
+241. **Un limite può essere onorato solo da chi tiene la risorsa, e questo decide su quale lato
+    della porta vive.** Chi chiama `dump` ha un iteratore; chi lo implementa ha un processo. Un
+    iteratore fermo dentro una lettura bloccante non si interrompe da fuori, un processo si ferma
+    sempre. Il parametro è finito sulla firma della porta non per simmetria o per eleganza, ma
+    perché di là non c'era niente su cui agire. La regola pratica: quando un parametro di controllo
+    non «attacca» sul lato del chiamante, non serve un meccanismo in più — serve spostare il
+    parametro.
+242. **Un `finally` che chiede qualcosa a un umano deve saper stare zitto quando l'umano non
+    c'è.** La ripresa del failover è finita in un `finally`, e la regia che la esegue fa una domanda
+    con `input()`. Da lì, un'eccezione sollevata **sostituisce** quella che stava risalendo: senza
+    terminale, chi guarda avrebbe letto «EOF when reading a line» al posto del vero motivo. La
+    regola pratica: ogni chiamata che può sollevare dentro un `finally` va guardata due volte, e
+    quelle che dipendono da un canale interattivo vanno rese innocue quando il canale non c'è.
+
+Stato aggiornato: decisioni fino ad **ADR-0119**, verifiche fino a **V-089**, misure fino a
+**M-059**, note di metodo fino alla **242**. Controlli: `make tools-test` **175**, `make app-test`
+**647**, `make app-check` (mypy `--strict`, 66 file) e `make docs-check` verdi. I quattro rilievi
+della review di `codex` sono chiusi. Prossimo passo: la fusione della PR #5, che è del Product
+Owner.

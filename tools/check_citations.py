@@ -7,7 +7,13 @@ from collections import Counter
 from dataclasses import dataclass
 
 ADR_TITOLO = re.compile(r"^## (ADR-\d{4}) ", re.MULTILINE)
-RIGA_FONTI = re.compile(r"^\*\*Fonti:\*\* (.+)$", re.MULTILINE)
+# L'elenco delle fonti va a capo quando è lungo, e le citazioni sulle righe di
+# continuazione contano quanto quelle della prima. Il blocco si chiude alla prima
+# riga vuota, alla prima etichetta in grassetto e al primo separatore: senza quei
+# tre freni un ADR erediterebbe le citazioni di quello dopo.
+RIGA_FONTI = re.compile(
+    r"^\*\*Fonti:\*\* (.+(?:\n(?!\s*$|\*\*|#|---)[^\n]+)*)", re.MULTILINE
+)
 RIFERIMENTO = re.compile(r"\[([SVC]-\d{3})\]")
 
 FONTE_TITOLO = re.compile(r"^### ([SVC]-\d{3}) ", re.MULTILINE)

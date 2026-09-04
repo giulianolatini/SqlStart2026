@@ -21,7 +21,12 @@
 #   1. i container fermati a mano durante una demo di failover — li riavvia;
 #   2. la topologia — aspetta che i tre membri siano sani e che ci sia un primario, e
 #      che sia tornato quello con priorità 2, perché la scena successiva comincia da lì;
-#   3. le collezioni che la demo ha lasciato in giro — in `lab` sopravvive solo `ordini`;
+#   3. le collezioni che la demo ha lasciato in giro — in `lab` sopravvive solo `ordini`.
+#      Dal Task 15 `ordini` non è più intoccata: `mongolab demo sharding` ci scrive dentro
+#      apposta, perché è la collezione distribuita (ADR-0106). Quei documenti si
+#      riconoscono dall'`_id`, che è un ObjectId mentre il seed usa interi, e li porta via
+#      il punto 4 — che la collezione la ricostruisce da zero. Qui si contano soltanto,
+#      perché un residuo silenzioso è un residuo che qualcuno prima o poi attribuirà al seed;
 #   4. il dataset — ricaricato, così l'impronta torna quella di V-013.
 #
 # Niente `set -e`: come per gli smoke, deve dire tutto quello che non va in una volta
@@ -317,10 +322,21 @@ elif [[ "${STACK}" == "03" ]]; then
   ')"
   ok "collezioni rimosse: ${tolte:-nessuna}"
 
+  # `ordini` sopravvive alla riga sopra, ma dal Task 15 non è più intatta: il Blocco 3 ci
+  # scrive dentro perché è la collezione distribuita, ed è l'unico posto in cui il seed e
+  # l'applicazione condividono una collezione (ADR-0106). Non si toglie niente qui — il
+  # seed qui sotto la ricostruisce — ma il numero si stampa, perché è la differenza fra
+  # «la demo è girata» e «il seed ha caricato più del previsto».
+  aggiunti="$(dal_router 'print(db.ordini.countDocuments({_id: {$type: "objectId"}}))')"
+  if [[ "${aggiunti}" =~ ^[0-9]+$ && "${aggiunti}" != "0" ]]; then
+    nota "in lab.ordini ci sono ${aggiunti} documenti scritti dalle scene: li toglie il seed qui sotto"
+  fi
+
   titolo "Dataset"
   # Lo STESSO servizio che semina all'avvio, con RICARICA=1: una sorgente sola, e
   # `sh.shardCollection()` dentro lo script è idempotente, quindi la collezione resta
-  # distribuita anche se la demo l'aveva lasciata cadere.
+  # distribuita anche se la demo l'aveva lasciata cadere. Con RICARICA la `drop` è
+  # incondizionata, ed è ciò che porta via i documenti contati poco sopra.
   if ! compose run --rm -e RICARICA=1 seed > /dev/null 2>&1; then
     errore "il seed non è andato a buon fine — «make logs-03» per il motivo"
   fi

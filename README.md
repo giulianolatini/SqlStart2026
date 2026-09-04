@@ -23,8 +23,8 @@ approfondire trova qui proprio le parti che dal vivo sono state saltate.
 | Cartella | Contenuto | Stato |
 |---|---|---|
 | [`docs/`](docs/README.md) | tutta la documentazione: architetture, installazione, amministrazione, `mongosh`, decisioni e fonti | presente, con le sezioni mancanti dichiarate nell'[indice](docs/README.md) |
-| `docker/` | i tre stack Compose, uno per architettura | [`01-standalone`](docker/01-standalone/compose.yaml) è nel repository, gli altri due no — vedi [Stato di avanzamento](#stato-di-avanzamento) |
-| `app/` | l'applicazione dimostrativa in Python | **non ancora nel repository** — vedi [Stato di avanzamento](#stato-di-avanzamento) |
+| `docker/` | i tre stack Compose, uno per architettura | tutti e tre nel repository: [`01-standalone`](docker/01-standalone/compose.yaml), [`02-replicaset`](docker/02-replicaset/compose.yaml), [`03-sharded`](docker/03-sharded/compose.yaml) |
+| `app/` | l'applicazione dimostrativa in Python, `mongolab` | **nel repository**, con la sua documentazione in [`app/docs/`](app/docs/README.md) |
 | `tools/` | strumenti di repository: preflight, pre-scaricamento delle immagini, prova end-to-end dello stack, e i tre controllori che verificano citazioni, file Compose e collegamenti | presente |
 
 La tabella dice cosa il repository conterrà: quello che manca è dichiarato riga per riga,
@@ -54,9 +54,15 @@ Il repository è in costruzione fino a metà settembre 2026. Questo è quello ch
 | `docker/02-replicaset` | **nel repository** | `feature/02-stack-replicaset` |
 | `docker/03-sharded` | **nel repository** | `feature/03-stack-sharded` |
 
-Anche l'applicazione Python in `app/` è in lavorazione, su `feature/04-app-python`. Oggi
-sono pronti l'impianto documentale, gli strumenti di repository e i tre stack: le
-sezioni della documentazione non ancora scritte sono elencate
+L'applicazione Python `mongolab` è in `app/`, sviluppata su `feature/04-app-python`:
+genera carico, osserva la topologia mentre cambia, e mette in scena il failover, il backup a
+caldo e il ripristino. I comandi di uso più frequente hanno un bersaglio nel `Makefile`
+(`make app-stats`, `app-watch`, `app-workload`, `app-demo`); l'elenco completo lo dà
+`mongolab --help`. La sua documentazione sta in [`app/docs/`](app/docs/README.md), e
+[`docs/06-sviluppo/architettura-app.md`](docs/06-sviluppo/architettura-app.md) la racconta a
+chi non aprirà i sorgenti.
+
+Le sezioni della documentazione non ancora scritte sono elencate
 nell'[indice](docs/README.md) con la feature che le produrrà.
 
 ## Requisiti

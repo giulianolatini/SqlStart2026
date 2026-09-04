@@ -3,6 +3,8 @@
 
 .DEFAULT_GOAL := help
 .PHONY: help docs-check tools-test images-pull images-verify preflight stack-check \
+        app-demo app-test app-check app-test-integration \
+        app-stats app-watch app-workload app-image \
         up-01 down-01 reset-01 logs-01 seed-01 smoke-01 reset-demo-01 \
         up-02 down-02 reset-02 logs-02 seed-02 smoke-02 reset-demo-02 \
         failover-02 failover-02-termina failover-02-maggioranza \
@@ -29,12 +31,139 @@ help: ## Elenca i target disponibili
 tools-test: ## Esegue la suite degli strumenti di repository
 	uv run --directory tools pytest -q
 
+# --- L'applicazione -------------------------------------------------------------------
+#
+# Due suite e due target, non uno: `app-test` non tocca Docker e finisce in un paio di
+# secondi, `app-test-integration` accende uno stack e ci mette minuti. Tenerle insieme
+# significherebbe che la suite veloce smette di essere veloce, e una suite che costa un
+# minuto non si esegue prima di ogni commit — cioè smette di proteggere proprio nella
+# fase in cui il TDD serve. La separazione è il §7 del design, letto insieme ad ADR-0020.
+
+app-test: ## Esegue la suite unitaria dell'applicazione (senza Docker)
+	uv run --directory app pytest -q
+
+app-check: ## Verifica i tipi dell'applicazione con mypy --strict
+	uv run --directory app mypy
+
+# Dal Task 8 questo target è vero: accende gli stack che le prove chiedono — con questi
+# stessi `up-01`, `up-02`, `up-03`, non con un facsimile (ADR-0020) — e ci gira contro.
+# Non li spegne alla fine: fermare uno stack che l'operatore aveva già su sarebbe un
+# effetto che le prove non hanno causato. Ciò che smontano sono i **dati**, e lo fanno
+# con un database usa-e-getta per prova.
+#
+# Il ramo che traduceva l'uscita 5 di pytest — «non ho raccolto niente» — non serve più e
+# non va rimesso: adesso un 5 vorrebbe dire che le prove sono sparite, ed è una notizia.
+app-test-integration: ## Esegue la suite di integrazione dell'applicazione (accende gli stack; richiede Docker)
+	uv run --directory app pytest -q tests/integration
+
+# --- L'applicazione, eseguita ---------------------------------------------------------
+#
+# Tre target che non aggiungono niente alla riga di comando: la scrivono. Il §6.4 del
+# design dice `mongolab stats --target rs`, e questi target sono quella riga più il modo
+# di trovarla — che dal Task 12 sono due, perché l'applicazione gira in due posti.
+#
+# `TARGET` non ha un valore predefinito, e la mancanza è deliberata. La CLI rifiuta di
+# indovinare quale dei tre stack intendevi — un `--target` sbagliato si ferma prima di
+# aprire un socket — e un `TARGET ?= rs` qui reintrodurrebbe dal Makefile esattamente
+# l'assunzione implicita che la CLI si rifiuta di fare. Il messaggio elenca i tre nomi,
+# perché un errore che dice solo «manca» costringe a cercare altrove ciò che serve.
+#
+# Dal Task 12 il nome viene anche controllato qui, e non solo dalla CLI: in container il
+# target sceglie il FILE COMPOSE prima che l'applicazione parta, e un nome sconosciuto
+# darebbe una riga di comando monca invece di un errore comprensibile.
+#
+# L'uscita è 2, la stessa con cui Typer respinge un parametro sbagliato: dal punto di
+# vista di chi legge un CI, sbagliare la riga di `make` e sbagliare la riga di `mongolab`
+# sono lo stesso errore, e meritano lo stesso codice.
+CHIEDI_TARGET = @case "$(TARGET)" in \
+		standalone|rs|sharded) ;; \
+		"") echo "manca TARGET: make $@ TARGET=rs (standalone, rs, sharded)" >&2; exit 2 ;; \
+		*) echo "TARGET=«$(TARGET)» non è uno stack di questo repository: standalone, rs, sharded." >&2; exit 2 ;; \
+	esac
+
+# `DOVE` sceglie da dove l'applicazione guarda lo stack, ed è la scelta che il Task 12
+# aggiunge. Il predefinito è `rete` perché è il punto di vista che il talk mostra: dentro
+# la rete Compose il client scopre i membri del replica set e parla con il primario, cosa
+# che dall'host non può fare (M-019, ADR-0012). `DOVE=host` esegue la stessa riga con
+# `uv run`, ed è quello che serve mentre si sviluppa — nessun container da ricostruire,
+# il debugger attaccato, e sul replica set la riserva dichiarata di ADR-0012.
+DOVE ?= rete
+
+CHIEDI_DOVE = @case "$(DOVE)" in \
+		rete|host) ;; \
+		*) echo "DOVE=«$(DOVE)» non esiste: «rete» esegue dentro la rete Compose, «host» sul portatile." >&2; exit 2 ;; \
+	esac
+
+# La mappa fra il nome del bersaglio e il file Compose che lo descrive. Con `=` e non
+# `:=` perché i tre COMPOSE_* sono definiti più sotto, e l'espansione differita li trova
+# comunque. Una prova in tools/tests/test_coerenza_repo.py verifica che questi tre nomi
+# siano gli stessi di `BERSAGLI` in mongolab.infrastructure.bersagli: due mappe che
+# divergono darebbero un comando che si collega allo stack sbagliato.
+COMPOSE_DI_standalone = $(COMPOSE_01)
+COMPOSE_DI_rs = $(COMPOSE_02)
+COMPOSE_DI_sharded = $(COMPOSE_03_BASE)
+
+# `--rm` perché ogni invocazione è un comando che finisce, e i container finiti non si
+# accumulano.
+#
+# NON c'è `--no-build`, e non è una dimenticanza: `docker compose run` non ha quel flag
+# (Compose v5.5.0 espone `--build` e `--pull`, misurato — M-035). La garanzia che serve —
+# nessuna costruzione a sorpresa la sera del talk — sta altrove, e sta meglio: il servizio
+# scrive `pull_policy: never` nel file (ADR-0039) e `tools/preflight.sh` verifica la
+# mattina che l'immagine ci sia, dicendo `make app-image` se manca.
+ESEGUI = $(if $(filter host,$(DOVE)),uv run --directory app mongolab,$(COMPOSE_DI_$(TARGET)) run --rm app)
+
+# `ARGS` è la valvola: `--sink plain`, `--writers 16`, `--duration 30` passano di lì senza
+# che il Makefile debba conoscerli. Un target per opzione invecchierebbe a ogni opzione
+# nuova, e il posto in cui le opzioni sono dichiarate è già uno solo, `cli.py`.
+app-stats: ## Fotografa uno stack: make app-stats TARGET=rs [DOVE=host]
+	$(CHIEDI_TARGET)
+	$(CHIEDI_DOVE)
+	$(ESEGUI) stats --target $(TARGET) $(ARGS)
+
+app-watch: ## Guarda la topologia cambiare: make app-watch TARGET=rs [DOVE=host]
+	$(CHIEDI_TARGET)
+	$(CHIEDI_DOVE)
+	$(ESEGUI) watch --target $(TARGET) $(ARGS)
+
+app-workload: ## Manda carico contro uno stack: make app-workload TARGET=rs [DOVE=host]
+	$(CHIEDI_TARGET)
+	$(CHIEDI_DOVE)
+	$(ESEGUI) workload --target $(TARGET) $(ARGS)
+
+# La scena centrale del Blocco 2. `DOVE` qui pesa più che altrove, ed è la ragione per cui
+# il predefinito resta `rete`: la cronaca dell'elezione esiste solo da dentro la rete
+# Compose (M-019), e da lì l'applicazione non ha il socket del demone — quindi annuncia il
+# comando e aspetta che qualcuno lo dia da un'altra finestra. Con `DOVE=host` è il
+# contrario: il guasto lo provoca da sé, e la cronaca non ce l'ha.
+#
+# Dal palco: `make app-demo TARGET=rs ARGS="--step --sink plain"`. Il `--sink plain` non è
+# gusto — `--step` e il `Live` di Rich vogliono lo stesso terminale, e la riga di comando
+# lo rifiuta invece di lasciar premere Invio alla cieca.
+app-demo: ## La scena del failover: make app-demo TARGET=rs [DOVE=host] [ARGS="--step --sink plain"]
+	$(CHIEDI_TARGET)
+	$(CHIEDI_DOVE)
+	$(ESEGUI) demo failover --target $(TARGET) $(ARGS)
+
+# La costruzione passa per Compose e non per un `docker build` scritto qui: gli argomenti
+# con cui si pinna la base — PYTHON_IMAGE, UV_IMAGE — sono già dichiarati nel servizio
+# `app`, e ripeterli in questo file vorrebbe dire due posti da tenere d'accordo. Il file
+# dello stack 01 va bene per tutti e tre: il servizio è identico nei tre stack, e questo è
+# l'unico che non ha bisogno di un `.env` fuori dal repository per interpolarsi.
+app-image: ## Costruisce l'immagine dell'applicazione (richiede rete la prima volta)
+	$(COMPOSE_01) build app
+
 docs-check: ## Verifica il legame fra ADR e fonti, e i collegamenti fra le pagine
 	uv run --project tools python tools/check_citations.py docs/Decision.md docs/Sources.md
-	uv run --project tools python tools/check_links.py docs README.md
+	uv run --project tools python tools/check_links.py docs app/docs README.md
 
-images-pull: ## Scarica le immagini e le pinna per digest (richiede rete)
-	./tools/pull-images.sh --pull
+# `NOMI` limita lo scaricamento: `make images-pull NOMI="PYTHON_IMAGE UV_IMAGE"` aggiorna
+# quelle due e conserva gli altri digest. Senza `NOMI` le riscarica tutte, che è ciò che
+# serve quando si cambia versione di MongoDB — e ciò che NON si vuole quando si aggiunge
+# un'immagine nuova, perché `mongo:7.0` è un tag mobile e il lab resta sulla 7.0.40 per
+# decisione (ADR-0058, ADR-0080).
+images-pull: ## Scarica le immagini e le pinna per digest (richiede rete; NOMI= per alcune)
+	./tools/pull-images.sh --pull $(NOMI)
 
 images-verify: ## Verifica che le immagini pinnate siano presenti in locale (offline)
 	./tools/pull-images.sh --verify

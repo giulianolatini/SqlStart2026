@@ -1334,6 +1334,69 @@ services:
       seed:
         condition: service_completed_successfully
 
+  # ---------------------------------------------------------------------------
+  # L'APPLICAZIONE, DENTRO LA RETE. Qui la scoperta c'è, ma è di un altro tipo.
+  #
+  # Il client si collega a `mongos` — un seme solo, e non perché ce ne sia uno
+  # solo: `mongos2` esiste nel profilo `completo`, e dichiararlo sempre vorrebbe
+  # dire dichiarare un nome che di norma non risolve. Da lì pymongo vede una
+  # topologia `Sharded`, e ciò che scopre non sono i membri di un set: sono i
+  # router. Gli shard restano dietro, e il client non ci parla mai.
+  #
+  # `directConnection` resta spento come dall'host, ed è l'unico dei tre stack in
+  # cui il valore non cambia con il punto di vista — perché il mongos è già il
+  # punto d'ingresso, e collegarsi «direttamente» a lui è ciò che si fa comunque.
+  # ---------------------------------------------------------------------------
+
+  app:
+    # L'immagine la costruisce `make app-image`, non un registro: qui niente
+    # digest, perché quello che containerd le calcola lo stesso (M-037) non è
+    # verificabile da fuori. La promessa di ADR-0009 si sposta sulle righe `FROM`
+    # del Dockerfile, che `check_stack.py` legge e pretende pinnate (ADR-0093).
+    image: mongolab:0.1.0
+
+    build:
+      context: ../../app
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+        UV_IMAGE: ${UV_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+
+    pull_policy: never
+
+    # Un profilo tutto suo, e non `palco` o `completo`: quelli scelgono QUANTO
+    # cluster accendere, questo dice se accendere uno strumento. `docker compose
+    # run` attiva da sé il profilo del servizio che nomina, quindi la riga del
+    # Makefile non deve saperne niente.
+    profiles: ["strumenti"]
+
+    # Niente container_name: `run` crea un container nuovo a ogni invocazione, e
+    # due comandi lanciati insieme collidono su un nome fisso.
+
+    mem_limit: ${MEMORIA_APP:-512m}
+    cpus: ${CPU_APP:-1.0}
+
+    restart: "no"
+
+    environment:
+      MONGOLAB_PUNTO_DI_VISTA: rete
+      # Per ambiente e non dal .env, che nel container non c'è: il file sta
+      # sull'host, git lo ignora (ADR-0014), e il valore non passa mai per la
+      # riga di comando del client docker (ADR-0054).
+      UTENTE_AMMINISTRATORE: ${UTENTE_AMMINISTRATORE:-admin}
+      PASSWORD_AMMINISTRATORE: ${PASSWORD_AMMINISTRATORE:?assente — copiare .env.example in .env e riempirlo}
+
+    volumes:
+      - ../../app/src:/app/src:ro
+
+    # Niente `depends_on`: su questo stack sarebbe la catena intera, e `make
+    # app-stats` accenderebbe diciotto container invece di dire che sono spenti.
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   keyfile:
   dati-cfg1:

@@ -702,12 +702,26 @@ make reset-03
 - **Non copre il resharding.** È la via d'uscita da una shard key sbagliata dalla 5.0, ed è
   nominata in [§1](#1-che-problema-risolve-e-quando-non-serve) solo per non far credere che la
   scelta sia eterna. Non è stata provata.
-- **Non usa `analyzeShardKey`.** Introdotto nella 7.0, sarebbe lo strumento giusto per scegliere una
-  chiave in un caso vero, e richiede un campione di query reali che una demo con dati generati non
-  ha ([S-067](../Sources.md#s-067)).
-- **Non misura le prestazioni sotto carico.** Tutti i numeri qui sono a riposo, con un solo
+- ~~**Non usa `analyzeShardKey`.** Introdotto nella 7.0, sarebbe lo strumento giusto per scegliere
+  una chiave in un caso vero, e richiede un campione di query reali che una demo con dati generati
+  non ha ([S-067](../Sources.md#s-067)).~~ **Saldato:** [V-081](../Sources.md#v-081) — il comando è
+  stato eseguito su `lab.ordini`, e dà il verdetto sulla chiave in uso più due rifiuti istruttivi
+  (`{stato: 1}` «può fare solo **6** chunk», `{citta: 1}` undici). Il campione di query reali si
+  fabbrica: `configureQueryAnalyzer` più il carico dell'applicazione, e le distribuzioni compaiono.
+  Le due condizioni che il comando non dichiara sono che una chiave candidata **senza indice**
+  riceve un `ok: 1` **privo** di `keyCharacteristics` invece di un errore, e che l'analizzatore va
+  acceso **prima** del traffico, con due ritardi da rispettare. Resta fuori da `mongolab`, perché
+  risponde una volta sola e l'applicazione emette flussi
+  ([ADR-0110](../Decision.md#adr-0110)).
+- ~~**Non misura le prestazioni sotto carico.** Tutti i numeri qui sono a riposo, con un solo
   scrittore. Il confronto fra le tre architetture ha senso sotto carico controllato, cioè con
-  l'applicazione Python di `feature/04`, e prima di allora sarebbe aria.
+  l'applicazione Python di `feature/04`, e prima di allora sarebbe aria.~~ **Saldato.**
+  [V-079](../Sources.md#v-079): il cluster scrive **5,0 volte più piano** dello standalone, e 1,23
+  volte più veloce del replica set. Il secondo numero non è un merito dello sharding: in questo lab
+  ogni shard ha **un solo membro**, quindi la maggioranza si raggiunge da sé, e il cluster paga il
+  salto in più di `mongos` senza pagare la replica. La riserva sul ferro vale qui più che altrove —
+  undici container sullo stesso portatile, e mezza CPU a shard
+  ([ADR-0111](../Decision.md#adr-0111)).
 - **Non prova la perdita di uno shard.** La disponibilità parziale di
   [§6.4](#64-la-disponibilità-è-parziale-e-lo-è-per-query) è citata dal manuale, non misurata qui.
 - **Non copre i chunk jumbo né il `chunkSize` diverso dal predefinito.** Il lab lascia i 128 MB e li
@@ -733,7 +747,9 @@ make reset-03
 [ADR-0014](../Decision.md#adr-0014) (il keyfile fuori dal repository),
 [ADR-0021](../Decision.md#adr-0021) (nomi host, mai indirizzi),
 [ADR-0071](../Decision.md#adr-0071) (l'amministratore per shard, che apre la porta di §2.2),
-[ADR-0072](../Decision.md#adr-0072) (le misure che una decisione invalida si riscrivono subito).
+[ADR-0072](../Decision.md#adr-0072) (le misure che una decisione invalida si riscrivono subito),
+[ADR-0110](../Decision.md#adr-0110) (perché `analyzeShardKey` resta fuori dall'applicazione),
+[ADR-0111](../Decision.md#adr-0111) (il confronto si pubblica in coppia con la riserva del ferro).
 
 **Fonti:** [S-008](../Sources.md#s-008), [S-024](../Sources.md#s-024), [S-025](../Sources.md#s-025),
 [S-066](../Sources.md#s-066), [S-067](../Sources.md#s-067), [S-069](../Sources.md#s-069),
@@ -742,4 +758,5 @@ make reset-03
 [V-054](../Sources.md#v-054), [V-055](../Sources.md#v-055), [V-056](../Sources.md#v-056),
 [V-057](../Sources.md#v-057), [V-058](../Sources.md#v-058), [V-060](../Sources.md#v-060),
 [V-061](../Sources.md#v-061), [V-062](../Sources.md#v-062), [V-063](../Sources.md#v-063),
-[V-064](../Sources.md#v-064), [V-067](../Sources.md#v-067)
+[V-064](../Sources.md#v-064), [V-067](../Sources.md#v-067),
+[V-079](../Sources.md#v-079), [V-081](../Sources.md#v-081)

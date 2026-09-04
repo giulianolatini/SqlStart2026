@@ -90,5 +90,94 @@ services:
       # container risulta «unhealthy» mentre sta semplicemente ancora partendo.
       start_period: 20s
 
+  # ---------------------------------------------------------------------------
+  # L'APPLICAZIONE, DENTRO LA RETE.
+  #
+  # `mongolab` gira anche sull'host — `uv run --directory app mongolab stats
+  # --target standalone` — e su questo stack le due strade portano allo stesso
+  # posto. Sugli altri due no, ed è per quello che questo servizio esiste: da
+  # fuori la rete Compose il client non può scoprire i membri di un replica set,
+  # perché i nomi che il set gli restituisce sono nomi di servizi Compose che
+  # l'host non risolve (M-019, ADR-0012). Da qui dentro sì.
+  #
+  # Il servizio è scritto uguale in tutti e tre gli stack apposta: la differenza
+  # fra le tre architetture deve stare negli stack, non nel modo di interrogarli.
+  # ---------------------------------------------------------------------------
+
+  app:
+    # Nome e versione sono quelli di app/pyproject.toml, e qui non c'è digest.
+    # Non perché non esista — con l'archivio immagini di containerd ne esiste uno
+    # anche per ciò che nessuno ha pubblicato, misurato in M-037 — ma perché
+    # sarebbe un digest che nessun registro ha mai servito e che cambia a ogni
+    # ricostruzione: scriverlo qui prometterebbe una verificabilità che non c'è.
+    # La promessa di ADR-0009 non salta, si sposta: `check_stack.py` va a leggere
+    # le righe `FROM` del Dockerfile e pretende che siano pinnate per digest e
+    # note a tools/images.env (ADR-0093).
+    image: mongolab:0.1.0
+
+    build:
+      # Relativo a QUESTA cartella e non alla radice: Compose risolve il contesto
+      # dalla posizione del file, qualunque sia la cartella da cui si esegue.
+      context: ../../app
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+        UV_IMAGE: ${UV_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+
+    # Vale anche per un servizio che si costruisce: `never` dice che l'immagine
+    # non si va a cercare in un registro nemmeno se manca. Se manca, la risposta
+    # giusta è `make app-image`, non una connessione (ADR-0039).
+    pull_policy: never
+
+    # Il profilo tiene questo servizio fuori da `make up-01`: lo stack è fatto di
+    # database, l'applicazione è uno strumento che si invoca. Senza profilo, `up
+    # -d --wait` avvierebbe anche lei, che eseguirebbe `--help` e uscirebbe
+    # subito — e `--wait` aspetterebbe la salute di un container già finito.
+    # `docker compose run` invece attiva da sé il profilo del servizio che nomina.
+    profiles: ["strumenti"]
+
+    # NIENTE container_name, ed è l'unico servizio del repository a non averlo.
+    # `run` crea un container nuovo a ogni invocazione: con un nome fisso, due
+    # comandi lanciati insieme — la cronaca in una finestra, il carico in
+    # un'altra, che è esattamente la scena del Blocco 2 — collidono sul nome.
+
+    # Un interprete Python con pymongo sta in una sessantina di MiB; il resto è
+    # margine per i documenti che `workload` tiene in volo, che sono `--writers`
+    # per `--doc-size`. Chi alza quei due numeri alza anche MEMORIA_APP.
+    mem_limit: ${MEMORIA_APP:-512m}
+    cpus: ${CPU_APP:-1.0}
+
+    # Non riparte da sola: è un comando, non un servizio. Un `unless-stopped` qui
+    # rieseguirebbe `stats` all'infinito ogni volta che finisce.
+    restart: "no"
+
+    environment:
+      # La riga per cui tutto questo esiste. `mongolab` legge questa variabile e
+      # cambia indirizzi: non più `localhost:27017` ma `mongo-standalone:27017`,
+      # il nome del servizio qui sopra (mongolab.infrastructure.bersagli).
+      MONGOLAB_PUNTO_DI_VISTA: rete
+      # Nessuna credenziale, perché questo stack non autentica: è l'esempio
+      # negativo di ADR-0005, e si vede anche da qui.
+
+    volumes:
+      # Il sorgente dell'host montato sopra quello dell'immagine, in SOLA
+      # LETTURA. L'immagine installa il progetto in modo modificabile e il
+      # collegamento punta a /app/src: montarci sopra i file dell'host significa
+      # che una modifica si prova subito, senza ricostruire niente (§6.5 del
+      # design). `ro` perché il container non ha nessuna ragione di scrivere nel
+      # repository, e l'immagine dichiara PYTHONDONTWRITEBYTECODE per non
+      # provarci nemmeno con i .pyc.
+      - ../../app/src:/app/src:ro
+
+    # Niente `depends_on`. Sarebbe comodo e sarebbe sbagliato: `run` avvia da sé
+    # le dipendenze dichiarate, quindi `make app-stats` accenderebbe lo stack
+    # invece di dire che è spento. Che lo stack sia in piedi lo si chiede a `make
+    # up-01`, e se non lo è la risposta giusta è un errore di connessione.
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   dati:

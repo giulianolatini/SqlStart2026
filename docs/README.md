@@ -3,9 +3,13 @@
 Materiale del talk **MongoDB: dalla singola istanza al cluster** — SqlStart 2026, Ancona,
 venerdì 18 settembre 2026.
 
-Questa cartella contiene tutta la documentazione del progetto. L'unico file Markdown fuori
-da qui è il [`README.md`](../README.md) di radice, che serve a chi arriva dal talk e vuole
-capire in trenta secondi cosa ha davanti.
+Questa cartella contiene la documentazione del progetto: il talk, gli stack, le decisioni, le
+fonti e il registro operativo. Fuori da qui stanno due cose sole, ed entrambe per una ragione:
+il [`README.md`](../README.md) di radice, che serve a chi arriva dal talk e vuole capire in
+trenta secondi cosa ha davanti, e [`app/docs/`](../app/docs/README.md), che spiega
+l'applicazione `mongolab` **accanto al suo codice**, perché sono pagine che si leggono con i
+sorgenti aperti nella finestra di fianco. Quelle pagine citano queste e non le duplicano; il
+controllo dei collegamenti percorre entrambe le cartelle.
 
 ## Come si legge
 
@@ -46,6 +50,8 @@ produrrà. Un indice che promette senza datare invecchia male.
 | [`2026-08-25-piano-feature-00-fondamenta.md`](00-progetto/2026-08-25-piano-feature-00-fondamenta.md) | il piano di implementazione della prima feature, passo per passo | già nel repository |
 | [`2026-08-28-piano-feature-01-stack-standalone.md`](00-progetto/2026-08-28-piano-feature-01-stack-standalone.md) | il piano della seconda feature: lo stack a istanza singola, la verifica eseguibile sui file Compose e le sei pagine di documentazione dovute | già nel repository |
 | [`2026-08-31-piano-feature-02-stack-replicaset.md`](00-progetto/2026-08-31-piano-feature-02-stack-replicaset.md) | il piano della terza feature: il replica set a tre membri, la catena di inizializzazione sotto keyfile, la demo di failover e i quattro debiti che i due branch precedenti gli hanno intestato | già nel repository |
+| [`2026-09-01-piano-feature-03-stack-sharded.md`](00-progetto/2026-09-01-piano-feature-03-stack-sharded.md) | il piano della quarta feature: lo sharded cluster a due shard, la catena di inizializzazione in undici container, la shard key sbagliata da provare con i numeri e i debiti che lo spike aveva lasciato aperti | già nel repository |
+| [`2026-09-02-piano-feature-04-app-python.md`](00-progetto/2026-09-02-piano-feature-04-app-python.md) | il piano della quinta feature: l'applicazione Python, il dominio provato senza Docker, le tre scene del Blocco 2 e i debiti di misura che quattro pagine le hanno intestato | già nel repository |
 | [`2026-08-25-spike-sharded.md`](00-progetto/2026-08-25-spike-sharded.md) | il verbale dello spike: il file Compose che ha funzionato, la memoria misurata sugli undici container, i tre punti in cui il design si era sbagliato, e la versione di MongoDB che su Docker Desktop non parte | già nel repository |
 | [`limiti-noti.md`](00-progetto/limiti-noti.md) | i confini dichiarati: dove il lab semplifica, dove la documentazione ufficiale non copre, quali affermazioni diffuse non risultano scritte | già nel repository |
 
@@ -76,7 +82,7 @@ sono state eseguite qui, perché qui non c'è né un Ubuntu né un Windows
 |---|---|---|
 | [`03-amministrazione/backup-restore.md`](03-amministrazione/backup-restore.md) | `mongodump`/`mongorestore`, il dump a caldo con `--oplog` e quale punto nel tempo garantisce, il restore contato, il fallimento per finestra di oplog mostrato mentre fallisce, e sullo sharded cluster il divieto di `--oplog` con le sue due facce e il restore che riporta i dati senza la distribuzione | già nel repository |
 | [`03-amministrazione/sicurezza-keyfile-x509.md`](03-amministrazione/sicurezza-keyfile-x509.md) | autenticazione interna: perché `--keyFile` porta con sé il controllo degli accessi, perché MongoDB riserva il keyfile a test e sviluppo, la sequenza verso X.509 eseguita con i suoi rifiuti, dove vivono gli utenti di un replica set, e su uno sharded cluster l'eccezione localhost aperta su ogni shard che non ha utenti, con la procedura del manuale per l'amministratore per shard e le tre semplificazioni che questo lab si prende al suo posto | già nel repository |
-| `03-amministrazione/statistiche-monitoraggio.md` | `serverStatus`, `dbStats`, metriche di replica, cosa guardare sotto carico | `feature/04-app-python` |
+| [`03-amministrazione/statistiche-monitoraggio.md`](03-amministrazione/statistiche-monitoraggio.md) | `serverStatus`, `dbStats`, metriche di replica, cosa guardare sotto carico; organizzata attorno a sei misure che smentiscono la lettura ingenua — le sezioni che al `mongos` mancano, le code che restano vuote sotto carico, il ritardo di replica che vale 10 000 ms su un insieme sano, e il router che dichiara un disco grande il doppio | già nel repository |
 | [`03-amministrazione/log.md`](03-amministrazione/log.md) | il formato JSON campo per campo, le severità e i componenti misurati, `logRotate` in container, cosa cercare durante un'elezione: gli `id` delle tre cause, misurati su `02`, e le tre prime righe che distinguono un guasto da una manutenzione | già nel repository |
 
 ## 04-mongosh — la shell
@@ -90,20 +96,21 @@ sono state eseguite qui, perché qui non c'è né un Ubuntu né un Windows
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
 | `05-talk/runbook-demo.md` | documento unico del talk: scaletta, comandi, tempi, piani di ripiego, criteri di rinuncia in appendice ([ADR-0015](Decision.md#adr-0015)) | `release/1.0` |
-| [`05-talk/registrazioni/`](05-talk/registrazioni/README.md) | indice dei filmati di riserva e delle registrazioni di terminale. Nove scene di terminale sono nel repository — quattro del replica set e cinque dello sharded cluster; i filmati stanno sul canale YouTube del relatore, con copia locale obbligatoria ([ADR-0016](Decision.md#adr-0016), [ADR-0050](Decision.md#adr-0050)) | già nel repository |
+| [`05-talk/registrazioni/`](05-talk/registrazioni/README.md) | indice dei filmati di riserva e delle registrazioni di terminale. Quattordici scene di terminale sono nel repository — quattro del replica set, cinque dell'applicazione `mongolab` sullo stesso stack, cinque dello sharded cluster; i filmati stanno sul canale YouTube del relatore, con copia locale obbligatoria ([ADR-0016](Decision.md#adr-0016), [ADR-0050](Decision.md#adr-0050)) | già nel repository |
 
 ## 06-sviluppo — come è fatto il lab
 
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
 | [`06-sviluppo/gestione-risorse-compose.md`](06-sviluppo/gestione-risorse-compose.md) | `mem_limit` e `cpus`, la cache WiredTiger nei container, come si dimostra che i limiti sono applicati; i due profili dello sharded cluster — a chi serve ciascuno, quanto costa, come si sceglie | già nel repository |
-| `06-sviluppo/architettura-app.md` | stratificazione dell'applicazione, porte, modello a eventi, composition root | `feature/04-app-python` |
-| `06-sviluppo/tdd-e-doppi.md` | separazione fra suite unitaria e di integrazione, fake contro mock, come si prova il failover senza aspettarlo | `feature/04-app-python` |
+| [`06-sviluppo/worktree-e-branch-di-lavoro.md`](06-sviluppo/worktree-e-branch-di-lavoro.md) | come si apre un branch di feature con il suo worktree e come lo si chiude dopo la PR; l'ordine vincolante della rimozione, e come si esce se una sessione è rimasta agganciata a un worktree cancellato | già nel repository |
+| [`06-sviluppo/architettura-app.md`](06-sviluppo/architettura-app.md) | stratificazione dell'applicazione, porte, modello a eventi, composition root; racconta a chi non apre i sorgenti quello che [`app/docs/`](../app/docs/README.md) spiega a chi li apre, e mostra che cosa quella forma ha reso: 634 prove in quattro secondi, con Docker irraggiungibile | già nel repository |
+| [`06-sviluppo/tdd-e-doppi.md`](06-sviluppo/tdd-e-doppi.md) | separazione fra suite unitaria e di integrazione, fake contro mock, come si prova il failover senza aspettarlo; il contratto condiviso che ha smascherato due bugiardi, di cui uno era MongoDB. Rimanda a [`app/docs/05-tipi-prove-e-guardie.md`](../app/docs/05-tipi-prove-e-guardie.md) invece di ripeterlo | già nel repository |
 
 ## Dove sta il resto
 
 | Cartella | Contenuto |
 |---|---|
 | `docker/` | i tre stack Compose: `01-standalone`, `02-replicaset`, `03-sharded` |
-| `app/` | l'applicazione dimostrativa in Python |
+| `app/` | l'applicazione dimostrativa in Python, con la propria documentazione in [`app/docs/`](../app/docs/README.md): principi di funzionamento, registro di sviluppo, decisioni vincolanti e fonti proprie ([ADR-0081](Decision.md#adr-0081)) |
 | `tools/` | strumenti di repository: preflight, pre-scaricamento delle immagini, e i tre controllori che tengono gli artefatti allineati alle decisioni — citazioni, file Compose, collegamenti ([ADR-0038](Decision.md#adr-0038)) |

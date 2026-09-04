@@ -25,8 +25,15 @@ FILE_IMMAGINI="${RADICE}/tools/images.env"
 # la shell e mongodump. Se una feature successiva ne richiederà un'altra, si aggiunge qui.
 # La versione è 7.0 e non 8.0 per il motivo scritto in ADR-0028: sul kernel della VM di
 # Docker Desktop nessuna MongoDB 8 pubblicata si avvia. Il traguardo resta la 8.0.30.
+#
+# Le due immagini di base dell'applicazione (Task 12, ADR-0012) servono a **costruire**,
+# non ad avviare: l'immagine `mongolab` è costruita in locale e non si scarica da nessun
+# registro. Stanno qui lo stesso perché sono l'unica parte della costruzione che venga
+# dalla rete, e il digest è ciò che rende quella parte ripetibile.
 declare -a IMMAGINI=(
   "MONGO_IMAGE=mongo:7.0"
+  "PYTHON_IMAGE=python:3.13-slim"
+  "UV_IMAGE=ghcr.io/astral-sh/uv:0.12.9"
 )
 
 # Impostare PIATTAFORMA (per esempio a linux/arm64) solo per forzare un'architettura
@@ -35,10 +42,12 @@ PIATTAFORMA="${PIATTAFORMA:-}"
 
 uso() {
   cat <<'FINE'
-Uso: tools/pull-images.sh --pull | --verify
+Uso: tools/pull-images.sh --pull [NOME...] | --verify
 
   --pull     Scarica ogni immagine e ne scrive il digest in tools/images.env.
              Richiede rete. Da eseguire quando si aggiorna una versione.
+             Con uno o piu` NOME scarica soltanto quelli e conserva i digest
+             degli altri: aggiungere un'immagine non deve aggiornarne un'altra.
   --verify   Controlla che ogni digest di tools/images.env sia già presente in
              locale. Non tocca la rete: è il controllo da fare prima del talk.
 
@@ -54,13 +63,68 @@ richiede_docker() {
   fi
 }
 
+# Il digest gia` scritto in tools/images.env per quel nome, vuoto se non c'e`.
+# Niente array associativi: su macOS `/bin/bash` e` ancora la 3.2, dove `declare -A`
+# non esiste e lo script morirebbe alla prima riga invece che al primo uso.
+digest_esistente() {
+  [[ -r "${FILE_IMMAGINI}" ]] || return 0
+  sed -n "s/^$1=//p" "${FILE_IMMAGINI}" | head -1
+}
+
+nominata() {
+  local cercato="$1"; shift
+  local voce
+  for voce in "$@"; do
+    [[ "${voce}" == "${cercato}" ]] && return 0
+  done
+  return 1
+}
+
+# `scarica` accetta i nomi da aggiornare. Senza nomi li aggiorna tutti, che e` il
+# comportamento di sempre; con dei nomi tocca solo quelli e **conserva** gli altri
+# digest cosi` come sono.
+#
+# La distinzione non e` un vezzo: `mongo:7.0` e` un tag mobile, e riscaricarlo per
+# aggiungere `python:3.13-slim` sposterebbe il lab su una patch di MongoDB che nessuno
+# ha deciso di adottare — mentre ADR-0080 dice che il lab resta sulla 7.0.40 finche` la
+# 8.0.30 non esce. Un effetto collaterale del genere non ha nessun sintomo: il file
+# cambia di due righe, gli stack ripartono, e la versione sotto la demo e` un'altra.
 scarica() {
   richiede_docker
+  local scelte=("$@")
   local righe=()
-  local voce nome riferimento digest
+  local voce nome riferimento digest aggiornate=()
+
+  # I nomi si validano prima di scaricare qualunque cosa: un refuso deve fermare il
+  # comando, non lasciare il file a meta` con un'immagine aggiornata e una no.
+  for nome in "${scelte[@]}"; do
+    local conosciuto=0
+    for voce in "${IMMAGINI[@]}"; do
+      [[ "${voce%%=*}" == "${nome}" ]] && conosciuto=1
+    done
+    if (( ! conosciuto )); then
+      echo "✗ «${nome}» non è un'immagine di questo lab." >&2
+      printf '  I nomi sono: %s\n' "$(printf '%s ' "${IMMAGINI[@]%%=*}")" >&2
+      exit 2
+    fi
+  done
+
   for voce in "${IMMAGINI[@]}"; do
     nome="${voce%%=*}"
     riferimento="${voce#*=}"
+
+    if (( ${#scelte[@]} > 0 )) && ! nominata "${nome}" "${scelte[@]}"; then
+      digest="$(digest_esistente "${nome}")"
+      if [[ -z "${digest}" ]]; then
+        echo "✗ ${nome} non è mai stata scaricata e non è fra quelle richieste." >&2
+        echo "  Con rete: tools/pull-images.sh --pull ${nome}" >&2
+        exit 1
+      fi
+      echo "· ${nome} conservata — ${digest}"
+      righe+=("${nome}=${digest}")
+      continue
+    fi
+
     echo "→ ${riferimento}"
     if [[ -n "${PIATTAFORMA}" ]]; then
       docker pull --platform "${PIATTAFORMA}" "${riferimento}"
@@ -75,6 +139,7 @@ scarica() {
     fi
     echo "  ${nome}=${digest}"
     righe+=("${nome}=${digest}")
+    aggiornate+=("${nome}")
   done
 
   # L'apostrofo va tenuto fuori da ${...:-...}: dentro l'espansione bash lo legge
@@ -88,10 +153,16 @@ scarica() {
     echo "#"
     echo "# Non modificare a mano: rigenerare con \`make images-pull\` quando si cambia"
     echo "# versione. Questo file è versionato perché è il lasciapassare offline del talk."
+    # Quali righe sono nuove di questa corsa e quali arrivano dalla precedente. Senza
+    # questa riga la data in cima varrebbe per tutte, e sarebbe falsa per quelle
+    # conservate: il file direbbe di aver verificato oggi un digest di tre settimane fa.
+    if (( ${#aggiornate[@]} < ${#righe[@]} )); then
+      echo "# Rigenerate in questa corsa: ${aggiornate[*]} — le altre sono state conservate."
+    fi
     printf '%s\n' "${righe[@]}"
   } > "${FILE_IMMAGINI}"
 
-  echo "✓ Scritto tools/images.env — immagini pinnate: ${#righe[@]}."
+  echo "✓ Scritto tools/images.env — immagini pinnate: ${#righe[@]}, scaricate: ${#aggiornate[@]}."
 }
 
 verifica() {
@@ -129,7 +200,7 @@ verifica() {
 }
 
 case "${1:-}" in
-  --pull)   scarica ;;
+  --pull)   shift; scarica "$@" ;;
   --verify) verifica ;;
   -h|--help) uso ;;
   *)        uso >&2; exit 2 ;;

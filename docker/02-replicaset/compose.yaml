@@ -415,6 +415,81 @@ services:
       mongo-rs-3:
         condition: service_healthy
 
+  # ---------------------------------------------------------------------------
+  # L'APPLICAZIONE, DENTRO LA RETE. Su questo stack è il servizio che dimostra
+  # ADR-0012, e la differenza con l'host è tutta qui.
+  #
+  # Dall'host `mongolab` deve collegarsi con `directConnection=true` a
+  # localhost:27021, perché con la scoperta accesa pymongo riceve dal set i nomi
+  # `mongo-rs-1:27017`, `mongo-rs-2:27017`, `mongo-rs-3:27017` — che sono nomi
+  # veri, ma veri QUI DENTRO — e da fuori non ne risolve nessuno: un replica set
+  # sanissimo si legge `ReplicaSetNoPrimary` (M-019). Il prezzo è che la forma
+  # della topologia si legge «singola» mentre il ruolo è `RSPrimary`.
+  #
+  # Da qui dentro quel prezzo non si paga: tre semi, scoperta accesa, e il client
+  # trova il primario da solo — anche dopo un failover, che è la scena del Blocco
+  # 2. È la riserva dichiarata di ADR-0012, ed è questo servizio a scioglierla.
+  # ---------------------------------------------------------------------------
+
+  app:
+    # Qui non c'è digest: l'immagine la costruisce `make app-image`, non un
+    # registro, e il digest che containerd le calcola comunque (M-037) nessuno
+    # può risolverlo da fuori. La promessa di ADR-0009 si sposta sulle righe
+    # `FROM` del Dockerfile, che `check_stack.py` legge e pretende pinnate
+    # (ADR-0093).
+    image: mongolab:0.1.0
+
+    build:
+      context: ../../app
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+        UV_IMAGE: ${UV_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+
+    pull_policy: never
+
+    # Fuori da `make up-02`, che deve avviare tre mongod e un one-shot: questo è
+    # uno strumento, e si invoca con `docker compose run`, che attiva da sé il
+    # profilo del servizio che nomina.
+    profiles: ["strumenti"]
+
+    # Niente container_name: `run` crea un container nuovo ogni volta, e durante
+    # il failover del Blocco 2 la cronaca gira in una finestra mentre il carico
+    # gira in un'altra. Con un nome fisso, la seconda non partirebbe.
+
+    mem_limit: ${MEMORIA_APP:-512m}
+    cpus: ${CPU_APP:-1.0}
+
+    restart: "no"
+
+    environment:
+      # Da qui i tre membri si chiamano per nome e la scoperta funziona:
+      # `mongolab` passa a tre semi, `replicaSet=rs0` e directConnection spento
+      # (mongolab.infrastructure.bersagli).
+      MONGOLAB_PUNTO_DI_VISTA: rete
+      # La credenziale arriva per ambiente e non dal .env, che nel container non
+      # esiste — e non deve esistere: il file sta sull'host, git lo ignora
+      # (ADR-0014), e montarlo dentro vorrebbe dire un segreto in più che
+      # viaggia. I nomi sono gli stessi del .env, così chi legge le due righe
+      # riconosce le stesse parole. Il valore lo passa Compose leggendo
+      # `--env-file docker/02-replicaset/.env`, e NON compare mai sulla riga di
+      # comando del client docker (ADR-0054).
+      UTENTE_AMMINISTRATORE: ${UTENTE_AMMINISTRATORE:-admin}
+      PASSWORD_AMMINISTRATORE: ${PASSWORD_AMMINISTRATORE:?assente — copiare .env.example in .env e riempirlo}
+
+    volumes:
+      # Sola lettura, sopra il sorgente installato in modo modificabile: una
+      # modifica si prova senza ricostruire (§6.5 del design).
+      - ../../app/src:/app/src:ro
+
+    # Niente `depends_on`: `run` avvierebbe le dipendenze, e `make app-stats`
+    # accenderebbe lo stack invece di dire che è spento.
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   keyfile:
   dati-1:

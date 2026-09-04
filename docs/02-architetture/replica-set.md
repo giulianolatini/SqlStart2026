@@ -500,14 +500,33 @@ averlo fatto.
 
 ## Cosa questa pagina non dice
 
-- **Non misura le prestazioni sotto carico.** Tutti i numeri qui sono a riposo, con un solo
+- ~~**Non misura le prestazioni sotto carico.** Tutti i numeri qui sono a riposo, con un solo
   scrittore. Il confronto fra le tre architetture ha senso sotto carico controllato, cioè con
-  l'applicazione Python di `feature/04`, e prima di allora sarebbe aria.
-- **Non prova la perdita con `retryWrites=false`.** È la misura naturale da aggiungere accanto a
+  l'applicazione Python di `feature/04`, e prima di allora sarebbe aria.~~ **Saldato.**
+  [V-079](../Sources.md#v-079): otto scrittori e quattro lettori per trenta secondi, lo stesso
+  dataset deterministico sulle tre architetture. Il replica set scrive **6,2 volte più piano** dello
+  standalone — è il prezzo della maggioranza, moltiplicato da tre container che si dividono lo
+  stesso portatile ([ADR-0111](../Decision.md#adr-0111)). Sotto lo stesso carico *legge* invece con
+  una mediana più bassa dello standalone, e non perché legga meglio: perché scrivendo cinque volte
+  meno tiene i nodi molto meno occupati.
+- ~~**Non prova la perdita con `retryWrites=false`.** È la misura naturale da aggiungere accanto a
   [V-033](../Sources.md#v-033): mostrerebbe che cosa vede un'applicazione senza la rete di sicurezza
-  del driver.
-- **Non usa `maxStalenessSeconds`.** Il manuale lo indica come rimedio alla lettura di dati vecchi
-  ([S-058](../Sources.md#s-058)); qui non è stato né usato né misurato.
+  del driver.~~ **Saldato, e la risposta non è quella attesa:** [V-076](../Sources.md#v-076) — senza
+  la rete di sicurezza del driver, durante un failover vero, il prezzo non è la perdita, è
+  l'**incertezza**. La scrittura fallisce con un errore che non dice se il documento sia arrivato o
+  no, e la decisione se ritentare torna a chi ha scritto l'applicazione.
+- ~~**Non usa `maxStalenessSeconds`.** Il manuale lo indica come rimedio alla lettura di dati vecchi
+  ([S-058](../Sources.md#s-058)); qui non è stato né usato né misurato.~~ **Saldato:**
+  [V-077](../Sources.md#v-077) — adesso si usa, e in questo lab non può escludere nessuno. Il minimo
+  ammesso è **90 secondi**, e i secondari di uno stack a riposo su un bridge locale restano ordini
+  di grandezza sotto quella soglia: l'opzione è corretta e inerte insieme. Non viaggia mai da sola,
+  perché con la preferenza `primary` è un errore in costruzione
+  ([M-055](../../app/docs/Sources.md#m-055), [ADR-0109](../Decision.md#adr-0109)).
+- **Non spiega perché un membro in pausa costi ventisette volte.** Con `mongo-rs-3` congelato la
+  maggioranza si raggiunge ancora con due membri su tre, e il ritmo di scrittura crolla di un
+  fattore ventisette ([V-078](../Sources.md#v-078)). Il rallentamento è misurato, la causa no: un
+  membro **congelato** non è un membro **spento**, e separare l'effetto del flow control da quello
+  dei timeout di heartbeat richiede una misura che qui non è stata fatta.
 - **Non copre gli arbitri.** Un membro che vota e non porta dati è un modo di avere una maggioranza
   dispari a costo ridotto, con conseguenze che meritano più di un inciso. Lo stack non ne ha.
 - **Non copre le letture nelle transazioni né il read concern.** `w: "majority"` e
@@ -529,7 +548,9 @@ averlo fatto.
 [ADR-0045](../Decision.md#adr-0045) (la terza scena),
 [ADR-0014](../Decision.md#adr-0014) (il keyfile fuori dal repository),
 [ADR-0021](../Decision.md#adr-0021) (nomi host, mai indirizzi),
-[ADR-0032](../Decision.md#adr-0032) (i quattro limiti dell'istanza singola).
+[ADR-0032](../Decision.md#adr-0032) (i quattro limiti dell'istanza singola),
+[ADR-0109](../Decision.md#adr-0109) (le opzioni di misura dalla riga di comando),
+[ADR-0111](../Decision.md#adr-0111) (il confronto si pubblica in coppia con la riserva del ferro).
 
 **Fonti:** [S-044](../Sources.md#s-044), [S-045](../Sources.md#s-045), [S-055](../Sources.md#s-055),
 [S-056](../Sources.md#s-056), [S-057](../Sources.md#s-057), [S-058](../Sources.md#s-058),
@@ -537,4 +558,6 @@ averlo fatto.
 [V-020](../Sources.md#v-020), [V-023](../Sources.md#v-023), [V-025](../Sources.md#v-025),
 [V-026](../Sources.md#v-026), [V-027](../Sources.md#v-027), [V-028](../Sources.md#v-028),
 [V-029](../Sources.md#v-029), [V-030](../Sources.md#v-030), [V-031](../Sources.md#v-031),
-[V-032](../Sources.md#v-032), [V-033](../Sources.md#v-033)
+[V-032](../Sources.md#v-032), [V-033](../Sources.md#v-033),
+[V-076](../Sources.md#v-076), [V-077](../Sources.md#v-077), [V-078](../Sources.md#v-078),
+[V-079](../Sources.md#v-079)

@@ -1041,6 +1041,43 @@ falsa proprio le misure di failover che la demo sta cronometrando.
 
 ---
 
+### Cercare `null` trova anche i documenti che quel campo non ce l'hanno
+
+> «The `{ metacritic : null }` query matches documents that contain the `metacritic` field with a
+> `null` value **or** do not contain the `metacritic` field.»
+
+Fonte: [`app/docs/Sources.md` A-006](../app/docs/Sources.md#a-006) — MongoDB Database Manual, *Query
+for Null or Missing Fields*.
+
+**Perché una slide:** è la differenza fra «l'ordine è stato annullato con motivazione vuota» e «il
+campo motivazione non è mai stato scritto», e in un documento senza schema quei due casi convivono
+nella stessa collezione. Chi arriva da SQL legge `= NULL` e si aspetta il primo. Per distinguerli
+servono altri operatori — `{ $type: 10 }` per il solo `null` esplicito, `{ $exists: false }` per il
+solo campo assente — e il fatto che ne servano due dice tutto: nel modello a documenti «assente» e
+«vuoto» sono due stati, non uno.
+
+---
+
+### Confrontare un sottodocumento intero confronta anche l'ordine dei campi
+
+> «MongoDB does not recommend comparisons on embedded documents because the operations require an
+> *exact* match of the specified `<value>` document, **including the field order**.»
+>
+> «Queries that use comparisons on embedded documents can result in unpredictable behavior when used
+> with a driver that does not use ordered data structures for expressing queries.»
+
+Fonte: [`app/docs/Sources.md` A-007](../app/docs/Sources.md#a-007) — MongoDB Database Manual, *Query
+on Embedded/Nested Documents*.
+
+**Perché una slide:** `{w: 21, h: 14}` e `{h: 14, w: 21}` sono lo stesso oggetto in ogni linguaggio
+che il pubblico usa tutti i giorni, e non sono lo stesso filtro in MongoDB. È la seconda frase a fare
+paura più della prima: il comportamento dipende dalla struttura dati con cui il **driver** esprime la
+query, cioè da qualcosa che chi scrive il codice non vede. La soluzione sta nella stessa pagina, ed
+è la notazione con il punto: si interroga **per campo annidato** — `{ "size.w": 21 }` — non per
+documento intero.
+
+---
+
 ## Repository e distribuzione
 
 ### I limiti di GitHub sui file grandi
@@ -1657,3 +1694,1564 @@ dei fatti. La domanda che si pone al revisore decide che cosa può trovare: il p
 review nominava esplicitamente codici d'uscita e comandi che falliscono in silenzio, e i tre rilievi
 sono arrivati esattamente da lì. Vale per i modelli e vale per le persone, ed è il motivo per cui una
 checklist di review è uno strumento e non una formalità.
+
+---
+
+### `frozen` protegge da una distrazione, `slots` protegge anche da chi conosce la scorciatoia
+
+> Congelare una dataclass Python blocca l'assegnazione normale, e basta: l'istanza conserva un
+> `__dict__`, e da lì passano sia `object.__setattr__` sia la scrittura diretta. Misurato sulle due
+> varianti della stessa classe, la differenza è netta. Senza `slots`: assegnazione bloccata,
+> `object.__setattr__` **riesce**, scrittura nel `__dict__` **riesce**. Con `slots`: il `__dict__`
+> non esiste, e con esso spariscono entrambe le vie. La documentazione lo dice fin dalla prima riga
+> e nessuno la legge fino in fondo — «It is not possible to create truly immutable Python objects.
+> However, by passing `frozen=True` […] you can **emulate** immutability».
+
+Fonte: [`app/docs/Sources.md` M-003](../app/docs/Sources.md#m-003) e
+[A-002](../app/docs/Sources.md#a-002), [ADR-0019](Decision.md#adr-0019).
+
+**Perché una slide:** l'oggetto che attraversa la coda fra il thread del driver e quello del disegno
+è il punto in cui la demo del failover può mentire, e «l'ho congelato» è la rassicurazione che tutti
+danno per buona. La misura mostra che protegge dalla svista e non dalla scorciatoia, che è
+esattamente la distinzione utile: `frozen` difende dal codice scritto in buona fede, `slots` chiude
+anche la porta di servizio. Vale oltre Python — ogni garanzia di immutabilità va guardata chiedendo
+*da chi* protegge, non *se* protegge.
+
+---
+
+### Rompere una guardia apposta ha tre esiti, non due
+
+> Scritto il controllo che verifica che tutti gli eventi siano congelati, l'ho rotto apposta
+> aggiungendo un nono evento mutabile. Non è fallito: **la classe non è arrivata a esistere** —
+> `TypeError: cannot inherit non-frozen dataclass from a frozen one`. Il controllo scatta e va bene;
+> il controllo tace e va corretto; oppure la violazione **non è costruibile**, perché il linguaggio
+> la vieta prima. Il terzo somiglia al primo, perché entrambi finiscono con la suite verde, ma
+> significa che l'asserzione sta controllando il compilatore.
+
+Fonte: [`app/docs/Sources.md` M-002](../app/docs/Sources.md#m-002),
+[registro operativo, nota 144](registro-operativo-sviluppo.md).
+
+**Perché una slide:** è il seguito naturale di «un controllo scritto quando non può fallire va rotto
+apposta», e ne mostra il limite. La disciplina di rompere le proprie guardie non basta se poi si
+legge il verde come conferma: bisogna sapere quale dei due verdi si sta guardando. E la conseguenza
+pratica è controintuitiva — un'asserzione che non può fallire va **tolta**, non lasciata lì «che male
+non fa», perché chi la legge crede che stia sorvegliando qualcosa.
+
+---
+
+### Una citazione plausibile è più pericolosa di una mancante
+
+> Scrivendo la documentazione dell'applicazione avevo attribuito a un ADR una regola che quell'ADR
+> non contiene, e che **nessun ADR** del repository contiene: è una pratica costante, mai scritta
+> come decisione. Il rimando era plausibile, il numero era di un documento vero, e proprio per questo
+> nessuno l'avrebbe aperto. Un'affermazione senza fonte è nuda e chi legge sa di doversi fidare
+> dell'autore; un'affermazione con accanto un numero sembra già verificata.
+
+Fonte: [ADR-0081](Decision.md#adr-0081),
+[registro operativo, nota 146](registro-operativo-sviluppo.md).
+
+**Perché una slide:** in un repository dove citare è la norma, la presenza del rimando diventa il
+segnale di qualità e smette di essere una domanda — cioè la disciplina delle fonti produce, come
+effetto collaterale, il posto perfetto in cui nascondere un'affermazione non verificata. Vale il
+doppio quando si cita a memoria un documento che si è scritto: la fiducia nella propria memoria è più
+alta, e la memoria non lo sa. La difesa è banale e va detta ad alta voce — si apre il documento nel
+momento in cui si scrive il numero, non dopo.
+
+---
+
+### Un doppio che tace su ciò che non sa è più pericoloso di uno che non c'è
+
+> Un doppio mancante si nota: il codice non compila, la prova non parte. Un doppio che riceve un
+> operatore che non conosce e lo **ignora** restituisce un risultato plausibile — tutti i documenti,
+> invece di quelli che il filtro avrebbe scelto — e la prova diventa verde per il motivo sbagliato.
+> Nessuno ha scritto una riga di codice difettoso: il difetto è nell'attrezzo di misura, che è il
+> posto in cui si guarda per ultimo.
+
+Fonte: [`app/docs/Sources.md` M-006](../app/docs/Sources.md#m-006),
+[registro operativo, nota 149](registro-operativo-sviluppo.md).
+
+**Perché una slide:** capovolge l'idea intuitiva che un doppio incompleto sia un problema piccolo,
+da colmare quando serve. La misura lo mostra: rompendo il filtro dell'archivio in memoria perché
+accetti tutto, due delle sette prove rosse falliscono con `DID NOT RAISE` — cioè il **rifiuto** era
+provato quanto il comportamento. La regola che ne esce è breve: un doppio dichiara il dialetto che
+parla e solleva su tutto il resto, nominando ciò che non sa fare. E quando l'eccezione arriva in
+faccia a qualcuno c'è una risposta sola — insegnarglielo insieme alla prova che lo verifica, mai
+riscrivere la prova per chiedergli qualcosa di più semplice.
+
+---
+
+### Un errore di *quando* non è un errore di tipo
+
+> «The execution starts when one of the generator's methods is called.»
+>
+> Una funzione generatrice e una funzione che restituisce un generatore hanno la stessa annotazione,
+> `Iterator[T]`. Scritta nella forma sbagliata, la nostra fallisce **una** prova e lascia
+> `mypy --strict` **verde**.
+
+Fonte: [`app/docs/Sources.md` A-005](../app/docs/Sources.md#a-005) — Python Language Reference,
+*Yield expressions* — e [M-007](../app/docs/Sources.md#m-007),
+[registro operativo, nota 151](registro-operativo-sviluppo.md).
+
+**Perché una slide:** è un baco che sopravvive a tutto ciò che di solito rassicura — tipi stretti,
+revisione, nome della funzione — perché non sbaglia *che cosa* fa il codice, sbaglia *quando* lo fa.
+Un `dump()` scritto con `yield` nel corpo non avvia `mongodump` alla chiamata: lo avvia se e quando
+qualcuno scorre il risultato. Il pubblico che scrive Python lo riconosce subito e non ci ha mai
+pensato: i sistemi di tipi controllano *che cosa*, quasi mai *quando*.
+
+---
+
+### Anche una riserva è un'affermazione
+
+> Avevo scritto, sotto una misura, che le prove non avrebbero visto un `$limit` che taglia dalla coda
+> invece che dalla testa. Sembrava una concessione onesta. Sono andato a guardare: la prova
+> asserisce `[1, 2]`, quindi quel taglio lo vede benissimo. L'esempio di lacuna era inventato — e una
+> lacuna vera esisteva, due tentativi più in là.
+
+Fonte: [`app/docs/Sources.md` M-006, riserve](../app/docs/Sources.md#m-006),
+[registro operativo, nota 152](registro-operativo-sviluppo.md).
+
+**Perché una slide:** è la nota sulla citazione plausibile applicata al proprio codice invece che
+alle proprie fonti, e con un'aggravante — la riserva è il punto della pagina che sembra più al riparo
+dall'errore, perché è quello in cui l'autore sta ammettendo un limite. Nessuno controlla una
+modestia. Il modo di trovare una lacuna vera è **rompere e guardare**, non immaginare; e chi rompe a
+caso scopre anche l'altra faccia della cosa, cioè che una guardia scritta per prudenza e mai provata
+sopravvive alla revisione ma non alla mutazione.
+
+
+---
+
+### «p95» da solo non è un numero: sullo stesso campione vale 1,0 oppure 47,55
+
+> Novantacinque latenze da 1 ms, poi 50, 60, 70, 80 e 900. Il novantacinquesimo percentile di questo
+> campione vale **1,0** per rango più vicino, **3,45** con `statistics.quantiles(method='inclusive')`,
+> **47,55** con `'exclusive'`. Quarantasette volte l'uno dall'altro, e nessuno dei tre sbaglia.
+
+Fonte: [`app/docs/Sources.md` M-009](../app/docs/Sources.md#m-009) e
+[A-009](../app/docs/Sources.md#a-009) — «The cut points are linearly interpolated from the two
+nearest data points… if a cut point falls one-third of the distance between two sample values, 100
+and 112, the cut-point will evaluate to 104» —
+[registro operativo, nota 154](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché «p95» è la parola con cui in sala si chiude una discussione, e la slide
+mostra che da sola non chiude niente. I tre numeri rispondono a tre domande diverse: chi **stima** un
+quantile della popolazione interpola, e ottiene un valore che nessuno ha misurato; chi **riferisce**
+ciò che ha misurato prende un valore osservato, e paga con l'effetto pianerottolo. Il difetto non è
+scegliere male: è pubblicare il numero senza dire quale delle due cose si sta facendo.
+
+---
+
+### Zero è la peggiore risposta mancante, perché ha la faccia di una misura
+
+> Un p95 di zero millisecondi su una corsa in cui ogni scrittura è fallita legge «velocissimo» dove
+> la verità è «mai arrivato». E a differenza di un'eccezione, non lo dice a nessuno.
+
+Fonte: [registro operativo, nota 155](registro-operativo-sviluppo.md),
+[`app/docs/06-carico-tentativi-e-latenze.md`](../app/docs/06-carico-tentativi-e-latenze.md).
+
+**Perché una slide:** è la regola del doppio che solleva, portata dai doppi ai dati. Uno zero al
+posto di una misura che non c'è attraversa i controlli di tipo, si somma, si stampa e si media —
+sopravvive a tutto ciò che di solito ferma un errore, perché non ha la forma di un errore. La riga
+che chiude il punto è breve: dove non c'è una risposta giusta, il tipo deve poter dire di non averla.
+
+---
+
+### C'è un quarto esito, e non è un fallimento: la suite si pianta
+
+> Ho spostato di due righe la garanzia che un thread segnali sempre di aver finito, aspettandomi un
+> rosso. La suite si è fermata al 68 % e ci è rimasta. Nessun `FAILED`, nessun messaggio, nessun
+> punto del codice indicato: solo un `timeout` e un codice d'uscita.
+
+Fonte: [`app/docs/Sources.md` M-010](../app/docs/Sources.md#m-010),
+[registro operativo, nota 153](registro-operativo-sviluppo.md) — che estende la
+[nota 144](registro-operativo-sviluppo.md), «rompere una guardia apposta ha tre esiti, non due».
+
+**Perché una slide:** perché arriva **dopo** la slide dei tre esiti, e la corregge in diretta. È il
+caso peggiore da leggere non per gravità ma per somiglianza: un blocco senza messaggio somiglia a un
+guasto dell'ambiente, e la reazione naturale è sospettare Docker, la rete, il portatile — cioè
+cercare il difetto ovunque tranne che nella modifica appena fatta. La regola pratica sta in una riga:
+le prove concorrenti si eseguono sotto un `timeout`, sempre.
+
+---
+
+### Il codice di prova va tipizzato più di quello di produzione, non meno
+
+> Un aiutante di tre righe filtrava gli eventi per specie e restituiva il tipo di partenza.
+> `mypy --strict` ha bocciato **dieci** asserzioni in un colpo: `"Evento" has no attribute
+> "durata_ms"`. A runtime sarebbero passate tutte.
+
+Fonte: [registro operativo, nota 156](registro-operativo-sviluppo.md),
+[`app/docs/06-carico-tentativi-e-latenze.md`](../app/docs/06-carico-tentativi-e-latenze.md).
+
+**Perché una slide:** perché il pubblico che scrive Python conosce l'aiutante di tre righe e non lo
+rilegge mai. Un filtro che perde il tipo lo perde esattamente dove le asserzioni sono più specifiche,
+cioè dove il controllo serviva di più, e lo perde in silenzio. La correzione è una riga di PEP 695 —
+`def specie[E: Evento](eventi: list[Evento], tipo: type[E]) -> list[E]` — ma il punto non è la
+sintassi: è che quando un aiutante *sa* qualcosa che il chiamante userà, glielo si deve far dire.
+---
+
+### Una guardia si prova solo con un caso in cui, se non ci fosse, si vedrebbe
+
+> La prova asseriva che gli eventi escono in ordine di indirizzo. Ho tolto l'ordinamento: è rimasta
+> verde. Nel suo scenario i server comparivano già in ordine alfabetico. Osservava il risultato
+> giusto per il motivo sbagliato.
+
+Fonte: [registro operativo, nota 159](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md` M-011](../app/docs/Sources.md#m-011).
+
+**Perché una slide:** perché è la prova inutile più difficile da riconoscere. Non è sbagliata, non è
+incompleta, asserisce esattamente ciò che deve — e non potrebbe fallire. Il pubblico che scrive prove
+riconosce all'istante la sensazione, perché la copertura la contava come coperta. La regola sta prima
+della prova, nella sua costruzione: si nomina la modifica al codice di produzione che la farebbe
+fallire, e se non se ne trova una, il caso scelto è complice.
+
+---
+
+### Il caso pericoloso non è la prova che fallisce: è la prova che non è stata eseguita
+
+> Lo script diceva ventuno su ventuno. Non aveva eseguito una sola prova: un'opzione scritta male
+> faceva uscire `pytest` con **4** — errore d'uso — e «diverso da zero» era stato letto come «la
+> guardia ha scattato».
+
+Fonte: [registro operativo, nota 157](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md` M-011](../app/docs/Sources.md#m-011), che estende
+[M-005](../app/docs/Sources.md#m-005) — «nessuna prova raccolta» esce con **5**.
+
+**Perché una slide:** perché il verdetto era il migliore possibile, e per questo nessuno lo avrebbe
+messo in dubbio. `pytest` risponde con almeno quattro cose diverse — 0, 1, 4, 5 — e solo l'**1**
+significa che una prova ha fallito. Un arnese che classifica esiti elenca i codici che conosce e
+tratta come guasto quello che non riconosce. Il segnale d'allarme, in sala come al terminale, è lo
+stesso: **un rapporto troppo pulito**.
+
+---
+
+### Due rotture della stessa dimensione, scritte nello stesso secondo, sono la stessa rottura
+
+> Il rapporto attribuiva a due mutazioni diverse la stessa prova fallita, che è un'impossibilità
+> logica. Python decide se ricompilare guardando data di modifica **in secondi** e dimensione **in
+> byte**: 16 036 e 16 036, nello stesso secondo. La seconda corsa eseguiva il bytecode della prima.
+
+Fonte: [registro operativo, nota 158](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md` M-011](../app/docs/Sources.md#m-011).
+
+**Perché una slide:** perché la cache di CPython è pensata per un umano che salva un file ogni tanto,
+e uno script di mutazione ne salva venti al minuto — viola entrambe le ipotesi implicite, la
+risoluzione dell'orologio e la variazione di lunghezza. Vale oltre Python: **ogni cache ha un
+criterio di invalidazione, e va conosciuto prima di metterla in un ciclo automatico.**
+
+---
+
+### Un numero può sbagliare verso il rassicurante, e può sbagliare verso lo spettacolare
+
+> Un'interruzione già in corso al primo sguardo, misurata da lì, dà un minimo: sbaglia per difetto, e
+> chi legge lo sospetta. Un'interruzione già chiusa, se ogni sguardo ne spostasse la fine, cresce a
+> ogni giro: sbaglia per eccesso, e nessuno lo sospetta — perché il numero grosso conferma la tesi.
+
+Fonte: [registro operativo, nota 160](registro-operativo-sviluppo.md), che continua la
+[nota 155](registro-operativo-sviluppo.md),
+[`app/docs/07-topologia-failover-e-i-due-numeri.md`](../app/docs/07-topologia-failover-e-i-due-numeri.md).
+
+**Perché una slide:** perché arriva subito dopo lo «zero che sembra una misura» e ne mostra il lato
+scomodo. Delle due direzioni dell'errore, l'attenzione ne guarda una sola, ed è quella che non
+conviene a chi sta parlando. La riga che chiude: quando un numero finisce su una slide a sostegno di
+un'affermazione, la prova che serve è quella che **gli impedirebbe di crescere**.
+
+---
+
+### `IRRAGGIUNGIBILE` è un'osservazione, `SCONOSCIUTO` è l'assenza di un'osservazione
+
+> Un server che sparisce dall'elenco non è un server che ha smesso di rispondere. Nel primo caso
+> nessuno l'ha interrogato; nel secondo qualcuno ci ha provato e non ha ottenuto risposta. Metterli
+> nello stesso stato significa dire in cronaca che un membro è caduto, quando è stato solo tolto.
+
+Fonte: [`app/docs/07-topologia-failover-e-i-due-numeri.md`](../app/docs/07-topologia-failover-e-i-due-numeri.md).
+
+**Perché una slide:** perché è la stessa disciplina dei doppi che sollevano invece di inventare, e
+della latenza che vale `None` invece di zero, applicata a un `enum`. Un tipo che ha uno stato per «non
+lo so» permette di non mentire; uno che non ce l'ha costringe a scegliere una bugia plausibile. Dal
+palco vale come domanda al pubblico: **quanti dei vostri `enum` hanno lo stato per «non lo so»?**
+
+---
+
+### Un listener lento non rallenta la grafica: rallenta il driver
+
+> «Events are delivered synchronously. Application threads block waiting for event handlers to
+> return.» Il thread che aspetta è il monitor, cioè quello che deve accorgersi che il primario è
+> caduto. Un callback che disegna una tabella allunga **proprio il failover che sta cronometrando**:
+> il numero sulla slide diventa più grande per colpa dello strumento che lo misura.
+
+Fonte: [S-010](Sources.md#s-010), [ADR-0019](Decision.md#adr-0019),
+[`app/docs/08-il-ponte-sdam-e-i-thread-del-driver.md`](../app/docs/08-il-ponte-sdam-e-i-thread-del-driver.md).
+
+**Perché una slide:** perché rovescia l'intuizione. Tutti sanno che un'interfaccia lenta è
+sgradevole; quasi nessuno si aspetta che una riga di stampa dentro un callback **falsifichi una
+misura**. Non è una degradazione delle prestazioni, è un dato sbagliato. Dal palco vale come regola
+in tre parole: costruisci, deposita, ritorna.
+
+---
+
+### Il driver fa già quello che ci siamo imposti di fare
+
+> Metà dei listener di PyMongo non vengono chiamati dal codice che scopre il cambiamento: quel
+> codice mette in coda, e un thread di nome `pymongo_events_thread` drena e consegna. Lo schema che
+> abbiamo scelto per l'applicazione è quello che il driver applica a sé stesso — e nessuna pagina di
+> documentazione lo dice.
+
+Fonte: [`app/docs/Sources.md`, M-014](../app/docs/Sources.md#m-014),
+[ADR-0019](Decision.md#adr-0019).
+
+**Perché una slide:** perché trasforma una scelta di disegno in una conferma indipendente. Non è il
+relatore che consiglia una coda: è quello che fa il codice di chi ha scritto il driver, sotto lo
+stesso vincolo. Vale anche come invito: la documentazione di una dipendenza dice che cosa promette,
+il suo sorgente dice come vive.
+
+---
+
+### La documentazione diceva microsecondi. Il codice passava secondi
+
+> La docstring dell'evento afferma «the duration of this heartbeat in microseconds». Il valore che
+> arriva è una differenza di `time.monotonic()`. Se ci avessimo creduto, ogni battito sarebbe finito
+> nella cronaca come 0,000002 ms, e la tabella dei percentili avrebbe mostrato **zeri** — la peggiore
+> risposta mancante, prodotta non da una nostra scelta ma da una riga scritta da altri.
+
+Fonte: [`app/docs/Sources.md`, M-012](../app/docs/Sources.md#m-012), che continua la
+[nota 155](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché è il caso concreto della regola «la misura e la fonte si tengono
+distinte». Il repository lo prevedeva in astratto da settimane; è la prima volta che la fonte
+ufficiale sbaglia davvero. La domanda al pubblico si scrive da sé: **quante delle unità di misura
+che usate le avete lette, e quante verificate?**
+
+---
+
+### Una rottura che non rompe
+
+> Abbiamo cambiato una riga apposta, e la suite è rimasta verde. La prima ipotesi — manca una prova —
+> era falsa: le due scritture erano **la stessa lettura per due strade**, perché il driver garantisce
+> che quei due valori coincidano. Inventare una prova per farla fallire avrebbe aggiunto copertura
+> senza aggiungere verità.
+
+Fonte: [registro operativo, nota 161](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md`, M-016](../app/docs/Sources.md#m-016).
+
+**Perché una slide:** perché è la trappola del testing per mutazione, e chi usa quegli strumenti la
+incontrerà. Una mutazione sopravvissuta non significa sempre «prova mancante»: può significare
+«mutazione equivalente», e la differenza è tutta. La riga da tenere: **prima di concludere che manca
+una guardia, escludi che manchi la differenza.**
+
+---
+
+### Una soglia che non dichiara che cosa non prende è una riserva non scritta
+
+> La prova chiede che il callback costi meno di dieci volte un inserimento in coda. Il caso onesto
+> sta a 2,9; una tabella di Rich arriva a 883. In mezzo c'è una `f-string` a 5,5, che il codice
+> vieta e la prova **lascia passare**. È scritto accanto alla prova, perché una soglia scelta e non
+> spiegata lascia credere che la copertura arrivi fino al divieto.
+
+Fonte: [registro operativo, nota 162](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md`, M-013](../app/docs/Sources.md#m-013).
+
+**Perché una slide:** perché ogni progetto ha una soglia scritta a occhio, e nessuno ricorda più da
+dove venga. Le due metà della regola stanno in una frase: si misura prima di scriverla, e si
+dichiara che cosa resta fuori. Il resto è il motivo per cui non si stringe: una prova che fallisce a
+caso viene disattivata da qualcuno, prima o poi.
+
+---
+
+### Il terzo stato dell'assenza: quando il client sa benissimo, e la scena non lo nomina
+
+> `SCONOSCIUTO` è l'assenza di un'osservazione. `IRRAGGIUNGIBILE` è un'osservazione. `ALTRO` è il
+> contrario di entrambi: il client ha capito perfettamente che cosa ha davanti, ed è qualcosa che
+> questa storia non racconta. Un membro che riparte è `RSOther` per qualche secondo — e sono
+> esattamente i secondi in cui la sala guarda quella riga.
+
+Fonte: [`app/docs/08-il-ponte-sdam-e-i-thread-del-driver.md`](../app/docs/08-il-ponte-sdam-e-i-thread-del-driver.md).
+
+**Perché una slide:** perché completa la coppia della slide precedente e mostra che gli stati «non
+so» sono più di uno. Il valore di ripiego di una traduzione è una decisione, non un dettaglio:
+mandare l'ignoto e il fuori-scena nello stesso posto fa scrivere «non so» proprio nel momento in cui
+si sapeva.
+
+---
+
+### Un doppio che si comporta diversamente dall'originale è un doppio che mente
+
+> Ogni volta che una prova passa contro il doppio, chi la legge conclude qualcosa sul comportamento
+> contro il database vero. Quella conclusione vale quanto la somiglianza fra i due — e la
+> somiglianza non l'aveva mai misurata nessuno.
+
+Fonte: [`app/docs/09-adattatori-veri-e-contratto-condiviso.md`](../app/docs/09-adattatori-veri-e-contratto-condiviso.md).
+
+**Perché una slide:** perché in sala c'è chi ha una suite verde di doppi e la considera una
+garanzia. La frase non dice di buttarli: dice che la fedeltà è una quantità, che oggi vale un
+numero — dodici comportamenti verificati da entrambe le parti — e che senza quel numero la suite
+verde è una fiducia, non una misura.
+
+---
+
+### Il contratto ha trovato il bugiardo prima che l'originale esistesse
+
+> Il file condiviso è stato scritto per girare in due posti, ed è bastato eseguirlo in **uno**.
+> Prima esecuzione, contro il solo doppio: `1 failed, 10 passed`. Un difetto che stava lì da quattro
+> task, invisibile perché nessuna prova aveva mai chiesto quel caso.
+
+Fonte: [registro operativo, nota 163](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md`, M-017](../app/docs/Sources.md#m-017).
+
+**Perché una slide:** perché ribalta l'aspettativa. Ci si prepara al confronto con il server vero e
+il difetto salta fuori prima, per una ragione che vale in generale: scrivere una verifica pensando
+«deve valere anche contro l'originale» costringe a formularla in termini di comportamento
+osservabile, e le domande che ne escono sono diverse da quelle che si pongono guardando il doppio.
+
+---
+
+### `$count` su zero documenti non risponde zero: non risponde
+
+> `risultato[0]["quanti"]` dà **0** sul doppio e **`IndexError`** contro MongoDB. La suite veloce
+> resta verde. La demo si rompe al primo fotogramma, quando la collezione è ancora vuota.
+
+Fonte: [`app/docs/Sources.md`, M-017](../app/docs/Sources.md#m-017).
+
+**Perché una slide:** perché è la trappola SQL più economica da mostrare. `COUNT(*)` su zero righe
+dà zero; una pipeline di aggregazione su zero documenti non emette niente, e nemmeno `$group` con
+`_id: null` lo fa. Chi arriva da SQL scrive la riga sbagliata al primo tentativo, e non se ne accorge
+finché la collezione non è vuota davvero.
+
+---
+
+### `limit(0)` non vuol dire «nessun documento», vuol dire «nessun limite»
+
+> «A `limit()` value of 0 (i.e. `.limit(0)`) is equivalent to setting no limit.» Il valore non lo
+> digita nessuno: ci si arriva per sottrazione — quanti mancano alla fine dell'elenco — cioè nel
+> caso limite di un calcolo, che è quello che nessuno prova a mano.
+
+Fonte: [`app/docs/Sources.md`, A-011](../app/docs/Sources.md#a-011) e
+[M-022](../app/docs/Sources.md#m-022).
+
+**Perché una slide:** perché è una fonte che inverte l'ovvio in una riga, e la conseguenza è
+spettacolare: cinquantamila righe che scorrono dove ne erano state chieste zero. In più mostra la
+tecnica — la guardia è stata scritta dopo aver visto la stessa verifica passare da una parte e
+fallire dall'altra.
+
+---
+
+### Un replica set sano, guardato da fuori, si legge «nessun primario»
+
+> Quattro secondi e due decimi, `ReplicaSetNoPrimary`, tutti e tre i membri irrisolvibili. Il set
+> risponde con i nomi di servizio della rete Compose, che dentro esistono e fuori no. È
+> indistinguibile da un primario caduto davvero.
+
+Fonte: [`app/docs/Sources.md`, M-019](../app/docs/Sources.md#m-019),
+[ADR-0021](Decision.md#adr-0021).
+
+**Perché una slide:** perché è ADR-0021 visto dal lato che fa male, ed è l'errore che chiunque
+provi un replica set in Docker incontra il primo giorno. La parte che la rende una slide e non un
+aneddoto: la diagnosi sbagliata **è la stessa** che il talk mostra come diagnosi giusta nel Blocco 2.
+Stesso messaggio, due cause opposte.
+
+---
+
+### Il difetto che non fallisce è l'unico che giustifica una guardia
+
+> `tz_aware` è predefinito a `False`. Le date tornano ingenue, il confronto con quelle scritte
+> riesce lo stesso, e lo sbaglio si vede come un orario storto sullo schermo — sbagliato di quante
+> ore vale il fuso.
+
+Fonte: [`app/docs/09-adattatori-veri-e-contratto-condiviso.md`](../app/docs/09-adattatori-veri-e-contratto-condiviso.md).
+
+**Perché una slide:** perché dà un criterio, non un consiglio. Le guardie difensive si moltiplicano
+finché non si sa quando smettere; la regola per smettere è questa — si mette una guardia dove
+l'alternativa non è un errore ma un risultato plausibile e sbagliato.
+
+---
+
+### Zero chunk su uno shard che ne ha due
+
+> Su 7.0.40 nessun chunk ha il campo `ns`, e cercarlo restituisce zero **senza sollevare**. Zero
+> chunk è la conclusione «i dati non sono distribuiti», detta esattamente nel momento in cui lo sono.
+
+Fonte: [`app/docs/Sources.md`, M-020](../app/docs/Sources.md#m-020) e
+[A-013](../app/docs/Sources.md#a-013).
+
+**Perché una slide:** perché è il difetto silenzioso in forma pura, sul tema del Blocco 3. E perché
+la correzione è didattica quanto il difetto: il manuale prescrive di unire per `uuid`, e non afferma
+da nessuna parte che `ns` sia stato tolto — la prima cosa è una fonte, la seconda una misura, e
+scriverle come se fossero la stessa cosa è come nascono le leggende.
+
+---
+
+### Misurare quello che tutti consigliano
+
+> `ordered=False` è la raccomandazione standard per il caricamento massivo. Ventimila documenti per
+> configurazione, tre giri alternati: mediane fra 2,48 e 2,70 ms **da entrambe le parti**. Due
+> minuti per misurarlo. Una riga che nessuno avrebbe più rimesso in discussione, per non misurarlo.
+
+Fonte: [registro operativo, nota 165](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md`, M-021](../app/docs/Sources.md#m-021).
+
+**Perché una slide:** perché il caso della soglia inventata a occhio è noto, e questo è quello
+complementare e più insidioso: non c'è un numero da inventare, c'è un consenso da ereditare. Vale
+anche la riserva, che è metà della slide: la misura è su loopback e istanza singola, e le tre
+condizioni in cui potrebbe ribaltarsi — rete, `w: majority`, sharding — sono tutte fuori.
+
+---
+
+### Le prove accendono lo stack che il pubblico eseguirà, non un facsimile
+
+> Da `make down-01` a diciannove prove verdi in 8,1 secondi, senza che nessuno digiti `make up-01`.
+> E alla fine gli stack restano accesi: fermare uno stack che l'operatore aveva già su sarebbe un
+> effetto che le prove non hanno causato.
+
+Fonte: [ADR-0020](Decision.md#adr-0020),
+[`app/docs/09-adattatori-veri-e-contratto-condiviso.md`](../app/docs/09-adattatori-veri-e-contratto-condiviso.md).
+
+**Perché una slide:** perché la scelta di non usare testcontainers va giustificata, e la
+giustificazione è di una riga: un container di prova configurato altrove sarebbe verde mentre lo
+stack del lab è rotto. La seconda metà — quello che le prove smontano sono i **dati**, non
+l'infrastruttura — è la regola pratica che rende sopportabile la prima.
+
+---
+
+### Lo strumento che ha perso cinquantamila documenti ed è uscito zero
+
+> `mongorestore` ha dichiarato `0 document(s) restored successfully. 50000 document(s) failed to
+> restore.` e ha restituito **0** al sistema operativo. Chi controlla il processo nel modo in cui si
+> controlla un processo riceve «riuscito».
+
+Fonte: [ADR-0084](Decision.md#adr-0084), [`app/docs/Sources.md`, M-024](../app/docs/Sources.md#m-024).
+
+**Perché una slide:** perché il codice d'uscita è il modo in cui *tutti* controllano un processo
+esterno, e questo è un caso in cui mente — non un caso limite costruito ad arte, ma il secondo giro
+di qualunque restore sulla stessa destinazione. La morale sta in una riga: quando lo strumento di
+qualcun altro non dà il verdetto, l'adattatore che lo incapsula è il posto in cui si ripara.
+
+---
+
+### La lista di argomenti non basta: `argv` è pubblico comunque
+
+> La tabella dei processi legge `argv`, e ad `argv` non importa da dove è arrivato. Con `-p` nella
+> lista, senza nessuna shell di mezzo, `ps` dentro il container mostra la password
+> dell'amministratore per tutto il tempo in cui il dump gira.
+
+Fonte: [`app/docs/Sources.md`, M-025](../app/docs/Sources.md#m-025),
+[`app/docs/10-processi-esterni-e-il-verdetto-che-manca.md`](../app/docs/10-processi-esterni-e-il-verdetto-che-manca.md).
+
+**Perché una slide:** perché «usa la lista, non la stringa di shell» è il consiglio che tutti danno
+e che tutti fermano un passo prima. La lista serve — protegge dagli spazi e dagli apici, non dagli
+occhi. Il segreto si tiene fuori da `argv`, e per `mongodump` la strada è omettere `-p` e scrivere
+la password sullo `stdin`, che lo strumento legge anche quando non è un terminale.
+
+---
+
+### La prova diceva una cosa falsa, e a scoprirlo è stato il codice
+
+> Avevo scritto, nella docstring di una prova, che un restore ripetuto è idempotente. Non lo è:
+> `mongorestore` inserisce, e il secondo giro collide su ogni `_id`. L'adattatore ha sollevato, e la
+> parte sbagliata era la mia premessa.
+
+Fonte: [registro operativo, Task 9](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md`, M-024](../app/docs/Sources.md#m-024).
+
+**Perché una slide:** perché rovescia l'immagine abituale — la prova che giudica il codice — e mostra
+l'altro verso, che capita più spesso di quanto si ammetta. Una docstring di prova è un'asserzione
+come le altre, scritta nel punto in cui nessuno la rilegge, e un codice che solleva quando non te lo
+aspetti è la cosa più vicina a una revisione paritaria che si possa avere alle undici di sera.
+
+---
+
+### Una promessa mantenuta per caso è una promessa che nessuno sta controllando
+
+> Un ADR di questo repository prometteva «un solo thread tocca `Live`». Con le impostazioni
+> predefinite di Rich i thread erano **due**: `Live.start()` ne avvia uno demone che ridisegna per
+> conto suo. Non succedeva niente di male — dentro `Live` c'è un lucchetto — e proprio per questo
+> la promessa sarebbe rimasta scritta, falsa, finché qualcosa non avesse smesso di funzionare.
+
+Fonte: [`app/docs/Sources.md`, M-027](../app/docs/Sources.md#m-027) e
+[A-015](../app/docs/Sources.md#a-015), [ADR-0085](Decision.md#adr-0085).
+
+**Perché una slide:** perché è il caso peggiore di tutti — l'assunzione sbagliata che *funziona*.
+Un'assunzione sbagliata che rompe qualcosa si scopre da sola; una che regge grazie a una protezione
+altrui, di cui non si sapeva niente, si scopre solo andando a guardare. E ci si va a guardare
+soltanto se si prende sul serio l'idea che «corretto per caso» e «corretto per costruzione» siano
+due stati diversi del software, non due modi di dire la stessa cosa.
+
+---
+
+### Quando una decisione si giustifica con un silenzio, quel silenzio va misurato
+
+> La documentazione di Rich non nomina mai i thread. Il progetto aveva letto quel silenzio come
+> «non ce ne sono» e ci aveva costruito sopra un ADR. Le due letture di un silenzio sono «non
+> succede» e «non è documentato», e la seconda è quasi sempre quella giusta.
+
+Fonte: [`docs/Sources.md`, S-018](Sources.md#s-018),
+[`app/docs/Sources.md`, A-015](../app/docs/Sources.md#a-015),
+[registro operativo, nota 173](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché la reazione prudente a una lacuna — cambiare disegno invece di
+indovinare — era quella giusta, e non è bastata. Quello che è stato scritto accanto alla scelta non
+era prudenza, era una proprietà attribuita a una libreria senza verificarla. Se una lacuna è
+abbastanza importante da entrare in una decisione, è abbastanza importante da farsi cinque minuti
+di sorgente installato: sta sul disco, si apre, risponde.
+
+---
+
+### Il numero c'era. La misura no
+
+> Nella docstring che giustificava il ritmo di aggiornamento avevo scritto «0,86 ms misurati», con
+> accanto un codice `M-0NN` perfettamente formato che rimandava a una misura che non esisteva
+> ancora. Quando l'ho fatta davvero, la misura smentiva il segnaposto del 35%.
+
+Fonte: [`app/docs/Sources.md`, M-028](../app/docs/Sources.md#m-028),
+[registro operativo, nota 174](registro-operativo-sviluppo.md).
+
+**Perché una slide:** è il seguito esatto di *«Una citazione plausibile è più pericolosa di una
+mancante»*, un giro più in là. Un repository con una regola severa sulle fonti si difende benissimo
+dal numero **senza** citazione: la mancanza salta all'occhio, perché la regola esiste apposta. Non
+si difende affatto dal numero scritto insieme a una citazione conforme che si ha intenzione di
+onorare dopo. La conformità della forma è precisamente ciò che ferma la rilettura — la disciplina
+delle fonti costruisce, come effetto collaterale, il nascondiglio migliore per un dato inventato.
+La regola pratica sta in una riga: la citazione si scrive **dopo** la fonte, mai prima.
+
+---
+
+### Otto righe riservate a server che non esistono
+
+> Avevo riservato otto righe della schermata all'elenco dei server, giustificandole così: «due
+> shard da due membri, tre config server, un `mongos`». Gli shard di membri ne hanno tre. E
+> soprattutto: la tabella non elenca i container dello stack, elenca quello che il **driver** vede,
+> e un client collegato a un `mongos` vede il `mongos`. Il numero vero è tre.
+
+Fonte: [`app/docs/Sources.md`, M-029](../app/docs/Sources.md#m-029),
+[registro operativo, nota 175](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché mostra la differenza fra un errore di conteggio e un errore di
+modello, e quale dei due sopravvive. Un numero nudo invita a chiedere «da dove viene?»; un numero
+con una derivazione plausibile scritta accanto **chiude** la domanda, e la chiude per anni. Vale
+anche come promemoria su MongoDB sharded, che è il punto in cui l'intuizione tradisce più spesso:
+la topologia che il client conosce non è la topologia del cluster, ed è per questo che i conteggi
+per shard si chiedono a `$shardedDataDistribution` e non alla lista dei server.
+
+---
+
+### Un elenco troncato in silenzio si legge come un cluster più piccolo di quello che è
+
+> Mostrare tre server su cinque senza dirlo non produce una schermata incompleta: produce una
+> schermata che afferma il falso. Chi guarda legge «il cluster ha tre membri», e non ha modo di
+> sospettare il contrario. Il costo di dirlo è una riga: «… e altri 2».
+
+Fonte: [`app/docs/11-tre-rese-e-un-solo-thread-che-disegna.md`](../app/docs/11-tre-rese-e-un-solo-thread-che-disegna.md),
+[registro operativo, nota 178](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché ogni cruscotto, ogni `top`, ogni pagina di risultati ha un budget di
+spazio e quindi tronca, e quasi nessuno dichiara di averlo fatto. In una dimostrazione dal vivo
+questo conta il doppio: la schermata proiettata è l'unica prova che il pubblico ha, e un'omissione
+non dichiarata diventa un'affermazione. Il dato più importante fra quelli che stanno per essere
+nascosti è **quanti** ne vengono nascosti.
+
+---
+
+### Un divieto di provare si onora spostando ciò che va provato, non rinunciando a provarlo
+
+> «Non provare la TUI» significa «non provare Rich», e Rich ha già le sue prove. Non significa che
+> le decisioni prese lì dentro restino senza guardia. Rompendo il codice una riga alla volta, le
+> due sole mutazioni sopravvissute su undici erano nel modulo che il divieto proteggeva — ed erano
+> le due righe che il resto del progetto cita.
+
+Fonte: [`app/docs/11-tre-rese-e-un-solo-thread-che-disegna.md`](../app/docs/11-tre-rese-e-un-solo-thread-che-disegna.md),
+[registro operativo, nota 177](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché «questo non si prova» è una frase che in ogni progetto copre due cose
+molto diverse — ciò che davvero non ha senso provare, e ciò che è scomodo. La domanda che le separa
+è *che cosa esattamente vieta il divieto*: qui vietava di guardare i pixel, non di contare i thread
+o di chiedere se una coda è vuota. Le due mutazioni sopravvissute stavano proprio lì, ed è un esito
+che si ripete: le righe senza guardia tendono a essere quelle su cui poggia la documentazione.
+
+---
+
+### Una suite verde non prova che il programma sia mai stato eseguito
+
+> 425 prove unitarie, 43 d'integrazione, `mypy --strict` su 57 file: tutto verde. Poi lo stack è
+> stato acceso, e due comandi su tre erano sbagliati. Nessuno dei due difetti apparteneva a un
+> componente: uno stava fra un generatore che numera da zero e una collezione già numerata, l'altro
+> fra due osservatori della stessa struttura. Le prove di componente non possono vedere le
+> giunture.
+
+Fonte: [`app/docs/12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md`](../app/docs/12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md),
+[registro operativo, nota 179](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché la copertura è la metrica che si mostra, e questa è la sua ombra. Un
+difetto di giuntura non ha un file in cui vive, quindi non ha un file in cui provarlo, quindi non
+compare in nessun rapporto di copertura — e resta l'unico che una demo dal vivo rivelerà, davanti a
+tutti. Il rimedio non è più prove: è mettere in conto la prima esecuzione contro l'ambiente vero
+come un **passo del lavoro**, non come una formalità dopo il commit.
+
+---
+
+### Il guasto da temere non è quello che solleva: è quello che esce con zero
+
+> Il carico rotto usciva con codice zero. La cronaca scorreva, 4 833 letture su 4 833 riuscivano,
+> lo schermo era pieno di attività. Solo una riga del consuntivo diceva la verità: «38 scritture, 0
+> confermate». Dal fondo della sala era una demo che funziona.
+
+Fonte: [`app/docs/Sources.md`, M-032](../app/docs/Sources.md#m-032),
+[ADR-0088](Decision.md#adr-0088), [registro operativo, nota 180](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché è successo tre volte in questo progetto e ogni volta con una faccia
+diversa — un `mongorestore` che perde documenti e esce zero ([ADR-0084](Decision.md#adr-0084)), una
+latenza negativa che entra nei percentili ([ADR-0086](Decision.md#adr-0086)), un carico che non
+scrive niente e sembra lavorare. Un'eccezione si vede; un numero plausibile no. La domanda pratica
+da portare via: **quale numero di questo consuntivo sarebbe zero se tutto fosse rotto?** — e poi
+guardarlo.
+
+---
+
+### Su uno stesso fatto, un narratore solo
+
+> `watch` raccontava ogni transizione due volte. PyMongo la emette una volta sola: a raddoppiarla
+> erano due osservatori nostri sulla stessa struttura, uno che riceve i callback e uno che
+> interroga ogni mezzo secondo. Uno spinto e uno tirato: non era un rischio, era una certezza.
+
+Fonte: [`app/docs/Sources.md`, M-033](../app/docs/Sources.md#m-033),
+[ADR-0089](Decision.md#adr-0089), [registro operativo, nota 182](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché la cura sbagliata è la prima che viene in mente — deduplicare a valle
+— e in un contesto di failover è peggio della malattia: due transizioni identiche e ravvicinate
+sono anche la firma di un membro che *flappa*, cioè esattamente la cosa che si sta cercando di
+mostrare. Un filtro non sa distinguere il doppione dal fatto ripetuto. Si guarisce togliendo un
+osservatore. Vale per ogni cruscotto che unisce una fonte a eventi e una fonte a polling, che è
+quasi ogni cruscotto.
+
+---
+
+### L'orologio da parete non promette di andare avanti, e lo dichiara
+
+> `time.get_clock_info("time")` risponde `monotonic=False, adjustable=True`. È scritto, si legge in
+> una riga, e quasi nessuno lo legge prima di sottrarre due `datetime.now()` e chiamare il
+> risultato «latenza». Quando NTP corregge una deriva, quella sottrazione dà un numero negativo —
+> che non solleva niente, ed entra nei percentili.
+
+Fonte: [`app/docs/Sources.md`, M-030](../app/docs/Sources.md#m-030),
+[ADR-0086](Decision.md#adr-0086), [registro operativo, nota 184](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché misurare una latenza è la cosa che chiunque in sala fa tutte le
+settimane, ed è il caso in cui l'implementazione ovvia di un'astrazione ovvia sbaglia. La domanda
+che separa i due usi è una sola: *questo istante lo devo datare o lo devo sottrarre?* Datare vuole
+l'ora vera, sottrarre vuole un contatore che non torna indietro, e un `datetime.now()` fa bene solo
+la prima. Un'ancora letta una volta più un contatore monotono fa bene entrambe.
+
+---
+
+### Un valore predefinito comodo è un errore silenzioso in attesa
+
+> `--target` non ha un predefinito, e non lo avrà. Durante il talk si cambia stack tre volte: con
+> un predefinito, una distrazione manda il carico al bersaglio sbagliato — e quel comando non
+> fallisce. **Riesce**, altrove.
+
+Fonte: [`app/docs/12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md`](../app/docs/12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md),
+[ADR-0087](Decision.md#adr-0087), [registro operativo, nota 185](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché il criterio è generale e si enuncia in una riga — *se sbagliare il
+predefinito produce un errore visibile, mettilo; se produce un risultato plausibile ma di un'altra
+cosa, non metterlo* — e perché nel mondo dei database questo caso ha una versione famosa: il
+`--host` che, mancando, punta a `localhost`. La stessa severità vale per gli strumenti attorno: qui
+`make app-stats` senza `TARGET` esce con **2** invece di indovinare, che è lo stesso codice con cui
+Typer rifiuta un parametro sbagliato.
+
+---
+
+### La stringa di connessione non è un indirizzo: è un punto di partenza
+
+> La specifica che tutti i driver MongoDB implementano definisce la *seed list* come «server
+> addresses provided client in initial configuration», e prescrive che il client **MUST add**
+> i server che gli altri membri gli nominano. Misurato: un seme solo, `mongo-rs-2`, e il client
+> finisce per scrivere su `mongo-rs-1` — un nome che nessuno gli aveva dato.
+
+Fonte: [`app/docs/Sources.md`, A-016](../app/docs/Sources.md#a-016) e
+[M-036](../app/docs/Sources.md#m-036), [ADR-0012](Decision.md#adr-0012),
+[registro operativo, nota 187](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché è la cosa che tutti hanno scritto mille volte senza pensarci — un URI
+in un file di configurazione — e quasi nessuno sa che quell'indirizzo è **solo l'inizio**. Da lì
+discendono conseguenze pratiche molto concrete: perché un firewall aperto sul solo seme non basta,
+perché i nomi che il set restituisce devono essere risolvibili dal client, e perché la stessa
+applicazione che funziona dentro Docker non funziona da fuori. Una demo che parte da un seme
+secondario e finisce a scrivere sul primario lo mostra in dieci secondi.
+
+---
+
+### Lo stesso cluster ha due indirizzi, e dal lato sbagliato la verità non è raggiungibile
+
+> Da fuori la rete Compose, un replica set con tre membri sani si legge `ReplicaSetNoPrimary`. Per
+> farlo funzionare bisogna spegnere la scoperta con `directConnection=true` — e allora la topologia
+> si legge `singola` mentre il ruolo del server è `RSPrimary`. Due affermazioni false insieme,
+> nessuna delle quali solleva un errore.
+
+Fonte: [`app/docs/Sources.md`, M-019](../app/docs/Sources.md#m-019),
+[`app/docs/13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md`](../app/docs/13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md),
+[ADR-0012](Decision.md#adr-0012), [ADR-0090](Decision.md#adr-0090).
+
+**Perché una slide:** perché è la trappola in cui cade chiunque provi un replica set in Docker dal
+proprio portatile, e perché la reazione naturale — mettere `directConnection=true` finché non
+funziona — non ripara niente: nasconde. Il cluster non è raggiungibile «un po' meno bene» da fuori;
+è raggiungibile in un modo che **non è quello che l'applicazione userà in produzione**. La
+conseguenza operativa è che una demo di failover ha senso solo dal lato in cui la scoperta è accesa.
+
+---
+
+### Una prova che non potrebbe fallire non dimostra niente, anche quando passa
+
+> Misurare la scoperta dei membri partendo dai tre semi della configurazione è circolare: trovare
+> tre server avendone dati tre è compatibile con un driver che non scopre nulla. Il disegno che
+> dimostra è un seme solo, scelto fra i **non** primari.
+
+Fonte: [`app/docs/Sources.md`, M-036](../app/docs/Sources.md#m-036),
+[registro operativo, nota 187](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché vale per ogni prova, non solo per le misure sui driver, e perché la
+domanda che la rende operativa sta in una riga: *quale osservazione falsificherebbe questa
+asserzione?* Se non ce n'è nessuna, la prova è verde per costruzione. È la stessa idea che rende
+obbligatorio far fallire una prova almeno una volta prima di fidarsene — qui applicata a un
+esperimento invece che a un test.
+
+---
+
+### Una premessa plausibile e mai verificata sopravvive a tutte le revisioni
+
+> «Un'immagine costruita in locale non ha un digest» suona ovvio ed è falso: con l'archivio immagini
+> di containerd, l'`Id` di un'immagine **è** il digest del suo manifesto, anche per ciò che nessuno
+> ha mai pubblicato. Era già scritta in cinque posti quando un `docker image inspect` l'ha smentita.
+
+Fonte: [`app/docs/Sources.md`, M-037](../app/docs/Sources.md#m-037),
+[ADR-0093](Decision.md#adr-0093), [registro operativo, nota 188](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché la decisione presa su quella premessa era **giusta** — il digest di
+un'immagine costruita in casa non va in `images.env` — e questo è precisamente ciò che rende
+l'errore interessante: una motivazione sbagliata sotto una conclusione corretta non viene corretta
+da niente, perché niente si rompe. E c'è l'aggravante che con il vecchio archivio a grafo di Docker
+la premessa sarebbe stata vera per caso. Le frasi che cominciano con «ovviamente» sono candidate a
+diventare una misura.
+
+---
+
+### Prima di segnare chiuso un punto aperto, guardare se lo è
+
+> Il registro dava per chiuso il limite del `docker exec` sul dump, con una motivazione scritta tre
+> task prima: «dal container non c'è più nessun `docker exec` in mezzo». Un comando ha mostrato che
+> nell'immagine `mongodump` non c'è affatto.
+
+Fonte: [`app/docs/Sources.md`, M-039](../app/docs/Sources.md#m-039),
+[registro operativo, nota 193](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché ogni progetto tiene un elenco di cose «da sistemare al prossimo giro»,
+e le scadenze scritte lì dentro sono **previsioni**, non fatti. Un punto chiuso per inerzia è
+peggio di un punto aperto: sparisce dall'elenco e riappare quando c'è pubblico. Il costo di
+verificarlo, qui, è stato un comando di una riga.
+
+---
+
+### Una scena che gira non è una scena che dice il vero
+
+> Fra un failover mostrato e un failover finto non c'è nessuna differenza visibile: le fasi
+> scorrono uguali, il carico riprende uguale. La differenza sta in due numeri — e se il guasto
+> non è arrivato, quei due numeri dicono «interruzione zero, scritture perse zero», cioè
+> **failover perfetto**.
+
+Fonte: [`app/docs/Sources.md`, M-043](../app/docs/Sources.md#m-043),
+[ADR-0096](Decision.md#adr-0096), [registro operativo, nota 197](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché è la giustificazione di tutto il Blocco 2, e vale ben oltre le demo.
+Un'operazione fallita che produce un risultato *plausibile* invece di un errore è la peggiore
+categoria di guasto che esista: nessuno la cerca, perché niente sembra rotto. Da qui la scelta di
+far **fermare** la scena quando `docker compose kill` esce diverso da zero, e quella di confrontare
+i numeri dell'applicazione con una misura fatta settimane prima per un'altra strada.
+
+---
+
+### «Fermare un nodo» non è un'operazione sola, e spegnere bene è venti volte più rapido
+
+> `docker compose stop` manda `SIGTERM`, e `mongod` cede il ruolo prima di uscire: **574, 480, 486
+> ms**, senza nessuna elezione. `docker kill` lo fa sparire senza cedere niente: **9 812, 10 619,
+> 10 943 ms**, e il replica set deve votare.
+
+Fonte: [V-029](Sources.md#v-029), [V-031](Sources.md#v-031),
+[ADR-0097](Decision.md#adr-0097).
+
+**Perché una slide:** perché va contro l'intuizione di tutti — «staccare la spina» dovrebbe essere
+la strada rapida, e invece è venti volte la più lenta — e perché spiega in una riga *perché* esiste
+un'elezione. Il primario che si spegne con ordine **dice** di andarsene; quello che sparisce va
+scoperto assente, e scoprirlo costa. È anche l'unico punto in cui il piano di questo progetto ha
+avuto torto contro una misura, e la correzione è stata scritta invece che applicata in silenzio.
+
+---
+
+### Guardare non è aspettare
+
+> Contro un replica set sanissimo, il comando usciva con «nessun primario in vista». Non era il
+> cluster: la topologia che il driver espone è la descrizione che **ha già**, e nei primi
+> millisecondi dopo la connessione è vuota, perché la scoperta comincia in quel momento.
+
+Fonte: [`app/docs/Sources.md`, M-042](../app/docs/Sources.md#m-042),
+[`app/docs/Sources.md`, A-017](../app/docs/Sources.md#a-017),
+[registro operativo, nota 198](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché una lettura pura e una chiamata bloccante hanno la stessa firma e
+sembrano intercambiabili — e contro un doppio lo **sono**, perché il doppio risponde subito.
+Cinquecento prove verdi non hanno visto niente. La correzione è una riga, `admin.command("ping")`,
+e funziona per un motivo che vale la pena dire: un comando su `admin` va sul primario per
+impostazione predefinita, quindi la selezione del server **è** l'attesa.
+
+---
+
+### Nessuno qui ha chiesto `majority`: è il server che ha scelto bene
+
+> Il write concern del client è vuoto — l'applicazione non chiede niente. Il `w: majority` che
+> salva le 15 229 scritture arriva dal server come default **implicito**, e
+> `getDefaultRWConcern` lo dichiara.
+
+Fonte: [`app/docs/Sources.md`, M-041](../app/docs/Sources.md#m-041),
+[V-016](Sources.md#v-016), [registro operativo, nota 202](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché è la differenza fra una frase vera e una falsa che si somigliano
+molto. «Zero scritture perse» è misurato; «la mia applicazione usa `w: majority`» sarebbe
+inventato. E la versione corretta è più utile, perché è prevedibile: da MongoDB 5.0 il default
+implicito è `majority`, quindi chi non tocca niente è protetto — e chi ha impostato un default di
+cluster più debole, o chiede `w: 1` esplicitamente, vede l'altro numero
+([V-016](Sources.md#v-016): cento perse).
+
+---
+
+### Quando due requisiti legittimi non stanno nello stesso processo, il vincolo è la lezione
+
+> La cronaca dell'elezione si vede solo da **dentro** la rete Compose. Il comando che uccide il
+> primario si può dare solo da **fuori**, perché il container non ha il socket del demone — e non
+> deve averlo. Un processo solo non può fare questa scena.
+
+Fonte: [ADR-0095](Decision.md#adr-0095),
+[`app/docs/Sources.md`, M-043](../app/docs/Sources.md#m-043),
+[registro operativo, nota 195](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché la scorciatoia era a portata di mano — montare `/var/run/docker.sock`
+nel container — e sarebbe stata proiettata in sala, insegnando senza dirlo il modo più diretto di
+prendere la macchina che ospita. Dichiarare il verbo come una porta e darle due implementazioni,
+una che esegue e una che **annuncia e aspetta un umano**, ha lasciato intatti entrambi i vincoli e
+ha reso visibile quello che conta.
+
+---
+
+### Una banda larga scelta apposta prova più di una soglia stretta
+
+> La prova accetta un'interruzione fra 5 e 15 secondi, non i 10 019 ms misurati. Quello che deve
+> intercettare è l'errore di **categoria**: zero, cioè il guasto non è arrivato; sessanta secondi,
+> cioè l'elezione non è avvenuta.
+
+Fonte: [`app/docs/Sources.md`, M-043](../app/docs/Sources.md#m-043),
+[registro operativo, nota 201](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché è il rimedio a una malattia comune delle suite — la soglia stretta su
+un numero misurato una volta, che fallisce sul portatile di qualcun altro e viene spenta entro un
+mese. La distinzione utile è fra ciò che la suite deve **impedire** e ciò che il registro deve
+**ricordare**: il numero preciso vive nel registro delle misure, la prova sorveglia la categoria.
+
+---
+
+### Una finestra più larga dell'evento è una misura che non può smentire la propria tesi
+
+> Il dump dura mezzo secondo. Se lo misuri su venti, un crollo totale del throughput ti compare
+> come un calo del due per cento — e la tua tesi risulta confermata da un numero incapace di
+> smentirla.
+
+Fonte: [ADR-0101](Decision.md#adr-0101),
+[`app/docs/Sources.md`, M-045](../app/docs/Sources.md#m-045),
+[`app/docs/Sources.md`, M-047](../app/docs/Sources.md#m-047),
+[registro operativo, nota 204](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché è l'errore di misura più diffuso e il meno visibile — nessuno lo
+scopre, dato che il risultato conferma quello che si sperava. La domanda che lo previene sta in
+sette parole: *quale risultato smentirebbe la mia tesi?* Se nessuno lo può, la finestra è
+sbagliata, non lo strumento. Nell'applicazione la conseguenza è concreta: la fase di carico sotto
+dump non ha una durata, **finisce quando finisce il dump**.
+
+---
+
+### Il calo ha un segno, e chi conclude al posto del pubblico ha già perso
+
+> `ritmo prima 595/s · durante 692/s · calo -16.2%`. Il calo è negativo: il ritmo è **salito**. Il
+> rapporto scrive la percentuale con il segno e non scrive «il dump non ha impatto», che pure quel
+> giorno sarebbe stato vero.
+
+Fonte: [`app/docs/Sources.md`, M-047](../app/docs/Sources.md#m-047),
+[`app/docs/Sources.md`, M-046](../app/docs/Sources.md#m-046).
+
+**Perché una slide:** perché è la stessa disciplina che il talk rimprovera ai benchmark altrui,
+applicata al proprio. I numeri da leggere sono quelli assoluti accanto — 279 scritture durante il
+dump, tutte confermate, p95 da 66,3 a 68,7 ms — e la percentuale cambia a ogni giro. C'è anche una
+ragione **misurata** per cui il primario non se ne accorge: con `--readPreference=secondary` le
+letture del dump gli passano da +15 a **+0**.
+
+---
+
+### Il `build` riesce, e il container si ferma alla prima esecuzione
+
+> Copiare `mongodump` dall'immagine `mongo` dentro quella dell'applicazione **si costruisce senza
+> un avviso**. Poi esce con 127: `libgssapi_krb5.so.2: cannot open shared object file`.
+
+Fonte: [`app/docs/Sources.md`, M-044](../app/docs/Sources.md#m-044),
+[ADR-0100](Decision.md#adr-0100),
+[registro operativo, nota 203](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché una verifica che si ferma al «compila?» avrebbe concluso l'opposto, e
+il guasto sarebbe arrivato in sala. Cinque minuti di prova hanno prodotto un fatto invece di
+un'argomentazione, e la decisione che ne segue ha una simmetria che si difende da sé: gli strumenti
+restano **dove sono già**, dentro i nodi, e la scena li raggiunge da fuori.
+
+---
+
+### Non «perse»: mancano nella copia, e sono ancora nell'originale
+
+> `restore 3908 all'origine · 3802 nella copia · differenza 106`. I 106 non sono scritture perse:
+> sono i documenti arrivati **mentre la fotografia veniva scattata**. Nel database ci sono tutti.
+
+Fonte: [ADR-0102](Decision.md#adr-0102),
+[`app/docs/Sources.md`, M-047](../app/docs/Sources.md#m-047),
+[`app/docs/Sources.md`, M-024](../app/docs/Sources.md#m-024).
+
+**Perché una slide:** perché è il prezzo di non aver fermato il servizio, detto con un numero
+invece che con un aggettivo — e perché usare «perse», la parola dell'Atto II, proprio nel momento
+in cui la sala sta imparando la differenza sarebbe l'errore più costoso possibile. Da qui anche il
+rifiuto di restaurare **sopra** l'originale: i conteggi combacerebbero, e la differenza sparirebbe
+proprio perché il restore è riuscito.
+
+---
+
+### La pulizia va scritta per il cammino che fallisce
+
+> L'helper della prova chiamava `check_returncode()` prima di restituire l'output. Ma il nome della
+> collezione da cancellare lo annuncia la scena, sulla prima riga: sollevando prima, nessuno sapeva
+> più che cosa pulire — e la collezione era già piena.
+
+Fonte: [registro operativo, nota 206](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché il fallimento è **esattamente** il caso in cui la pulizia serve di
+più, ed è l'unico che di solito non si prova. La forma che funziona è banale una volta vista: un
+helper di prova non solleva, restituisce il codice di uscita insieme all'output, e l'asserzione
+viene dopo che il chiamante ha raccolto ciò che gli serve per rimettere a posto.
+
+---
+
+### Il balancer è acceso, ha fatto 1 153 giri, e non ha mai migrato niente
+
+> `balancerStatus` dice `mode: "full"` e **1 153 giri**. Il `changelog` del cluster, che conserva le
+> voci dal giorno dell'`addShard`, ha due fusioni e **zero** migrazioni: non una sola voce
+> `moveChunk`.
+
+Fonte: [`app/docs/Sources.md`, M-049](../app/docs/Sources.md#m-049),
+[ADR-0103](Decision.md#adr-0103),
+[ADR-0069](Decision.md#adr-0069).
+
+**Perché una slide:** perché è la risposta a «e il balancer quando si vede lavorare?», ed è una
+risposta che spiega invece di scusarsi. Con una chiave `{_id: "hashed"}` i documenti si sparpagliano
+**all'inserimento**: i due shard restano pari per costruzione, e il balancer non ha nessuno
+squilibrio da correggere. Lo zero non è un difetto del lab, è il comportamento corretto di una
+chiave scelta bene — e ha portato con sé la conseguenza più netta del task, un evento del dominio
+**rimosso** perché nessuno può emetterlo.
+
+---
+
+### Un evento che nessuno può emettere non è un campo vuoto: è una decisione
+
+> `ChunkMigrated` era nel design fin dal §6.3. È uscito dal dominio quando si è misurato che in
+> questo cluster non è mai avvenuta una migrazione. La guardia dei nomi scende da dieci a nove, e al
+> suo posto resta un commento che dice quando è uscito e con quale numero accanto.
+
+Fonte: [ADR-0103](Decision.md#adr-0103),
+[`app/docs/Sources.md`, M-049](../app/docs/Sources.md#m-049),
+[registro operativo, nota 208](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché la scelta alternativa — lasciare il nome nel codice «per quando
+servirà» — produce un campo che sembra funzionante e non lo è, e nessuno se ne accorge finché non
+serve davvero. Rimuoverlo costa il cambio di un elenco in una guardia, cioè costa **accorgersene**.
+È anche un cambio di ordine nelle domande: prima di chiedersi «come lo emetto», chiedersi «quante
+volte è successo finora».
+
+---
+
+### Una sola colonna non dimostra niente
+
+> ```
+> non sharded  carico-20260904-140333 non è distribuita · 5000 documenti su shard1rs
+> arrivati     shard1rs 2507 (50%) · shard2rs 2493 (50%)
+> ```
+> Lo stesso identico carico, due volte: una collezione che nessuno ha distribuito se lo prende
+> tutto, quella distribuita lo divide a metà.
+
+Fonte: [ADR-0106](Decision.md#adr-0106),
+[ADR-0107](Decision.md#adr-0107),
+[`app/docs/16`](../app/docs/16-la-chiave-di-shard-e-lo-stesso-carico-due-volte.md).
+
+**Perché una slide:** perché mostrare due colonne di numeri equilibrati non prova che lo sharding
+faccia qualcosa — serve accanto il caso in cui non lo fa. Costa quattro secondi di scaletta in più
+ed è l'unica forma in cui la scena dimostra la sua tesi. Da sola, la prima riga è anche la risposta
+alla domanda che il pubblico fa sempre: *cosa succede a una collezione che non ho distribuito?* Va
+tutta sullo shard primario.
+
+---
+
+### La riga di garanzia ha funzionato, e denunciava un difetto di disegno
+
+> `carico 4288 senza chiave · 4415 con chiave · non è lo stesso carico`. Due corse da sei secondi
+> l'una non scrivono lo stesso numero di documenti, perché il throughput non è lo stesso. Da lì il
+> limite della scena non è più una durata: è un conteggio.
+
+Fonte: [`app/docs/Sources.md`, M-052](../app/docs/Sources.md#m-052),
+[ADR-0107](Decision.md#adr-0107),
+[registro operativo, nota 209](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché nessuna prova unitaria poteva vederlo — i doppi scrivono esattamente
+quanto il copione chiede — e il fatto vive nel punto in cui un limite di tempo incontra due
+throughput diversi, cioè in nessuno dei due. La riga resta a schermo anche adesso che le due corse
+sono uguali per costruzione: **una garanzia che nessuno controlla è una speranza**, e il costo di
+tenerla è una riga.
+
+---
+
+### `SCONOSCIUTO` non è «non c'è»: è «non ho ancora guardato»
+
+> Un client PyMongo appena costruito non conosce nessun server: la scoperta avviene alla prima
+> operazione, non alla costruzione. L'ispettore leggeva quello stato e concludeva «non è uno sharded
+> cluster» — cioè leggeva il proprio non aver guardato, e negava un cluster acceso.
+
+Fonte: [`app/docs/Sources.md`, M-053](../app/docs/Sources.md#m-053),
+[ADR-0108](Decision.md#adr-0108),
+[`app/docs/Sources.md`, M-042](../app/docs/Sources.md#m-042).
+
+**Perché una slide:** perché è la distinzione che tutta l'architettura del dominio prende sul serio
+— «assenza di un'osservazione» contro «osservato assente» — colta nel momento in cui è stata
+violata, per la seconda volta, dal codice che l'aveva dichiarata. La correzione è un `ping`, e la
+parte da non sbagliare è la preferenza di lettura: `NEAREST`, perché un comando su `admin` aspetta
+un primario che su un mongos non esiste.
+
+---
+
+### La fixture preparava anche ciò che nessuno le aveva chiesto
+
+> Il difetto del client freddo era in produzione da due task, e la suite d'integrazione non poteva
+> vederlo: la fixture di sessione pulisce il database prima di consegnare il client, e la scoperta
+> avveniva come **effetto collaterale della pulizia**. Ogni prova partiva da un client caldo. Solo
+> la sala partiva da uno freddo.
+
+Fonte: [registro operativo, nota 210](registro-operativo-sviluppo.md),
+[`app/docs/Sources.md`, M-053](../app/docs/Sources.md#m-053).
+
+**Perché una slide:** perché è il modo più comune in cui una suite verde convive con un difetto
+riproducibile a mano in dieci secondi. Il primo istante di vita di un oggetto non è coperto da
+nessuna prova che riceva quell'oggetto già usato — e la correzione non è una fixture migliore, è una
+prova che si costruisce il proprio client apposta, con scritto accanto perché.
+
+---
+
+### Il seed diluiva lo squilibrio fino a farlo sparire
+
+> Misurata sui totali di `lab.ordini`, una corsa finita per l'**ottanta per cento** su un solo shard
+> risultava sbilanciata di **tre centesimi di punto**. I ventimila documenti del seed coprono
+> qualunque cosa faccia il carico. La scena misura gli arrivi: dopo meno prima.
+
+Fonte: [ADR-0106](Decision.md#adr-0106),
+[`app/docs/16`](../app/docs/16-la-chiave-di-shard-e-lo-stesso-carico-due-volte.md#perché-gli-arrivi-e-non-i-totali).
+
+**Perché una slide:** perché è la stessa trappola della finestra di misura più larga dell'evento, in
+un'altra forma: **una misura che non può smentire la tesi non la sta verificando**. Qui il numero
+sbagliato sarebbe stato un equilibrio perfetto mostrato mentre il carico andava tutto da una parte —
+cioè la conferma più convincente possibile della cosa falsa.
+
+---
+
+### `SINGLE_SHARD` e `SHARD_MERGE`, con le parole del server
+
+> ```
+> mirata    {"_id": 4242}          · SINGLE_SHARD · 1 shard
+> su tutti  {"citta": "Ancona"}    · SHARD_MERGE  · 2 shard
+> ```
+> Lo stadio va a schermo **verbatim**: sono le parole che chi guarda ritroverà in `explain()` la
+> prima volta che proverà da solo.
+
+Fonte: [`app/docs/Sources.md`, M-051](../app/docs/Sources.md#m-051),
+[ADR-0105](Decision.md#adr-0105).
+
+**Perché una slide:** perché è la differenza fra chiedere a **un** shard e chiedere a **tutti**,
+mostrata in due righe e senza spiegazioni — e perché tradurre lo stadio in un booleano significherebbe
+tenere aggiornato un dizionario al posto del server. Nota per chi presenta: l'ordine degli shard che
+il server restituisce **non è stabile**, e la scena li ordina apposta.
+
+---
+
+### Il numero non misurava il server, misurava il client
+
+> Stesso carico, stesso dataset, tre architetture. Lo standalone fa **1 712** scritture al secondo.
+> Si alza da una a quattro CPU il **solo** container dell'applicazione, e lo standalone fa
+> **2 334**: +40 %. Il replica set e il cluster si muovono del 3 % e del 9 %, cioè restano fermi.
+
+Fonte: [V-079](Sources.md#v-079),
+[`app/docs/Sources.md`, M-056](../app/docs/Sources.md#m-056),
+[ADR-0111](Decision.md#adr-0111).
+
+**Perché una slide:** perché è la lezione che il pubblico può portarsi a casa e usare lunedì. Non
+c'era niente nel riepilogo che denunciasse il problema — zero errori, zero ritentativi, latenze
+plausibili — e la verifica costa una corsa sola: si alza il limite del **solo** client e si guarda
+se le altre condizioni restano ferme. Se si muovono tutte, il sospetto è la macchina; se si muove
+una sola, il numero era del misuratore.
+
+---
+
+### Una mediana intatta con una coda quattro volte più lunga
+
+> `p50 2,8 ms → 2,8 ms` · `p99 40,6 ms → 11,0 ms`. La metà delle operazioni non si accorge di
+> niente. **Contesa dal lato di chi chiede, non lentezza dal lato di chi risponde.**
+
+Fonte: [`app/docs/Sources.md`, M-056](../app/docs/Sources.md#m-056),
+[V-079](Sources.md#v-079).
+
+**Perché una slide:** perché insegna a leggere due colonne che di solito si guardano separate.
+Chiunque abbia un cruscotto ha una mediana e un p99 davanti agli occhi ogni giorno; la coppia dice
+*dove* sta il collo di bottiglia, e il grafico della sola mediana non lo dirà mai.
+
+---
+
+### Il thread che soffre di più è il meno rappresentato
+
+> Con `maxPoolSize` a uno **in meno** del numero di scrittori, p50, p95 e p99 sono indistinguibili
+> dal caso sano. Solo il massimo dice qualcosa: **20 004 ms**, cioè un thread che ha aspettato per
+> tutta la corsa e non ha mai scritto. Se aspetta non scrive, e se non scrive non compare.
+
+Fonte: [V-080](Sources.md#v-080),
+[`app/docs/Sources.md`, M-054](../app/docs/Sources.md#m-054).
+
+**Perché una slide:** perché è controintuitivo e si dimostra in una riga: i percentili pesano le
+**operazioni**, non i thread. È anche la difesa del massimo, la statistica che tutti tolgono per
+prima dai cruscotti perché «è rumore» — ed è l'unica colonna che qui vede la fame.
+
+---
+
+### `j: true`: la perdita si azzera davvero, e costa un terzo
+
+> Senza giornale: **2** documenti confermati e spariti dopo un `SIGKILL`, ≈ 4 900 scritture/s.
+> Con `j: true`: **0** persi, ≈ 3 330 scritture/s. **−32 %.**
+
+Fonte: [V-075](Sources.md#v-075), [V-016](Sources.md#v-016),
+[ADR-0109](Decision.md#adr-0109).
+
+**Perché una slide:** perché le due metà stanno sulla stessa riga. È facile mostrare lo zero e
+tacere il prezzo, o mostrare il prezzo e tacere che il problema esiste davvero: un confronto che
+riporta solo la buona notizia non è un confronto. E il numero vero è −32 % solo dopo aver tolto
+l'avvio dell'interprete dal tempo a orologio — sui tempi lordi sembrava −23 %.
+
+---
+
+### «Può fare solo 6 chunk»
+
+> `analyzeShardKey` su `{stato: 1}` non risponde «è una chiave mediocre». Rifiuta: quella chiave
+> può produrre **sei** chunk, e sei chunk non si distribuiscono su niente. Una chiave a bassa
+> cardinalità non è lenta — è **inutilizzabile**, e il server lo dice prima che tu ci provi.
+
+Fonte: [V-081](Sources.md#v-081),
+[`02-architetture/sharded-cluster.md`](02-architetture/sharded-cluster.md#cosa-questa-pagina-non-dice).
+
+**Perché una slide:** perché la cardinalità della shard key è il primo errore che si fa, e questo è
+il modo più breve di spiegarla: non un consiglio, un rifiuto con un numero dentro.
+
+---
+
+### Il replica set legge più in fretta dello standalone, e non è un merito
+
+> Sotto lo stesso carico, mediana di lettura: replica set **2,0 ms**, standalone **3,4 ms**. Non
+> perché legga meglio — perché scrivendo cinque volte meno tiene i nodi molto meno occupati.
+
+Fonte: [V-079](Sources.md#v-079).
+
+**Perché una slide:** perché è il promemoria che in una misura di sistema nessuna colonna è
+indipendente dalle altre, e che il numero migliore della tabella può essere il sintomo del numero
+peggiore. Chi cita la riga delle letture senza quella delle scritture sta vendendo un vantaggio che
+non esiste.
+
+---
+
+### Un controllo che nessuno controlla è una firma in bianco
+
+> `RIGA_FONTI = re.compile(r"^\*\*Fonti:\*\* (.+)$", re.MULTILINE)` — `.` non attraversa il
+> newline. Un elenco di fonti che va a capo perde tutto ciò che sta sotto la prima riga, **in
+> silenzio**. Il difetto è emerso solo quando ha bocciato un file corretto: finché ha promosso
+> file rotti, nessuno poteva accorgersene.
+
+Fonte: [registro operativo, nota 217](registro-operativo-sviluppo.md),
+[`app/docs/17`](../app/docs/17-le-quattro-opzioni-e-i-debiti-di-misura.md#il-controllo-che-approvava-un-file-rotto).
+
+**Perché una slide:** perché è la stessa classe di rischio delle prove che passano per il motivo
+sbagliato, applicata all'automazione che dovrebbe proteggerci. Su centoundici ADR il buco ne
+toccava esattamente uno; per gli altri centodieci l'abitudine aveva funzionato **per caso**.
+
+---
+
+### Il ritardo di replica di un insieme sano vale diecimila millisecondi
+
+> Su un replica set sano e a riposo, il ritardo letto nel modo standard dichiara **10 000 ms**,
+> quantizzati al secondo. Chiesto al secondario invece che al primario, lo stesso ritardo diventa
+> **negativo**. Il ritardo vero di questo lab, misurato altrimenti, è ≈ **1,6 ms**.
+> Fonte: [V-084](Sources.md#v-084), [V-027](Sources.md#v-027).
+
+**Perché una slide:** perché è la metrica che tutti citano, e su un insieme in ottima salute produce
+il numero più allarmante della serata. Non misura il ritardo: misura la distanza fra l'ultima
+scrittura replicata e adesso, e a riposo non ci sono scritture da replicare. È il caso più puro di
+allarme falso strutturale — cresce quando il sistema **non ha niente da fare**. La pagina sul
+monitoraggio ha deciso di non mostrarla dal vivo e di dire perché
+([ADR-0112](Decision.md#adr-0112)).
+
+---
+
+### Il server dichiara 67 microsecondi, il client ne misura 2 800
+
+> Sotto lo stesso carico: `opLatencies.writes` lato server **67 µs**, p50 misurato dal client
+> **2,8 ms**. Un fattore quaranta. Nessuno dei due numeri è sbagliato: misurano due cose diverse, e
+> quella che l'utente subisce è la seconda.
+> Fonte: [V-083](Sources.md#v-083), [V-079](Sources.md#v-079).
+
+**Perché una slide:** perché il numero del server è quello che finisce sui cruscotti, ed è quello
+che assolve il database. La differenza è tutto ciò che sta fuori dal cronometro del server —
+attraversamento di rete, driver, attesa in coda lato client — cioè quasi tutta la latenza. Sullo
+stesso campo, sul primario di un replica set, il valore sale a **18 390 µs**: non è la stessa
+metrica più grande, è una metrica che **cambia significato** con l'architettura.
+
+---
+
+### Il pool dei ticket di scrittura non è 128, e non sta fermo
+
+> Il numero 128 circola come una costante di WiredTiger. Misurato dentro questi container, il pool
+> di scrittura sta fra **7 e 12**, e si muove da solo mentre il carico gira: nella 7.0 lo dimensiona
+> un controllore.
+> Fonte: [V-083](Sources.md#v-083).
+
+**Perché una slide:** perché è la premessa nascosta di ogni allarme scritto come «ticket disponibili
+sotto la soglia X». La soglia si sceglie rispetto a un totale che non è costante e che nessuno
+dichiara: l'allarme non misura la saturazione, misura quanto il controllore ha deciso di concedere
+in quel momento.
+
+---
+
+### `dataSize` non è spazio su disco: tre volte sui dati veri, zero sulla zavorra
+
+> Stessa istanza, stesso motore, stessa compressione. `lab.ordini`: `size`/`storageSize` = **3,06×**.
+> La collezione di carico: **0,97×** — l'archiviazione è più grande dei dati. La zavorra è base64 di
+> uno `shake_128`, cioè byte pseudocasuali, e i byte casuali non si comprimono.
+> Fonte: [V-087](Sources.md#v-087).
+
+**Perché una slide:** perché il rapporto di compressione non è una proprietà del database ma **dei
+dati**, e un solo numero medio su un database misto non dice quanto disco serve né quanto si sta
+risparmiando. Il corollario pratico costa poco e si dimentica sempre: si misura sulla collezione,
+non si stima sul database.
+
+---
+
+### Il ritorno di un'architettura si misura in secondi, non in aggettivi
+
+> 634 prove unitarie, **3,86 secondi**, con la variabile d'ambiente del client Docker puntata a un
+> socket che non esiste. La suite di integrazione, sulle stesse macchine, ne chiede **circa 110** e
+> undici container.
+> Fonte: [M-058](../app/docs/Sources.md#m-058).
+
+**Perché una slide:** perché «le dipendenze puntano verso l'interno» è una frase che nessuno può
+contestare e nessuno può verificare, mentre quattro secondi contro due minuti si contano. Ed è la
+differenza fra una suite che si esegue dopo ogni modifica e una che si esegue quando ci si ricorda —
+cioè fra una rete di sicurezza e un rituale.
+
+---
+
+### Un contratto copiato non è un contratto
+
+> Dodici verifiche scritte **una volta sola**, eseguite in due posti: dal doppio in memoria nella
+> suite veloce, dall'adattatore vero contro lo stack acceso. Alla prima esecuzione hanno trovato due
+> bugiardi, e il secondo era MongoDB.
+> Fonte: [`docs/06-sviluppo/tdd-e-doppi.md`](06-sviluppo/tdd-e-doppi.md),
+> [M-017](../app/docs/Sources.md#m-017), [M-022](../app/docs/Sources.md#m-022).
+
+**Perché una slide:** perché la tentazione è duplicare il corpo delle verifiche nei due file, e
+sembra innocua: sono identiche. Divergono al primo fallimento, quando qualcuno corregge la copia che
+ha davanti per farla passare e l'altra resta indietro **senza che niente diventi rosso**. Un doppio
+ben scritto è convincente, ed è precisamente per questo che serve qualcuno che lo interroghi con le
+stesse domande dell'originale.
+
+---
+
+### Una regola che nessuna prova esegue non è una regola: è un commento
+
+> «Dopo trenta secondi senza primario, smetti di ritentare» è rimasta una frase nel documento di
+> design per mesi, perché nessuno mette in una suite veloce una prova che aspetta mezzo minuto. Con
+> il tempo preso da una porta invece che dall'orologio di sistema, la stessa regola si verifica in
+> centesimi di secondo, con il valore atteso **esatto** invece che tollerante: sei letture; e con la
+> pazienza a 1001 ms, sette.
+> Fonte: [`docs/06-sviluppo/tdd-e-doppi.md`](06-sviluppo/tdd-e-doppi.md).
+
+**Perché una slide:** perché mostra che cosa compra davvero l'inversione delle dipendenze, in un
+caso in cui il guadagno non è teorico: non solo la prova diventa istantanea, ma diventa **più
+severa**. Un millisecondo di pazienza in più è un giro in più — cioè si verifica che la soglia
+scatti quando deve *e non prima*, distinzione che con un'attesa vera non sarebbe misurabile.
+
+---
+
+### Delle due cose che il write concern predefinito fa senza dirlo, quella cara è il disco
+
+> Un replica set senza arbitri conferma con `w: majority`, e `majority` accende **anche** la
+> sincronizzazione sul giornale, senza che nessuno l'abbia scritta. Tre corse identiche tranne che
+> per una cosa alla volta: a giornale costante la maggioranza costa **1,38×** di resa; a conferme
+> costanti il giornale costa **2,24×**. Insieme, 3,1×.
+> Fonte: [V-088](Sources.md#v-088), [S-077](Sources.md#s-077).
+
+**Perché una slide:** perché chi ottimizza un replica set lento comincia dal numero di secondari, e
+sta lavorando sul fattore piccolo. Le due variabili viaggiano incollate — il manuale lo dice in una
+riga sola, dentro una tabella — e chiunque confronti «con e senza maggioranza» in due corse
+attribuirà alla rete un costo che è quasi tutto del disco. È anche il caso di scuola di come si fa
+una misura: una variabile per volta, o il numero è giusto e la spiegazione è sbagliata.
+
+---
+
+### Il server non metteva in coda niente perché non gli veniva chiesto di andare abbastanza forte
+
+> Sotto carico saturo, il primario dichiarava code vuote e 10 ms cumulativi di attesa per un ticket.
+> Tolto il write concern predefinito, la stessa corsa fa il triplo delle scritture e l'attesa
+> cumulativa passa a **308 ms**: trenta volte tanto. Il collo di bottiglia non era WiredTiger, era
+> la conferma — e togliendola il collo si sposta di livello.
+> Fonte: [V-088](Sources.md#v-088), [V-083](Sources.md#v-083).
+
+**Perché una slide:** perché «le code sono vuote» è la conclusione che chiude un'indagine, e qui era
+vera e fuorviante insieme. Un sistema mostra il suo secondo limite solo dopo che si è tolto il
+primo; misurare a un solo punto di funzionamento significa fotografare quale limite era attivo quel
+giorno, e chiamarlo *il* limite.
+
+---
+
+### Non era «non eseguibile»: era «non chiedibile»
+
+> Un debito registrato diceva che la misura decisiva non si poteva fare. Verificato sul manuale, `w`
+> era un'opzione della stringa di connessione come `journal`, e il codice la portava al client da
+> tredici task. Mancava una parola sulla riga di comando: tre righe di codice, due minuti di misura.
+> Fonte: [ADR-0114](Decision.md#adr-0114), [S-076](Sources.md#s-076).
+
+**Perché una slide:** perché è il modo più comune in cui un debito tecnico si autoconserva. Scritto
+«non è possibile», nessuno lo riapre; scritto «manca l'opzione», qualcuno la aggiunge il giorno
+dopo. La parola scelta per registrare un limite decide quanto a lungo il limite resta lì, e il costo
+di sbagliarla non si vede mai nel momento in cui la si scrive.
+
+---
+
+### Per registrare una scena che chiede una seconda finestra, chi registra deve diventarla
+
+> L'applicazione, dentro la rete Compose, vede l'elezione ma non può provocarla: annuncia il comando
+> che uccide il primario e aspetta. Dal palco quel comando lo dà una persona con un secondo
+> terminale. Per registrare la scena — la stessa, senza varianti — lo strumento di registrazione ha
+> imparato a essere quella persona: esegue la riga annunciata, poi manda l'Invio. In quest'ordine, o
+> si registra un failover senza failover.
+> Fonte: [ADR-0115](Decision.md#adr-0115), [V-089](Sources.md#v-089).
+
+**Perché una slide:** perché mostra che cosa costa davvero la regola «la registrazione dev'essere lo
+stesso codice della scena dal vivo». La scorciatoia c'era ed era gratis: girare la scena dall'host,
+dove il guasto si dà da soli. Avrebbe prodotto un file con lo stesso nome e senza la cosa da
+guardare — il client dall'host non fa scoperta, e la cronaca dell'elezione semplicemente non esiste.
+Fedeltà e comodità qui puntano in direzioni opposte, e si vede solo se si sa dove guardare.
+
+---
+
+### La prima registrazione della scena è ripartita da capo dentro se stessa
+
+> La regia esegue le righe che cominciano con `docker compose `. Ma `make` fa l'eco della ricetta
+> prima di eseguirla, e la ricetta comincia con `docker compose `. Lo strumento ha eseguito l'eco, e
+> la scena è ripartita dentro se stessa. Si registra con `make -s`.
+> Fonte: [V-089](Sources.md#v-089), [ADR-0115](Decision.md#adr-0115).
+
+**Perché una slide:** perché è il difetto strutturale di ogni protocollo che viaggia sullo stesso
+canale del testo per gli umani — un prefisso non distingue chi parla. È la stessa famiglia della SQL
+injection e dell'iniezione di prompt, in una forma abbastanza piccola da stare in tre righe e
+abbastanza vera da essere costata una registrazione. Chi la vede qui la riconosce dove fa danni.
+
+---
+
+### Il p95 più basso è quello della fase in cui il database era morto
+
+> Nella scena del failover la fase «durante» dichiara 13 786 scritture, tutte confermate, con un p95
+> di 49,5 ms: **più basso** di quello della fase precedente. Non è un miglioramento. La fase dura
+> venticinque secondi, i primi dieci non contengono nessuna scrittura, e i quindici che restano
+> girano contro un primario appena eletto e ancora scarico.
+> Fonte: [V-089](Sources.md#v-089).
+
+**Perché una slide:** perché un percentile calcolato su una finestra che contiene un'interruzione
+non descrive il servizio: descrive chi è sopravvissuto alla finestra. Le richieste peggiori non sono
+lente, sono **assenti** — non hanno nemmeno cominciato — e un cruscotto che mostra solo latenze le
+conta zero volte. È il motivo per cui il numero che conta in quella scena non è un percentile ma
+un'interruzione: 10 019 millisecondi, e zero scritture perse.
+
+
+---
+
+### Il registratore diceva «uscita 7» e usciva 0
+
+> Lo strumento che registra le demo fa anche da seconda finestra: esegue il comando che uccide il
+> primario e poi manda l'Invio alla scena che lo aspettava. Con un comando uscito con **7** mandava
+> l'Invio lo stesso, scriveva `regia: … · uscita 7` su `stderr` e usciva **0**. Il `.cast` conteneva
+> un failover con zero millisecondi di interruzione e zero scritture perse: un failover perfetto,
+> mai avvenuto.
+> Fonte: [ADR-0117](Decision.md#adr-0117), rilievo della review di `codex` sulla PR #5.
+
+**Perché una slide:** perché una registrazione mutila è un problema visibile e una registrazione
+completa e falsa non lo è — e perché il sistema *lo stava già dicendo*. L'informazione c'era, su
+`stderr`, esatta; il codice di uscita, che è l'unica cosa che qualcuno legge davvero, diceva il
+contrario. Segnalare non è agire, e un difetto già descritto altrove nello stesso repository — il
+docstring dell'adattatore spiegava per esteso perché un guasto fallito e ignorato produce «un
+failover perfetto» — può ricomparire intatto dall'altra parte del confine fra l'applicazione e i
+suoi strumenti.
+
+
+---
+
+### Il tetto era scritto in due documenti e valeva per metà del codice
+
+> Due pagine promettevano che `--tetto` facesse «terminare la scena anche se il dump non torna
+> più». Il numero arrivava al carico e non allo strumento: con un tetto di **0,05 secondi** e un
+> dump piantato, la scena era ancora ferma dopo **quindici**, cioè trecento volte il tetto. Il
+> carico mollava puntuale; il thread che disegna restava dentro il ciclo, fermo su una lettura che
+> non tornava.
+> Fonte: [M-059](../app/docs/Sources.md#m-059), [ADR-0118](Decision.md#adr-0118).
+
+**Perché una slide:** perché è il modo più comune in cui una rete di sicurezza smette di esserlo —
+non viene tolta, viene **collegata a metà** — e perché la metà collegata è quella che si vede nei
+log. Un timeout che ferma il produttore e non il consumatore sembra funzionare in ogni prova che non
+lo metta alla prova. La domanda che smaschera la famiglia intera è una sola: *chi tiene in mano la
+risorsa che deve smettere?* Se non è chi ha il numero, il numero non serve.
+
+---
+
+### Il rimedio ovvio alzava `ValueError: generator already executing`
+
+> Per far scadere un tetto su un iteratore, la prima idea è un thread di guardia che allo scadere lo
+> chiuda. Non funziona: il consumatore è **dentro** il frame del generatore, fermo sulla lettura di
+> un tubo, e `close()` da un altro thread trova un generatore in esecuzione. Il dump resta vivo, il
+> ciclo resta dov'è. Nella stessa sonda il thread principale è uscito solo quando il guardiano ha
+> ucciso il **processo**.
+> Fonte: [M-059](../app/docs/Sources.md#m-059).
+
+**Perché una slide:** perché mostra in dieci righe la differenza fra annullare e sbloccare. Un
+iteratore fermo su una lettura bloccante non si annulla da fuori — nessun linguaggio con thread
+nativi lo permette senza cooperazione — e l'unica leva vera è la risorsa sottostante. È la stessa
+ragione per cui un `Thread` in Python non si può uccidere e un `Popen` sì, e la stessa ragione per
+cui i timeout seri nei client di rete chiudono il socket invece di «interrompere la funzione».
+
+---
+
+### Un container spento si vede; uno in pausa si scopre la volta dopo
+
+> Nella scena del failover, `rompe` e `ripara` erano due righe consecutive con in mezzo la fase più
+> lunga della scena. Un Ctrl-C dato al prompt — cioè il modo normale di abbandonare una scena che va
+> lunga — saltava la ripresa. Col modo che **sospende** invece di fermare, il container resta vivo,
+> tiene la sua memoria e non risponde a nessuno: non compare come spento da nessuna parte, e si
+> scopre la volta dopo, quando il replica set non elegge e non si capisce perché.
+> Fonte: [ADR-0119](Decision.md#adr-0119), rilievo della review di `codex` sulla PR #5.
+
+**Perché una slide:** perché il guasto peggiore non è quello più grave, è quello che non lascia
+tracce nel posto in cui si guarda. `docker compose ps` mostra «Up» per un container in pausa
+esattamente come per uno sano. E perché la correzione ha una forma che si porta via: il `try` si
+apre **dopo** ciò che rompe, non prima — un `finally` deve coprire ciò che è stato rotto, non ciò
+che non si è riusciti a rompere.

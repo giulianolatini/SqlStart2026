@@ -308,7 +308,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   handler lento non rallenta solo la UI: rallenta il driver, e falsa proprio le misure di
   failover che la demo vuole mostrare. Ulteriore avvertenza se si registrano i comandi: «The
   command documents published through this API are not copies.»
-- **Usata da:** ADR-0006, ADR-0019
+- **Usata da:** ADR-0006, ADR-0019, ADR-0085, ADR-0089, ADR-0096
 
 <a id="s-011"></a>
 ### S-011 — MongoDB Database Tools: `mongodump`
@@ -503,7 +503,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   avvertenza documentata sull'aggiornamento di `Live` da più thread, né in un senso né
   nell'altro. Se la domanda arriva dal pubblico, la risposta onesta è che la documentazione
   tace.
-- **Usata da:** ADR-0007, ADR-0019
+- **Usata da:** ADR-0007, ADR-0019, ADR-0085, ADR-0098
 
 <a id="s-019"></a>
 ### S-019 — Docker Docs: `docker compose up`
@@ -722,7 +722,11 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   compare né in `downloads.mongodb.org/current.json`, né fra i tag di `library/mongo`, né fra
   quelli di `mongodb/mongodb-community-server` [V-007](#v-007). Il changelog documenta il ramo
   di rilascio, non la disponibilità.
-- **Usata da:** ADR-0028
+- **Riletta il 2026-09-02** ([V-074](#v-074)): la sezione `## 8.0.30 Changelog` è ancora la prima
+  del documento e contiene ancora `SERVER-125742`. La correzione non è slittata a una patch
+  successiva, quindi il numero da attendere è rimasto quello. La seconda riserva regge identica: la
+  documentazione della 8.0.30 c'è, i binari continuano a non esserci.
+- **Usata da:** ADR-0028, ADR-0080
 
 ---
 
@@ -2190,7 +2194,7 @@ web:
   (`analyzeShardKey`), che il lab non usa e che sarebbe lo strumento giusto in un caso vero. Non è
   entrato nel materiale perché richiede un campione di query reali, che una demo con dati generati
   non ha.
-- **Usata da:** ADR-0064, ADR-0068
+- **Usata da:** ADR-0064, ADR-0068, ADR-0110
 
 <a id="s-068"></a>
 ### S-068 — Docker Docs: Use profiles with Compose
@@ -4303,7 +4307,7 @@ apre e si autentica. Una media su dieci giri di cui uno è il riscaldamento non 
   set è a riposo e la collezione di prova è vuota; sotto il carico della demo dell'applicazione i
   numeri saranno altri, e vanno rimisurati là invece che estrapolati da qui.
 - **Data:** 2026-08-31
-- **Usata da:** ADR-0043, ADR-0046
+- **Usata da:** ADR-0043, ADR-0046, ADR-0112
 
 ---
 
@@ -4485,7 +4489,7 @@ timeout da far scadere, e restano solo i millisecondi del voto.
   **secondario** — che non provoca nessuna elezione — non è cronometrato qui perché non ha niente
   da cronometrare.
 - **Data:** 2026-08-31
-- **Usata da:** ADR-0044, ADR-0046, ADR-0049, ADR-0050, ADR-0051
+- **Usata da:** ADR-0044, ADR-0046, ADR-0049, ADR-0050, ADR-0051, ADR-0096, ADR-0097
 
 ---
 
@@ -4654,7 +4658,7 @@ di quello che salva.
   misura: un set a due membri non è stato costruito, e la sua maggioranza sarebbe 2, cioè zero
   guasti tollerati in scrittura.
 - **Data:** 2026-09-01
-- **Usata da:** ADR-0045, ADR-0046, ADR-0051, ADR-0052
+- **Usata da:** ADR-0045, ADR-0046, ADR-0051, ADR-0052, ADR-0096, ADR-0097
 
 ---
 
@@ -8156,5 +8160,1437 @@ sh-seed exited with code 9
     questo laboratorio e non è stato provato.
 - **Data:** 2026-09-02
 - **Usata da:** ADR-0077
+
+---
+
+<a id="v-073"></a>
+### V-073 — Rimosso il worktree, la sessione che ci stava dentro resta agganciata al percorso e non può più fare niente
+
+- **Comandi:** `git worktree remove`, `git worktree list`, `git branch`, e gli strumenti di sessione
+  `EnterWorktree` / `ExitWorktree`
+- **Ambiente:** macOS 26.6.2 arm64, git 2.50.1 (Apple Git-155), sessione Claude Code avviata
+  isolata dentro `.claude/worktrees/feature-03-stack-sharded`
+- **Che cosa si voleva sapere:** non era una prova progettata, è un guasto capitato e poi
+  ricostruito. Chiusa e unita la PR #4, la pulizia prevista da [ADR-0056](Decision.md#adr-0056) è
+  stata eseguita dal checkout principale **mentre la sessione che aveva sviluppato il branch era
+  ancora viva dentro il worktree**. La domanda che ne è nata: che cosa succede a una sessione
+  isolata quando la directory a cui è agganciata sparisce, e come se ne esce.
+
+- **Esito, primo punto — la guardia sopravvive alla directory, e blocca tutto.** L'isolamento è
+  **stato della sessione**: un percorso assoluto registrato all'avvio, che nessun comando git
+  aggiorna. Rimosso il worktree, ogni comando di shell è stato rifiutato, compresi quelli che non
+  nominavano git e quelli che puntavano altrove:
+
+```
+This session is isolated in the worktree /…/.claude/worktrees/feature-03-stack-sharded,
+but this command's working directory resolved to the shared checkout
+(/…/.claude/worktrees/feature-04-app-python). Refusing to run it there
+```
+
+  Rifiutata anche ogni scrittura, con un invito impossibile da soddisfare:
+
+```
+This session is isolated in the worktree /…/feature-03-stack-sharded.
+Edit the worktree copy of this file instead of the shared-checkout path.
+```
+
+  Lo strumento di lettura ha continuato a funzionare. La sessione poteva guardare e non toccare.
+
+- **Esito, secondo punto — il rientro diretto nel worktree nuovo non funziona.** `EnterWorktree`
+  con il percorso del worktree appena creato è stato rifiutato due volte, per due ragioni diverse.
+  Finché la directory di lavoro era ripiegata sulla home dell'utente: `Cannot enter an existing
+  worktree: the current directory is not in a git repository`. Dopo che un `cd` riuscito l'aveva
+  portata dentro il worktree nuovo: `Cannot enter worktree: /…/feature-04-app-python is the current
+  working directory`. Non si può riagganciare rientrando: bisogna prima uscire.
+
+- **Esito, terzo punto — `ExitWorktree` in modalità `keep` sgancia, anche se non dovrebbe.** La sua
+  documentazione dichiara che fuori da una sessione aperta con `EnterWorktree` l'operazione è nulla.
+  L'isolamento ricevuto **all'avvio** conta come sessione aperta: il comando ha sganciato il pin e
+  riportato la sessione nel checkout principale, dopodiché git, la shell e la scrittura sono tornati
+  a funzionare, e `EnterWorktree` con `path:` ha agganciato il worktree nuovo al primo tentativo.
+
+```
+Exited worktree. Your work is preserved at /…/feature-03-stack-sharded
+on branch worktree-feature-03-stack-sharded.
+Session is now back in /…/SqlStart2026.
+```
+
+- **Riserva sul messaggio.** Le due cose che quella riga promette **non esistono**: la directory era
+  già stata cancellata, e il branch `worktree-feature-03-stack-sharded` non compare in `git branch`
+  né prima né dopo. Il messaggio è composto senza verificare, ed è innocuo purché non lo si segua:
+  non c'è nessun ramo di salvataggio da andare a cercare, e nessuno da cancellare.
+
+- **Che cosa non è stato provato:** se `ExitWorktree` sganci allo stesso modo una sessione il cui
+  worktree esiste ancora — qui la directory era già sparita. E se il blocco si presenti identico su
+  un sistema operativo diverso: la misura è di una macchina sola.
+
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0079
+
+---
+
+<a id="v-074"></a>
+### V-074 — Il primo appuntamento di ADR-0058: la 8.0.30 non è pubblicata, e il numero da aspettare non si è spostato
+
+- **Comandi:** `curl` sull'API dei tag di Docker Hub per `library/mongo` e per
+  `mongodb/mongodb-community-server`, filtrando **per nome esatto**; `curl` sul feed ufficiale dei
+  download (`https://downloads.mongodb.org/current.json`); `curl` sul changelog della serie 8.0
+  ([S-028](#s-028)) nella variante `.md`
+- **Ambiente:** macOS 26.6.2 arm64, curl 8.7.1, interrogazione del 2026-09-02 alle 23:10 CEST
+- **Che cosa si voleva sapere:** [ADR-0058](Decision.md#adr-0058) ha fissato **due date** per il
+  controllo che [ADR-0028](Decision.md#adr-0028) aveva lasciato condizionale. La prima cade
+  all'apertura di `feature/04` ([ADR-0078](Decision.md#adr-0078): vale l'evento, non la data
+  scritta), e va onorata prima di montare l'applicazione su una versione — ripinnare il giorno dopo
+  significherebbe rigirare le registrazioni. Domanda secca, la stessa di
+  [V-051](#v-051): la 8.0.30 esiste?
+
+- **Esito, primo canale — su Docker Hub non c'è.** Filtrando per nome esatto:
+
+```
+GET /v2/repositories/library/mongo/tags?page_size=100&name=8.0.30
+-> {"count": 0, "results": []}
+```
+
+  Il controllo che rende leggibile quello zero: la stessa interrogazione con `name=8.0.29` dà
+  `count: 7`. Il filtro funziona, quindi il conteggio nullo è un'assenza e non una domanda mal
+  posta. I tag mobili (`latest`, `8`) risultano aggiornati il **2026-08-31**, come alla verifica
+  precedente; `8.0` e `7.0.40` al 2026-08-18.
+
+- **Esito, secondo canale — il feed ufficiale è identico a ventiquattr'ore prima.** Le versioni
+  correnti per linea sono **8.3.8** (21/07/2026), **8.2.12** (26/06/2026), **8.0.29** (21/07/2026),
+  **7.0.40** (21/07/2026), 6.0.29, 5.0.34, 4.4.31 — tutte marcate `production_release`. La 7.0.40 è
+  ancora la punta della propria linea: la versione del lab non sta invecchiando mentre la si usa.
+
+- **Esito, terzo canale — quello che V-051 aveva lasciato scoperto.** ADR-0028 nominava anche
+  l'immagine `mongodb/mongodb-community-server`, che la verifica del 1º settembre non aveva
+  interrogato. Interrogata adesso, dà lo stesso zero — e dà anche la prova più forte di tutta la
+  verifica:
+
+```
+mongodb/mongodb-community-server, name=8.0.30 -> count: 0
+mongodb/mongodb-community-server, name=8.0.29 -> count: 164
+  fra cui  8.0.29-ubuntu2204-slim-20260902T071320Z
+           8.0.29-ubi9-slim-20260902T070906Z
+```
+
+  Quel canale ha ricostruito e ripubblicato le immagini **stamattina**, con la marca temporale nel
+  nome del tag, e ciò che ha ripubblicato è la **8.0.29**. Non è un canale fermo che tace: è un
+  canale attivo che oggi continua a non avere la 8.0.30.
+
+- **Esito, quarto punto — chiusa la riserva sul changelog.** V-051 dichiarava di non aver riletto il
+  changelog per verificare che la correzione fosse **ancora** attribuita alla 8.0.30 invece che
+  spostata a una patch successiva. Riletto ([S-028](#s-028)): la sezione `## 8.0.30 Changelog`
+  esiste, è la prima del documento, e contiene
+  [SERVER-125742](https://jira.mongodb.org/browse/SERVER-125742) «Remove the graceful exit for
+  kernel version 7.0.14 and above», cioè esattamente la correzione che ADR-0028 aspetta. Il numero
+  da attendere non si è spostato: la documentazione della 8.0.30 è pubblicata, i binari no.
+
+- **Conseguenza:** [ADR-0080](Decision.md#adr-0080). Il lab resta su 7.0.40, il primo dei due
+  appuntamenti di ADR-0058 è speso, e resta il secondo — il 16 settembre.
+- **Riserve:** il feed `current.json` elenca la versione corrente per linea, non tutte le patch
+  pubblicate; come per V-051, l'assenza da questi canali non è una prova formale che la 8.0.30 non
+  esista da nessuna parte, ma è il criterio che ADR-0028 si era dato, e adesso copre tutti e tre i
+  canali che nominava. Il changelog è documentazione, non un annuncio di rilascio: dice che cosa
+  conterrà la 8.0.30, non quando esce, e non c'è in quella pagina alcuna data prevista. Non è stato
+  chiesto a MongoDB se e quando la pubblicheranno — nessun canale del repository lo permette senza
+  aprire un contatto, e non è previsto.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0080
+
+---
+
+<a id="v-075"></a>
+### V-075 — `j: true` sullo standalone: la perdita si azzera davvero, e costa fra il 32 % e il 45 %
+
+- **Comandi:** dalla radice del repository, con lo stack 01 acceso.
+
+```
+make app-workload TARGET=standalone ARGS="--writes 5000 --writers 8 --readers 0 --sink null --no-journal"
+make app-workload TARGET=standalone ARGS="--writes 5000 --writers 8 --readers 0 --sink null --journal"
+make app-workload TARGET=standalone ARGS="--writes 1 --writers 1 --readers 0 --sink null"
+```
+
+  e, per la durabilità, un carico a scadenza interrotto da un `SIGKILL` al container a otto
+  secondi dall'avvio, seguito dal conteggio dei sopravvissuti:
+
+```
+make app-workload TARGET=standalone DOVE=host ARGS="--duration 25 --writers 1 --readers 0 --sink null --journal"
+docker kill -s KILL mongo-standalone
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker Desktop, MongoDB 7.0.40, stack 01, applicazione
+  `mongolab` 0.1.0. Il container `mongo-standalone` ha `cpus: 1.0` e `mem_limit: 1024m`; il
+  container dell'applicazione `cpus: 1.0` e `mem_limit: 512m`.
+- **Che cosa si voleva sapere:** [V-016](#v-016) ha misurato **cento scritture confermate e
+  sparite** dopo un `SIGKILL`, e ha chiuso con una riserva esplicita: «non è stato provato lo
+  stesso esperimento con `j: true`, che secondo [S-035](#s-035) dovrebbe azzerare la perdita al
+  prezzo della velocità: è la misura naturale da aggiungere quando l'applicazione Python
+  (`feature/04`) potrà farla sotto carico controllato». L'applicazione adesso c'è, e
+  [ADR-0109](Decision.md#adr-0109) le ha dato l'interruttore. Le due metà della riserva —
+  l'azzeramento **e** il prezzo — si misurano tutte e due, perché un confronto che riporta solo la
+  buona notizia non è un confronto.
+
+- **Esito, prima metà — il prezzo.** Cinquemila scritture con otto scrittori, tre corse per parte,
+  latenze in millisecondi e durata a orologio:
+
+| | p50 | p95 | durata |
+|---|---|---|---|
+| `--no-journal` | 1,5 · 1,5 · 1,7 | 3,2 · 3,3 · 3,9 | 1,79 · 1,70 · 1,68 s |
+| `--journal` | 2,3 · 2,3 · 2,5 | 4,7 · 3,8 · 6,6 | 2,19 · 2,22 · 2,19 s |
+
+  La durata a orologio contiene l'avvio dell'interprete, che è un costo fisso e non va attribuito
+  al giornale: misurato a parte con una scrittura sola, vale 0,78 · 0,68 · 0,67 s. Al netto restano
+  ≈ 1,02 s contro ≈ 1,50 s, cioè **≈ 4 900 scritture/s contro ≈ 3 330/s: −32 %**.
+
+- **Esito, seconda metà — la perdita.** Uno scrittore, carico a scadenza, `SIGKILL` al container
+  dopo otto secondi, poi il conteggio dei documenti sopravvissuti e dell'`_id` più alto:
+
+| | scritture | confermate | sopravvissuti | `_id` massimo | **confermate e perse** | ritmo |
+|---|---|---|---|---|---|---|
+| `--no-journal` | 14 273 | 14 272 | 14 270 | 14269 | **2** | ≈ 1 784/s |
+| `--journal` | 7 848 | 7 847 | 7 847 | 7846 | **0** | ≈ 981/s |
+
+  `j: true` azzera la perdita, come [S-035](#s-035) prometteva. Con un solo scrittore il prezzo
+  sale a **−45 %**, più del −32 % misurato con otto: il group commit ammortizza il `fsync` fra più
+  scrittori concorrenti, e chi scrive da solo se lo paga tutto.
+
+- **Esito, terzo punto — lo stato del container e il ricovero.** Entrambe le volte
+  `Status=exited OOMKilled=false ExitCode=137 RestartCount=0`, che è la stessa lettura di
+  [V-016](#v-016) e [V-017](#v-017). Al riavvio il log dichiara il ricovero:
+
+```
+{"s":"W","c":"STORAGE","id":22302,"ctx":"initandlisten","msg":"Recovering data from the last clean checkpoint."}
+... recovery log replay has successfully finished and ran for 184 milliseconds
+... recovery rollback to stable ... 0 milliseconds
+... recovery checkpoint ... 47 milliseconds
+```
+
+- **Che cosa questa misura toglie a V-016.** V-016 contava gli ack leggendo un file su cui
+  `mongosh` stampava, e la sua riserva diceva che una pipe può bufferizzare: il numero di ack
+  registrati poteva essere **minore** di quelli davvero ricevuti, quindi la perdita misurata era un
+  **minimo**. Qui gli ack li conta il processo che li riceve — `Riepilogo.documenti_confermati` è la
+  somma dei `WriteSucceeded`, cioè delle risposte del server già arrivate al chiamante — e quella
+  riserva cade. Il numero è la perdita, non un suo minimo.
+- **Riserve:** `SIGKILL` uccide il **processo**, non l'host: quello che ha già raggiunto la page
+  cache del sistema operativo sopravvive comunque. Questa misura riguarda il buffer in-processo di
+  WiredTiger, non un blackout — un'interruzione di corrente perderebbe di più, e non è stata
+  provata perché su un portatile non si prova. Questo spiega anche la distanza fra le **2** perse
+  qui e le **100** di V-016: scrittore diverso, ritmo diverso, una prova sola per parte, e la
+  finestra è larga quanto il tempo che passa fra due checkpoint — non è una costante di MongoDB.
+  Le due prove di durabilità sono una per parte: la differenza fra 0 e 2 è netta nel verso, non
+  nella cifra. Il conteggio dei sopravvissuti si fida dell'`_id` progressivo che il generatore
+  assegna: regge perché nessuna scrittura è fallita se non l'ultima, quella interrotta dal kill.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0109
+
+---
+
+<a id="v-076"></a>
+### V-076 — `retryWrites=false` durante un failover vero: il prezzo non è la perdita, è l'incertezza
+
+- **Comandi:** dentro la rete Compose, guidando la scena come fa la prova d'integrazione del
+  Task 13 — è l'unica disposizione in cui il client vede la topologia e qualcuno può fermare un
+  nodo ([M-019](../app/docs/Sources.md#m-019)):
+
+```
+mongolab demo failover --target rs --sink plain --carico 10 --elezione 25 --recupero 15 --retry-writes
+mongolab demo failover --target rs --sink plain --carico 10 --elezione 25 --recupero 15 --no-retry-writes
+```
+
+  `mongo-rs-1` viene ucciso e poi riavviato quando la scena lo annuncia; il replica set viene
+  rimesso in piedi fra una corsa e l'altra.
+- **Ambiente:** stack 02 con tre membri, MongoDB 7.0.40, `defaultWriteConcern {w: "majority"}`
+  implicita, `writeConcernMajorityJournalDefault: true`, tre membri con un voto e
+  `secondaryDelaySecs: 0`.
+- **Che cosa si voleva sapere:** «cosa questa pagina non dice» di
+  [`replica-set.md`](02-architetture/replica-set.md) dichiarava lo scoperto così: «non prova la
+  perdita con `retryWrites=false`. È la misura naturale da aggiungere accanto a
+  [V-033](#v-033): mostrerebbe che cosa vede un'applicazione senza la rete di sicurezza del
+  driver».
+
+- **Esito — due corse per parte:**
+
+| | interruzione | perse | confermate | ritrovate | **non confermate** | avvicendamento |
+|---|---|---|---|---|---|---|
+| `--retry-writes` | 10 021 ms | 0 | 28 802 | 28 802 | **0** | rs-1 → rs-3 |
+| `--retry-writes` | 10 017 ms | 0 | 30 177 | 30 177 | **0** | — |
+| `--no-retry-writes` | 10 016 ms | 0 | 30 421 | 30 429 | **8** | rs-1 → rs-2 |
+| `--no-retry-writes` | 10 010 ms | 0 | 30 739 | 30 740 | **1** | — |
+
+- **Il debito chiedeva la parola sbagliata.** Chiedeva «la perdita», e la perdita è **zero da
+  entrambe le parti**: `w: "majority"` fa il suo mestiere, e nessuna scrittura confermata sparisce
+  nemmeno senza i tentativi del driver. Quello che cambia è l'altra colonna: **scritture arrivate
+  al database il cui ack non è mai tornato al chiamante**. Otto in una corsa, una nell'altra. Senza
+  i tentativi automatici l'applicazione non sa se quelle scritture ci sono, e se le riprova a mano
+  senza una chiave di idempotenza le duplica.
+- **L'interruzione non cambia.** ~10 s da entrambe le parti: `retryWrites` non accorcia l'elezione,
+  non la allunga, e non ha niente a che vedere con quanto dura il buco. Compra solo il fatto che il
+  buco sia trasparente al chiamante.
+- **Dove atterra questa distinzione.** Esattamente sulla differenza che il dominio
+  dell'applicazione aveva già scritto e che finora nessuna misura aveva riempito: `Bilancio`
+  separa «scritture perse» da «scritture non confermate» proprio perché sono due cose diverse.
+  Questa è la misura in cui la seconda colonna è l'unica che si muove.
+- **Riserve:** due corse per parte, su un lab dove l'elezione dura una decina di secondi perché i
+  membri sono tre container sullo stesso portatile. Il numero di scritture non confermate dipende
+  da quante ne stavano in volo nell'istante dell'interruzione, cioè dal ritmo: **non è una
+  costante**, e infatti fra le due corse va da 8 a 1. Ciò che si trasferisce è che il numero sia
+  diverso da zero solo da una parte. Le scritture «ritrovate» si contano rileggendo la collezione
+  a scena finita: se una scrittura fosse arrivata **dopo** quella rilettura non sarebbe contata, e
+  la finestra è chiusa dal recupero della scena, non da una garanzia.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0109
+
+---
+
+<a id="v-077"></a>
+### V-077 — `maxStalenessSeconds`: il minimo è 90 s, e in questo lab non può escludere nessuno
+
+- **Comandi:** dentro la rete Compose, contro lo stack 02:
+
+```
+mongolab workload --target rs --writers 0 --readers 4 --duration 8 --sink plain --max-staleness 30
+mongolab workload --target rs --writers 0 --readers 4 --duration 8 --sink plain --max-staleness 90
+```
+
+  più `replSetGetStatus` per il ritardo dichiarato dal server, e venti letture con la stessa
+  preferenza per contare **quale nodo** ha risposto.
+- **Ambiente:** stack 02, tre membri, MongoDB 7.0.40, `lab.ordini` con 50 000 documenti.
+- **Che cosa si voleva sapere:** «cosa questa pagina non dice» di
+  [`replica-set.md`](02-architetture/replica-set.md) dichiarava: «non usa `maxStalenessSeconds`. Il
+  manuale lo indica come rimedio alla lettura di dati vecchi ([S-058](#s-058)); qui non è stato né
+  usato né misurato».
+
+- **Esito, primo punto — sotto i 90 secondi non si legge, e si scopre subito.** Con
+  `--max-staleness 30`: **219 691 letture, 0 riuscite, 219 691 fallite**. Non un timeout di
+  selezione dopo trenta secondi di attesa: un rifiuto immediato, sollevato **per ogni operazione**,
+  con questo testo:
+
+```
+ConfigurationError: maxStalenessSeconds must be at least 90. maxStalenessSeconds is set to 30.
+```
+
+  Il novanta non è arbitrario: il manuale lo lega all'intervallo di heartbeat più il periodo di
+  aggiornamento dell'oplog, e sotto quella soglia la misura non sarebbe distinguibile dal rumore
+  del monitoraggio.
+
+- **Esito, secondo punto — a 90 funziona, e legge dove deve.** Con `--max-staleness 90` le letture
+  riescono. Venti letture di controllo si dividono **9 e 11** fra `mongo-rs-2` e `mongo-rs-3`, e
+  **mai** il primario — che è il comportamento voluto: la preferenza costruita è `secondary` e non
+  `secondaryPreferred`, perché un ripiego sul primario nasconderebbe una selezione fallita invece
+  di mostrarla ([ADR-0109](Decision.md#adr-0109)).
+
+- **Esito, terzo punto — a riposo non c'è staleness da escludere.** `replSetGetStatus` dà un
+  ritardo di **+0,000 s** su entrambi i secondari. Nessun nodo è mai vecchio, quindi il filtro non
+  ha nulla su cui mordere.
+
+- **Esito, quarto punto, e qui sta la notizia — un nodo fermato non è «vecchio», è «ignoto».**
+  Messo in pausa `mongo-rs-3`, il server lo dichiara `(not reachable/healthy)` con un ritardo
+  **nominale** di +1 788 528 200 s — cioè l'aritmetica fra un istante vero e uno zero, non una
+  misura. Il driver, che è chi decide, non lo classifica come «stale»: lo classifica come
+  **`Unknown`**. E un nodo `Unknown` viene escluso dalla selezione **prima** che la staleness venga
+  presa in considerazione. Tutte e venti le letture vanno a `mongo-rs-2`.
+- **Conclusione, e va scritta per intero.** In questo lab `maxStalenessSeconds` **non può escludere
+  niente**, mai: tutto ciò che ferma la replica ferma anche l'heartbeat, e chi non risponde è già
+  fuori per un'altra ragione. Per esercitarlo servirebbe un membro che risponde a `hello` mentre
+  **non** applica l'oplog — un membro ritardato (`secondaryDelaySecs`) o un failpoint di prova.
+  Questo stack non ha né l'uno né l'altro, e aggiungerne uno cambierebbe l'architettura che la
+  pagina descrive.
+- **Riserve:** la divisione 9/11 fra i due secondari è su venti letture: dice che la preferenza
+  distribuisce, non che distribuisca uniformemente. Il rifiuto sotto i 90 s è di pymongo, non del
+  server: è il driver a rifiutarsi di comporre la preferenza, quindi il numero non arriva mai a
+  MongoDB e questa misura non dice che cosa farebbe il server se ci arrivasse. La classificazione
+  `Unknown` è quella che riporta la descrizione della topologia lato client; non è stato chiesto al
+  server come classifichi lui il nodo in pausa.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0109
+
+---
+
+<a id="v-078"></a>
+### V-078 — Con un membro in pausa il replica set scrive ventisette volte più piano, e il perché resta aperto
+
+- **Comandi:** lo stesso comando due volte, con l'unica differenza dello stato di `mongo-rs-3`:
+
+```
+docker pause mongo-rs-3
+mongolab workload --target rs --writers 4 --readers 0 --duration 25 --sink plain
+docker unpause mongo-rs-3
+mongolab workload --target rs --writers 4 --readers 0 --duration 25 --sink plain
+```
+
+- **Ambiente:** stack 02, tre membri, `defaultWriteConcern {w: "majority"}` implicita,
+  `writeConcernMajorityJournalDefault: true`.
+- **Che cosa si voleva sapere:** niente. Questa misura è **capitata** mentre si preparava
+  [V-077](#v-077), e si registra perché un fattore ventisette non si lascia in una nota di
+  passaggio.
+
+- **Esito:**
+
+| | scritture in 25 s | p50 | p95 | max |
+|---|---|---|---|---|
+| `mongo-rs-3` in pausa | **466** | 3,7 ms | 1 999,9 ms | 8 293,3 ms |
+| tutti e tre su | **12 829** | 4,2 ms | 41,2 ms | 91,3 ms |
+
+  Fattore **≈ 27,5**, con il p50 quasi identico: la mediana non si accorge di niente, e tutto il
+  danno sta nella coda.
+- **Quello che si può dire.** Con `w: "majority"` su tre membri la maggioranza è due. Con tre
+  membri su, il primario può contare su **due** secondari e prende il più pronto dei due; con uno
+  in pausa la maggioranza dipende da **un** nodo solo, senza alternative: ogni esitazione di quel
+  nodo diventa un'attesa di tutti. La forma del danno — mediana intatta, coda che esplode — è
+  compatibile con questa lettura.
+- **Quello che non si può dire.** Che sia **la** spiegazione. Il p95 a 1 999,9 ms è sospettosamente
+  vicino a un valore tondo di due secondi, e un valore tondo di solito è un intervallo configurato,
+  non un fenomeno: non è stato identificato quale. `docker pause` congela i processi con `SIGSTOP`,
+  che non è un guasto realistico — un nodo spento risponde con un rifiuto immediato, un nodo
+  congelato non risponde affatto, e il driver deve aspettare i propri timeout per accorgersene.
+  **Il meccanismo non è stato diagnosticato**, e questa voce esiste per dire che il numero c'è e la
+  spiegazione no.
+- **Riserve:** una corsa per parte. Venticinque secondi sono pochi per un fenomeno di coda. Il
+  numero dipende da `docker pause`, cioè da un modo di rompere che non ha equivalente in
+  produzione: con un nodo davvero spento il risultato sarebbe probabilmente diverso, e non è stato
+  provato.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0111 — non come base del confronto, ma come sua riserva: è la prova che un
+  dettaglio di stato vale un ordine di grandezza
+
+---
+
+<a id="v-079"></a>
+### V-079 — Le tre architetture sotto la stessa riga: 6,2× fra standalone e replica set, e il ferro non è lo stesso
+
+- **Comandi:** la riga di carico del design, identica per tutti e tre, **da dentro la rete
+  Compose**:
+
+```
+make app-workload TARGET=standalone ARGS="--writers 8 --readers 4 --doc-size 2k --duration 30 --sink null"
+make app-workload TARGET=rs        ARGS="--writers 8 --readers 4 --doc-size 2k --duration 30 --sink null"
+make app-workload TARGET=sharded   ARGS="--writers 8 --readers 4 --doc-size 2k --duration 30 --sink null"
+```
+
+  Tre corse per architettura. Poi due controlli: lo standalone con `--journal`, e tutte e tre con
+  `CPU_APP=4.0 MEMORIA_APP=1024m` davanti al `make`.
+- **Ambiente:** macOS 26.6.2 arm64, Docker Desktop, MongoDB 7.0.40, i tre stack accesi
+  contemporaneamente, applicazione `mongolab` 0.1.0.
+- **Perché da dentro la rete e non dall'host.** Dall'host il bersaglio `rs` è una **connessione
+  diretta** a `localhost:27021`, cioè a un nodo solo ([M-019](../app/docs/Sources.md#m-019)):
+  misurarlo così vorrebbe dire chiamare «replica set» un singolo `mongod` e pubblicare un confronto
+  che non confronta niente. Da dentro la rete tutte e tre vedono la topologia vera e pagano la
+  stessa latenza di bridge locale.
+- **Che cosa si voleva sapere:** è il debito che **tutte e tre** le pagine di
+  [`02-architetture`](02-architetture/standalone.md) si erano intestate con la stessa frase: «il
+  confronto ha senso sotto carico controllato, cioè con l'applicazione Python di `feature/04`, e
+  prima di allora sarebbe aria».
+
+- **Esito, primo punto — il lab così com'è.** Tre corse per riga; scritture al secondo, latenze in
+  millisecondi:
+
+| | scritture/s | p50 | p95 | p99 | letture in 30 s | p50 lett. | p95 lett. |
+|---|---|---|---|---|---|---|---|
+| standalone | 1 712 · 1 677 · 1 656 | 2,8 | 12,3 · 12,9 · 13,9 | ≈ 40,6 | 23 087 · 22 389 · 21 808 | 3,4 | 26,8 |
+| sharded | 427,7 · 426,4 · 419,2 | 5,5 | ≈ 84 | ≈ 95 | 12 652 · 13 210 · 12 858 | 2,7 | 67,8 |
+| replica set | 365,8 · 358,9 · 362,9 | 9,0 | ≈ 75 | ≈ 88 | 20 283 · 20 687 · 21 131 | 2,0 | 50,5 |
+
+  Zero fallite e zero ritentate ovunque: nessuno dei tre stack è stato messo in difficoltà, sono
+  stati messi sotto carico.
+
+- **Esito, secondo punto — il primo numero era sbagliato, e il controllo lo dice.** Rifatte le tre
+  righe con **quattro** CPU al container dell'applicazione invece di una:
+
+| | scritture/s | variazione | p50 | p95 | p99 | letture |
+|---|---|---|---|---|---|---|
+| standalone | 2 333,8 | **+40 %** | 2,8 | 7,4 | 11,0 | 31 065 |
+| sharded | 462,4 | +9 % | 5,2 | 77,2 | 98,5 | 13 505 |
+| replica set | 374,9 | +3 % | 9,0 | 72,8 | 87,5 | 21 305 |
+
+  **Il numero dello standalone nel lab predefinito non misurava lo standalone: misurava il client.**
+  Il container dell'applicazione ha `cpus: 1.0`, e a quel ritmo l'interprete Python satura la
+  propria CPU prima che il server saturi la sua. Gli altri due no — un +3 % e un +9 % sono rumore:
+  quelle due architetture erano già limitate dal server. I rapporti citabili sono quelli della
+  seconda tabella: **standalone / replica set = 6,2×**, **standalone / sharded = 5,0×**,
+  **sharded / replica set = 1,23×**.
+
+- **Esito, terzo punto — la semantica dell'ack non è la stessa, e senza dirlo si misura la
+  durabilità chiamandola velocità.** Interrogati i tre bersagli:
+
+| | write concern effettiva |
+|---|---|
+| standalone | `getDefaultRWConcern` non è supportato; il client dichiara `{}`, cioè **`w: 1` senza giornale** |
+| replica set | `{w: "majority", wtimeout: 0}`, **implicita**, con `writeConcernMajorityJournalDefault: true` |
+| sharded, via mongos | `{w: "majority", wtimeout: 0}`, **implicita** |
+
+  Il controllo che rimette lo standalone almeno sulla stessa soglia di disco — `--journal`, due
+  corse — dà **1 237,0 e 1 176,7 scritture/s**, p50 3,9–4,0, p95 31,4–32,5. Cioè: quasi un terzo
+  della distanza fra standalone e replica set è il prezzo del giornale, non della replica.
+
+- **Esito, quarto punto — perché lo sharded batte il replica set, e perché non conta.** Chiesto al
+  cluster com'è fatto:
+
+```
+shard1rs   shard1rs/shard1a:27017
+shard2rs   shard2rs/shard2a:27017
+lab        primary: shard1rs   partitioned: False
+```
+
+  **Un membro per shard.** `w: "majority"` su un insieme di un membro solo è soddisfatta dal
+  primario da solo, senza andata e ritorno in rete — mentre sul replica set la maggioranza sono due
+  nodi su tre. E la collezione di carico **non è distribuita**: `lab` non è partizionato, quindi
+  tutte le scritture vanno su `shard1rs` e `shard2rs` sta a guardare. Il numero dello sharded non
+  dice «lo sharding è più veloce della replica»: dice che in questo lab lo shard che lavora **non è
+  replicato**, e paga un router al posto di un secondario.
+
+- **Esito, quinto punto — le letture dicono una cosa che non è dell'architettura.** Il p50 di
+  lettura del replica set (**2,0 ms**) è **migliore** di quello dello standalone (**3,4 ms**). Non
+  perché un replica set legga meglio di un `mongod` solo: perché le sue scritture, cinque volte più
+  lente, lasciano il nodo molto meno occupato. Quella colonna misura quanto il carico di scrittura
+  ha saturato il server, non come l'architettura legge.
+
+- **La riserva strutturale: le tre architetture non hanno lo stesso ferro, per costruzione.**
+
+| stack | servizio | `cpus` | `mem_limit` |
+|---|---|---|---|
+| 01 | `mongod` | 1.0 | 1024m |
+| 02 | ogni membro (`CPU_MEMBRO`) | 0.75 | 768m |
+| 03 | ogni shard (`CPU_SHARD`) | 0.5 | 640m |
+| 03 | `mongos` (`CPU_MONGOS`) | 0.5 | 256m |
+| 03 | ogni config server (`CPU_CFG`) | 0.5 | 512m |
+| tutti | `app` (`CPU_APP`) | 1.0 | 512m |
+
+  Il budget è stato distribuito perché il portatile potesse tenere accesi tutti e tre gli stack
+  insieme, il che è la ragione per cui il lab esiste. Ma vuol dire che il percorso di scrittura
+  dello standalone ha **una CPU intera**, quello del replica set 0,75 + 0,75, e quello dello
+  sharded 0,5 di router più 0,5 di shard. **Una parte della distanza è la scelta di Compose, non
+  l'architettura**, e non è separabile senza cambiare il lab.
+- **Riserve:** tre corse per riga nel lab predefinito, una per riga nel controllo a quattro CPU. Un
+  lab su un portatile non è un datacenter: qui la rete è un bridge locale sulla stessa macchina, e
+  il costo della maggioranza — che in produzione è dominato dalla rete — è qui dominato dalla CPU.
+  La forma dei fenomeni si trasferisce, le cifre no. Il carico è un `insert_many` di documenti da
+  2 KB generati in modo deterministico: non è un carico applicativo, non ci sono indici secondari,
+  non ci sono aggiornamenti né letture per chiave. La collezione di carico è nuova a ogni corsa,
+  quindi nessuna misura vede una collezione grande. Il controllo a quattro CPU alza solo il
+  **client**: il limite del server non è parametrizzato nello stack 01 e non è stato toccato, quindi
+  non si sa a quale ritmo lo standalone saturerebbe davvero.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0109, ADR-0111, ADR-0112
+
+---
+
+<a id="v-080"></a>
+### V-080 — `maxPoolSize`: la resa non si muove, i percentili migliorano, e il massimo è un gradino
+
+- **Comandi:** scrittori fermi a 32, client con quattro CPU, e solo il pool che cambia:
+
+```
+CPU_APP=4.0 MEMORIA_APP=1024m make app-workload TARGET=standalone \
+  ARGS="--writers 32 --readers 0 --doc-size 2k --duration 20 --sink null --max-pool-size N"
+```
+
+  con `N` fra 2 e 33, più una corsa senza `--max-pool-size` (il predefinito di pymongo è 100).
+- **Ambiente:** stack 01, MongoDB 7.0.40, `mongod` con `cpus: 1.0`.
+- **Che cosa si voleva sapere:** il design chiama la saturazione del pool «materiale didattico» e il
+  Task 5 aveva lasciato solo il gancio — `scrittori` era il parametro che sarebbe dovuto salire
+  sopra `maxPoolSize`, e il docstring di `WorkloadRunner` diceva «qui la saturazione non si misura e
+  non si può». [ADR-0109](Decision.md#adr-0109) ha aggiunto l'altra manopola, e adesso si può.
+
+- **Esito:**
+
+| `maxPoolSize` | scritture/s | p50 | p95 | p99 | **max** |
+|---|---|---|---|---|---|
+| 2 | 3 613 | 0,5 | 0,8 | 1,5 | **20 004,7** |
+| 4 | 3 284 | 1,0 | 2,5 | 4,0 | **20 009,6** |
+| 8 | 3 090 | 2,1 | 5,6 | 8,8 | **20 002,8** |
+| 16 | 3 113 | 4,3 | 11,6 | 17,2 | **19 997,4** |
+| 31 | 3 526 | 7,4 | 19,9 | 28,7 | **19 973,1** |
+| 32 | 3 470 | 7,7 | 21,1 | 32,7 | 101,7 |
+| 33 | 3 479 | 7,7 | 21,0 | 32,2 | 137,4 |
+| predefinito (100) | 3 476 | 7,6 | 21,4 | 35,2 | 117,6 |
+
+  Zero scritture fallite in **tutte** le righe.
+
+- **Prima lettura — la resa non è la variabile.** Da 3 090 a 3 613 scritture al secondo su un
+  intervallo di pool che va da 2 a 100, cioè cinquanta volte. Il pool non è una manopola di resa:
+  il server satura intorno alle 3 100–3 500 scritture/s e ci resta comunque.
+
+- **Seconda lettura — i percentili *migliorano* quando il pool si stringe, ed è vero.** Con pool 2
+  il p50 è 0,5 ms; con il pool predefinito è 7,6 ms, quindici volte tanto. Non è un errore di
+  misura: con due operazioni in volo il server le serve subito, con cento se le mette in coda lui.
+  La coda non è sparita — **si è spostata dal server al client**, dove nessuna metrica del server la
+  vede.
+
+- **Terza lettura, ed è quella che vale — il massimo è una funzione a gradino su
+  `maxPoolSize = scrittori`.** A 31 connessioni per 32 scrittori il massimo è **19 973 ms**, cioè
+  l'intera corsa; a 32 crolla a **101,7 ms**; a 33 è 137,4 ms. Una connessione in meno del numero di
+  scrittori, e un thread aspetta venti secondi. Con `pool = scrittori − 1` la resa è identica
+  (3 526 contro 3 470) e **tutti i percentili fino al p99 sono indistinguibili dal caso sano**
+  (7,4/19,9/28,7 contro 7,7/21,1/32,7): l'unico numero che denuncia il problema è il massimo.
+
+- **Perché i percentili non lo vedono.** Il thread affamato contribuisce **pochi campioni proprio
+  perché è affamato**: se aspetta, non scrive, e quindi non compare nella statistica. I percentili
+  pesano le operazioni, non i thread — così il thread che soffre di più è quello meno rappresentato
+  nel campione. È il motivo per cui il riassunto di `mongolab` stampa anche il massimo accanto ai
+  tre percentili.
+
+- **Perché non ci sono errori.** `waitQueueTimeoutMS` non è impostato, e il predefinito di pymongo è
+  «nessun limite»: **il driver non si arrende mai**. La fame di connessioni non produce eccezioni,
+  produce attesa — quindi non arriva a nessun cruscotto degli errori.
+
+- **Dove si misura.** L'orologio avvolge l'intera `insert_many`
+  (`app/src/mongolab/application/workload.py:706`), quindi l'attesa di una connessione dal pool è
+  **dentro** il numero misurato. Se fosse fuori, questa misura non esisterebbe.
+- **Una stesura buttata, tenuta come lezione di metodo.** Il primo disegno teneva il pool fermo a 4
+  e faceva salire gli scrittori, su un client con **una** CPU: 4 118 → 3 372 → 2 632 → 2 446 →
+  2 518 scritture/s. Sembrava la saturazione del pool, era la contesa per l'unica CPU del container
+  — far salire i thread cambiava due cose insieme. Il disegno buono tiene fermo ciò che non si
+  vuole misurare.
+- **Riserve:** una corsa per riga; la resa oscilla del 15 % fra righe che dovrebbero essere
+  equivalenti (3 090 contro 3 526), quindi le differenze di resa **non** vanno lette, solo la loro
+  assenza di tendenza. Il gradino è provato a 31/32/33 con 32 scrittori: che sia esattamente
+  `pool = scrittori` è coerente con le altre righe ma è stato verificato su un valore solo di
+  scrittori. Il massimo di ~20 000 ms coincide con la durata della corsa, quindi è un limite
+  inferiore: non si sa quanto avrebbe aspettato quel thread in una corsa più lunga. Tutto su
+  `insert_many` di documenti da 2 KB verso uno standalone: con operazioni più lente per singola
+  connessione il gradino si sposterebbe.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0109
+
+---
+
+<a id="v-081"></a>
+### V-081 — `analyzeShardKey`: il verdetto sulla chiave in uso, due rifiuti, e due condizioni che il comando non dichiara
+
+- **Comandi:** dentro la rete Compose, contro il `mongos` dello stack 03:
+
+```
+docker compose --env-file tools/images.env --env-file docker/03-sharded/.env \
+  -f docker/03-sharded/compose.yaml run --rm \
+  -v <script>:/analyze.py:ro --entrypoint python app /analyze.py
+```
+
+  dove lo script chiama `db.adminCommand({analyzeShardKey: "lab.ordini", key: …,
+  keyCharacteristics: true, readWriteDistribution: true})` su sette chiavi candidate, e poi
+  `configureQueryAnalyzer`.
+- **Ambiente:** stack 03, MongoDB 7.0.40, `lab.ordini` con 20 000 documenti,
+  `avgDocSizeBytes: 121`, `numOrphanDocs: 0`. Campi: `_id` int, `cliente` str, `citta` str, `stato`
+  str, `importo` float, `righe` int, `data` datetime.
+- **Che cosa si voleva sapere:** «cosa questa pagina non dice» di
+  [`sharded-cluster.md`](02-architetture/sharded-cluster.md) dichiarava: «non usa
+  `analyzeShardKey`. Introdotto nella 7.0, sarebbe lo strumento giusto per scegliere una chiave in
+  un caso vero, e richiede un campione di query reali che una demo con dati generati non ha
+  ([S-067](#s-067))».
+
+- **Esito, primo punto — il verdetto sulle sette candidate:**
+
+| chiave | esito |
+|---|---|
+| `{_id: "hashed"}` — quella in uso | 20 000 distinti su 20 000 · unica · frequenza massima **1** · `not monotonic` (r = 0,0) |
+| `{stato: 1}` | **rifiutata**: «does not have enough cardinality to make the required number of chunks of 100, it can only make **6** chunks» |
+| `{citta: 1}` | **rifiutata**: solo **11** chunk |
+| `{cliente: 1}` senza indice | risponde **senza `keyCharacteristics`**, e senza errore |
+| `{cliente: 1}` con indice | 1 999 distinti · non unica · frequenza massima **21** · `not monotonic` (r = −0,0027) |
+| `{data: 1}` con indice | 240 distinti · frequenza massima **104** · `not monotonic` (r = +0,0204) |
+| `{citta: 1, cliente: 1}` senza indice | risponde senza `keyCharacteristics` |
+
+  La chiave scelta da [ADR-0064](Decision.md#adr-0064) prende il massimo su ogni caratteristica che
+  il comando sa misurare. Non è una sorpresa — è una chiave hashed su un campo unico — ed è
+  esattamente per questo che serviva la controprova.
+
+- **Esito, secondo punto — sulle chiavi cattive il comando non dà un voto basso: si rifiuta.** E il
+  messaggio d'errore **è** il verdetto, perché dice quanti chunk quella chiave potrà mai fare: sei
+  per `stato`, undici per `citta`. In un cluster a due shard, sei chunk vuol dire che non c'è nulla
+  da bilanciare. Il rifiuto per cardinalità arriva **prima** del controllo sull'indice: `stato` e
+  `citta` sono state rifiutate senza che nessun indice esistesse.
+
+- **Esito, terzo punto — serve un indice a sostegno, e senza il comando riesce lo stesso.** È la
+  condizione più insidiosa: su `{cliente: 1}` senza indice la risposta arriva con `ok: 1` e
+  **manca la metà che serve a scegliere**. Nessun errore, nessun avviso. Dimostrato costruendo
+  l'indice e rifacendo la stessa domanda:
+
+```
+cliente:1 [senza indice] niente keyCharacteristics · campione 0 letture / 0 scritture
+cliente:1 [con indice]   distinti 1999 · unica False · frequenza massima 21 · not monotonic (r=-0.0027287852)
+```
+
+  Gli indici costruiti per la prova (`t16-cliente`, `t16-data`) sono stati buttati subito dopo, e la
+  collezione è tornata ai suoi due indici `_id_` e `_id_hashed`.
+
+- **Esito, quarto punto — `readDistribution` e `writeDistribution` non si calcolano guardando i
+  dati.** Si calcolano guardando **le query già passate**, e il campione lo raccoglie
+  `configureQueryAnalyzer`, che va acceso *prima*. Acceso (`mode: "full", samplesPerSecond: 10`),
+  atteso, mandati 60 s di traffico costruito apposta — una `find_one` per `_id` a ogni giro, una
+  `find` su `stato` ogni tre, una `update_one` per `_id` ogni dieci, 61 208 giri — e poi chiesto:
+
+```
+letture   campione 576 (find 576) · mirate 77,6% · più shard 0,0% · a tappeto 22,4%
+scritture campione  43            · mirate 100%  · più shard 0,0% · a tappeto 0,0%
+```
+
+  Il traffico generato era **75 % mirato e 25 % a tappeto** sulle letture e 100 % mirato sulle
+  scritture: il campione riproduce la miscela, il che convalida il metodo invece di limitarsi a
+  usarlo.
+
+- **Esito, quinto punto — i due ritardi, chiesti al cluster e non dedotti:**
+
+```
+queryAnalysisSamplerConfigurationRefreshSecs = 10
+queryAnalysisWriterIntervalSecs = 90
+```
+
+  Il primo è ogni quanto il `mongos` si accorge di dover campionare: le query mandate prima di quel
+  momento non entrano nel campione, e non lo dice nessuno. Il secondo è ogni quanto il campione
+  raccolto viene scritto. Fra «ho acceso» e «il campione esiste» passano quindi almeno un minuto e
+  mezzo, durante i quali `analyzeShardKey` risponde «campione 0» — indistinguibile da «non ho acceso
+  niente». Il primo tentativo di questa misura è morto proprio così, e la seconda volta lo
+  spegnimento del campionatore è stato messo in un `finally`.
+- **Che cosa questo cambia per la pagina.** Lo scoperto diceva che `analyzeShardKey` «richiede un
+  campione di query reali che una demo con dati generati non ha». È vero per metà: le
+  **caratteristiche della chiave** non richiedono nessun campione e si ottengono subito, ed è la
+  metà che risponde alla domanda «questa chiave distribuisce?». La **distribuzione delle query**
+  richiede davvero traffico, ma il traffico si può generare — e generarlo con una miscela nota è
+  anche il modo di verificare che il comando dica il vero.
+- **Riserve:** una passata sola per ogni candidata; il comando campiona (`numDocsSampled` = 20 000,
+  cioè tutti, su questa collezione) e su una collezione grande i valori di `numDistinctValues` e
+  `mostCommonValues` sarebbero stime. `{data: 1}` risulta **non monotona** solo perché il seme
+  genera le date a caso: in una collezione vera un campo data sarebbe il caso di scuola della chiave
+  monotona, e questo lab **non può mostrarlo** ([ADR-0031](Decision.md#adr-0031) sceglie un dataset
+  deterministico, non realistico). Il campione di 576 letture su 81 611 query mandate è ~0,7 %: la
+  percentuale 77,6 contro il 75 % vero è dentro il rumore di quel campione, e non va letta come una
+  cifra precisa. Le percentuali di distribuzione dipendono dal traffico che si è scelto di mandare:
+  qui l'ho costruito io, quindi misurano lo strumento, non l'applicazione.
+- **Riserva di metodo, e vale per chi ripeterà la prova:** `config.sampledQueries` interrogata dal
+  `mongos` è rimasta a **0** per tutti i 150 s di attesa mentre `analyzeShardKey` riportava 576
+  campioni. Quel conteggio **non è il termometro giusto**, e chi lo usa per capire se il
+  campionatore sta lavorando conclude di no mentre sta lavorando. L'unico modo affidabile è
+  chiederlo ad `analyzeShardKey`. Di conseguenza questa prova non dice *dopo quanto* il campione sia
+  diventato disponibile: solo che entro 150 s c'era.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0110
+
+---
+
+<a id="v-082"></a>
+
+### V-082 — `serverStatus` non risponde la stessa cosa su tre nodi: 45, 52 e 36 sezioni, e il router ne perde venti
+
+- **Comandi:** su ciascuno dei tre stack accesi insieme,
+
+```
+docker exec -i <nodo> mongosh --quiet --host localhost [--username … --password …] admin \
+  --eval 'const s = db.serverStatus();
+           const k = Object.keys(s).sort();
+           print("N=" + k.length); print("BYTES=" + bsonsize(s)); print(k.join(","))'
+```
+
+  con `<nodo>` fra `mongo-standalone`, `mongo-rs-1` (il primario) e `sh-mongos`.
+- **Ambiente:** MongoDB 7.0.40, stack 01, 02 e 03 accesi contemporaneamente, tutti a riposo.
+- **Che cosa si voleva sapere:** se «guarda `serverStatus`» sia un consiglio che si può dare senza
+  dire su quale nodo, cioè se uno script di monitoraggio scritto su un `mongod` funzioni contro un
+  `mongos`.
+
+- **Esito, primo punto — i tre insiemi di sezioni, e le loro dimensioni:**
+
+| nodo | sezioni di primo livello | dimensione BSON della risposta |
+|---|---|---|
+| `mongo-standalone` | **45** | 73 614 byte |
+| `mongo-rs-1` (primario) | **52** | 75 865 byte |
+| `sh-mongos` (router) | **36** | **26 445 byte** |
+
+- **Esito, secondo punto — lo standalone è un sottoinsieme stretto del replica set.** Verificato
+  come insiemi: tutte e 45 le sezioni dello standalone esistono sul primario. Le **sette** in più
+  del replica set sono `$clusterTime`, `defaultRWConcern`, `operationTime`, `oplogTruncation`,
+  `queryAnalyzers`, `readPreferenceCounters`, `repl`. Chi passa da uno stack all'altro non perde
+  niente in quella direzione: aggiunge.
+
+- **Esito, terzo punto — il router non è un sottoinsieme: toglie venti sezioni e ne aggiunge
+  quattro.** Le **venti** che mancano rispetto al primario:
+
+```unknown
+batchedDeletes      catalogStats        electionMetrics   featureCompatibilityVersion
+flowControl         globalLock          indexBuilds       indexStats
+locks               opcountersRepl      oplogTruncation   profiler
+readConcernCounters readPreferenceCounters                repl
+shardSplits         storageEngine       tenantMigrations  twoPhaseCommitCoordinator
+wiredTiger
+```
+
+  Le **quattro** che solo lui ha: `health`, `hedgingMetrics`, `sharding`, `shardingStatistics`.
+  Le sezioni comuni a tutti e tre i nodi sono **28**.
+
+  L'elenco delle venti non è una curiosità: contiene esattamente le sezioni su cui si appoggia
+  qualunque ricetta di monitoraggio scritta per un `mongod` — `wiredTiger` per la cache e i ticket,
+  `globalLock` per le code, `locks` per la contesa, `repl` e `opcountersRepl` per la replica. Uno
+  script che le legge non dà un errore contro un router: `serverStatus` risponde `ok: 1` e le
+  chiavi non ci sono. Il fallimento arriva più tardi, sotto forma di `undefined`, e nella riga
+  sbagliata. La mancanza di `wiredTiger` era già stata misurata da un'altra direzione
+  ([V-058](#v-058)); questa prova dice **quante altre** ne mancano.
+
+- **Esito, quarto punto — la risposta del router pesa un terzo.** 26 445 byte contro 73 614: la
+  differenza non è solo il numero di sezioni ma la loro profondità, perché ciò che manca è la parte
+  che descrive un motore di archiviazione che il router non ha.
+
+- **Riserve:** una lettura per nodo, a riposo. L'insieme delle sezioni dipende dalla versione e —
+  per alcune — dal fatto che la funzione sia mai stata usata da quando il processo è partito, il
+  che vale per esempio per `queryAnalyzers` sul primario, comparso dopo la prova di
+  [V-081](#v-081). Le sezioni si contano di primo livello: `metrics` è una sola voce qui e contiene
+  decine di sotto-alberi. Il conteggio dice **quali capitoli esistono**, non quanti numeri ci sono
+  dentro.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112
+
+---
+
+<a id="v-083"></a>
+
+### V-083 — Sotto carico il server non mette in coda niente, e la latenza che dichiara non è quella che vede il client
+
+- **Comandi:** un campionatore di `serverStatus` una volta al secondo per 45 s, aperto **prima** del
+  carico e chiuso dopo, dentro una sola sessione `mongosh` — un `docker exec` per campione costerebbe
+  mezzo secondo di orologio e falserebbe la cadenza:
+
+```
+docker exec -i mongo-standalone mongosh --quiet --host localhost admin --eval "$(cat campiona.js)"
+```
+
+  e in parallelo, dall'host:
+
+```
+make app-workload TARGET=standalone \
+  ARGS="--duration 30 --doc-size 2k --writers 8 --readers 4 --sink null"
+```
+
+  Il campionatore stampa una riga TSV con `opcounters`, `connections`,
+  `wiredTiger.concurrentTransactions.write` (`out`, `available`, `totalTickets`, `queueLength`,
+  `totalTimeQueuedMicros`), `globalLock.currentQueue`, `globalLock.activeClients`,
+  `wiredTiger.cache`, `opLatencies.writes` e `mem.resident`. Sul primario del replica set lo stesso
+  con in più il ritardo di ogni membro.
+- **Ambiente:** MongoDB 7.0.40, stack 01 e 02, `mongod` con `cpus: 1.0` e `mem_limit: 1024m` (stack
+  01) e `0.75` / `768m` per membro (stack 02); applicazione nel container con `cpus: 1.0`, cioè il
+  lab predefinito di [V-079](#v-079).
+- **Che cosa si voleva sapere:** che cosa **guardare** mentre il carico gira, e se i numeri che il
+  server dichiara raccontino la stessa storia dei percentili misurati dal client.
+
+- **Esito, primo punto — due corse sullo standalone, viste dal server:**
+
+| | corsa A | corsa B |
+|---|---|---|
+| inserimenti totali nei 30 s attivi | 42 242 | 50 664 |
+| inserimenti/s medi (min–max) | 1 408 (1 151–1 698) | **1 689** (1 170–1 851) |
+| `globalLock.currentQueue.writers` | **0** sempre | **0** sempre |
+| `globalLock.currentQueue.readers` | **0** sempre | **0** sempre |
+| `concurrentTransactions.write.queueLength` | **0** sempre | **0** sempre |
+| `totalTimeQueuedMicros`, delta sui 45 s | **0 µs** | **9 840 µs** |
+| `opLatencies.writes` medio | **84 µs** | **67 µs** |
+| cache WiredTiger | 191 → 207 MiB, dirty max 9,2 MiB | 188 → 206 MiB, dirty max 8,9 MiB |
+| `mem.resident` | 462–463 MB | 461–462 MB |
+| connessioni create nei 45 s | 35 | 36 |
+
+  **Il server non ha mai messo in coda una scrittura.** Nella corsa B ha accumulato in tutto 9,8
+  **millisecondi** di attesa per un ticket, distribuiti su 50 664 scritture: 0,19 µs a scrittura.
+  Nella corsa A, zero. Le tre metriche che si guardano per prime quando «il database è lento» —
+  coda dei writer, coda dei ticket, tempo accumulato in coda — dicono all'unisono che il collo di
+  bottiglia **non era qui**, ed è la conferma lato server di ciò che [V-079](#v-079) aveva concluso
+  dal lato del client: in quel lab il numero era del client.
+
+- **Esito, secondo punto — 67 µs contro 2,8 ms, cioè un fattore quaranta.** Il server dichiara una
+  latenza media di scrittura di 67 µs; il client, sulla stessa corsa, misura un p50 di **2,8 ms**
+  ([V-079](#v-079)). I due numeri non sono in disaccordo: misurano tratti diversi dello stesso
+  percorso. `opLatencies` conta il tempo passato dentro il comando, il client conta anche
+  serializzazione, socket, attraversamento della rete Compose e ritorno. **Guardare solo
+  `opLatencies` su uno standalone significa non vedere il 97 % del tempo che l'utente aspetta.**
+
+- **Esito, terzo punto — sul replica set lo stesso numero dice quasi tutto.** Stessa misura sul
+  primario dello stack 02: 10 928 scritture, `opLatencies.writes` medio **18 390 µs**. Contro i 67
+  µs dello standalone è un fattore **274**, mentre il rapporto di resa fra le due architetture è
+  6,2× ([V-079](#v-079)). La differenza fra i due server sta quindi in ciò che il primario conta e
+  lo standalone no: l'attesa della conferma di maggioranza rientra nella durata del comando. Sul
+  replica set il numero del server e quello del client sono dello stesso ordine (p50 9,0 ms, p95 ≈
+  75 ms); sullo standalone no. **Non è la stessa metrica che diventa più grande: è una metrica che
+  cambia significato quando cambia l'architettura.**
+
+- **Esito, quarto punto — il pool dei ticket di scrittura non è 128, ed è vivo.** Il valore che
+  circola come costante di WiredTiger è 128. Misurato:
+
+```unknown
+standalone, corsa A:  totalTickets 12 → 11   (available 11–12, out 0–1)
+standalone, corsa B:  totalTickets  9 →  8   (available  6–9,  out 0–3)
+primario rs:          totalTickets  8 →  7   (available … ,    out 0–1)
+```
+
+  Nella 7.0 il pool è governato da un controllore che lo dimensiona da solo, e in questi container
+  si è assestato fra **7 e 12**. Chi allarma su «ticket disponibili sotto una soglia fissa» sta
+  confrontando una misura viva con una costante che non vale più. Il numero da guardare è
+  `queueLength` — quanti stanno aspettando — non `available`.
+
+- **Riserve:** due corse sullo standalone e una sul replica set, tutte di 30 s di carico dentro una
+  finestra di campionamento di 45 s. Il campionamento a un secondo **non vede** picchi più brevi: una
+  coda che si forma e si smaltisce fra due campioni non lascia traccia in `queueLength`, e per
+  questo la conclusione «non ha mai messo in coda» si appoggia a `totalTimeQueuedMicros`, che è
+  cumulativo e non può nascondere niente. L'interpretazione del terzo punto — che i 18 ms del
+  primario contengano l'attesa della maggioranza — è coerente con i numeri ma **non è stata
+  isolata**: servirebbe la stessa corsa con `w: 1` sul replica set. Il costo del campionatore è
+  stato controllato a parte e sta nel rumore (+1,4 % e −5,9 % su due coppie, segno che cambia).
+- **Riserva chiusa lo stesso giorno da [V-088](#v-088).** La corsa con `w: 1` è stata eseguita: il
+  cronometro del server scende da 18 913 a 644 µs, e l'interpretazione era giusta. Con una
+  correzione che questa voce non poteva prevedere: fra le due configurazioni non cambia solo il
+  numero di conferme, cambia anche il giornale ([S-077](#s-077)), e delle due è il giornale a
+  costare di più. Anche la conclusione «non ha mai messo in coda» va letta insieme a V-088: era vera
+  perché la maggioranza faceva da freno prima di WiredTiger.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112, ADR-0114
+
+---
+
+<a id="v-084"></a>
+
+### V-084 — Il ritardo di replica letto nel modo standard è inutilizzabile qui: quantizzato al secondo, 10 s a riposo, negativo dal secondario
+
+- **Comandi:** durante la stessa corsa di [V-083](#v-083), sul primario dello stack 02, il ritardo
+  di ogni membro calcolato come lo calcola `rs.printSecondaryReplicationInfo()`:
+
+```
+const r = db.adminCommand({ replSetGetStatus: 1 });
+// optimeDate del primario meno optimeDate di ciascun membro
+```
+
+  e in parallelo, su `mongo-rs-2` (secondario), `metrics.repl.apply.batches.num`,
+  `metrics.repl.apply.ops`, `opcountersRepl.insert`, `metrics.repl.buffer` e la vista che il
+  secondario ha del proprio ritardo.
+- **Ambiente:** MongoDB 7.0.40, stack 02 sano, tre membri `1P,2S,3S` per tutti i 45 campioni.
+- **Che cosa si voleva sapere:** quale metrica di replica si può mostrare dal vivo, dato che il
+  ritardo reale su questo lab è già stato misurato in **≈ 1,6 ms** con un metodo diretto
+  ([V-027](#v-027)).
+
+- **Esito, primo punto — la serie del ritardo, per il membro 2, campionata al secondo:**
+
+```unknown
+0, 10000, 10000, 0, 0, 0, 0, 1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000,
+1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000, 1000,
+2000, 1000, 0, 1000, 0, 0, 0, 0, 0, 0, 0, 0, 0     (millisecondi)
+```
+
+  Il membro 3 dà la stessa forma. Tre fatti in una riga sola:
+
+  1. **I valori sono solo 0, 1000 e 2000.** Non esistono valori intermedi perché `optimeDate` ha
+     granularità di **un secondo**: la differenza fra due date arrotondate al secondo è un multiplo
+     di mille millisecondi. Un ritardo di 1,6 ms non è rappresentabile in questa metrica.
+  2. **I due campioni da 10 000 ms sono a riposo**, prima che il carico partisse, su un insieme
+     sano. Sono la firma del fatto che senza scritture l'optime non avanza: il primario ha scritto
+     dieci secondi fa, il secondario ha applicato tutto, e la sottrazione dice «dieci secondi
+     indietro» mentre il secondario è allineato. **Il valore più allarmante della serie è quello
+     dello stato migliore.**
+  3. **Sotto carico oscilla fra 1 000 e 2 000** con la regolarità di un metronomo, perché la vista
+     che il primario ha degli altri arriva dagli heartbeat, che sono ogni 2 000 ms
+     (`heartbeatIntervalMillis`, [V-031](#v-031)): si sta guardando un dato vecchio fino a due
+     secondi, arrotondato al secondo.
+
+- **Esito, secondo punto — dal secondario lo stesso conto è negativo.** Ventidue campioni su 45
+  danno **−1 000 ms**, e uno **−10 000 ms**:
+
+```unknown
+0, 0, 0, 0, -10000, 0, 0, 0, 0, -1000, 0, -1000, 0, -1000, … , 0, 0, 0, 0, 0
+```
+
+  Il secondario conosce il proprio optime **adesso** e quello del primario **dall'ultimo
+  heartbeat**: quando applica in fretta, il suo optime è più recente di quello che crede sia del
+  primario, e la differenza cambia segno. Un ritardo negativo non è un errore da segnalare: è la
+  prova che i due termini della sottrazione **non sono contemporanei**. Chiunque scriva un allarme
+  su questa metrica deve decidere prima da quale nodo la legge.
+
+- **Esito, terzo punto — che cosa si può guardare invece, misurato sul secondario nei 30 s di
+  carico:**
+
+| metrica | delta | lettura |
+|---|---|---|
+| `opcountersRepl.insert` | **9 139** | **identico** agli inserimenti confermati al client |
+| `metrics.repl.apply.batches.num` | 6 501 | ≈ 217 lotti/s sui 30 s attivi |
+| `metrics.repl.apply.ops` | 18 280 | 2,8 operazioni per lotto |
+| `metrics.repl.buffer.count` (massimo) | **3** | il secondario non ha mai accumulato arretrato |
+| `metrics.repl.buffer.sizeBytes` (massimo) | 7 023 | sette kilobyte |
+
+  `opcountersRepl.insert` sul secondario coincide **esattamente** con il numero che il client ha
+  visto confermare. È la metrica che risponde alla domanda «sta applicando tutto?» senza dipendere
+  da nessun orologio. E il buffer, che è la coda vera del percorso di replica, non ha mai contenuto
+  più di tre operazioni: **il secondario non era in ritardo, e nessuna metrica temporale sapeva
+  dirlo.**
+
+- **Esito, quarto punto — sul primario le metriche di applicazione non si muovono.**
+  `metrics.repl.apply.batches.num` sul primario ha delta **0** su tutti i 45 campioni, pur avendo un
+  valore cumulativo non nullo — l'eredità di quando era secondario. Il valore assoluto non dice il
+  ruolo; solo il delta lo dice. Su un cruscotto che mostra il totale, primario e secondario si
+  somigliano.
+
+- **Riserve:** una sola corsa, un solo secondario campionato dei due. La serie del ritardo è di
+  questo lab, con tre container sulla stessa macchina: su nodi separati da una rete vera i valori
+  sarebbero più grandi e la quantizzazione al secondo peserebbe meno. La coincidenza di
+  `opcountersRepl.insert` con le scritture confermate vale perché il carico fa **solo inserimenti**
+  a documento singolo; con aggiornamenti, batch o scritture ripetibili il conto cambia — è
+  esattamente quello che misura [V-085](#v-085). `heartbeatIntervalMillis` è il valore predefinito,
+  non una scelta di questo repository.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112
+
+---
+
+<a id="v-085"></a>
+
+### V-085 — Ogni scrittura ripetibile costa un'operazione replicata in più: `apply.ops` raddoppia
+
+- **Comandi:** notato che sul secondario `metrics.repl.apply.ops` cresceva del **doppio** degli
+  inserimenti (18 280 contro 9 139, [V-084](#v-084)), tre prove in scala decrescente per isolarne la
+  causa. La decisiva è una coppia, a parità di tutto il resto:
+
+```
+make app-workload TARGET=rs ARGS="… --no-retry-writes"     # 800 inserimenti
+make app-workload TARGET=rs ARGS="… --retry-writes"        # 800 inserimenti
+```
+
+  con `opcountersRepl` e `metrics.repl.apply.ops` letti sul secondario prima e dopo ciascuna.
+- **Ambiente:** MongoDB 7.0.40, stack 02, tre membri sani.
+- **Che cosa si voleva sapere:** perché il secondario applica il doppio delle operazioni di quante
+  ne arrivano.
+
+- **Esito, primo punto — le due prove che hanno ristretto il campo.** Un `insertMany` controllato di
+  100 documenti **non riproduce** il raddoppio: `apply.ops` +104, `opcountersRepl.insert` +100. Una
+  corsa concorrente limitata a 800 inserimenti lo riproduce: `apply.ops` +1 613 su +800 inserimenti.
+  Non è quindi il volume né il batching: è qualcosa che l'applicazione fa e lo script no.
+
+- **Esito, secondo punto — la coppia decisiva:**
+
+| corsa | `apply.ops` | `opcountersRepl.insert` | `opcountersRepl.update` |
+|---|---|---|---|
+| `--no-retry-writes` | **+802** | +800 | **+0** |
+| `--retry-writes` | **+1 603** | +800 | **+800** |
+
+  Ogni scrittura ripetibile scrive un record di sessione in `config.transactions`, e **quel record
+  si replica come un `update`**. Ottocento inserimenti diventano milleseicento operazioni sul
+  secondario. Il raddoppio non è un artefatto della misura: è il prezzo, in lavoro replicato, di una
+  garanzia che il driver attiva **per impostazione predefinita**: `retryWrites` è acceso di suo, e
+  [V-076](#v-076) l'ha misurato spegnendolo.
+
+- **Esito, terzo punto — che cosa cambia per chi guarda.** `apply.ops` **non** è il numero di
+  documenti che stanno arrivando al secondario, e leggerlo così porta a credere che il carico sia il
+  doppio di quello che è. Il numero che risponde alla domanda vera è `opcountersRepl.insert`. Le due
+  operazioni in più oltre a `2 × 800` (802 e 1 603 invece di 800 e 1 600) sono traffico interno del
+  set — `noop` periodici — e sono il residuo che dice che la misura non è stata addomesticata.
+
+- **Riserve:** una coppia sola, 800 inserimenti per lato, sullo stack 02. Il rapporto 1:1 fra
+  scrittura ripetibile e `update` replicato vale per inserimenti a documento singolo; con
+  inserimenti multipli in un comando solo il record di sessione è uno per comando, non per
+  documento, ed è probabilmente la ragione per cui l'`insertMany` da 100 non ha mostrato niente —
+  ma **non è stato verificato separatamente**. L'attribuzione a `config.transactions` è dedotta dal
+  fatto che gli `update` compaiono solo con `retryWrites` acceso: la collezione non è stata
+  interrogata direttamente durante la corsa.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112
+
+---
+
+<a id="v-086"></a>
+
+### V-086 — Il router conta esatto quello che gli hai chiesto, somma i filesystem degli shard, e non sa dirti che uno shard sta fermo
+
+- **Comandi:** `opcounters` letti su `sh-mongos`, `sh-shard1a` e `sh-shard2a` prima e dopo
+
+```
+make app-workload TARGET=sharded \
+  ARGS="--duration 30 --doc-size 2k --writers 8 --readers 4 --sink null"
+```
+
+  e `db.stats()` su `lab` chiesto al router e ai due shard.
+- **Ambiente:** MongoDB 7.0.40, stack 03, due shard da un membro, `lab` **non partizionato** con
+  primary shard `shard1rs` ([V-079](#v-079)).
+- **Che cosa si voleva sapere:** che cosa un `mongos` sa dire di sé, dato che gli mancano venti
+  sezioni di `serverStatus` ([V-082](#v-082)).
+
+- **Esito, primo punto — i contatori del router sono quelli del client, alla singola operazione:**
+
+| | prima | dopo | delta | il client dice |
+|---|---|---|---|---|
+| `opcounters.insert` (router) | 120 873 | 133 414 | **+12 541** | **12 541 scritture** |
+| `opcounters.query` (router) | 134 357 | 147 360 | **+13 003** | **13 003 letture** |
+
+  Coincidenza esatta su entrambe le righe. Il router è il posto giusto per rispondere a «quante
+  operazioni sono state chieste al cluster», ed è l'**unico** posto dove quel numero è quello del
+  client.
+
+- **Esito, secondo punto — sotto, il carico è andato tutto su uno shard:**
+
+| | insert | query | connessioni |
+|---|---|---|---|
+| `shard1a` | 98 288 → 110 834 (**+12 546**) | 104 885 → 117 902 (**+13 017**) | 16 → 28 |
+| `shard2a` | 25 868 → 25 868 (**+0**) | 53 811 → 53 811 (**+0**) | 14 → 14 |
+
+  **Zero.** Non «poco»: nessuna operazione. È la conferma quantitativa della riserva che
+  [V-079](#v-079) dichiarava a parole — la collezione di carico non è distribuita, quindi vive
+  intera sul primary shard. Le cinque operazioni di scarto fra router e shard (+12 546 contro
+  +12 541) sono traffico di servizio del `mongod`, non del client.
+
+  Questa è la misura che smonta l'errore più comune davanti a un cluster: **un cluster sharded non
+  distribuisce il carico, distribuisce le collezioni partizionate.** Con `lab` non partizionato,
+  metà del ferro sta a guardare, e il router lo dice solo a chi va a chiederlo shard per shard.
+
+- **Esito, terzo punto — `dbStats` sul router somma cose che non si sommano.** Chiesto a
+  `sh-mongos`, su `lab`: 17 chiavi, di cui `raw` con una voce per shard.
+
+```unknown
+router:  fsTotalSize 125 342 195 712   fsUsedSize 63 012 814 848   objects 99 699
+shard1a: fsTotalSize  62 671 097 856   fsUsedSize 31 506 227 200   objects 89 559
+```
+
+  125 342 195 712 = **2 × 62 671 097 856**, esattamente. Ma i due shard sono due container sulla
+  **stessa** macchina e vedono lo **stesso** `/dev/vda1` da 62 671 097 856 byte. Il router dichiara
+  un disco che non esiste, grande il doppio del vero, e lo stesso vale per lo spazio occupato. Le
+  righe che si sommano legittimamente — `objects`, `dataSize`, `storageSize`, `indexSize` — sono
+  corrette; quelle che descrivono **il ferro** non lo sono, perché sommare presuppone che gli shard
+  siano su macchine diverse. In un cluster vero lo sarebbero; in un lab su un portatile, e in
+  qualunque cluster con più shard sullo stesso host, quel numero è finzione.
+
+- **Riserve:** una corsa sola. La coincidenza esatta fra client e router vale per un carico di sole
+  operazioni singole: con operazioni in lotto i contatori del router contano i **comandi**, non i
+  documenti. Lo scarto di cinque insert sullo shard non è stato attribuito a una causa precisa. Il
+  numero di connessioni sul router **scende** durante la corsa (8 → 4) perché il pool del client
+  viene chiuso alla fine e la lettura di «dopo» arriva dopo: non va letto come un calo di carico.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112
+
+---
+
+<a id="v-087"></a>
+
+### V-087 — `dataSize` non è spazio su disco: 3,06× sui dati veri, 0,97× sulla zavorra, e trentasette collezioni dimenticate
+
+- **Comandi:** su `mongo-standalone`, database `lab`:
+
+```
+db.stats()
+db.getCollection("ordini").stats()
+db.getCollection("carico-20260904-133649").stats()
+db.getCollectionNames().length
+```
+
+- **Ambiente:** MongoDB 7.0.40, stack 01, compressione predefinita (`snappy` sui blocchi,
+  `prefix` sugli indici), dopo una giornata di corse di carico.
+- **Che cosa si voleva sapere:** che cosa risponde davvero `dbStats` alla domanda «quanto occupa
+  questo database», visto che la pagina di monitoraggio deve dire quale numero guardare.
+
+- **Esito, primo punto — `dbStats` sullo standalone, quattordici chiavi:**
+
+```unknown
+collections   38            objects    1 505 885     avgObjSize     1 984
+dataSize      2 987 746 740 storageSize 3 169 259 520 indexSize     18 321 408
+fsUsedSize   31 512 723 456 fsTotalSize 62 671 097 856
+```
+
+  `freeStorageSize` **non c'è**: va chiesto (`db.stats({freeStorage: 1})`), e chi lo cerca senza
+  chiederlo trova `undefined` invece di zero. Sono quattordici chiavi contro le diciassette del
+  router ([V-086](#v-086)), che ne aggiunge tre sue.
+
+- **Esito, secondo punto — il rapporto fra dati e archiviazione cambia di tre volte a seconda di che
+  cosa c'è dentro:**
+
+| collezione | documenti | `avgObjSize` | `size` | `storageSize` | `size`/`storageSize` |
+|---|---|---|---|---|---|
+| `lab.ordini` | 50 000 | 121 B | 6 094 260 | 1 990 656 | **3,06×** |
+| `lab.carico-20260904-133649` | 49 690 | 2 048 B | 101 765 120 | 105 021 440 | **0,97×** |
+
+  Sulla collezione di dati veri la compressione restituisce tre volte lo spazio; sulla collezione di
+  carico **non restituisce niente**, e l'archiviazione è del 3 % più grande dei dati. La ragione sta
+  nel generatore, non nel motore: la zavorra dei documenti di carico è base64 di uno `shake_128`,
+  cioè byte pseudocasuali, e i byte casuali non si comprimono. Il 3 % in più è il costo delle
+  strutture di WiredTiger su un contenuto che non le ripaga.
+
+  **Conseguenza pratica:** `dataSize` sommato su un database misto non dice quanto disco serve, e
+  nemmeno `storageSize` da solo dice quanto si sta risparmiando. Il rapporto è una proprietà **dei
+  dati**, e va misurato sulla collezione, non stimato sul database.
+
+- **Esito, terzo punto — trentotto collezioni, trentasette delle quali di carico.** Ogni corsa di
+  `workload` crea una collezione nuova, chiamata con l'istante di partenza. Dopo una giornata di
+  misure il database `lab` ne ha 37, per 1,5 milioni di documenti e ~3 GB di `dataSize` che non
+  interessano più a nessuno. Nessuno le cancella, e `dbStats` le somma tutte: il numero di
+  `dbStats` sul database è quindi il numero **di tutta la spazzatura accumulata**, e va letto
+  sapendolo. Su un lab si sistema con un `drop`; su un sistema vero, il fatto che nessuno guardi
+  `collections` è il modo tipico in cui un disco si riempie senza spiegazione.
+
+- **Riserve:** una lettura sola, a riposo, su un database in uno stato che dipende da quante corse
+  siano state fatte quel giorno — i valori assoluti non si riproducono, il rapporto sì.
+  `avgObjSize` di 1 984 byte sul database è la media pesata su una popolazione dominata dai
+  documenti di carico da 2 048 byte, non una proprietà dei dati del lab. La compressione non è stata
+  cambiata: `snappy` è il predefinito e non è stato confrontato con `zstd` o `zlib`, che darebbero
+  altri rapporti sulla stessa collezione `ordini` e — verosimilmente — quasi gli stessi sulla
+  zavorra.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112
+
+---
+
+<a id="s-076"></a>
+### S-076 — MongoDB Manual: Connection String URI Format, opzioni di write concern
+
+- **URL:** https://www.mongodb.com/docs/manual/reference/connection-string-options/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** manual (corrente)
+- **Consultata:** 2026-09-04
+- **Verdetto:** conferma, e smentisce mezzo debito di questo repository
+- **Perché è stata cercata.** Il Task 17 aveva chiuso registrando che «il carico non sa chiedere un
+  write concern diverso dal predefinito», e da lì che la corsa con `w: 1` — quella che isolerebbe i
+  18 390 µs di `opLatencies.writes` del primario, [V-083](#v-083) — non fosse eseguibile. Il Product
+  Owner ha obiettato che `w` è un parametro della stringa di connessione, nella sezione dopo il `?`,
+  e ha chiesto di verificarlo sul manuale invece di discuterne.
+- **Cosa afferma, primo punto — le opzioni di write concern nell'URI sono tre.** La sezione «Write
+  Concern Options» elenca `w`, `wtimeoutMS` e `journal`. Su `w`: «Corresponds to the write concern
+  `w` Option. The `w` option requests acknowledgment that the write operation has propagated to a
+  specified number of `mongod` instances or to `mongod` instances with specified tags.» E i valori
+  ammessi: «You can specify a `number`, the string `majority`, or a `tag set`.»
+- **Cosa afferma, secondo punto — il nome dell'opzione URI è `journal`, non `j`.** «Corresponds to
+  the write concern `j` Option option. The `journal` option requests acknowledgment from MongoDB
+  that the write operation has been written to the journal.» `j` è il nome dell'opzione di write
+  concern sottostante; nella stringa di connessione si scrive `journal`. È esattamente il nome che
+  `opzioni_di_misura` usa dal Task 16, e la coincidenza non era stata verificata su questa pagina.
+- **Cosa afferma, terzo punto — le due si condizionano.** «If you set `journal` to `true`, and
+  specify a `w` value less than 1, `journal` prevails.»
+- **Cosa afferma, quarto punto — l'URI perde contro il parametro del metodo.** «You can specify write
+  concern both in the connection string and as a parameter to methods like `insert` or `update`. If
+  specified in both places, the method parameter overrides the connection string.» È la ragione per
+  cui accendere il write concern sul **client** basta a cambiare come scrive un adattatore che
+  riceve una collezione e non sa da quale client venga: finché nessuno lo chiede per operazione,
+  vince quello del client.
+- **Cosa afferma, quinto punto — l'esempio è una riga intera.**
+
+  ```
+  mongodb://myDatabaseUser:D1fficultP%40ssw0rd@db0.example.com,db1.example.com,db2.example.com/?replicaSet=myRepl&w=majority&wtimeoutMS=5000
+  ```
+
+- **Cosa afferma, sesto punto — `wtimeoutMS` è deprecata.** «The `wtimeoutMS` option is deprecated.
+  Set `timeoutMS` instead. `timeoutMS` overrides `wtimeoutMS`.» E, sul comportamento residuo: «When
+  `wtimeoutMS` is `0`, write operations never time out.»
+- **Cosa afferma, settimo punto — chi le legge.** Le opzioni della stringa di connessione sono
+  supportate «by MongoDB drivers, `mongosh`, `mongofiles`, `mongoimport`, and `mongorestore`». Cioè
+  la stessa parola vale nell'applicazione, nella shell e negli strumenti di backup.
+- **Riserve:** la pagina **non** dichiara nessun predefinito lato server per `w`, e non descrive come
+  il write concern predefinito di un replica set interagisca con un `w` passato nell'URI: rimanda
+  alla pagina di riferimento sul write concern, che è [S-077](#s-077). L'unica affermazione di
+  predefinito è specifica di Atlas — «MongoDB Atlas deployment connection strings use `"majority"` by
+  default» — e non vale per questo laboratorio.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0114
+
+---
+
+<a id="s-077"></a>
+### S-077 — MongoDB Manual: Write Concern, il predefinito implicito e il prezzo di `w: 1`
+
+- **URL:** https://www.mongodb.com/docs/manual/reference/write-concern/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** manual (corrente)
+- **Consultata:** 2026-09-04
+- **Verdetto:** conferma, e cambia il disegno della misura
+- **Perché è stata cercata.** Prima di confrontare una corsa con `w: 1` e una senza serviva sapere
+  **che cosa** sia «senza»: se il predefinito di questo insieme sia `1` o `majority`, la stessa
+  misura racconta due storie opposte. E serviva sapere se cambiando `w` cambi solo `w`.
+- **Cosa afferma, primo punto — il predefinito implicito è la maggioranza, con un'eccezione da
+  arbitri.** «The implicit default write concern is `w: majority`.» L'eccezione, per esteso: «The
+  voting majority of a replica set is 1 plus half the number of voting members, rounded down. If the
+  number of data-bearing voting members is not greater than the voting majority, the default write
+  concern is `{ w: 1 }`. In all other scenarios, the default write concern is `{ w: "majority" }`.»
+  Con tre membri portatori di dati e nessun arbitro — la forma dello stack 02 — si ricade nel caso
+  generale, cioè `majority`.
+- **Cosa afferma, secondo punto — `w: 1` è il primario e basta, e si può perdere.** «Requests
+  acknowledgment that the write operation has propagated to the standalone `mongod` or the primary in
+  a replica set. **Data can be rolled back if the primary steps down before the write operations
+  replicate to any of the secondaries.**» È il prezzo esatto della resa che [V-088](#v-088) misura, e
+  va citato insieme al guadagno.
+- **Cosa afferma, terzo punto — cambiare `w` cambia anche il giornale, senza dirlo.** Con `j` non
+  specificato e `w: "majority"`: «If `true`, acknowledgment requires MongoDB to make writes durable
+  by syncing them to on-disk journal, equivalent to `j: true`», dove `true` è il valore di
+  `writeConcernMajorityJournalDefault`, che «defaults to `true`». Con `j` non specificato e
+  `w: <number>`: «Acknowledgment requires writing the operation in memory, **equivalent to
+  `j: false`**.» Cioè passare da `majority` a `1` spegne per conseguenza anche la sincronizzazione
+  del giornale: due variabili in una mossa, ed è la ragione per cui [V-088](#v-088) ha tre corse e
+  non due.
+- **Cosa afferma, quarto punto — `j: true` non protegge dal failover.** «`j: true` alone does not
+  guarantee that the write will not roll back due to replica set primary failover.» E, sulla portata:
+  «With `j: true`, MongoDB returns only after the requested number of members, including the primary,
+  have written to the journal.»
+- **Cosa afferma, quinto punto — `wtimeout` non si applica sotto la soglia.** «`wtimeout` does not
+  apply if `w` is less than or equal to `1`.» E, se manca: «If you do not specify the `wtimeout`
+  option and the level of write concern is unachievable, the write operation will block
+  indefinitely.»
+- **Riserve:** la pagina descrive il predefinito **implicito**; un `setDefaultRWConcern` esplicito lo
+  sostituirebbe, e la pagina non dice come accorgersene. La verifica che su questo laboratorio il
+  predefinito sia davvero implicito è misurata in [V-088](#v-088) con `getDefaultRWConcern`, non
+  dedotta da qui.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0114
+
+---
+
+<a id="v-088"></a>
+### V-088 — La maggioranza è la metà piccola del conto: tre corse sul primario, e il giornale che costa di più
+
+- **Comandi:** lo stesso campionatore di [V-083](#v-083), con in più l'autenticazione — la password
+  arriva per `--env-file` e non compare mai sulla riga di comando ([ADR-0054](Decision.md#adr-0054)):
+
+```
+docker cp campiona-w.js mongo-rs-1:/tmp/campiona-w.js
+docker exec -i --env-file docker/02-replicaset/.env mongo-rs-1 \
+  mongosh --quiet --host localhost admin --file /tmp/campiona-w.js
+```
+
+  e in parallelo, dall'host, tre corse identiche tranne che per le opzioni di write concern:
+
+```
+make app-workload TARGET=rs ARGS="--duration 30 --doc-size 2k --writers 8 --readers 4 --sink null"
+make app-workload TARGET=rs ARGS="… --write-concern 1 --journal"
+make app-workload TARGET=rs ARGS="… --write-concern 1"
+```
+
+- **Ambiente:** MongoDB 7.0.40, stack 02, `mongod` con `cpus: 0.75` e `mem_limit: 768m` per membro,
+  applicazione nel container con `cpus: 1.0` — il lab predefinito di [V-079](#v-079), lo stesso di
+  [V-083](#v-083). Primario `mongo-rs-1`, tre membri con voto, **nessun arbitro**,
+  `writeConcernMajorityJournalDefault: true`, e `getDefaultRWConcern` risponde
+  `{"w":"majority","wtimeout":0}` con `defaultWriteConcernSource: implicit`. Cioè il predefinito di
+  questo insieme è la maggioranza per la regola generale di [S-077](#s-077), e nessuno l'ha
+  impostato a mano.
+- **Che cosa si voleva sapere:** la riserva di [V-083](#v-083). Sul primario `opLatencies.writes`
+  vale 18 390 µs contro i 67 µs dello standalone, e la lettura proposta era «il cronometro del server
+  include l'attesa della maggioranza». Coerente, ma non isolata. La corsa con `w: 1` la isola — e
+  [S-077](#s-077) ha aggiunto che non la isola da sola, perché scendendo da `majority` a un numero si
+  spegne anche il giornale. Da qui la terza corsa.
+- **Esito, primo punto — le tre corse viste dal server e dal client:**
+
+| | `w: majority` (predefinito) | `w: 1` + `journal` | `w: 1` |
+|---|---|---|---|
+| giornale | implicito `j: true` | `j: true` chiesto | implicito `j: false` |
+| scritture confermate in 30 s | 10 544 | 14 585 | **31 535** |
+| inserimenti/s medi | 351 | 486 | **1 087** |
+| `opLatencies.writes` medio | **18 913 µs** | 11 547 µs | **644 µs** |
+| p50 lato client | 9,8 ms | 7,5 ms | **3,4 ms** |
+| p95 lato client | 79,5 ms | 65,7 ms | 42,2 ms |
+| p99 lato client | 97,2 ms | 89,0 ms | 70,2 ms |
+| `totalTimeQueuedMicros`, delta | 10 388 µs | 2 783 µs | **308 413 µs** |
+| letture riuscite | 26 370 | 20 588 | 13 976 |
+
+  La corsa con il predefinito riproduce [V-083](#v-083) a distanza di ore: 18 913 µs contro 18 390,
+  10 544 scritture contro 10 928. La riserva era ben posta e la misura è ripetibile.
+
+- **Esito, secondo punto — la riserva di V-083 si chiude, e la risposta è sì.** Con `w: 1` il
+  cronometro del server scende da 18 913 a **644 µs**, cioè di un fattore **29**. Ciò che il primario
+  contava e lo standalone no era davvero l'attesa della conferma, e adesso è misurato invece che
+  argomentato.
+- **Esito, terzo punto — ma la maggioranza è la metà piccola.** Tenendo il giornale acceso e
+  cambiando solo il numero di conferme, la resa passa da 486 a 351 inserimenti/s: la maggioranza
+  costa **1,38×**. Tenendo `w: 1` e accendendo il giornale, la resa passa da 1 087 a 486: il giornale
+  costa **2,24×**. Il prodotto è il 3,10× fra il predefinito e `w: 1`. **Delle due cose che il
+  predefinito fa senza dirlo, quella cara è la sincronizzazione su disco, non l'attesa dei due
+  secondari** — e nessuna delle due si vede nella riga di comando di chi non le ha chieste.
+- **Esito, quarto punto — restano 644 µs che non sono né maggioranza né giornale.** Lo standalone
+  della corsa B di [V-083](#v-083), con lo stesso carico, dichiarava **67 µs**. Il primario con
+  `w: 1` e senza giornale ne dichiara 644, cioè **9,6×**. Non c'è nessuno da aspettare: è quanto
+  costa **essere** un primario — l'oplog, il conteggio, il resto della macchina di replica — e vale
+  circa un ordine di grandezza. Il fattore 274 fra le due architetture non era tutto attesa.
+- **Esito, quinto punto — tolto il collo di bottiglia, il collo si sposta.** [V-083](#v-083) aveva
+  concluso che «il server non mette in coda niente», con 9,8 ms cumulativi di attesa per un ticket su
+  50 664 scritture. Con `w: 1` il primario accumula **308 413 µs** di coda in 31 535 scritture, cioè
+  **9,8 µs per scrittura** contro l'1,0 della corsa predefinita: trenta volte tanto. Resta l'1,5 %
+  della latenza media, quindi la conclusione di V-083 non si rovescia — ma la ragione per cui il
+  server non metteva in coda niente era che **non gli veniva chiesto di andare abbastanza forte**.
+  Era la maggioranza a fare da freno, non WiredTiger.
+- **Esito, sesto punto — le letture pagano il conto delle scritture.** Le stesse quattro letture
+  concorrenti riescono 26 370 volte nella corsa lenta e 13 976 in quella veloce. Non è un
+  peggioramento del server: è che gli otto scrittori, non dovendo più aspettare, competono per la
+  stessa CPU limitata. Un confronto di latenza di lettura fra due corse con write concern diversi
+  misura la contesa, non la lettura.
+- **Il prezzo, che va citato insieme al guadagno.** `w: 1` è la conferma del solo primario, e
+  [S-077](#s-077) dice cosa comporta: «Data can be rolled back if the primary steps down before the
+  write operations replicate to any of the secondaries.» Il 3,10× di resa si compra con la
+  possibilità di perdere le scritture confermate nell'istante di un failover — cioè esattamente lo
+  scenario che lo stack 02 esiste per mostrare.
+- **Riserve:** tre corse, una per configurazione, non tre ripetizioni per configurazione: la
+  variabilità fra corse identiche misurata in [V-083](#v-083) è del 20 % sulla resa, quindi il
+  fattore 1,38 della maggioranza è il meno solido dei tre numeri e andrebbe ripetuto prima di
+  portarlo in una slide. I 67 µs dello standalone vengono dalla sessione di [V-083](#v-083) e non da
+  questa: stessa giornata e stesso lab, ma non la stessa ora. Le tre corse hanno la stessa
+  **concorrenza offerta** (otto scrittori) e non lo stesso carico effettivo, quindi le latenze medie
+  non si sommano né si sottraggono: i rapporti riportati sono di resa, che è la grandezza a
+  concorrenza costante, e le latenze sono osservazioni accanto, non addendi.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0114
+
+---
+
+<a id="v-089"></a>
+### V-089 — Cinque scene dell'applicazione, registrate una volta ciascuna, e quattordici riproduzioni che coincidono
+
+- **Comandi:** `./tools/reset-demo.sh 02` prima di ciascuna, poi lo strumento del repository. Le
+  prime tre girano l'applicazione dentro la rete Compose attraverso i bersagli del `Makefile`, le
+  ultime due dall'host:
+
+```
+python3 tools/registra-terminale.py <file>.cast --titolo "…" -- make app-stats TARGET=rs
+python3 tools/registra-terminale.py <file>.cast --titolo "…" -- make -s app-watch TARGET=rs ARGS="--sink plain --duration 45"
+python3 tools/registra-terminale.py <file>.cast --titolo "…" --regia "docker compose " -- make -s app-demo TARGET=rs ARGS="--sink plain"
+uv run --directory app mongolab demo backup-live --target rs --sink plain
+uv run --directory app mongolab demo restore --target rs --sink plain --from /tmp/mongolab-backup --collection carico-20260904-184403
+```
+
+  Tutte con `--sink plain` e **senza** `--step`: è lo stesso codice della scena dal vivo, non una
+  variante per registrare. Una corsa per scena, il 4 settembre 2026, sullo stesso stack e di
+  seguito. La scena 11 ha ricevuto il guasto da uno script esterno (attesa 10 s, `stop
+  mongo-rs-1`, attesa 20 s, `start`), perché `watch` non annuncia niente e non c'è nulla che la
+  regia possa intercettare.
+
+- **Esito, primo punto — i numeri che le cinque scene portano.**
+
+| scena | durata | il numero |
+|---|---:|---|
+| 10 `stats` | 1,5 s | `mongod 7.0.40` · tre membri, un primario · `lab` 50 000 documenti · dati 5,8 MB, indici 1,4 MB |
+| 11 `watch` | 42,5 s | primario perso a `16:42:26.047`, `mongo-rs-2` eletto a `16:42:36.082`: **10 035 ms**; rientro di `mongo-rs-1` a `16:42:56.147` |
+| 12 `demo failover` | 53,3 s | interruzione **10 019 ms** · **0 scritture perse** · 31 952 confermate contro 31 955 ritrovate |
+| 13 `demo backup-live` | 11,4 s | ritmo 546/s prima, 539/s durante: **calo 1,3 %** · 5 886 documenti, 158 voci di oplog |
+| 14 `demo restore` | 3,2 s | 5 886 all'origine · 5 740 nella copia · **differenza 146** |
+
+- **Esito, secondo punto — la scena 12 ha eletto due volte, e la seconda non era nel copione.** La
+  prima elezione è quella provocata; la seconda avviene a `16:40:45`, otto secondi dopo che
+  `mongo-rs-1` è rientrato come secondario, quando si riprende il ruolo di primario. Nel tracciato
+  si legge come `ERRORE NotPrimaryError` seguito da `RITENTO tentativo 2 dopo 50 ms`: i tentativi
+  automatici del driver l'hanno assorbita, e le scritture perse restano zero anche lì. Non era
+  previsto e non è stato tolto.
+
+- **Esito, terzo punto — la fase `durante` ha il p95 più basso, e non è un miglioramento.** 13 786
+  scritture, tutte confermate, p95 **49,5 ms** contro i 61,0 della fase precedente e i 57,9 della
+  successiva. La fase dura venticinque secondi, i primi dieci non contengono nessuna scrittura, e i
+  quindici che restano girano contro un primario appena eletto e ancora scarico. Un p95 calcolato su
+  una fase che contiene un'interruzione descrive la coda, non il servizio.
+
+- **Esito, quarto punto — due scene su quattordici fanno il 99,9 % della cartella.** Le nove degli
+  stack pesano 31 K di testo; le tre dell'applicazione senza carico 4,8 K; la 12 e la 13 **6,3 M**.
+  Non è un difetto della registrazione: `PlainSink` scrive una riga per evento senza tagliare
+  niente, e trentaduemila scritture confermate sono sessantaquattromila righe. `gzip` le porta a
+  516 311 e 121 565 byte (10,2× e 8,9×), quindi nel pacchetto di git pesano ~640 K.
+
+- **Esito, quinto punto — la regola di normalizzazione scritta nell'indice era insufficiente.**
+  Tutte e quattordici le registrazioni sono state riprodotte dentro uno pseudo-terminale e
+  confrontate con il testo originale. Le dodici corte coincidevano con la regola vecchia (`\r\r\n`
+  → `\r\n`); le due lunghe no, e il confronto falliva a **66 354 byte**, dopo che due terzi del file
+  avevano coinciso. Il prefisso comune finisce dove la riproduzione ha `\r\r\n` e l'originale
+  `\r\n`; nella riproduzione compaiono anche **quattro** occorrenze di `\r\r\r\n`. Comprimendo
+  `\r+\n` in `\n` da tutt'e due le parti, tutte e quattordici coincidono e in tutte il titolo
+  compare.
+
+- **Esito, sesto punto — l'eco di `make` è indistinguibile dal comando annunciato.** La prima corsa
+  della scena 12 è ripartita da capo dentro se stessa: `make` stampa la ricetta prima di eseguirla,
+  la ricetta comincia con `docker compose ` esattamente come il comando che l'applicazione annuncia,
+  e la regia ha eseguito l'eco. Con `make -s` la scena è corretta. È il costo di riconoscere un
+  comando dal prefisso invece che da un canale separato, ed è dichiarato in
+  [ADR-0115](Decision.md#adr-0115).
+
+- **Riserve:** una corsa per scena, non tre. I tempi — 10 035 ms di elezione senza carico, 10 019
+  con — sono singole osservazioni e ballano come tutte le altre della cartella; le misure ripetute
+  del branch stanno altrove. Il calo dell'1,3 % della scena 13 è la differenza fra due finestre
+  della stessa corsa e non fra due corse, quindi dice che il dump non ha fermato il carico, non
+  quanto costa un dump in generale. La differenza di 146 documenti della scena 14 dipende da quanto
+  è durato il dump e dal ritmo del carico: è la dimostrazione che la finestra esiste, non la sua
+  misura. Le cinque scene sono girate una dopo l'altra sulla stessa macchina, quindi condividono
+  qualunque deriva della giornata.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0115, ADR-0116
 
 ---

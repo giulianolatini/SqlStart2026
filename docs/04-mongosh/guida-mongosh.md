@@ -965,8 +965,13 @@ l'unica forma di verifica che sopravvive alla regola del §4.4: se il database f
   del talk, e mostrarla male sarebbe peggio che non mostrarla.
 - **Non è un manuale del linguaggio.** L'aggregation framework, gli operatori di query, gli indici
   composti: c'è la documentazione ufficiale, e non è quello che il pubblico viene a vedere.
-- **Non copre gli strumenti di backup.** `mongodump`, `mongorestore` e `mongoexport` stanno nella
-  stessa immagine ma non sono `mongosh`: sono materia di `feature/04`, insieme al backup a caldo.
+- **Non copre gli strumenti di backup, e adesso si sa dove sono.** `mongodump`, `mongorestore` e
+  `mongoexport` stanno nella stessa immagine ma non sono `mongosh`. I primi due li copre
+  [Backup e restore](../03-amministrazione/backup-restore.md): dati a mano nelle sezioni da 1 a 7,
+  e dentro l'applicazione nella
+  [§8](../03-amministrazione/backup-restore.md#8-le-stesse-due-cose-come-scena-demo-backup-live-e-demo-restore),
+  dove il backup a caldo gira sotto carico e i due ritmi si leggono affiancati
+  ([ADR-0100](../Decision.md#adr-0100)). `mongoexport` resta fuori da tutte e due.
 - **Non copre il driver Python.** L'applicazione della demo non userà `mongosh`: userà `pymongo`,
   con altre regole e altri valori predefiniti — a partire, presumibilmente, da un
   `serverSelectionTimeoutMS` diverso da due secondi.

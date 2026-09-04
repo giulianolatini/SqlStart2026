@@ -458,11 +458,19 @@ e sulla slide sta da sola. L'ultima è il valore dell'ultima istruzione, che `mo
 
 ## Cosa questa pagina non dice
 
-- **Non confronta le prestazioni con le altre architetture.** Il confronto ha senso sotto carico
-  controllato, cioè con l'applicazione Python di `feature/04`, e prima di allora sarebbe aria.
-- **Non misura la perdita con `j: true`.** Secondo [S-035](../Sources.md#s-035) dovrebbe azzerarsi,
-  al prezzo della latenza. È la misura naturale da aggiungere e non è stata fatta
-  [V-016](../Sources.md#v-016).
+- ~~**Non confronta le prestazioni con le altre architetture.** Il confronto ha senso sotto carico
+  controllato, cioè con l'applicazione Python di `feature/04`, e prima di allora sarebbe aria.~~
+  **Saldato.** L'applicazione c'è, e il confronto è [V-079](../Sources.md#v-079): sotto la stessa
+  riga di carico lo standalone scrive 6,2 volte il replica set e 5,0 volte il cluster sharded. La
+  riserva viaggia con il numero e non in fondo alla pagina — il ferro dei tre stack non è lo
+  stesso, e quel rapporto misura la configurazione tanto quanto l'architettura
+  ([ADR-0111](../Decision.md#adr-0111)).
+- ~~**Non misura la perdita con `j: true`.** Secondo [S-035](../Sources.md#s-035) dovrebbe
+  azzerarsi, al prezzo della latenza. È la misura naturale da aggiungere e non è stata fatta
+  [V-016](../Sources.md#v-016).~~ **Saldato.** [V-075](../Sources.md#v-075): la perdita si azzera
+  davvero — zero documenti contro i cento di [V-016](../Sources.md#v-016) — e il prezzo c'è, fra il
+  32 % e il 45 % di velocità a seconda di come il carico spende il tempo. L'opzione entra dalla riga
+  di comando, e chi non la chiede non la riceve ([ADR-0109](../Decision.md#adr-0109)).
 - **Non copre l'autenticazione.** Lo stack la esclude per scelta; la trattazione seria è in
   `feature/02`, dove il keyfile diventa obbligatorio.
 - **Non copre l'installazione fuori da Docker.** Sta in
@@ -481,11 +489,13 @@ e sulla slide sta da sola. L'ultima è il valore dell'ultima istruzione, che `mo
 [ADR-0030](../Decision.md#adr-0030) (i log su stdout),
 [ADR-0031](../Decision.md#adr-0031) (il dataset deterministico),
 [ADR-0022](../Decision.md#adr-0022) (backup a caldo e oplog),
-[ADR-0028](../Decision.md#adr-0028) (perché la 7.0).
+[ADR-0028](../Decision.md#adr-0028) (perché la 7.0),
+[ADR-0109](../Decision.md#adr-0109) (le opzioni di misura dalla riga di comando),
+[ADR-0111](../Decision.md#adr-0111) (il confronto si pubblica in coppia con la riserva del ferro).
 
 **Fonti:** [S-011](../Sources.md#s-011), [S-033](../Sources.md#s-033), [S-034](../Sources.md#s-034),
 [S-035](../Sources.md#s-035), [S-036](../Sources.md#s-036), [S-037](../Sources.md#s-037),
 [S-038](../Sources.md#s-038), [V-009](../Sources.md#v-009), [V-010](../Sources.md#v-010),
 [V-011](../Sources.md#v-011), [V-012](../Sources.md#v-012), [V-014](../Sources.md#v-014),
 [V-015](../Sources.md#v-015), [V-016](../Sources.md#v-016),
-[V-033](../Sources.md#v-033)
+[V-033](../Sources.md#v-033), [V-075](../Sources.md#v-075), [V-079](../Sources.md#v-079)

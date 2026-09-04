@@ -138,6 +138,30 @@ else
   while IFS= read -r riga; do nota "${riga}"; done < <(printf '%s\n' "${esito_avvio}" | head -2)
 fi
 
+# L'immagine dell'applicazione è l'unica del lab che **non** si scarica: la costruisce
+# `make app-image` a partire da questo repository. Un digest ce l'ha — misurato, M-037,
+# perché l'archivio immagini di containerd ne calcola uno anche per ciò che nessuno ha
+# pubblicato — ma è un digest che nessun registro ha mai servito e che cambia a ogni
+# ricostruzione: in images.env sarebbe una cosa da verificare in rete che in rete non
+# c'è (ADR-0093). Resta però una cosa che deve essere in cache prima del talk esattamente
+# come le altre, e l'unico controllo possibile è il più semplice: c'è o non c'è.
+#
+# Il tag si legge dal file Compose e non si riscrive qui, perché il numero che conta è
+# quello che `docker compose run` andrà a cercare. Che i tre stack lo scrivano uguale, e
+# uguale alla versione in app/pyproject.toml, lo prova tools/tests/test_coerenza_repo.py.
+immagine_app="$(sed -n 's|^ *image: *\(mongolab:[^ ]*\).*|\1|p' \
+  "${RADICE}/docker/01-standalone/compose.yaml" 2>/dev/null | head -1)"
+if ! (( demone_vivo )); then
+  errore "presenza dell'immagine dell'applicazione non verificabile: il demone non risponde"
+elif [[ -z "${immagine_app}" ]]; then
+  errore "nessun servizio con immagine mongolab: in docker/01-standalone/compose.yaml"
+elif docker image inspect "${immagine_app}" >/dev/null 2>&1; then
+  ok "l'immagine dell'applicazione è in cache — ${immagine_app}"
+else
+  errore "l'immagine dell'applicazione manca: ${immagine_app}"
+  nota "costruirla ora, finché c'è rete: make app-image"
+fi
+
 # --- Filmati di riserva (ADR-0016) --------------------------------------------------
 titolo "Filmati di riserva"
 

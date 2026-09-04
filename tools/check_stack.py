@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
+import pathlib
 import re
 
 IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+
+# Una riga `FROM`, con tutto ciò che la segue: le opzioni (`--platform=…`), il
+# riferimento e l'eventuale `AS nome`. Si separano dopo, a pezzi, perché la
+# forma è variabile e una sola espressione regolare che le coprisse tutte
+# sarebbe illeggibile prima di essere sbagliata.
+FROM_RIGA = re.compile(r"^\s*FROM\s+(?P<resto>.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+
+# `${NOME}` o `$NOME`: un `FROM` che non nomina un'immagine ma un argomento di
+# costruzione, il cui valore vero sta in `build.args` del file Compose.
+RIFERIMENTO_ARGOMENTO = re.compile(
+    r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$|^\$([A-Za-z_][A-Za-z0-9_]*)$"
+)
 
 # `${NOME}`, `${NOME:-predefinito}`, `${NOME:?spiegazione}`.
 VARIABILE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::([-?])([^}]*))?\}")
@@ -527,8 +540,135 @@ def problemi_di_ruolo(
     return problemi
 
 
+def basi_del_dockerfile(testo: str) -> list[str]:
+    """Le immagini da cui una costruzione parte davvero: un `FROM`, meno gli stadi.
+
+    `FROM base AS uv` dichiara uno stadio; `FROM uv` più sotto non scarica niente,
+    riusa quello. Contarlo fra le immagini darebbe un falso positivo su ogni
+    costruzione a più stadi — che è la forma con cui `app/Dockerfile` prende il
+    binario di uv senza installarlo con pip.
+    """
+    basi: list[str] = []
+    stadi: set[str] = set()
+    for trovato in FROM_RIGA.finditer(testo):
+        # Le opzioni della riga (`--platform`, `--chmod`) non sono l'immagine.
+        pezzi = [
+            pezzo for pezzo in trovato.group("resto").split() if not pezzo.startswith("--")
+        ]
+        if not pezzi:
+            continue
+        if len(pezzi) >= 3 and pezzi[1].lower() == "as":
+            stadi.add(pezzi[2].lower())
+        if pezzi[0].lower() in stadi:
+            continue
+        basi.append(pezzi[0])
+    return basi
+
+
+def argomenti_di_costruzione(build: object) -> dict[str, str]:
+    """`build.args`, nelle due forme che la Specification ammette: mappa o elenco."""
+    if not isinstance(build, dict):
+        return {}
+    argomenti = build.get("args")
+    if isinstance(argomenti, dict):
+        return {str(k): str(v) for k, v in argomenti.items() if v is not None}
+    if isinstance(argomenti, list):
+        letti: dict[str, str] = {}
+        for voce in argomenti:
+            nome, _, valore = str(voce).partition("=")
+            letti[nome.strip()] = valore.strip()
+        return letti
+    return {}
+
+
+def problemi_costruzione(
+    nome: str, servizio: dict, digest_noti: set[str], percorso: object | None
+) -> list[str]:
+    """La regola del digest, spostata dove ha senso per un servizio che si costruisce.
+
+    La prima stesura di questa docstring diceva che un'immagine costruita in
+    locale «non ha un digest». È falso, e a smentirlo è bastato guardare
+    ([M-037](../app/docs/Sources.md#m-037)): con l'archivio immagini di
+    containerd — quello che Docker Desktop usa qui — anche un'immagine mai
+    pubblicata ha il suo digest di manifesto, e `docker image inspect
+    mongolab@sha256:…` la trova.
+
+    Il punto vero è un altro, e regge lo stesso: quel digest **nessun registro
+    l'ha mai servito**, quindi non è verificabile da fuori, e cambia a ogni
+    ricostruzione. Scriverlo in `tools/images.env` darebbe a `pull-images.sh
+    --verify` una cosa da cercare in rete che in rete non c'è, e la mattina del
+    talk il preflight fallirebbe accusando la cache di un difetto che non ha.
+
+    Lo scopo della regola però resta: nessun bit arriva dalla rete senza che
+    qualcuno l'abbia fissato. Per un servizio che si costruisce quei bit sono le
+    sue **basi**, cioè le righe `FROM` del suo Dockerfile — e quelle devono essere
+    pinnate per digest, e per un digest che `tools/images.env` conosce, altrimenti
+    `pull-images.sh` non le porta in cache e la costruzione cerca la rete (ADR-0009).
+    """
+    build = servizio.get("build")
+    if percorso is None:
+        return [
+            f"{nome}: dichiara «build» ma il controllo non sa da dove risolverne il "
+            "contesto. Le basi del Dockerfile non sono state guardate: passare il "
+            "percorso del file Compose"
+        ]
+    if isinstance(build, str):
+        contesto, dockerfile = build, "Dockerfile"
+    elif isinstance(build, dict):
+        contesto = str(build.get("context", "."))
+        dockerfile = str(build.get("dockerfile", "Dockerfile"))
+    else:
+        return [f"{nome}: «build» non è né un percorso né una mappa"]
+
+    # Il contesto è relativo alla cartella del file Compose, non alla radice del
+    # repository né alla cartella da cui si esegue il controllo.
+    quale = pathlib.Path(str(percorso)).parent / contesto / dockerfile
+    try:
+        testo = quale.read_text(encoding="utf-8")
+    except OSError as errore:
+        return [
+            f"{nome}: non riesco a leggere «{quale}» ({errore.strerror}). Il contesto "
+            "di «build» si risolve dalla cartella del file Compose"
+        ]
+
+    argomenti = argomenti_di_costruzione(build)
+    problemi: list[str] = []
+    for base in basi_del_dockerfile(testo):
+        trovato = RIFERIMENTO_ARGOMENTO.match(base)
+        if trovato:
+            chiave = trovato.group(1) or trovato.group(2)
+            if chiave not in argomenti:
+                problemi.append(
+                    f"{nome}: «{dockerfile}» parte da «{base}», ma «build.args» non "
+                    f"dichiara {chiave}: la base resterebbe quella predefinita del "
+                    "Dockerfile, o nessuna"
+                )
+                continue
+            riferimento = argomenti[chiave]
+        else:
+            riferimento = base
+
+        if "@sha256:" not in riferimento:
+            problemi.append(
+                f"{nome}: la base «{riferimento}» di {dockerfile} non è pinnata per "
+                "digest. Un tag può cambiare contenuto sotto lo stesso nome, anche "
+                "quando sta in un Dockerfile invece che in un compose (ADR-0009)"
+            )
+        elif riferimento.split("@", 1)[1] not in digest_noti:
+            digest = riferimento.split("@", 1)[1]
+            problemi.append(
+                f"{nome}: la base «{riferimento}» di {dockerfile} ha il digest "
+                f"«{digest}», che non compare in tools/images.env: pull-images.sh non "
+                "lo scarica e la costruzione cercherebbe la rete (ADR-0009)"
+            )
+    return problemi
+
+
 def verifica(
-    documento: dict, digest_noti: set[str], grezzo: dict | None = None
+    documento: dict,
+    digest_noti: set[str],
+    grezzo: dict | None = None,
+    percorso: object | None = None,
 ) -> list[str]:
     """Restituisce l'elenco dei problemi. Lista vuota significa conformità.
 
@@ -580,6 +720,12 @@ def verifica(
         )
 
     for nome, servizio in sorted(documento.get("services", {}).items()):
+        # Un servizio che si costruisce non può avere un digest di registro, e la
+        # regola si sposta sulle basi del suo Dockerfile invece di sparire.
+        costruisce = "build" in servizio
+        if costruisce:
+            problemi += problemi_costruzione(nome, servizio, digest_noti, percorso)
+
         immagine = str(servizio.get("image", ""))
         if not immagine:
             problemi.append(f"{nome}: manca «image»")
@@ -590,11 +736,12 @@ def verifica(
                     "tag is always pulled even when the missing pull policy is used»: "
                     "il vincolo offline salterebbe senza preavviso (ADR-0018)"
                 )
-            problemi.append(
-                f"{nome}: l'immagine «{immagine}» non è pinnata per digest. Un tag può "
-                "cambiare contenuto sotto lo stesso nome; il digest no (ADR-0009, "
-                "ADR-0028)"
-            )
+            if not costruisce:
+                problemi.append(
+                    f"{nome}: l'immagine «{immagine}» non è pinnata per digest. Un tag "
+                    "può cambiare contenuto sotto lo stesso nome; il digest no "
+                    "(ADR-0009, ADR-0028)"
+                )
         else:
             digest = immagine.split("@", 1)[1]
             if digest not in digest_noti:
@@ -868,7 +1015,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"«{percorso}»: variabile obbligatoria assente — {errore.args[0]}", file=sys.stderr)
             return 2
 
-        problemi = verifica(documento, digest, grezzo)
+        problemi = verifica(documento, digest, grezzo, percorso=percorso)
         for problema in problemi:
             print(f"  ✗ {percorso}: {problema}", file=sys.stderr)
         totale += len(problemi)
