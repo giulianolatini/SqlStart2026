@@ -424,25 +424,25 @@ che si rompe se l'applicazione gira sull'host e il cluster dentro Docker.
 
 È l'Atto II del Blocco 2, cinque minuti, ed è la ragione per cui l'applicazione esiste.
 
-- [ ] **Passo 1.** `--step` mette in pausa prima di ogni fase e riparte con Invio: è modalità da
+- [x] **Passo 1.** `--step` mette in pausa prima di ogni fase e riparte con Invio: è modalità da
       palco. Senza `--step` lo stesso scenario gira da solo — ed è **così** che si producono le
       registrazioni di riserva, che per costruzione mostrano esattamente ciò che si farà dal vivo.
       Una sola implementazione, due modi.
-- [ ] **Passo 2.** La sequenza del copione: carico attivo, `docker compose stop` del primario,
+- [x] **Passo 2.** La sequenza del copione: carico attivo, `docker compose stop` del primario **→ corretto in `kill -s SIGKILL`, [ADR-0097](../Decision.md#adr-0097)**,
       cronaca dell'elezione con timestamp al millisecondo, **durata dell'interruzione e scritture
       perse**, riavvio e recupero.
-- [ ] **Passo 3.** Il supplemento previsto dal copione: `docker compose pause` per il nodo
+- [x] **Passo 3.** Il supplemento previsto dal copione: `docker compose pause` per il nodo
       *irraggiungibile ma vivo* — timeout invece di connection refused, cioè la differenza fra
       server morto e rete partizionata. È la parte che il pubblico non si aspetta, e vale i trenta
       secondi che costa.
-- [ ] **Passo 4.** Lo scenario si prova con `RecordingSink` e i doppi: l'asserzione è sulla
+- [x] **Passo 4.** Lo scenario si prova con `RecordingSink` e i doppi: l'asserzione è sulla
       **sequenza di eventi**, verificabile senza aspettare dieci secondi di elezione. Poi una prova
       di integrazione che la stessa sequenza esca da uno stack vero.
-- [ ] **Passo 5.** Confrontare i numeri con quelli che `feature/02` ha già misurato —
+- [x] **Passo 5.** Confrontare i numeri con quelli che `feature/02` ha già misurato —
       [V-031](../Sources.md#v-031) (la forbice 8-10 s) e [V-033](../Sources.md#v-033) (12 901
       confermate, 0 perdute). Se l'applicazione dice qualcosa di diverso, **uno dei due è sbagliato**
       e va capito quale prima di andare avanti.
-- [ ] **Passo 6.** Commit: `feat: la scena del failover, con i due numeri che la chiudono`.
+- [x] **Passo 6.** Commit: `feat: la scena del failover, con i due numeri che la chiudono`.
 
 ---
 

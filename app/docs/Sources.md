@@ -477,6 +477,33 @@ misure valgono per l'ambiente descritto in [M-001](#m-001) e per nessun altro.
   specifica, non nel manuale dello strumento, e chi legge solo il secondo non la trova.
 - **Usata da:** [13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md](13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md)
 
+<a id="a-017"></a>
+### A-017 — PyMongo: un comando su `admin` va sul primario, e per questo `ping` è un'attesa
+
+- **URL:** https://pymongo.readthedocs.io/en/stable/api/pymongo/database.html — letta però sul
+  pacchetto installato, `pymongo` **4.17.0**, in
+  `app/.venv/lib/python3.13/site-packages/pymongo/synchronous/database.py`, perché ciò che qui
+  conta non è la frase della pagina ma la riga che la attua, e la riga si può citare per numero.
+- **Editore:** MongoDB, Inc. — documentazione e sorgente di PyMongo
+- **Consultata:** 2026-09-04
+- **Verdetto:** **conferma**, e la conferma è doppia — la docstring lo dichiara, il codice lo fa
+- **Cosa afferma:** di `Database.command`, che il parametro `read_preference`, se la sessione non
+  è in una transazione, «defaults to :attr:`~pymongo.read_preferences.ReadPreference.PRIMARY`»
+  (righe 880-885). Cinquanta righe più sotto, il codice che lo attua:
+  ```python
+  if read_preference is None:
+      read_preference = (session and session._txn_read_preference()) or ReadPreference.PRIMARY
+  ```
+  (righe 932-933).
+- **Conseguenza qui:** è la ragione per cui `attendi_il_primario` è una riga sola e non un ciclo
+  di sondaggi. Un comando che deve andare sul primario **non torna finché un primario non c'è**:
+  la selezione del server è l'attesa, e il suo limite è il `serverSelectionTimeoutMS` che
+  `connetti` fissa. `cliente.admin.command("ping")` non è quindi una verifica di raggiungibilità
+  — quella la darebbe una preferenza `NEAREST` — ma la stessa domanda che la scena farà un
+  istante dopo, fatta in anticipo per aspettarne la risposta. Il difetto che ha reso necessaria
+  la riga è [M-042](#m-042).
+- **Usata da:** [14-la-scena-del-failover-e-i-due-numeri.md](14-la-scena-del-failover-e-i-due-numeri.md)
+
 ---
 
 ## Misure fatte qui
@@ -2031,6 +2058,145 @@ misure valgono per l'ambiente descritto in [M-001](#m-001) e per nessun altro.
   `tools/images.env` e un'immagine più pesante da tenere in cache — e continuare a passare per
   `docker exec` dall'host, rinunciando a eseguire quella scena dal container. La decisione è di
   quel task; qui si registra solo che la previsione non è stata onorata.
+
+<a id="m-040"></a>
+### M-040 — I due `--env-file` non sono un vezzo del Makefile: senza, `docker compose` non parte
+
+- **Data:** 2026-09-04
+- **Comando:**
+  ```
+  docker compose -f docker/02-replicaset/compose.yaml ps
+  docker compose --env-file tools/images.env -f docker/02-replicaset/compose.yaml ps
+  ```
+  entrambi dalla radice del repository.
+- **Output:** il primo esce con `1` e sette errori `required variable … is missing a value`; il
+  secondo esce con `1` e due, tutti e due `required variable PASSWORD_AMMINISTRATORE is missing
+  a value`. Con entrambi i file — `tools/images.env` e `docker/02-replicaset/.env` — il comando
+  riesce.
+- **Che cosa dimostra:** che l'interpolazione dei `compose.yaml` usa la forma
+  `${VARIABILE:?messaggio}`, che è un errore e non un valore vuoto, e che le variabili vengono da
+  **due** file distinti: i digest delle immagini da `tools/images.env`, che sta in git, e la
+  credenziale da `docker/<stack>/.env`, che non ci sta e non ci starà mai. Dimostra anche che
+  `-p` non serve: ogni `compose.yaml` dichiara il proprio `name:` al suo interno, e la riga
+  annunciata dalla scena è già completa senza.
+- **Perché è stata fatta:** perché la prova di integrazione del Task 13 esegue **verbatim** la
+  riga che l'applicazione annuncia, e prima di poterla eseguire bisognava sapere che cosa quella
+  riga deve contenere per funzionare da sola. La misura ha fissato la forma di `_compose()` in
+  `app/tests/integration/ambiente.py` e, per la stessa ragione, quella del frasario di
+  `ComandiCompose`.
+- **Riserve:** i due errori del secondo comando sono due e non uno perché la variabile compare in
+  due servizi; il numero dipende dallo stack e non va letto come una costante. La misura è su
+  `02-replicaset`; `03-sharded` ha più servizi e quindi più errori, ma la conclusione — che
+  servono entrambi i file — è la stessa.
+
+<a id="m-041"></a>
+### M-041 — «Zero scritture perse» è vero, e non è merito dell'applicazione: è il server a imporre `majority`
+
+- **Data:** 2026-09-04
+- **Comando:**
+  ```
+  docker compose --env-file tools/images.env --env-file docker/02-replicaset/.env \
+    -f docker/02-replicaset/compose.yaml run --rm -T --entrypoint python app -c \
+    "from mongolab.infrastructure.bersagli import BERSAGLI, connetti
+     c = connetti(BERSAGLI['rs'])
+     print(c.admin.command('getDefaultRWConcern'))
+     print(repr(c.write_concern))
+     print(c.admin.command('buildInfo')['version'])"
+  ```
+- **Output:**
+  ```
+  defaultWriteConcern: {'w': 'majority', 'wtimeout': 0}
+  defaultWriteConcernSource: 'implicit'
+  WriteConcern()
+  7.0.40
+  ```
+- **Che cosa dimostra:** che il `WriteConcern` del client è **vuoto** — l'applicazione non chiede
+  niente — e che il valore effettivo, `w: majority`, arriva dal server come *default implicito*.
+  Da MongoDB 5.0 il write concern predefinito è `majority` quando il numero di membri portatori
+  di dati lo consente; `defaultWriteConcernSource: 'implicit'` dice esattamente che nessuno
+  l'ha impostato a livello di cluster, e che quindi **cambierebbe** se qualcuno eseguisse
+  `setDefaultRWConcern`.
+- **Perché è stata fatta:** perché il Passo 5 del Task 13 chiede di confrontare i numeri della
+  scena con quelli che `feature/02` aveva già misurato, e il numero da spiegare era «0 scritture
+  perse». Prima di dire *perché* zero bisognava sapere **chi** chiede `majority`. La risposta
+  cambia la frase da dire in sala: non «la mia applicazione usa `w: majority`», che sarebbe
+  falso, ma «nessuno qui ha chiesto niente, e il server ha scelto bene».
+- **Riserve:** il confronto con [V-016](../../docs/Sources.md#v-016) — cento scritture perse con
+  `w: 1` — resta valido proprio perché lì il write concern era **esplicito**: quella misura
+  scavalcava il default, questa lo eredita. La misura vale per questo replica set su questa
+  versione; su un cluster con un default esplicito diverso la scena mostrerebbe un altro numero,
+  ed è una cosa da dire, non un difetto da correggere.
+
+<a id="m-042"></a>
+### M-042 — Subito dopo `connetti` la topologia è vuota, e la scena moriva prima di cominciare
+
+- **Data:** 2026-09-04
+- **Comando:** la prima esecuzione di `app/tests/integration/test_scenari.py` contro lo stack
+  `02-replicaset` acceso e sano.
+- **Output:**
+  ```
+  Usage: mongolab demo failover [OPTIONS]
+  Try 'mongolab demo failover --help' for help.
+  ╭─ Error ───────────────────────────────────────────────────────────────────╮
+  │ Invalid value: nessun primario in vista su «rs»                           │
+  ╰───────────────────────────────────────────────────────────────────────────╯
+  ```
+- **Che cosa dimostra:** che `Inspector.topology()` legge la descrizione che il driver **ha già**
+  in mano, e che quella descrizione, nei primi millisecondi dopo `MongoClient(...)`, è ancora
+  vuota: la scoperta di PyMongo comincia in quel momento e prosegue su thread suoi. Non è un
+  difetto del replica set, che era sanissimo, ed è precisamente ciò che la docstring di
+  `topology()` dichiarava da sempre — è una lettura pura, non fa scoperta e non blocca. La
+  correzione è un `ping`, che va sul primario ([A-017](#a-017)) e quindi **aspetta**.
+- **Perché è stata fatta:** non è stata fatta, è **capitata** alla prima esecuzione vera della
+  scena, e vale la pena scriverla per un motivo preciso: le prove unitarie, tutte verdi, non
+  la vedevano, perché i doppi rispondono subito. Gli altri comandi non ci inciampavano per caso —
+  `stats` chiede `serverStatus`, che è un comando vero e quindi aspetta la selezione; `watch`
+  guarda la topologia proprio mentre cambia, che è il suo mestiere. Solo `demo failover` guarda
+  una volta sola, subito, e su quella risposta decide chi fermare.
+- **Riserve:** la correzione vive in `infrastructure/bersagli.py` e non in `cli.py`, dove sarebbe
+  stata più comoda, perché `test_pymongo_si_importa_solo_nell_infrastruttura` lo vieta: la
+  guardia ha avuto ragione, e il risultato è migliore — `SenzaPrimario` è un fatto
+  dell'infrastruttura, `niente_da_fermare` è la frase che la riga di comando ne ricava. Vedi
+  [ADR-0099](../../docs/Decision.md#adr-0099).
+
+<a id="m-043"></a>
+### M-043 — La scena del failover contro lo stack vero: 10 019 ms, 0 scritture perse, e i numeri di `feature/02` tengono
+
+- **Data:** 2026-09-04
+- **Comando:**
+  ```
+  uv run --directory app pytest tests/integration/test_scenari.py
+  ```
+  che gira `mongolab demo failover --target rs --sink plain --carico 3 --elezione 20
+  --recupero 5` **dentro** il container, sulla rete di `02-replicaset`, ed esegue sull'host le
+  righe `docker compose` che la scena annuncia.
+- **Output:**
+  ```
+  fasi     prima 2057 scritture p95 55.7 ms · durante 9006 p95 51.4 ms · dopo 4166 p95 50.8 ms
+  cronaca  primario perduto
+           da mongo-rs-1:27017 a mongo-rs-3:27017
+  failover interruzione 10019.0 ms · scritture perse 0
+  ```
+  su **15 229** scritture confermate e 15 229 ritrovate.
+- **Che cosa dimostra:** che l'applicazione misura la stessa cosa che `feature/02` aveva misurato
+  a mano, e la misura uguale. I 10 019 ms cadono dentro la forbice di
+  [V-029](../../docs/Sources.md#v-029) — 9 812, 10 619 e 10 943 ms su tre `docker kill` — e
+  quindi dentro gli «8-10 s» di [V-031](../../docs/Sources.md#v-031); le zero scritture perse
+  ripetono [V-033](../../docs/Sources.md#v-033), che ne aveva confermate 12 901 e perdute
+  nessuna. Il Passo 5 del Task 13 chiedeva di fermarsi se i due non avessero coinciso:
+  coincidono, e nessuno dei due va corretto.
+- **Perché è stata fatta:** perché una scena che gira non è una scena che dice il vero. Le prove
+  unitarie asseriscono sulla **sequenza** degli eventi con i doppi, e una sequenza giusta può
+  benissimo accompagnare due numeri sbagliati: se il guasto non arrivasse, l'interruzione
+  sarebbe zero e la sequenza resterebbe identica. Confrontare con una misura fatta settimane
+  prima, per un'altra strada, è il solo controllo che quei due numeri abbiano un significato.
+- **Riserve:** la prova asserisce su una banda larga — fra 5 000 e 15 000 ms — e non sui 10 019,
+  perché a stringerla si otterrebbe una prova che fallisce sul portatile di qualcun altro senza
+  che niente sia rotto. Ciò che la banda intercetta è l'errore di **categoria**: zero (il guasto
+  non è arrivato) o sessanta secondi (l'elezione non è avvenuta). Il numero preciso è questa
+  misura, e sta qui. La scena è girata dal container e il guasto è stato eseguito sull'host da
+  un processo che faceva da umano: dall'host solo non si può, perché lì la connessione è
+  `directConnection` e non c'è scoperta — [ADR-0095](../../docs/Decision.md#adr-0095).
 
 ## Fonti canoniche che l'applicazione usa senza copiarle
 

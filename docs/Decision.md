@@ -5951,3 +5951,305 @@ questo repository scrive, e non pretende di capire ogni Dockerfile del mondo.
 
 **Fonti:** [M-037](../app/docs/Sources.md#m-037), [ADR-0009](#adr-0009), [ADR-0018](#adr-0018),
 [ADR-0039](#adr-0039)
+
+---
+
+<a id="adr-0094"></a>
+## ADR-0094 — `FaseIniziata`, il decimo evento: uno scenario che annuncia invece di stampare
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** la scena del failover è una sequenza di fasi — carico, guasto, elezione, ripresa,
+recupero, bilancio — e ciascuna va annunciata: in sala perché il pubblico sappia che cosa sta
+guardando, e con `--step` perché la pausa da palco deve dire **che cosa** sta per succedere
+prima di aspettare l'Invio. La strada breve era una `print` dentro lo scenario. La strada breve
+avrebbe però messo la resa dentro il dominio, che [ADR-0007](#adr-0007) vieta, e avrebbe reso
+la scena non verificabile: una prova che asserisce su `capsys` verifica l'impaginazione, non
+la sequenza.
+
+**Decisione:** lo scenario emette un decimo evento di dominio, `FaseIniziata`, con il nome
+della fase e la sua descrizione, e non stampa niente. I nove eventi precedenti sono di specie
+diversa — raccontano un fatto **osservato** (una scrittura è riuscita, un server è cambiato di
+ruolo); questo racconta un'**intenzione**, ed è l'unico evento che l'applicazione produce
+sapendo già che accadrà. La distinzione è dichiarata nel modulo, perché chi aggiunge l'undicesimo
+sappia in quale delle due famiglie sta entrando.
+
+La pausa di `--step` è una funzione che riceve `FaseIniziata` e torna quando può proseguire:
+`senza_attesa` non fa niente, `_invio` scrive e legge da stdin. È lo stesso evento a servire i
+tre sink e la pausa, che è la ragione per cui la modalità automatica e quella da palco mostrano
+davvero la stessa scena e non due scene che si somigliano.
+
+**Conseguenze:** le prove unitarie della scena asseriscono sulla sequenza di eventi che esce da
+`RecordingSink`, fasi comprese, senza mai guardare un carattere di output. La pausa si prova
+passando una funzione che annota invece di leggere, e non serve simulare una tastiera. Le
+registrazioni di riserva del Task 18 mostrano la stessa successione di fasi della scena dal
+vivo, per costruzione.
+
+**Alternative scartate.**
+
+- *Una `print` nello scenario.* Rompe ADR-0007 e rende la sequenza inosservabile.
+- *Passare i nomi delle fasi alla riga di comando e lasciare che li stampi lei.* La riga di
+  comando dovrebbe allora conoscere l'ordine delle fasi, cioè il copione — che è la sola cosa
+  che lo scenario possiede davvero.
+- *Riusare `MisuraPresa` con un campo `fase`.* Un evento che significa due cose diverse a
+  seconda di un campo è un evento che ogni sink deve disambiguare, tre volte.
+
+**Fonti:** [ADR-0007](#adr-0007), [ADR-0082](#adr-0082),
+[M-043](../app/docs/Sources.md#m-043)
+
+---
+
+<a id="adr-0095"></a>
+## ADR-0095 — `Regia`, la sesta porta: chi fa accadere il guasto non sta dove lo scenario guarda
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** la scena centrale del talk ha bisogno di due cose insieme, e il Task 13 ha scoperto
+eseguendo che **un processo solo non può averle entrambe**.
+
+La cronaca dell'elezione — «il primario era `mongo-rs-1:27017`, adesso è `mongo-rs-3:27017`» —
+esiste solo se il client fa scoperta, e la scoperta funziona solo da dentro la rete Compose,
+dove i nomi dei servizi si risolvono ([M-036](../app/docs/Sources.md#m-036),
+[A-016](../app/docs/Sources.md#a-016)). Dall'host lo stesso replica set si raggiunge con
+`directConnection=True` su `localhost:27021`: nessuna scoperta, nessuna cronaca, e per giunta
+l'indirizzo del primario è un `localhost:27021` che non è il nome di nessun servizio da fermare.
+
+Il guasto, però, è un `docker compose kill`, e richiede il socket del demone. Il container
+dell'applicazione **non ce l'ha**, per una scelta del Task 12 che resta valida: montare
+`/var/run/docker.sock` dentro un container mostrato in sala vuol dire mostrare, senza dirlo, il
+modo più diretto di prendere la macchina che lo ospita.
+
+**Decisione:** una sesta porta, `Regia`, con quattro verbi — `ferma`, `riavvia`, `sospendi`,
+`risveglia` — e due adattatori che la implementano in modi opposti:
+
+- `RegiaCompose` **esegue**. Vive sull'host, costruisce la riga di `docker compose` dal frasario
+  e la lancia con `subprocess.run` dalla radice del repository.
+- `RegiaAnnunciata` **annuncia**. Vive nel container, stampa la riga esatta — quella che si
+  incolla in un altro terminale, con entrambi i `--env-file` che
+  [M-040](../app/docs/Sources.md#m-040) ha dimostrato obbligatori — e si blocca finché un umano
+  non preme Invio.
+
+Quale dei due si costruisce lo decide `punto_di_vista()`, cioè la stessa funzione che già
+sceglie il bersaglio; lo scenario non lo sa e non deve saperlo. Il frasario è un dato separato
+dall'esecuzione **proprio perché** `RegiaAnnunciata` deve poter comporre una riga senza averne
+il diritto di eseguirla.
+
+**Conseguenze:** la scena dal vivo richiede due terminali, e questo va detto al PO prima delle
+prove generali: uno mostra la scena, l'altro esegue il guasto che la scena detta. In cambio, la
+riga da incollare non si inventa a mano sotto pressione e non può essere sbagliata. La prova di
+integrazione automatizza esattamente questo: un processo legge lo stdout del container, esegue
+verbatim la riga annunciata e rimanda un Invio — il che, di passaggio, dimostra che la riga
+annunciata è davvero incollabile ([M-043](../app/docs/Sources.md#m-043)).
+
+**Alternative scartate.**
+
+- *Montare il socket Docker nel container.* Rifiutata al Task 12 e rifiutata di nuovo qui. Il
+  motivo non è cambiato, e in sala peserebbe di più: sarebbe proiettato.
+- *Girare tutta la scena dall'host.* Funziona per il guasto e perde la cronaca, cioè la metà
+  che vale i cinque minuti dell'Atto II.
+- *Un secondo processo «agente» che riceve gli ordini dal container su una socket.* Sposta il
+  problema di un livello e aggiunge un componente da spiegare in sala; il valore didattico del
+  vincolo — *questo container non può toccare il demone* — sparirebbe dentro l'infrastruttura
+  che lo aggira.
+
+**Riserve.** `RegiaAnnunciata` legge da stdin, quindi la scena dal container non gira senza un
+terminale interattivo o un processo che ne faccia le veci; la prova di integrazione fa la
+seconda cosa, e la sua scadenza è un `threading.Timer` perché un Invio che non arriva è un
+comando che non torna mai.
+
+**Fonti:** [M-036](../app/docs/Sources.md#m-036), [A-016](../app/docs/Sources.md#a-016),
+[M-040](../app/docs/Sources.md#m-040), [M-043](../app/docs/Sources.md#m-043),
+[ADR-0054](#adr-0054), [ADR-0090](#adr-0090), [ADR-0092](#adr-0092)
+
+---
+
+<a id="adr-0096"></a>
+## ADR-0096 — L'interruzione si deduce dagli eventi del ponte, non si misura sondando
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** «quanto è durata l'interruzione» è uno dei due numeri che chiudono la scena, e la
+strada ovvia per ottenerlo è un ciclo che chiede al cluster chi è il primario finché qualcuno
+risponde. Quella strada misura però il proprio intervallo di sondaggio quanto misura
+l'elezione: con un sondaggio ogni 500 ms, un'elezione di 10 019 ms e una di 10 400 danno lo
+stesso numero, e il numero dipende da una costante che nessuno ha discusso.
+
+Il ponte SDAM del Task 7 riceve intanto, dai listener di PyMongo, gli eventi che descrivono
+esattamente ciò che serve: il momento in cui il primario smette di essere tale e il momento in
+cui la topologia ne ha uno nuovo. Sono i tempi del driver, non i nostri.
+
+**Decisione:** lo scenario non sonda. Drena la coda del ponte e ricava l'interruzione dalla
+distanza fra i due eventi di cambio ruolo che il driver ha già osservato. La conseguenza
+importante è che il numero è quello che **il client ha vissuto**, cioè lo stesso che vive
+un'applicazione vera: non il tempo in cui il replica set ha eletto, ma il tempo in cui il driver
+è rimasto senza un posto dove scrivere. È anche il solo dei due che il pubblico possa mettere in
+relazione con le proprie latenze.
+
+Il carico continua per tutta la durata, e la sua interruzione è la controprova: le fasi
+mostrano 2 057 scritture prima, 9 006 durante e 4 166 dopo, con p95 che restano attorno ai 51-56
+ms. Un numero dedotto e un numero osservato che raccontano lo stesso fatto.
+
+**Conseguenze:** nessun intervallo di sondaggio da giustificare, nessun thread in più, e una
+scena che continua a funzionare se il driver cambia le sue soglie — cambierà il numero, non il
+modo di ottenerlo. Le prove unitarie possono fabbricare la sequenza di eventi e verificare
+l'aritmetica senza un cluster.
+
+**Alternative scartate.**
+
+- *Sondare `hello` in un ciclo.* Misura anche sé stessa, e ogni scelta dell'intervallo è
+  arbitraria.
+- *Leggere `replSetGetStatus` e usare il timestamp dell'elezione dichiarato dal server.* È un
+  numero diverso e più preciso, e risponde a un'altra domanda: quanto ci ha messo **il set**, non
+  quanto è rimasto fermo **il client**. Vale la pena nominarlo in sala, non sostituirlo.
+- *Cronometrare a mano dal primo errore di scrittura alla prima riuscita.* Dipende dalla
+  frequenza delle scritture, che è un parametro della scena, non del failover.
+
+**Riserve.** Il numero dedotto vale quanto vale la puntualità con cui i listener sono chiamati;
+[S-010](Sources.md#s-010) dice che gli eventi sono consegnati in modo sincrono e che il thread
+che li consegna aspetta il gestore, il che è la ragione per cui il gestore accoda e basta —
+[ADR-0019](#adr-0019). Il confronto con la misura indipendente di `feature/02` è la verifica
+che la deduzione non stia mentendo: 10 019 ms contro i 9 812-10 943 di
+[V-029](Sources.md#v-029) ([M-043](../app/docs/Sources.md#m-043)).
+
+**Fonti:** [S-010](Sources.md#s-010), [V-029](Sources.md#v-029), [V-031](Sources.md#v-031),
+[M-043](../app/docs/Sources.md#m-043), [ADR-0019](#adr-0019), [ADR-0089](#adr-0089)
+
+---
+
+<a id="adr-0097"></a>
+## ADR-0097 — Il guasto predefinito è `SIGKILL`, e non lo `stop` che il piano scriveva
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** il Passo 2 del Task 13 detta la sequenza del copione e nomina, alla lettera,
+`docker compose stop` del primario. Eseguito, `stop` manda `SIGTERM`, e `mongod` che riceve
+`SIGTERM` **cede il ruolo con ordine** prima di uscire: [V-029](Sources.md#v-029) misura quella
+strada in 574, 480 e 486 ms, senza elezione da raccontare. La stessa misura, con `docker kill`,
+dà 9 812, 10 619 e 10 943 ms — che sono i numeri che [V-031](Sources.md#v-031) ha già portato
+sulle slide come «forbice 8-10 s».
+
+Il piano e le slide non possono avere ragione tutti e due.
+
+**Decisione:** il verbo `ferma` della regia esegue `docker compose kill -s SIGKILL`, che diventa
+il guasto predefinito della scena. `ARRESTO_ORDINATO = ("stop",)` resta nel codice, documentato
+e configurabile, perché è il confronto che rende leggibile il numero grande: mezzo secondo
+contro dieci, e nel verso opposto all'intuizione di chi si aspetta che «spegnere bene» sia più
+lento.
+
+Le slide hanno ragione, il piano ha una svista, e la svista è istruttiva quanto la correzione:
+**«fermare un nodo» non è un'operazione sola**, e quale delle due si sceglie decide se il
+pubblico vedrà un'elezione o non la vedrà affatto.
+
+**Conseguenze:** la scena riproduce i numeri già misurati, il che è la premessa perché il
+confronto del Passo 5 abbia senso. Chi voglia mostrare l'altra scena può, ed è una riga di
+configurazione, non una modifica.
+
+**Alternative scartate.**
+
+- *Obbedire alla lettera del piano.* Produrrebbe una scena in cui il primario cambia in mezzo
+  secondo e nessuno capisce perché il talk ne parlasse tanto, con due slide che dicono un numero
+  diverso da quello proiettato sotto.
+- *Togliere `stop` dal codice.* Perderebbe il confronto, che è il pezzo di didattica migliore
+  dei due.
+- *Cambiare le slide.* Le slide riportano una misura fatta, non un'opinione.
+
+**Riserve.** Va portata al PO come correzione dichiarata del piano, non applicata in silenzio:
+il piano è un documento del progetto e la sua lettera contava. Da segnalare anche che i tre
+valori di V-029 e i 10 019 ms di [M-043](../app/docs/Sources.md#m-043) dipendono dalle
+impostazioni di elezione di questo replica set; su un set configurato diversamente la forbice si
+sposta, e la frase da dire in sala è «su questo lab», non «in MongoDB».
+
+**Fonti:** [V-029](Sources.md#v-029), [V-031](Sources.md#v-031),
+[M-043](../app/docs/Sources.md#m-043)
+
+---
+
+<a id="adr-0098"></a>
+## ADR-0098 — `--step` e `--sink rich` si rifiutano a vicenda, e il rifiuto arriva prima della scena
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** `--step` mette in pausa prima di ogni fase e riparte con un Invio: legge da stdin,
+sul thread della scena. La resa `rich` tiene aperto un `Live` che ridisegna quattro volte al
+secondo su un thread suo ([ADR-0085](#adr-0085), [M-027](../app/docs/Sources.md#m-027)). Le due
+cose vogliono lo stesso terminale: il prompt «Invio per proseguire» finisce sotto il ridisegno
+successivo, e chi tiene la tastiera dal palco non vede più che cosa sta aspettando. È il genere
+di difetto che non fallisce nessuna prova e rovina esattamente un'occasione.
+
+**Decisione:** la combinazione è rifiutata come errore di parametro, prima che la scena
+cominci — prima della connessione, del carico e della collezione di lavoro. Il messaggio dice
+perché, e detta la riga giusta: dal palco è `--step --sink plain`, che è **la stessa** con cui si
+girano le registrazioni di riserva.
+
+Rifiutare invece di degradare in silenzio a `plain` è deliberato: una scena che cambia da sola
+la propria resa è una scena che dal vivo mostra qualcosa di diverso da quello che si è provato
+la sera prima.
+
+**Conseguenze:** la modalità da palco è `plain`, punto — il che semplifica anche le prove
+generali, perché la registrazione asciinema e la scena dal vivo usano la stessa riga. La resa
+`rich` resta quella dei comandi che nessuno interrompe, `watch` in testa.
+
+**Alternative scartate.**
+
+- *Sospendere il `Live` durante la pausa.* Tecnicamente possibile e appeso a un dettaglio
+  privato di Rich, che [M-027](../app/docs/Sources.md#m-027) ha già mostrato essere `_RefreshThread`:
+  appoggiarcisi sarebbe un errore anche se fosse documentato.
+- *Degradare a `plain` con un avviso.* L'avviso scorre via e la scena non è quella provata.
+- *Leggere la pausa da un altro descrittore.* Risolve il conflitto e ne crea uno peggiore: dal
+  palco bisognerebbe ricordarsi dove premere Invio.
+
+**Riserve.** Da portare al PO: è una biforcazione vera fra ciò che si vorrebbe (la scena bella
+**e** la pausa) e ciò che si può, e la risposta scelta rinuncia alla prima. Se le prove generali
+mostrassero che la resa `plain` non regge la proiezione, la decisione va riaperta — con la
+sospensione del `Live` come prima candidata, e con il costo dichiarato.
+
+**Fonti:** [M-027](../app/docs/Sources.md#m-027), [S-018](Sources.md#s-018),
+[ADR-0085](#adr-0085)
+
+---
+
+<a id="adr-0099"></a>
+## ADR-0099 — L'attesa del primario vive nell'infrastruttura, perché la riga di comando resti senza PyMongo
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** alla prima esecuzione vera, `demo failover` è uscito con «nessun primario in vista
+su «rs»» contro un replica set sanissimo ([M-042](../app/docs/Sources.md#m-042)). La causa non
+era il cluster: `Inspector.topology()` legge la descrizione che il driver **ha già** in mano, e
+nei primi millisecondi dopo `MongoClient(...)` quella descrizione è ancora vuota, perché la
+scoperta comincia in quel momento e prosegue su thread suoi. **Guardare non è aspettare.**
+
+La correzione è un `ping`, che essendo un comando su `admin` va sul primario per impostazione
+predefinita ([A-017](../app/docs/Sources.md#a-017)) e quindi torna esattamente quando la domanda
+successiva ha una risposta. La tentazione era metterlo in `cli.py`, dove sta la chiamata. La
+guardia `test_pymongo_si_importa_solo_nell_infrastruttura` lo vieta — e la sua docstring dice, da
+sempre, che «`cli.py` è proprio il posto in cui la tentazione arriva».
+
+**Decisione:** la guardia ha ragione, e non si tocca. L'attesa vive in
+`infrastructure/bersagli.py`, accanto all'unico `MongoClient(...)` del repository, e traduce il
+`ServerSelectionTimeoutError` di PyMongo in un `SenzaPrimario` di questo strato. La riga di
+comando cattura `SenzaPrimario` e ne ricava la frase, che è cosa sua: `niente_da_fermare`
+**restituisce** l'eccezione di `typer` invece di sollevarla, così il messaggio — la parte che
+finisce davanti al pubblico — si prova senza dover fabbricare un replica set malato.
+
+L'attesa massima non è un parametro: è il `serverSelectionTimeoutMS` che `connetti` già fissa.
+Prenderlo di nuovo qui vorrebbe dire poter dichiarare un'attesa diversa da quella che si aspetta
+davvero.
+
+**Conseguenze:** il codice è finito meglio di dove voleva andare — un fatto
+dell'infrastruttura da una parte, la frase per la sala dall'altra, ciascuno provato per conto
+suo. Il difetto vale anche come lezione sui limiti dei doppi: 518 prove unitarie verdi non lo
+vedevano, perché i doppi rispondono subito e un cluster vero no.
+
+**Alternative scartate.**
+
+- *Rilassare la guardia per `cli.py`.* Una guardia che cede la prima volta che dà fastidio non
+  è una guardia, ed è la sola cosa che tenga `MongoClient(...)` in un punto solo del repository.
+- *Un ciclo che rilegge `topology()` finché non compare un primario.* Reimplementa la selezione
+  del server che il driver già fa, con un intervallo arbitrario in più.
+- *Aggiungere l'attesa dentro `connetti`.* Farebbe pagare a `stats`, `watch` e `workload`
+  un'attesa che non hanno chiesto, e a `watch` in particolare toglierebbe proprio la scena che
+  deve mostrare: la topologia mentre si forma.
+
+**Fonti:** [A-017](../app/docs/Sources.md#a-017), [M-042](../app/docs/Sources.md#m-042),
+[ADR-0007](#adr-0007), [ADR-0090](#adr-0090)

@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import Any, Final, Mapping
 
 from pymongo import MongoClient
+from pymongo.errors import ServerSelectionTimeoutError
 
 __all__ = [
     "BERSAGLI",
@@ -61,7 +62,9 @@ __all__ = [
     "Credenziali",
     "PuntoDiVista",
     "PuntoDiVistaSconosciuto",
+    "SenzaPrimario",
     "Vista",
+    "attendi_il_primario",
     "bersaglio_di",
     "collezione_di_carico",
     "connetti",
@@ -431,6 +434,43 @@ def _dall_ambiente(variabili: Mapping[str, str]) -> Credenziali:
             "qui e non deve comparire in nessun log."
         )
     return Credenziali(utente=variabili.get(CHIAVE_UTENTE, "admin"), password=password)
+
+
+class SenzaPrimario(RuntimeError):
+    """Nessun primario si è fatto vedere entro l'attesa di selezione del client.
+
+    Un'eccezione di questo strato e non un `ServerSelectionTimeoutError` che passa: chi la
+    riceve è la riga di comando, e deve poterla trasformare in una frase senza importare
+    pymongo — glielo vieta `test_pymongo_si_importa_solo_nell_infrastruttura`, ed è la
+    stessa regola per cui `MongoClient(...)` compare in un punto solo del repository.
+    """
+
+
+def attendi_il_primario(cliente: MongoClient[dict[str, Any]]) -> None:
+    """Un `ping`, per aspettare che ci sia un primario prima di chiedere chi è.
+
+    **Guardare non è aspettare**, e la differenza è costata un difetto vero al Task 13.
+    `Inspector.topology()` legge la descrizione che il driver ha già in mano: è una
+    lettura pura, non fa scoperta e non blocca. Subito dopo `connetti` quella descrizione
+    è ancora vuota, perché la scoperta di pymongo comincia in quel momento e prosegue su
+    thread suoi. Contro un replica set sanissimo, `demo failover` usciva con «nessun
+    primario in vista» qualche decina di millisecondi prima che il primario comparisse.
+
+    Gli altri comandi non se ne accorgevano, e per caso: `stats` chiede `serverStatus`,
+    che è un comando vero e quindi aspetta la selezione; `watch` guarda la topologia
+    mentre cambia, che è precisamente il suo mestiere.
+
+    Il `ping` va **sul primario** — è la preferenza di lettura predefinita dei comandi su
+    `admin` — quindi torna quando la selezione è riuscita, cioè esattamente quando la
+    domanda che segue ha una risposta. L'attesa massima non è un parametro di questa
+    funzione: è il `serverSelectionTimeoutMS` del client, che `connetti` fissa a
+    `ATTESA_SELEZIONE_MS`. Prenderla anche qui vorrebbe dire poter dichiarare un'attesa
+    diversa da quella che si aspetta davvero.
+    """
+    try:
+        cliente.admin.command("ping")
+    except ServerSelectionTimeoutError as scaduta:
+        raise SenzaPrimario(str(scaduta)) from scaduta
 
 
 def connetti(

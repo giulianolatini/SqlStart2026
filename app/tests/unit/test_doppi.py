@@ -38,6 +38,7 @@ from mongolab.domain.porte import (
     Clock,
     ClusterInspector,
     DocumentStore,
+    Regia,
     EventSink,
 )
 
@@ -51,9 +52,12 @@ from tests.doppi import (
     FakeInspector,
     InMemoryStore,
     LetturaRifiutata,
+    NodoSconosciuto,
     NonSupportato,
     OrologioCheScorre,
     RecordingSink,
+    RegiaCheRifiuta,
+    RegiaFinta,
     ScritturaRifiutata,
 )
 
@@ -742,3 +746,90 @@ def test_l_orologio_che_scorre_non_torna_mai_indietro_sotto_piu_thread() -> None
 def test_l_orologio_che_scorre_passa_per_la_porta() -> None:
     orologio: Clock = OrologioCheScorre(ISTANTE)
     assert orologio.now().tzinfo is not None
+
+
+# --- RegiaFinta, RegiaCheRifiuta --------------------------------------------------------
+
+
+def test_la_regia_finta_annota_i_verbi_nell_ordine_in_cui_li_riceve() -> None:
+    """L'ordine è tutto il valore di questo doppio, e per questo è la sua prima prova.
+
+    La scena del failover è una sequenza, e sbagliarne l'ordine produce una scena che gira
+    lo stesso e racconta un'altra cosa: fermare il nodo **dopo** aver misurato
+    l'interruzione darebbe zero millisecondi, cioè un failover perfetto, e nessuna
+    asserzione sui conteggi se ne accorgerebbe.
+    """
+    regia = RegiaFinta()
+
+    regia.ferma("mongo-rs-1")
+    regia.riavvia("mongo-rs-1")
+    regia.sospendi("mongo-rs-2")
+    regia.risveglia("mongo-rs-2")
+
+    assert regia.ordini == [
+        ("ferma", "mongo-rs-1"),
+        ("riavvia", "mongo-rs-1"),
+        ("sospendi", "mongo-rs-2"),
+        ("risveglia", "mongo-rs-2"),
+    ]
+
+
+def test_la_regia_finta_con_i_nodi_noti_rifiuta_quello_che_non_conosce() -> None:
+    """`noti` serve a provare la strada dell'errore senza uno stack acceso.
+
+    Il caso vero è una `--node` scritta male dal palco: `docker compose kill` risponde «no
+    such service» e la scena muore a metà, con il carico già partito. Chi vuole provare
+    che cosa succede allora ha bisogno di un doppio che sappia dire di no.
+    """
+    regia = RegiaFinta(noti=frozenset({"mongo-rs-1"}))
+
+    regia.ferma("mongo-rs-1")
+    with pytest.raises(NodoSconosciuto, match="mongo-rs-9"):
+        regia.ferma("mongo-rs-9")
+
+    assert regia.ordini == [("ferma", "mongo-rs-1")], "l'ordine rifiutato non si annota"
+
+
+def test_la_regia_che_rifiuta_solleva_a_ogni_verbo_e_annota_lo_stesso() -> None:
+    """Solleva **dopo** aver annotato, ed è la parte che conta.
+
+    Serve a distinguere due fallimenti che di fuori si somigliano: la scena che ha chiesto
+    di fermare il nodo e non c'è riuscita, e la scena che non l'ha mai chiesto. Se il
+    doppio sollevasse prima di annotare, le due sarebbero indistinguibili — e la seconda è
+    il difetto peggiore che questa applicazione possa avere.
+    """
+    regia = RegiaCheRifiuta()
+
+    for verbo in (regia.ferma, regia.riavvia, regia.sospendi, regia.risveglia):
+        with pytest.raises(NodoSconosciuto):
+            verbo("mongo-rs-1")
+
+    assert [verbo for verbo, _ in regia.ordini] == [
+        "ferma",
+        "riavvia",
+        "sospendi",
+        "risveglia",
+    ]
+
+
+def test_il_motivo_del_rifiuto_arriva_nel_messaggio() -> None:
+    regia = RegiaCheRifiuta("nessun socket del demone in questo container")
+
+    with pytest.raises(NodoSconosciuto, match="socket del demone"):
+        regia.ferma("mongo-rs-1")
+
+
+def test_le_due_regie_passano_per_la_porta() -> None:
+    """Le annotazioni sono la prova: è `mypy --strict` a verificarle, non pytest.
+
+    A tempo di esecuzione questa funzione non asserisce quasi niente, e va bene così: la
+    conformità strutturale alla porta `Regia` non è una cosa che si osservi chiamando dei
+    metodi, è una cosa che si osserva leggendo le firme. Qui si dichiara il tipo perché
+    `make app-check` abbia dove guardare.
+    """
+    finta: Regia = RegiaFinta()
+    che_rifiuta: Regia = RegiaCheRifiuta()
+
+    finta.ferma("mongo-rs-1")
+    with pytest.raises(NodoSconosciuto):
+        che_rifiuta.ferma("mongo-rs-1")

@@ -15,10 +15,14 @@ finisca mai nell'URI.
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 import re
+from typing import Any
 
 import pytest
+from pymongo import MongoClient
 
 from mongolab.infrastructure.bersagli import (
+    SenzaPrimario,
+    attendi_il_primario,
     BERSAGLI,
     COLLEZIONE,
     PREFISSO_CARICO,
@@ -518,5 +522,27 @@ def test_senza_punto_di_vista_il_client_lo_legge_dall_ambiente(
         assert sorted(cliente.topology_description.server_descriptions()) == [
             ("mongos", 27017)
         ]
+    finally:
+        cliente.close()
+
+
+def test_l_attesa_del_primario_finisce_e_lo_dice_nel_linguaggio_di_questo_strato() -> None:
+    """Se il primario non arriva, esce `SenzaPrimario` e non l'eccezione di pymongo.
+
+    Un `MongoClient` vero contro una porta chiusa, e non un doppio: ciò che si verifica è
+    come **pymongo** fallisce, e un doppio verificherebbe come lo immagina chi scrive la
+    prova. La porta 1 su loopback rifiuta subito, quindi la prova costa i cinquanta
+    millisecondi di attesa che le si danno e non tocca la rete.
+
+    Il caso opposto — il `ping` che riesce, e che è il motivo per cui questa funzione
+    esiste — non si prova senza un server: lo prova `tests/integration/test_scenari.py`
+    contro il replica set acceso, dove senza questa attesa la scena non parte.
+    """
+    cliente: MongoClient[dict[str, Any]] = MongoClient(
+        "mongodb://127.0.0.1:1/", serverSelectionTimeoutMS=50, connectTimeoutMS=50
+    )
+    try:
+        with pytest.raises(SenzaPrimario):
+            attendi_il_primario(cliente)
     finally:
         cliente.close()

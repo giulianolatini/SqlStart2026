@@ -24,25 +24,40 @@ from rich.console import Console
 from typer.testing import CliRunner
 
 from mongolab.application.topologia import INTERVALLO_PREDEFINITO_MS
+import typer
+
 from mongolab.cli import (
     LETTORI_PREDEFINITI,
     SCRITTORI_PREDEFINITI,
     Resa,
     app,
     cabla,
+    comandi_di,
     giri_di,
     mentre_disegna,
+    nodo_di,
+    regia_di,
+    servizi_di,
     sink_di,
+    niente_da_fermare,
 )
 from mongolab.domain.eventi import Evento, ServerStateChanged
-from mongolab.domain.modelli import Documento, RuoloServer
+from mongolab.domain.modelli import (
+    DescrizioneServer,
+    DescrizioneTopologia,
+    Documento,
+    RuoloServer,
+    TipoTopologia,
+)
 from mongolab.domain.porte import Clock
 from mongolab.infrastructure.bersagli import (
     BERSAGLI,
     COLLEZIONE,
     PREFISSO_CARICO,
     BersaglioSconosciuto,
+    PuntoDiVista,
 )
+from mongolab.infrastructure.regia import RegiaAnnunciata, RegiaCompose
 from mongolab.presentation.null import NullSink
 from mongolab.presentation.plain import PlainSink
 from mongolab.presentation.rich_tui import RichTui
@@ -539,3 +554,215 @@ def test_watch_chiude_il_cliente(monkeypatch: pytest.MonkeyPatch) -> None:
     esegui("watch", "--target", "standalone", "--sink", "plain", "--duration", "0.01")
 
     assert cliente.chiuso
+
+
+# --- La scena del failover: `demo failover` --------------------------------------------
+#
+# La scena vera ha bisogno di uno stack acceso, di dieci secondi di elezione e di un
+# container fermato per davvero: sta in `tests/integration/`. Qui c'è la stessa domanda
+# di tutto il resto del file — **che cosa è stato attaccato a che cosa** — declinata sui
+# pezzi che questa scena aggiunge: il frasario di Compose, la regia che dipende da dove
+# si guarda, e il nodo da fermare.
+
+
+def test_demo_e_un_gruppo_e_la_prima_scena_e_il_failover() -> None:
+    codice, testo = esegui("--help")
+    assert codice == 0
+    assert "demo" in testo
+
+    codice, testo = esegui("demo", "--help")
+    assert codice == 0
+    assert "failover" in testo
+
+
+def test_demo_failover_ha_le_opzioni_del_copione() -> None:
+    codice, testo = esegui("demo", "failover", "--help")
+
+    assert codice == 0
+    for opzione in ("--target", "--step", "--node", "--mode", "--sink"):
+        assert opzione in testo, opzione
+
+
+def test_demo_failover_vuole_un_bersaglio() -> None:
+    codice, testo = esegui("demo", "failover")
+
+    assert codice != 0
+    assert "target" in testo
+
+
+def test_demo_failover_rifiuta_un_bersaglio_sconosciuto() -> None:
+    codice, testo = esegui("demo", "failover", "--target", "rs0")
+
+    assert codice != 0
+    assert "rs0" in testo
+    for nome in BERSAGLI:
+        assert nome in testo, nome
+
+
+def test_i_due_guasti_sono_quelli_del_copione() -> None:
+    """Il nodo morto e il nodo irraggiungibile ma vivo, e non ce n'è un terzo.
+
+    Sono due scene diverse e il copione le vuole entrambe: `kill` dà connection refused,
+    `pause` dà un timeout. La differenza fra un server caduto e una rete partizionata è
+    la parte che il pubblico non si aspetta, e vale i trenta secondi che costa.
+    """
+    codice, testo = esegui("demo", "failover", "--help")
+
+    assert codice == 0
+    assert "ferma" in testo
+    assert "sospendi" in testo
+
+
+def test_un_guasto_che_non_esiste_si_ferma_alla_riga_di_comando() -> None:
+    codice, testo = esegui(
+        "demo", "failover", "--target", "rs", "--mode", "incendia"
+    )
+
+    assert codice != 0
+    assert "incendia" in testo
+
+
+def test_step_e_la_tui_non_possono_avere_lo_stesso_terminale() -> None:
+    """Due cose vogliono lo schermo, e ADR-0019 dice che lo tocca un thread solo.
+
+    La pausa di `--step` legge da `stdin` sul thread che esegue la scena; il `Live` di
+    Rich ridisegna dal thread che ha chiamato. Il prompt finirebbe sotto il ridisegno —
+    invisibile — e chi sta sul palco premerebbe Invio alla cieca davanti alla sala.
+
+    Il rifiuto arriva **alla lettura degli argomenti**, prima che si apra una connessione
+    e prima che parta il carico: è la differenza fra scoprirlo digitando il comando e
+    scoprirlo con la scena già in corso. Dal palco la riga giusta è `--step --sink
+    plain`, che è anche quella con cui si girano le registrazioni di riserva.
+    """
+    codice, testo = esegui("demo", "failover", "--target", "rs", "--step")
+
+    assert codice != 0
+    assert "plain" in testo
+
+
+def test_senza_step_la_tui_resta_la_resa_predefinita() -> None:
+    codice, testo = esegui("demo", "failover", "--help")
+
+    assert codice == 0
+    assert "rich" in testo
+
+
+# --- Il frasario di Compose, il nodo, la regia -----------------------------------------
+
+
+def test_i_servizi_di_uno_stack_sono_i_nomi_della_vista_di_rete() -> None:
+    """I nomi dei servizi ci sono già, e stanno nei semi con cui il client li cerca.
+
+    Una seconda mappa «stack → servizi» accanto a `BERSAGLI` sarebbe la stessa
+    informazione scritta due volte, e la seconda divergerebbe al primo nodo aggiunto.
+    """
+    assert servizi_di(BERSAGLI["rs"]) == ("mongo-rs-1", "mongo-rs-2", "mongo-rs-3")
+    assert servizi_di(BERSAGLI["standalone"]) == ("mongo-standalone",)
+
+
+def test_il_frasario_punta_al_compose_dello_stack_con_i_suoi_env_file() -> None:
+    """Il file dello stack, `tools/images.env`, e il `.env` di chi autentica.
+
+    L'ordine e la presenza non sono estetica: senza i due env-file `docker compose` non
+    arriva a guardare i container, perché i `compose.yaml` interpolano con `${VAR:?...}`
+    e una variabile mancante è un errore. Sono gli stessi che le variabili `COMPOSE_0X`
+    del Makefile passano, ed è voluto: la riga che l'applicazione esegue e quella che si
+    digita a mano devono essere la stessa riga.
+    """
+    riga = comandi_di(BERSAGLI["rs"]).riga("ferma", "mongo-rs-1")
+
+    assert "docker/02-replicaset/compose.yaml" in riga
+    assert "tools/images.env" in riga
+    assert "docker/02-replicaset/.env" in riga
+    assert riga.endswith("mongo-rs-1")
+
+
+def test_lo_stack_che_non_autentica_non_ha_un_env_file_da_passare() -> None:
+    # `Bersaglio.ambiente` è `None` per il 01, e vuol dire «questo stack non autentica».
+    # Un `--env-file` verso un file che non esiste fermerebbe `docker compose` prima di
+    # arrivare al container, e per una credenziale di cui non c'è bisogno.
+    assert len(comandi_di(BERSAGLI["standalone"]).ambiente) == 1
+    assert len(comandi_di(BERSAGLI["rs"]).ambiente) == 2
+
+
+def test_dall_host_la_regia_comanda_e_dalla_rete_annuncia() -> None:
+    """Le due metà del problema che nessun processo solo può tenere insieme.
+
+    Dall'host il socket del demone c'è e la scoperta della topologia no ([M-019]); dalla
+    rete è l'opposto. Il punto di vista che sceglie la vista del client sceglie anche la
+    regia, e sceglierlo in un posto solo è ciò che impedisce alle due scelte di finire in
+    disaccordo — un'applicazione che annuncia il comando e poi lo esegue anche lei
+    fermerebbe il nodo due volte.
+    """
+    assert isinstance(regia_di(BERSAGLI["rs"], PuntoDiVista.HOST), RegiaCompose)
+    assert isinstance(regia_di(BERSAGLI["rs"], PuntoDiVista.RETE), RegiaAnnunciata)
+
+
+def _vista(indirizzo: str | None) -> DescrizioneTopologia:
+    server = (
+        ()
+        if indirizzo is None
+        else (DescrizioneServer(indirizzo=indirizzo, ruolo=RuoloServer.PRIMARIO),)
+    )
+    return DescrizioneTopologia(
+        tipo=TipoTopologia.REPLICA_SET_CON_PRIMARIO, server=server, nome_set="rs0"
+    )
+
+
+def test_il_nodo_predefinito_e_il_primario_che_il_driver_vede() -> None:
+    """`--node` si può omettere, e l'omissione è la scelta giusta quasi sempre.
+
+    Il primario cambia a ogni prova, e una riga di comando che lo nomina a mano è una
+    riga che dal palco si digita sbagliata: `mongo-rs-1` fermato quando il primario era
+    `mongo-rs-3` produce un secondario in meno e nessuna elezione — cioè cinque minuti
+    di Atto II in cui non succede niente.
+    """
+    assert nodo_di(_vista("mongo-rs-2:27017"), BERSAGLI["rs"]) == "mongo-rs-2"
+
+
+def test_senza_primario_non_c_e_niente_da_fermare() -> None:
+    with pytest.raises(typer.BadParameter, match="primario"):
+        nodo_di(_vista(None), BERSAGLI["rs"])
+
+
+def test_un_indirizzo_che_non_e_un_servizio_dello_stack_lo_dice() -> None:
+    """`localhost:27021` è ciò che il driver vede dall'host, e non si può fermare.
+
+    Dall'host il bersaglio `rs` si raggiunge con `directConnection` su una porta
+    pubblicata: il primario si chiama `localhost`, che non è un servizio del
+    `compose.yaml` e non è un nome che `docker compose kill` sappia usare. È la faccia
+    visibile di [M-019], e l'errore lo dice invece di far fallire Compose con «no such
+    service» dopo che il carico è già partito.
+    """
+    with pytest.raises(typer.BadParameter) as errore:
+        nodo_di(_vista("localhost:27021"), BERSAGLI["rs"])
+
+    for servizio in servizi_di(BERSAGLI["rs"]):
+        assert servizio in str(errore.value), servizio
+
+
+def test_un_nodo_scritto_a_mano_che_non_esiste_si_ferma_prima_del_carico() -> None:
+    codice, testo = esegui(
+        "demo", "failover", "--target", "rs", "--node", "mongo-rs-9", "--sink", "null"
+    )
+
+    assert codice != 0
+    assert "mongo-rs-9" in testo
+    assert "mongo-rs-1" in testo
+
+
+def test_senza_primario_l_errore_nomina_il_bersaglio_e_il_comando_che_rimedia() -> None:
+    """Il messaggio è la parte che finisce davanti al pubblico, e si prova da sola.
+
+    `niente_da_fermare` restituisce l'eccezione invece di sollevarla proprio per questo:
+    verificare che cosa dice non richiede un replica set senza primario, che è una cosa
+    che si fabbrica in trenta secondi di `docker compose` e che nessuno rifabbricherebbe
+    a ogni suite.
+
+    Che l'attesa **avvenga** lo prova `test_bersagli`; che serva, la prova di integrazione
+    del Task 13, dove senza di essa la scena non partiva affatto.
+    """
+    detto = str(niente_da_fermare(BERSAGLI["rs"]))
+
+    assert "rs" in detto
+    assert "make up-02" in detto, "l'errore deve dire come si rimedia"

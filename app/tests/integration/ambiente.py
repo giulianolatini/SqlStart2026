@@ -35,7 +35,9 @@ from importlib.metadata import version
 from dataclasses import dataclass
 from typing import Any, Final, Iterator, Mapping
 from uuid import uuid4
+import shlex
 import subprocess
+import threading
 
 from pymongo import MongoClient
 from pymongo.collection import Collection
@@ -56,13 +58,17 @@ __all__ = [
     "PREFISSO_PROVE",
     "STACK",
     "Credenziali",
+    "Scena",
     "Stack",
     "collezione_usa_e_getta",
+    "comando_nel_container",
     "connetti",
     "credenziali_di",
     "immagine_in_cache",
     "nel_container",
     "radice",
+    "rimetti_in_piedi",
+    "scena_nel_container",
     "sveglia",
 ]
 
@@ -237,6 +243,48 @@ def immagine_in_cache() -> bool:
     return esito.returncode == 0
 
 
+def _compose(stack: Stack) -> list[str]:
+    """`docker compose` con i suoi due `--env-file` e il file dello stack, e nulla altro.
+
+    I due `--env-file` sono obbligatori tutti e due, e non è una comodità: i `compose.yaml`
+    di questo repository interpolano con la forma `${MONGO_IMAGE:?...}`, che è un **errore**
+    e non un valore vuoto. Senza nessuno dei due, `docker compose -f
+    docker/02-replicaset/compose.yaml ps` risponde sette volte «required variable ... is
+    missing a value»; con il solo `tools/images.env` ne restano due, per
+    `PASSWORD_AMMINISTRATORE`.
+
+    Nessun `-p`: il nome del progetto sta dentro i file (`name: sqlstart-02-replicaset`).
+    """
+    comando = ["docker", "compose", "--env-file", "tools/images.env"]
+    if stack.ambiente is not None:
+        comando += ["--env-file", stack.ambiente]
+    return comando + ["-f", f"docker/{stack.nome}/compose.yaml"]
+
+
+def comando_nel_container(
+    stack: Stack,
+    *argomenti: str,
+    entrypoint: str | None = None,
+    senza_tty: bool = False,
+) -> list[str]:
+    """La riga che avvia il servizio `app` di uno stack, come lista di argomenti.
+
+    Separata da chi la esegue perché due prove la eseguono in due modi: `nel_container`
+    aspetta la fine e legge tutto insieme, `scena_nel_container` legge riga per riga
+    mentre la scena gira e risponde. La riga è la stessa, e deve restare la stessa.
+
+    `senza_tty` aggiunge `-T`. Serve a chi parla con il processo attraverso delle pipe: con
+    uno pseudo-terminale in mezzo Compose riscriverebbe i fine riga e l'eco, e chi legge si
+    troverebbe il proprio Invio nel testo che sta analizzando.
+    """
+    comando = _compose(stack) + ["run", "--rm"]
+    if senza_tty:
+        comando.append("-T")
+    if entrypoint is not None:
+        comando += ["--entrypoint", entrypoint]
+    return comando + ["app", *argomenti]
+
+
 def nel_container(stack: Stack, *argomenti: str, entrypoint: str | None = None) -> str:
     """Esegue qualcosa nel servizio `app` dello stack, e restituisce ciò che ha scritto.
 
@@ -249,15 +297,8 @@ def nel_container(stack: Stack, *argomenti: str, entrypoint: str | None = None) 
     servizio; il client `docker` non la vede passare come argomento, che è ciò che
     [ADR-0054](../../../docs/Decision.md#adr-0054) vieta.
     """
-    comando = ["docker", "compose", "--env-file", "tools/images.env"]
-    if stack.ambiente is not None:
-        comando += ["--env-file", stack.ambiente]
-    comando += ["-f", f"docker/{stack.nome}/compose.yaml", "run", "--rm"]
-    if entrypoint is not None:
-        comando += ["--entrypoint", entrypoint]
-    comando += ["app", *argomenti]
     esito = subprocess.run(
-        comando,
+        comando_nel_container(stack, *argomenti, entrypoint=entrypoint),
         cwd=radice(),
         capture_output=True,
         text=True,
@@ -271,6 +312,144 @@ def nel_container(stack: Stack, *argomenti: str, entrypoint: str | None = None) 
             f"{esito.returncode}.\n{coda}"
         )
     return esito.stdout
+
+
+@dataclass(frozen=True)
+class Scena:
+    """Che cosa resta di una scena girata nel container: ciò che ha scritto e ciò che ha
+    chiesto di fare.
+
+    I comandi sono tenuti a parte perché sono metà di quello che c'è da verificare. Una
+    scena che stampa la cronaca giusta senza aver chiesto di uccidere nessuno non è una
+    scena riuscita: è una simulazione, ed è esattamente la bugia che
+    `RegiaAnnunciata` esiste per non dire.
+    """
+
+    uscita: str
+    comandi: tuple[str, ...]
+
+    @property
+    def righe(self) -> list[str]:
+        """Le righe stampate, senza i fine riga. È come le legge chi guarda."""
+        return self.uscita.splitlines()
+
+
+PROMPT_DI_REGIA: Final = "docker compose "
+"""Da che cosa si riconosce una riga annunciata da `RegiaAnnunciata`.
+
+Si riconosce dal contenuto e non da un marcatore, perché quella riga esiste per essere
+**copiata**: qualunque cosa la rendesse riconoscibile e non incollabile — un prefisso, una
+sigla, delle virgolette — la renderebbe inutile allo scopo per cui viene stampata.
+"""
+
+
+def _sull_host(riga: str) -> None:
+    """Esegue verbatim, dalla radice del repository, la riga che la scena ha annunciato.
+
+    `shlex.split` e nessuna shell. Nessuna shell perché la riga arriva da un altro
+    processo, e passarla a una shell vorrebbe dire che un `$` capitato in un nome di
+    servizio diventa una sostituzione. Verbatim perché è proprio questo che la prova
+    verifica: se la riga annunciata non fosse eseguibile così com'è, stamparla non
+    servirebbe a niente, e chi la copiasse dal proiettore se ne accorgerebbe in sala.
+    """
+    esito = subprocess.run(
+        shlex.split(riga),
+        cwd=radice(),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if esito.returncode != 0:
+        coda = "\n".join((esito.stdout + esito.stderr).splitlines()[-10:])
+        raise RuntimeError(
+            f"il comando annunciato dalla scena è fallito con {esito.returncode}:\n"
+            f"{riga}\n{coda}"
+        )
+
+
+def scena_nel_container(
+    stack: Stack, *argomenti: str, scadenza_s: float = 300.0
+) -> Scena:
+    """Gira una scena nel container e **fa da umano**: esegue i comandi che annuncia.
+
+    È l'unica disposizione che produce una cronaca dell'elezione vera. Dentro la rete
+    Compose l'applicazione vede la topologia — e solo da lì la vede (M-019) — ma non ha il
+    socket del demone e non può fermare nessuno; sull'host è il contrario. Questa funzione
+    è il ponte fra le due metà, e in sala quel ponte è una persona con una seconda
+    finestra aperta.
+
+    Legge riga per riga e non alla fine: la conferma va data **mentre** la scena aspetta,
+    e una `communicate()` aspetterebbe una fine che non arriva. Il figlio ha
+    `PYTHONUNBUFFERED=1` dal proprio Dockerfile, quindi le righe arrivano quando vengono
+    scritte e non a blocchi.
+
+    La scadenza è un `Timer` che uccide, e non un `timeout=` su una lettura: una
+    `readline` bloccata non scade, e una prova che resta appesa è peggio di una che
+    fallisce, perché non lo dice a nessuno.
+    """
+    processo = subprocess.Popen(
+        comando_nel_container(stack, *argomenti, senza_tty=True),
+        cwd=radice(),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    righe: list[str] = []
+    comandi: list[str] = []
+    with processo:
+        allarme = threading.Timer(scadenza_s, processo.kill)
+        allarme.start()
+        try:
+            canale, uscita = processo.stdin, processo.stdout
+            assert canale is not None and uscita is not None  # sono `PIPE`, per mypy
+            for riga in iter(uscita.readline, ""):
+                righe.append(riga)
+                annunciato = riga.strip()
+                if not annunciato.startswith(PROMPT_DI_REGIA):
+                    continue
+                comandi.append(annunciato)
+                _sull_host(annunciato)
+                canale.write("\n")
+                canale.flush()
+            codice = processo.wait()
+        finally:
+            allarme.cancel()
+            processo.kill()
+    testo = "".join(righe)
+    if codice != 0:
+        perche = " (uccisa dalla scadenza)" if codice < 0 else ""
+        raise RuntimeError(
+            f"la scena su {stack.nome} è uscita con {codice}{perche}.\n{testo}"
+        )
+    return Scena(uscita=testo, comandi=tuple(comandi))
+
+
+def rimetti_in_piedi(stack: Stack) -> None:
+    """Riavvia e risveglia tutto ciò che una scena può aver lasciato fermo o congelato.
+
+    Serve solo quando una prova **fallisce**: una scena che arriva in fondo rimette il
+    nodo in servizio da sé, perché è una fase del copione. Ma se la prova muore a metà —
+    una scadenza, un'asserzione, un Ctrl-C — il primario resta ucciso, e la prova
+    successiva troverebbe un replica set a due membri senza avere modo di capire perché.
+
+    Non contraddice la regola per cui le prove non spengono gli stack: qui non si spegne
+    niente, si rimette in piedi ciò che questa prova ha buttato giù.
+
+    `unpause` tollera l'errore perché non è idempotente — risvegliare un servizio che non
+    dorme è un fallimento, e sarebbe il fallimento del caso normale.
+    """
+    for coda, scadenza in ((["unpause"], 60), (["start"], 120)):
+        subprocess.run(
+            _compose(stack) + coda,
+            cwd=radice(),
+            capture_output=True,
+            text=True,
+            timeout=scadenza,
+            check=False,
+        )
 
 
 def spazza(client: MongoClient[dict[str, Any]]) -> int:

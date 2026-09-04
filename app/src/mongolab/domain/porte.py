@@ -1,4 +1,4 @@
-"""Le cinque porte del §6.2, come `typing.Protocol`.
+"""Le sei porte: le cinque del §6.2, più `Regia` (ADR-0095).
 
 **Strutturali, non nominali.** Un doppio soddisfa una porta perché ha i metodi giusti,
 senza ereditarla e senza registrarsi da nessuna parte. Il vantaggio non è risparmiare una
@@ -37,6 +37,7 @@ __all__ = [
     "ClusterInspector",
     "DocumentStore",
     "EventSink",
+    "Regia",
 ]
 
 
@@ -150,3 +151,48 @@ class Clock(Protocol):
         ...
 
     def sleep(self, secondi: float) -> None: ...
+
+
+@runtime_checkable
+class Regia(Protocol):
+    """Chi fa accadere il guasto, senza che lo scenario sappia come (ADR-0095).
+
+    I quattro verbi sono due coppie, e la differenza fra le coppie **è** il Blocco 2.
+    `ferma`/`riavvia` spengono il processo: chi prova a connettersi riceve un rifiuto
+    immediato. `sospendi`/`risveglia` lasciano il processo vivo e lo congelano: nessuno
+    rifiuta niente, la porta TCP resta aperta, e il client scopre il guasto solo quando
+    scade un timeout. Server morto e rete partizionata sono due guasti diversi, e un
+    dominio che li chiamasse allo stesso modo non potrebbe raccontarne la differenza.
+
+    Nessun metodo nomina Docker, e non è pulizia formale: gli adattatori sono due, e sono
+    diversi per una ragione strutturale. Dall'host il guasto si provoca con un comando;
+    dentro la rete Docker — dove l'applicazione deve stare perché la scoperta della
+    topologia funzioni (M-019) — il container non ha il socket del demone e **non può**
+    fermare un altro container. Lì la regia annuncia l'ordine e aspetta che un umano lo
+    esegua. Lo scenario è lo stesso in entrambi i casi: è l'unica cosa che permette a
+    `demo failover` di girare sia dal palco sia dentro una registrazione.
+
+    `nodo` è il nome logico del membro — `mongo-1`, non `02-replicaset-mongo-1-1`. La
+    traduzione in ciò che Docker vuole sentirsi dire appartiene all'adattatore.
+    """
+
+    def ferma(self, nodo: str) -> None:
+        """Spegne il nodo. Al ritorno il processo non c'è più: connessione rifiutata."""
+        ...
+
+    def riavvia(self, nodo: str) -> None:
+        """Rimette in piedi un nodo fermato. Non attende che sia di nuovo nel replica set.
+
+        L'attesa non sta qui perché chi sa dire «è tornato» è l'osservatore della
+        topologia, non chi ha dato l'ordine. Metterla qui costringerebbe ogni adattatore
+        ad avere un client MongoDB, e la porta si trascinerebbe dietro il driver.
+        """
+        ...
+
+    def sospendi(self, nodo: str) -> None:
+        """Congela il nodo lasciandolo vivo: irraggiungibile, ma non morto."""
+        ...
+
+    def risveglia(self, nodo: str) -> None:
+        """Scongela un nodo sospeso. Il processo riprende da dov'era, senza riavvio."""
+        ...

@@ -21,6 +21,7 @@ from mongolab.domain.eventi import (
     BackupProgressed,
     ChunkMigrated,
     Evento,
+    FaseIniziata,
     LatencySampled,
     PrimaryWaitAbandoned,
     RetryAttempted,
@@ -149,7 +150,7 @@ def _appiattisci(testo: str) -> str:
 
 
 def _etichetta_e_dettaglio(evento: Evento) -> tuple[str, str]:
-    """L'etichetta in colonna e ciò che la segue, per ciascuna delle nove specie."""
+    """L'etichetta in colonna e ciò che la segue, per ciascuna delle dieci specie."""
     match evento:
         case WriteSucceeded():
             return (
@@ -187,6 +188,8 @@ def _etichetta_e_dettaglio(evento: Evento) -> tuple[str, str]:
                 f"{evento.collezione} {evento.chunk}"
                 f" {evento.da_shard} → {evento.a_shard}",
             )
+        case FaseIniziata():
+            return "FASE", evento.descrizione
         case PrimaryWaitAbandoned():
             ultimo = evento.ultimo_primario or "nessuno visto"
             return (

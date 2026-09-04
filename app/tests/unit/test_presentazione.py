@@ -32,6 +32,7 @@ from mongolab.domain.eventi import (
     BackupProgressed,
     ChunkMigrated,
     Evento,
+    FaseIniziata,
     LatencySampled,
     PrimaryWaitAbandoned,
     RetryAttempted,
@@ -90,7 +91,7 @@ SENZA_PRIMARIO = DescrizioneTopologia(
 
 
 def uno_per_specie() -> list[Evento]:
-    """Un esemplare di ciascuno dei nove eventi, in ordine alfabetico di classe.
+    """Un esemplare di ciascuno dei dieci eventi, in ordine alfabetico di classe.
 
     Costruiti a mano e non con una fabbrica generica: i campi hanno significati diversi,
     e una fabbrica che li riempisse con valori qualunque renderebbe illeggibili proprio
@@ -99,6 +100,7 @@ def uno_per_specie() -> list[Evento]:
     return [
         BackupProgressed(ISTANTE, Progress("dump", 1200, 50000, "lab.ordini")),
         ChunkMigrated(ISTANTE, "lab.ordini", "shard0000", "shard0001", "[0, 5000)"),
+        FaseIniziata(ISTANTE, "guasto", "fermo il primario"),
         LatencySampled(ISTANTE, "insert_many", 12.34),
         PrimaryWaitAbandoned(ISTANTE, 30000.0, 30000.0, "mongo-rs-1:27017"),
         RetryAttempted(ISTANTE, 2, 100.0, "AutoReconnect"),
@@ -115,15 +117,15 @@ def uno_per_specie() -> list[Evento]:
 
 
 def test_ogni_evento_del_dominio_sa_diventare_una_riga() -> None:
-    """Nove eventi, nove rese dedicate: nessuno cade nel ripiego.
+    """Dieci eventi, dieci rese dedicate: nessuno cade nel ripiego.
 
-    La guardia è scritta al contrario di come verrebbe: non elenca le nove classi ma le
+    La guardia è scritta al contrario di come verrebbe: non elenca le dieci classi ma le
     **scopre**, e chiede che nessuna finisca sull'etichetta di ripiego. Un decimo evento
-    aggiunto domani senza una riga sua fa fallire questa prova invece di comparire a
-    schermo come una scritta inutile nel mezzo del Blocco 2.
+    aggiunto senza una riga sua fa fallire questa prova invece di comparire a schermo
+    come una scritta inutile nel mezzo del Blocco 2 — ed è successo davvero al Task 13.
     """
-    assert len(sottoclassi_di_evento()) == 9
-    assert len(uno_per_specie()) == 9
+    assert len(sottoclassi_di_evento()) == 10
+    assert len(uno_per_specie()) == 10
 
     for evento in uno_per_specie():
         assert ETICHETTA_IGNOTA not in riga(evento), type(evento).__name__
@@ -215,6 +217,11 @@ def test_le_righe_dicono_il_fatto_e_non_il_nome_della_classe() -> None:
     resa = riga(PrimaryWaitAbandoned(ISTANTE, 30000.0, 30000.0, "mongo-rs-1:27017"))
     assert "mongo-rs-1:27017" in resa
 
+    # `fase` è il nome su cui asseriscono le prove dello scenario; in sala si legge la
+    # `descrizione`. La riga porta la seconda, perché la prima è vocabolario interno.
+    fase = riga(FaseIniziata(ISTANTE, "guasto", "fermo il primario"))
+    assert "fermo il primario" in fase
+
 
 def test_l_avanzamento_senza_totale_non_inventa_una_percentuale() -> None:
     """`Progress.totali` è opzionale, e la riga rispetta il silenzio.
@@ -247,7 +254,7 @@ def test_emit_deposita_e_ritorna_senza_toccare_lo_stato() -> None:
     for evento in uno_per_specie():
         scena.emit(evento)
 
-    assert scena.in_coda == 9
+    assert scena.in_coda == 10
     assert scena.cronaca == ()
     assert scena.conteggi.scritture == 0
     assert scena.topologia is None
@@ -261,9 +268,9 @@ def test_assorbi_svuota_la_coda_e_dice_quanti() -> None:
 
     assorbiti = scena.assorbi()
 
-    assert assorbiti == 9
+    assert assorbiti == 10
     assert scena.in_coda == 0
-    assert len(scena.cronaca) == min(9, RIGHE_CRONACA)
+    assert len(scena.cronaca) == min(10, RIGHE_CRONACA)
 
 
 def test_assorbi_su_una_coda_vuota_ritorna_zero_e_non_aspetta() -> None:
@@ -357,7 +364,7 @@ def test_il_sink_di_testo_scrive_una_riga_per_evento(tmp_path: Path) -> None:
 
     righe_scritte = percorso.read_text(encoding="utf-8").splitlines()
 
-    assert len(righe_scritte) == 9
+    assert len(righe_scritte) == 10
     assert righe_scritte[-1] == riga(WriteSucceeded(ISTANTE, 3, 12.34))
 
 
@@ -430,7 +437,7 @@ def test_i_tre_sink_sono_tre_rese_dello_stesso_flusso(tmp_path: Path) -> None:
 
     righe_scritte = percorso.read_text(encoding="utf-8").splitlines()
 
-    assert len(righe_scritte) == len(raccoglitore.eventi) == 9
+    assert len(righe_scritte) == len(raccoglitore.eventi) == 10
     assert righe_scritte == [riga(evento) for evento in raccoglitore.eventi]
 
 

@@ -1,10 +1,11 @@
-"""I nove eventi del §6.3. Immutabili, e con l'istante come campo esplicito.
+"""I dieci eventi del §6.3. Immutabili, e con l'istante come campo esplicito.
 
 Il design ne elencava **otto**. Il nono, `PrimaryWaitAbandoned`, è arrivato al Task 6 di
 `feature/04` con ADR-0082: la regola «dopo tanto senza primario, smetti di ritentare»
 esisteva come frase dal §6.2, e nessuno degli otto sapeva raccontarne l'esito senza
-mentire. Il §6.3 non si riscrive: l'ADR lo emenda, e la guardia in `test_dominio.py`
-conta nove.
+mentire. Il decimo, `FaseIniziata`, è arrivato al Task 13 con ADR-0094, ed è di specie
+diversa: non racconta un fatto del cluster ma un fatto **dello scenario**. Il §6.3 non si
+riscrive: gli ADR lo emendano, e la guardia in `test_dominio.py` conta dieci.
 
 **Immutabili non per eleganza.** Un evento nasce dentro un callback di pymongo, che gira
 sul thread del driver, e viene letto dal ciclo di disegno, che gira sul thread
@@ -36,6 +37,7 @@ __all__ = [
     "BackupProgressed",
     "ChunkMigrated",
     "Evento",
+    "FaseIniziata",
     "LatencySampled",
     "PrimaryWaitAbandoned",
     "RetryAttempted",
@@ -174,3 +176,25 @@ class PrimaryWaitAbandoned(Evento):
     atteso_ms: float
     pazienza_ms: float
     ultimo_primario: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class FaseIniziata(Evento):
+    """Lo scenario annuncia la fase che sta per cominciare (ADR-0094).
+
+    È l'unico dei dieci che non riporta qualcosa **accaduto al cluster**: riporta una
+    decisione del copione. La distinzione conta, perché spiega perché questo evento può
+    essere emesso prima che accada alcunché — è il titolo di un capitolo, non il capitolo.
+
+    Esiste perché il Passo 4 del Task 13 chiede di asserire sulla **sequenza**: senza un
+    evento che nomini le fasi, una prova dello scenario dovrebbe riconoscerle indovinando
+    dai fatti che le compongono, e cambierebbe colore ogni volta che cambia una latenza.
+    Con questo evento la sequenza del copione è leggibile in una lista di stringhe.
+
+    Serve anche dal palco: è ciò che `--step` mostra prima di fermarsi ad aspettare Invio,
+    ed è la ragione per cui `descrizione` è una frase e non un identificatore. `fase` è
+    quella su cui asseriscono le prove; `descrizione` è quella che legge la sala.
+    """
+
+    fase: str
+    descrizione: str

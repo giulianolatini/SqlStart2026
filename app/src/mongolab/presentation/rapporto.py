@@ -39,6 +39,8 @@ Dove il numero manca compare `IGNOTO`, che si legge come «non c'era» e non com
 
 from typing import Mapping, Sequence
 
+from mongolab.application.scenari import EsitoFailover
+from mongolab.application.topologia import Interruzione
 from mongolab.application.workload import Latenze, Riepilogo
 from mongolab.domain.modelli import ContoShard, DescrizioneServer, DescrizioneTopologia
 from mongolab.domain.porte import ClusterInspector
@@ -49,6 +51,7 @@ __all__ = [
     "IGNOTO",
     "INDIRIZZO",
     "SEPARATORE",
+    "cronaca",
     "rapporto",
     "riassunto",
 ]
@@ -145,6 +148,44 @@ def riassunto(corsa: Riepilogo, *, larghezza: int | None = COLONNE_SALA) -> str:
         linee += _latenze("latenze", corsa.latenze_letture)
     return "\n".join(tronca(linea, larghezza) for linea in linee)
 
+
+def cronaca(scena: EsitoFailover, *, larghezza: int | None = COLONNE_SALA) -> str:
+    """Come è finita la scena del failover: i due numeri, e quel tanto che li spiega.
+
+    **I due numeri stanno sulla prima riga**, e non è impaginazione. Il §6.3 li chiama
+    per nome — «durata dell'interruzione» e «scritture perse» — come le due cose che
+    giustificano l'esistenza di questa applicazione, e chi guarda dalla decima fila legge
+    la prima riga e le ultime due. Metterli in fondo, dopo tre riepiloghi di carico, vuol
+    dire farli scorrere via insieme alle latenze.
+
+    Le scritture perse e quelle non confermate restano **due voci distinte**, perché sono
+    due fenomeni opposti e nessuno dei due è il negativo dell'altro: il perché sta nella
+    docstring di `Bilancio`, e questa funzione si limita a non ricomporlo in un numero
+    solo con il segno.
+    """
+    bilancio = scena.bilancio
+    linee = [
+        _voce(
+            "failover",
+            f"interruzione {_millisecondi(scena.durata_interruzione_ms)}",
+            f"scritture perse {bilancio.scritture_perse}",
+        )
+    ]
+    linee += _avvicendamento(bilancio.interruzione)
+    linee.append(
+        _voce(
+            "scritture",
+            f"{bilancio.confermate} confermate",
+            f"{bilancio.ritrovate} ritrovate",
+            f"{bilancio.scritture_non_confermate} non confermate",
+        )
+    )
+    linee += _fase("prima", scena.prima)
+    linee += _fase("durante", scena.durante)
+    linee += _fase("dopo", scena.dopo)
+    if scena.fasi:
+        linee.append(_voce("fasi", *scena.fasi))
+    return "\n".join(tronca(linea, larghezza) for linea in linee)
 
 # --- Le voci del rapporto ---------------------------------------------------------------
 
@@ -251,6 +292,35 @@ def _latenze(etichetta: str, latenze: Latenze | None) -> list[str]:
     ]
 
 
+def _avvicendamento(interruzione: Interruzione | None) -> list[str]:
+    """Chi ha preso il posto di chi, e solo se qualcuno l'ha preso davvero.
+
+    `e_un_failover` è falso quando lo stesso nodo torna primario: c'è stata
+    un'interruzione, non un'elezione, e scrivere «da mongo-rs-1 a mongo-rs-1» sarebbe una
+    riga che si legge come un refuso proprio nel momento in cui va letta con attenzione.
+    """
+    if interruzione is None or not interruzione.e_un_failover:
+        return []
+    return [_sotto(f"da {interruzione.primario_prima} a {interruzione.primario_dopo}")]
+
+
+def _fase(etichetta: str, corsa: Riepilogo) -> list[str]:
+    """Il carico di una fase in una riga sola: qui interessa il confronto fra le tre.
+
+    Non `riassunto`, che di righe ne fa fino a quattro: tre riassunti interi sarebbero
+    dodici righe fra i due numeri e le fasi, e la domanda a cui questa parte risponde —
+    *quanto è calato il carico durante l'elezione* — si legge meglio da tre righe
+    allineate che da dodici complete.
+    """
+    if not corsa.scritture:
+        return []
+    voci = [f"{corsa.scritture} scritture", f"{corsa.riuscite} confermate"]
+    if corsa.fallite:
+        voci.append(f"{corsa.fallite} fallite")
+    if corsa.latenze is not None:
+        voci.append(f"p95 {corsa.latenze.p95_ms:.1f} ms")
+    return [_voce(etichetta, *voci)]
+
 # --- I formati ---------------------------------------------------------------------------
 
 
@@ -295,6 +365,17 @@ def _byte(quanti: int) -> str:
         if quanti >= soglia:
             return f"{quanti / soglia:.1f} {unita}"
     return f"{quanti} B"
+
+
+def _millisecondi(quanti: float | None) -> str:
+    """Una durata in millisecondi, o il segno del mancante.
+
+    `IGNOTO` e non `0 ms`, ed è la stessa scelta di `Interruzione.durata_ms` portata fino
+    allo schermo: uno zero in quella casella passerebbe per una misura, e sarebbe la
+    misura di un failover perfetto — cioè esattamente ciò che si vede quando il guasto
+    non è avvenuto affatto.
+    """
+    return IGNOTO if quanti is None else f"{quanti:.0f} ms"
 
 
 def _durata(secondi: float) -> str:

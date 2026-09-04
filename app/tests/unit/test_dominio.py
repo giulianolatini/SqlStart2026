@@ -17,6 +17,7 @@ from mongolab.domain.eventi import (
     BackupProgressed,
     ChunkMigrated,
     Evento,
+    FaseIniziata,
     LatencySampled,
     PrimaryWaitAbandoned,
     RetryAttempted,
@@ -40,6 +41,7 @@ from mongolab.domain.porte import (
     ClusterInspector,
     DocumentStore,
     EventSink,
+    Regia,
 )
 from tests.aiutanti import sottoclassi_di_evento
 
@@ -49,8 +51,8 @@ ISTANTE = datetime(2026, 9, 18, 9, 30, 0, tzinfo=UTC)
 # --- Gli eventi -----------------------------------------------------------------------
 
 
-def test_gli_eventi_del_design_sono_nove_e_sono_quelli() -> None:
-    """Otto dal §6.3, il nono da ADR-0082.
+def test_gli_eventi_del_design_sono_dieci_e_sono_quelli() -> None:
+    """Otto dal §6.3, il nono da ADR-0082, il decimo da ADR-0094.
 
     Questa prova non elenca per pignoleria: elenca perché il costo di aggiungere un
     evento deve restare **visibile**. Un dominio che cresce in silenzio è un dominio in
@@ -59,6 +61,7 @@ def test_gli_eventi_del_design_sono_nove_e_sono_quelli() -> None:
     attesi = {
         "BackupProgressed",
         "ChunkMigrated",
+        "FaseIniziata",
         "LatencySampled",
         "PrimaryWaitAbandoned",
         "RetryAttempted",
@@ -129,7 +132,7 @@ def test_un_evento_e_confrontabile_per_valore() -> None:
     assert primo == secondo
 
 
-def test_i_nove_eventi_si_costruiscono() -> None:
+def test_i_dieci_eventi_si_costruiscono() -> None:
     # Una prova noiosa che serve a una cosa sola: se una firma cambia, se ne accorge qui
     # e non dentro il primo caso d'uso che la usa.
     topologia = DescrizioneTopologia(tipo=TipoTopologia.SCONOSCIUTA, server=())
@@ -159,8 +162,9 @@ def test_i_nove_eventi_si_costruiscono() -> None:
             pazienza_ms=30_000.0,
             ultimo_primario="mongo1:27017",
         ),
+        FaseIniziata(istante=ISTANTE, fase="guasto", descrizione="spengo il primario"),
     ]
-    assert len(costruiti) == 9
+    assert len(costruiti) == 10
     assert all(evento.istante == ISTANTE for evento in costruiti)
 
 
@@ -246,6 +250,25 @@ class RaccoglitoreDiProva:
         self.ricevuti.append(evento)
 
 
+class RegiaDiProva:
+    """Annota gli ordini. Nessun metodo nomina Docker: la porta non sa chi li esegue."""
+
+    def __init__(self) -> None:
+        self.ordini: list[tuple[str, str]] = []
+
+    def ferma(self, nodo: str) -> None:
+        self.ordini.append(("ferma", nodo))
+
+    def riavvia(self, nodo: str) -> None:
+        self.ordini.append(("riavvia", nodo))
+
+    def sospendi(self, nodo: str) -> None:
+        self.ordini.append(("sospendi", nodo))
+
+    def risveglia(self, nodo: str) -> None:
+        self.ordini.append(("risveglia", nodo))
+
+
 def test_un_oggetto_qualunque_soddisfa_la_porta_senza_ereditarla() -> None:
     # L'annotazione è la prova vera, e la fa mypy: se `OrologioDiProva` sbagliasse una
     # firma, `make app-check` fallirebbe su questa riga. A runtime resta la conferma che
@@ -262,15 +285,39 @@ def test_un_oggetto_qualunque_soddisfa_la_porta_senza_ereditarla() -> None:
     raccoglitore: EventSink = RaccoglitoreDiProva()
     raccoglitore.emit(LatencySampled(istante=ISTANTE, operazione="find", durata_ms=1.0))
 
+    annotata = RegiaDiProva()
+    regia: Regia = annotata
+    regia.ferma("mongo-1")
+    regia.sospendi("mongo-2")
+    assert annotata.ordini == [("ferma", "mongo-1"), ("sospendi", "mongo-2")]
+
 
 def test_le_porte_si_riconoscono_anche_a_runtime() -> None:
     assert isinstance(OrologioDiProva(), Clock)
     assert isinstance(ArchivioDiProva(), DocumentStore)
     assert isinstance(RaccoglitoreDiProva(), EventSink)
+    assert isinstance(RegiaDiProva(), Regia)
     # Le altre due esistono e sono controllabili allo stesso modo: qui basta nominarle
     # perché un `Protocol` non `runtime_checkable` solleverebbe `TypeError`.
     assert not isinstance(OrologioDiProva(), ClusterInspector)
     assert not isinstance(OrologioDiProva(), BackupTool)
+
+
+def test_una_regia_che_ferma_ma_non_sospende_non_e_una_regia() -> None:
+    """I quattro verbi sono quattro perché la scena ne mostra due coppie.
+
+    Fermare e riavviare sono il nodo morto: la connessione viene rifiutata subito.
+    Sospendere e risvegliare sono il nodo irraggiungibile ma vivo: nessuno rifiuta
+    niente, e il client aspetta il timeout. Una regia che sa solo la prima coppia
+    saprebbe raccontare mezzo Blocco 2, ed è il muro che questa riga alza.
+    """
+
+    class RegiaCheSoloFerma:
+        def ferma(self, nodo: str) -> None: ...
+
+        def riavvia(self, nodo: str) -> None: ...
+
+    assert not isinstance(RegiaCheSoloFerma(), Regia)
 
 
 def test_a_chi_manca_un_metodo_la_porta_si_chiude() -> None:

@@ -308,7 +308,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   handler lento non rallenta solo la UI: rallenta il driver, e falsa proprio le misure di
   failover che la demo vuole mostrare. Ulteriore avvertenza se si registrano i comandi: «The
   command documents published through this API are not copies.»
-- **Usata da:** ADR-0006, ADR-0019, ADR-0085, ADR-0089
+- **Usata da:** ADR-0006, ADR-0019, ADR-0085, ADR-0089, ADR-0096
 
 <a id="s-011"></a>
 ### S-011 — MongoDB Database Tools: `mongodump`
@@ -503,7 +503,7 @@ Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata
   avvertenza documentata sull'aggiornamento di `Live` da più thread, né in un senso né
   nell'altro. Se la domanda arriva dal pubblico, la risposta onesta è che la documentazione
   tace.
-- **Usata da:** ADR-0007, ADR-0019, ADR-0085
+- **Usata da:** ADR-0007, ADR-0019, ADR-0085, ADR-0098
 
 <a id="s-019"></a>
 ### S-019 — Docker Docs: `docker compose up`
@@ -4489,7 +4489,7 @@ timeout da far scadere, e restano solo i millisecondi del voto.
   **secondario** — che non provoca nessuna elezione — non è cronometrato qui perché non ha niente
   da cronometrare.
 - **Data:** 2026-08-31
-- **Usata da:** ADR-0044, ADR-0046, ADR-0049, ADR-0050, ADR-0051
+- **Usata da:** ADR-0044, ADR-0046, ADR-0049, ADR-0050, ADR-0051, ADR-0096, ADR-0097
 
 ---
 
@@ -4658,7 +4658,7 @@ di quello che salva.
   misura: un set a due membri non è stato costruito, e la sua maggioranza sarebbe 2, cioè zero
   guasti tollerati in scrittura.
 - **Data:** 2026-09-01
-- **Usata da:** ADR-0045, ADR-0046, ADR-0051, ADR-0052
+- **Usata da:** ADR-0045, ADR-0046, ADR-0051, ADR-0052, ADR-0096, ADR-0097
 
 ---
 

@@ -11,8 +11,12 @@ rapporto dichiara di mostrare ci siano, che quelli che non ci sono si dichiarino
 invece di diventare zeri, e che nessuna riga sfori le cento colonne.
 """
 
+from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Mapping, Sequence
 
+from mongolab.application.scenari import EsitoFailover
+from mongolab.application.topologia import Bilancio, Interruzione
 from mongolab.application.workload import Latenze, Riepilogo
 from mongolab.domain.modelli import (
     ContoShard,
@@ -22,7 +26,7 @@ from mongolab.domain.modelli import (
     TipoTopologia,
 )
 from mongolab.domain.porte import ClusterInspector
-from mongolab.presentation.rapporto import IGNOTO, rapporto, riassunto
+from mongolab.presentation.rapporto import IGNOTO, cronaca, rapporto, riassunto
 from mongolab.presentation.righe import COLONNE_SALA
 
 from tests.doppi.ispettore import FakeInspector
@@ -415,3 +419,111 @@ def test_il_rapporto_guarda_la_topologia_per_ultima() -> None:
     assert isinstance(doppio, IspettoreCheRicorda)
     assert doppio.chiamate[0] == "server_status"
     assert doppio.chiamate[-1] == "topology"
+
+
+# --- La cronaca del failover: i due numeri che chiudono la scena -----------------------
+#
+# Sono i due numeri per cui l'applicazione esiste — il §6.3 li chiama per nome, «durata
+# dell'interruzione» e «scritture perse» — e questa sezione verifica l'unica cosa che li
+# riguarda a questo livello: che si **leggano**. Che siano giusti lo provano
+# `test_topologia.py` e `test_scenari.py`; che finiscano su una riga che si legge dalla
+# decima fila lo può provare solo chi la scrive.
+
+INTERROTTA = Interruzione(
+    inizio=datetime(2026, 9, 18, 10, 30, 0, tzinfo=UTC),
+    primario_prima="mongo-rs-1:27017",
+    fine=datetime(2026, 9, 18, 10, 30, 9, 812_000, tzinfo=UTC),
+    primario_dopo="mongo-rs-2:27017",
+)
+
+SCENA = EsitoFailover(
+    fasi=("carico", "guasto", "elezione", "ripresa", "recupero", "bilancio"),
+    prima=CORSA,
+    durante=CORSA,
+    dopo=CORSA,
+    bilancio=Bilancio(interruzione=INTERROTTA, confermate=12_901, ritrovate=12_901),
+    interruzioni=(INTERROTTA,),
+)
+
+
+def test_la_cronaca_apre_con_i_due_numeri() -> None:
+    """Prima riga, e nient'altro prima: sono la conclusione, non un dettaglio.
+
+    Un consuntivo che li mettesse in fondo li farebbe scorrere via insieme alle latenze,
+    e chi guarda dalla sala legge la prima riga e le ultime due.
+    """
+    prima = cronaca(SCENA).splitlines()[0]
+
+    assert "9812" in prima.replace(" ", "").replace(" ", "")
+    assert "perse 0" in prima
+
+
+def test_la_cronaca_dice_chi_ha_preso_il_posto_di_chi() -> None:
+    testo = cronaca(SCENA)
+
+    assert "mongo-rs-1:27017" in testo
+    assert "mongo-rs-2:27017" in testo
+
+
+def test_un_primario_che_torna_non_e_un_avvicendamento() -> None:
+    """Stesso nodo prima e dopo: c'è stata un'interruzione, non un'elezione.
+
+    `Interruzione.e_un_failover` fa già questa distinzione, e la cronaca la rispetta:
+    scrivere «da mongo-rs-1 a mongo-rs-1» sarebbe una riga che si legge come un errore
+    di stampa proprio nel momento in cui va letta con attenzione.
+    """
+    tornato = replace(INTERROTTA, primario_dopo="mongo-rs-1:27017")
+    scena = replace(
+        SCENA,
+        bilancio=Bilancio(interruzione=tornato, confermate=10, ritrovate=10),
+        interruzioni=(tornato,),
+    )
+
+    assert " a mongo-rs-1:27017" not in cronaca(scena)
+
+
+def test_senza_interruzione_il_numero_e_il_segno_del_mancante() -> None:
+    """Non zero: zero direbbe «non è durata niente» dove la verità è «non è successo».
+
+    È la stessa scelta di `Interruzione.durata_ms`, portata fino allo schermo. Uno zero
+    in quella casella passerebbe per una misura — e sarebbe la misura di un failover
+    perfetto, cioè esattamente ciò che si vede quando il guasto non è avvenuto.
+    """
+    scena = replace(
+        SCENA,
+        bilancio=Bilancio(interruzione=None, confermate=10, ritrovate=10),
+        interruzioni=(),
+    )
+
+    assert IGNOTO in cronaca(scena).splitlines()[0]
+
+
+def test_la_cronaca_conta_le_scritture_dei_due_versi() -> None:
+    """Perse e non confermate sono due voci, perché sono due fenomeni.
+
+    Confermate meno ritrovate sono scritture che il client credeva salve; ritrovate meno
+    confermate sono scritture applicate la cui conferma si è persa mentre il primario
+    cadeva. Un solo campo firmato scriverebbe «-17 perse», che è aritmetica giusta e
+    cronaca sbagliata.
+    """
+    scena = replace(
+        SCENA, bilancio=Bilancio(interruzione=INTERROTTA, confermate=100, ritrovate=83)
+    )
+
+    testo = cronaca(scena)
+
+    assert "perse 17" in testo
+    assert "100 confermate" in testo
+    assert "83 ritrovate" in testo
+
+
+def test_la_cronaca_elenca_le_fasi_nell_ordine_in_cui_sono_andate() -> None:
+    testo = cronaca(SCENA)
+
+    posizioni = [testo.index(fase) for fase in SCENA.fasi if fase != "bilancio"]
+    assert posizioni == sorted(posizioni)
+
+
+def test_la_cronaca_sta_nel_budget_di_sala() -> None:
+    for linea in cronaca(SCENA).splitlines():
+        assert len(linea) <= COLONNE_SALA, linea

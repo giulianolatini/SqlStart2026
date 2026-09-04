@@ -2545,3 +2545,109 @@ Fonte: [`app/docs/Sources.md`, M-039](../app/docs/Sources.md#m-039),
 e le scadenze scritte lì dentro sono **previsioni**, non fatti. Un punto chiuso per inerzia è
 peggio di un punto aperto: sparisce dall'elenco e riappare quando c'è pubblico. Il costo di
 verificarlo, qui, è stato un comando di una riga.
+
+---
+
+### Una scena che gira non è una scena che dice il vero
+
+> Fra un failover mostrato e un failover finto non c'è nessuna differenza visibile: le fasi
+> scorrono uguali, il carico riprende uguale. La differenza sta in due numeri — e se il guasto
+> non è arrivato, quei due numeri dicono «interruzione zero, scritture perse zero», cioè
+> **failover perfetto**.
+
+Fonte: [`app/docs/Sources.md`, M-043](../app/docs/Sources.md#m-043),
+[ADR-0096](Decision.md#adr-0096), [registro operativo, nota 197](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché è la giustificazione di tutto il Blocco 2, e vale ben oltre le demo.
+Un'operazione fallita che produce un risultato *plausibile* invece di un errore è la peggiore
+categoria di guasto che esista: nessuno la cerca, perché niente sembra rotto. Da qui la scelta di
+far **fermare** la scena quando `docker compose kill` esce diverso da zero, e quella di confrontare
+i numeri dell'applicazione con una misura fatta settimane prima per un'altra strada.
+
+---
+
+### «Fermare un nodo» non è un'operazione sola, e spegnere bene è venti volte più rapido
+
+> `docker compose stop` manda `SIGTERM`, e `mongod` cede il ruolo prima di uscire: **574, 480, 486
+> ms**, senza nessuna elezione. `docker kill` lo fa sparire senza cedere niente: **9 812, 10 619,
+> 10 943 ms**, e il replica set deve votare.
+
+Fonte: [V-029](Sources.md#v-029), [V-031](Sources.md#v-031),
+[ADR-0097](Decision.md#adr-0097).
+
+**Perché una slide:** perché va contro l'intuizione di tutti — «staccare la spina» dovrebbe essere
+la strada rapida, e invece è venti volte la più lenta — e perché spiega in una riga *perché* esiste
+un'elezione. Il primario che si spegne con ordine **dice** di andarsene; quello che sparisce va
+scoperto assente, e scoprirlo costa. È anche l'unico punto in cui il piano di questo progetto ha
+avuto torto contro una misura, e la correzione è stata scritta invece che applicata in silenzio.
+
+---
+
+### Guardare non è aspettare
+
+> Contro un replica set sanissimo, il comando usciva con «nessun primario in vista». Non era il
+> cluster: la topologia che il driver espone è la descrizione che **ha già**, e nei primi
+> millisecondi dopo la connessione è vuota, perché la scoperta comincia in quel momento.
+
+Fonte: [`app/docs/Sources.md`, M-042](../app/docs/Sources.md#m-042),
+[`app/docs/Sources.md`, A-017](../app/docs/Sources.md#a-017),
+[registro operativo, nota 198](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché una lettura pura e una chiamata bloccante hanno la stessa firma e
+sembrano intercambiabili — e contro un doppio lo **sono**, perché il doppio risponde subito.
+Cinquecento prove verdi non hanno visto niente. La correzione è una riga, `admin.command("ping")`,
+e funziona per un motivo che vale la pena dire: un comando su `admin` va sul primario per
+impostazione predefinita, quindi la selezione del server **è** l'attesa.
+
+---
+
+### Nessuno qui ha chiesto `majority`: è il server che ha scelto bene
+
+> Il write concern del client è vuoto — l'applicazione non chiede niente. Il `w: majority` che
+> salva le 15 229 scritture arriva dal server come default **implicito**, e
+> `getDefaultRWConcern` lo dichiara.
+
+Fonte: [`app/docs/Sources.md`, M-041](../app/docs/Sources.md#m-041),
+[V-016](Sources.md#v-016), [registro operativo, nota 202](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché è la differenza fra una frase vera e una falsa che si somigliano
+molto. «Zero scritture perse» è misurato; «la mia applicazione usa `w: majority`» sarebbe
+inventato. E la versione corretta è più utile, perché è prevedibile: da MongoDB 5.0 il default
+implicito è `majority`, quindi chi non tocca niente è protetto — e chi ha impostato un default di
+cluster più debole, o chiede `w: 1` esplicitamente, vede l'altro numero
+([V-016](Sources.md#v-016): cento perse).
+
+---
+
+### Quando due requisiti legittimi non stanno nello stesso processo, il vincolo è la lezione
+
+> La cronaca dell'elezione si vede solo da **dentro** la rete Compose. Il comando che uccide il
+> primario si può dare solo da **fuori**, perché il container non ha il socket del demone — e non
+> deve averlo. Un processo solo non può fare questa scena.
+
+Fonte: [ADR-0095](Decision.md#adr-0095),
+[`app/docs/Sources.md`, M-043](../app/docs/Sources.md#m-043),
+[registro operativo, nota 195](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché la scorciatoia era a portata di mano — montare `/var/run/docker.sock`
+nel container — e sarebbe stata proiettata in sala, insegnando senza dirlo il modo più diretto di
+prendere la macchina che ospita. Dichiarare il verbo come una porta e darle due implementazioni,
+una che esegue e una che **annuncia e aspetta un umano**, ha lasciato intatti entrambi i vincoli e
+ha reso visibile quello che conta.
+
+---
+
+### Una banda larga scelta apposta prova più di una soglia stretta
+
+> La prova accetta un'interruzione fra 5 e 15 secondi, non i 10 019 ms misurati. Quello che deve
+> intercettare è l'errore di **categoria**: zero, cioè il guasto non è arrivato; sessanta secondi,
+> cioè l'elezione non è avvenuta.
+
+Fonte: [`app/docs/Sources.md`, M-043](../app/docs/Sources.md#m-043),
+[registro operativo, nota 201](registro-operativo-sviluppo.md).
+
+**Perché una slide:** perché è il rimedio a una malattia comune delle suite — la soglia stretta su
+un numero misurato una volta, che fallisce sul portatile di qualcun altro e viene spenta entro un
+mese. La distinzione utile è fra ciò che la suite deve **impedire** e ciò che il registro deve
+**ricordare**: il numero preciso vive nel registro delle misure, la prova sorveglia la categoria.
+

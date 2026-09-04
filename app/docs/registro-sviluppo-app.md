@@ -937,6 +937,115 @@ attraversa gli a capo mentre `sed` lavora una riga per volta.
 `make stack-check` dice «Stack conformi: 3.» e `tools/preflight.sh` chiude con «Superati: 9 ·
 Avvisi: 1 · Errori: 0 · Pronto.», dove il nono superato è l'immagine dell'applicazione in cache.
 
+## Task 13 — La scena centrale, e la sesta porta nata da un'impossibilità
+
+**Fatto il 4 settembre 2026.** Il capitolo che ne esce è
+[14-la-scena-del-failover-e-i-due-numeri.md](14-la-scena-del-failover-e-i-due-numeri.md).
+
+È l'Atto II del Blocco 2, cinque minuti, e la ragione per cui questa applicazione esiste. Il
+piano lo scriveva in sei passi e li ha ottenuti tutti; quello che non poteva prevedere è che il
+Passo 2 avrebbe smentito il Passo 2, e che la scena, eseguita per la prima volta, si sarebbe
+rivelata **impossibile per un processo solo**.
+
+### L'impossibilità, e la porta che ne è uscita
+
+La cronaca dell'elezione esiste solo se il client fa scoperta, e la scoperta funziona solo da
+dentro la rete Compose — è tutto il Task 12. Il guasto è un `docker compose kill`, e vuole il
+socket del demone, che il container dell'applicazione **non ha** per una scelta deliberata del
+Task 12. Dall'host, per giunta, il primario si chiama `localhost:27021`: un indirizzo che non è
+il nome di nessun servizio che si possa fermare.
+
+Da qui la sesta porta, `Regia`, con due adattatori che la implementano in modi opposti
+([ADR-0095](../../docs/Decision.md#adr-0095)): `RegiaCompose` **esegue** e vive sull'host,
+`RegiaAnnunciata` **annuncia** la riga esatta e si blocca finché un umano non l'ha eseguita. Il
+frasario è un dato separato dall'esecuzione proprio perché chi annuncia deve poter comporre una
+riga senza avere il diritto di lanciarla.
+
+La conseguenza va portata al PO prima delle prove generali: **la scena dal vivo richiede due
+terminali.** In cambio, la riga da incollare non si inventa a mano sotto pressione.
+
+### Il piano diceva `stop`, e le slide dicevano un altro numero
+
+Il Passo 2 nomina alla lettera `docker compose stop`. Eseguito, `stop` manda `SIGTERM`, e `mongod`
+cede il ruolo con ordine: [V-029](../../docs/Sources.md#v-029) misura quella strada in 574, 480 e
+486 ms, **senza elezione da raccontare**. Con `docker kill` sono 9 812, 10 619 e 10 943 ms, che
+sono i numeri già sulle slide.
+
+Le slide riportano una misura fatta, il piano ha una svista, e
+[ADR-0097](../../docs/Decision.md#adr-0097) la corregge: il guasto predefinito è `kill -s
+SIGKILL`. `ARRESTO_ORDINATO = ("stop",)` resta documentato e configurabile, perché il confronto è
+il pezzo di didattica migliore dei due — «spegnere bene» è venti volte più rapido di «staccare la
+spina», e va contro l'intuizione di tutti.
+
+### Due difetti trovati eseguendo, e nessuno dei due visibile alle prove unitarie
+
+**Guardare non è aspettare.** Contro un replica set sanissimo, `demo failover` usciva con «nessun
+primario in vista su «rs»». `Inspector.topology()` legge la descrizione che il driver **ha già**,
+e subito dopo `connetti` quella descrizione è vuota: la scoperta comincia in quel momento
+([M-042](Sources.md#m-042)). Gli altri comandi non ci inciampavano per caso — `stats` chiede
+`serverStatus`, che aspetta la selezione, e `watch` guarda la topologia proprio mentre cambia.
+
+La correzione è un `ping`, che essendo un comando su `admin` va sul primario per impostazione
+predefinita ([A-017](Sources.md#a-017)) e quindi **aspetta**. Il posto comodo era `cli.py`, e
+`test_pymongo_si_importa_solo_nell_infrastruttura` lo vieta: la guardia non è stata toccata, e il
+codice è finito meglio di dove voleva andare — `SenzaPrimario` è un fatto dell'infrastruttura,
+`niente_da_fermare` è la frase che la riga di comando ne ricava
+([ADR-0099](../../docs/Decision.md#adr-0099)).
+
+**Una prova che passava per la ragione sbagliata.** La seconda esecuzione ha fallito dicendo che
+il nuovo primario era il nodo appena ucciso: la prova cercava la prima riga `SERVER … →
+primario`, che è la **scoperta iniziale**. Il pericolo non era il fallimento ma il suo contrario:
+una prova così passerebbe anche se il guasto non fosse mai arrivato. L'asserzione si appoggia
+adesso alla riga di continuazione `da … a …`, che la cronaca stampa solo se qualcuno ha davvero
+preso il posto di qualcun altro.
+
+### La prova che fa da umano
+
+`tests/integration/test_scenari.py` gira la scena dentro il container e supplisce alla metà che
+manca: legge lo stdout, esegue **verbatim** sull'host la riga `docker compose` che la scena
+annuncia, e rimanda un Invio. Di passaggio dimostra la sola cosa che nessun'altra prova può
+dimostrare — che la riga annunciata è davvero incollabile. Fissare la forma di quella riga ha
+richiesto [M-040](Sources.md#m-040): i due `--env-file` sono obbligatori, `-p` non serve, e la
+prima versione componeva percorsi assoluti che dentro il container esistevano e sull'host no.
+
+### Il confronto del Passo 5, che è la vera chiusura del task
+
+| | `feature/02`, a mano | `mongolab`, Task 13 |
+|---|---|---|
+| interruzione | 9 812 / 10 619 / 10 943 ms ([V-029](../../docs/Sources.md#v-029)) | **10 019 ms** |
+| scritture perse | 0 su 12 901 ([V-033](../../docs/Sources.md#v-033)) | **0** su 15 229 |
+
+Coincidono ([M-043](Sources.md#m-043)), e nessuno dei due va corretto. Il confronto contava
+perché le prove con i doppi asseriscono sulla **sequenza**, e una sequenza giusta può
+accompagnare due numeri sbagliati: se il guasto non arrivasse, l'interruzione sarebbe zero e la
+sequenza resterebbe identica.
+
+Lo zero, poi, ha una spiegazione che cambia la frase da dire in sala. Il `WriteConcern` del client
+è **vuoto**: `mongolab` non chiede niente, e `w: majority` arriva dal server come default
+*implicito* ([M-041](Sources.md#m-041)). Non «la mia applicazione usa `w: majority`», che sarebbe
+falso, ma «nessuno qui ha chiesto niente, e il server ha scelto bene».
+
+### Fuori copione: il ciclo di `watch` ha lasciato `cli.py`
+
+È diventato `sorveglia`, in `application/scenari.py`. Non è riordino: dentro la radice di
+composizione era provabile solo aprendo una connessione, e la sua regola più delicata — si aspetta
+`giri - 1` volte e non `giri` — non aveva nessuna prova. Il punto aperto del Task 12 si chiude
+qui.
+
+### Numeri
+
+| | Prima | Dopo |
+|---|---|---|
+| Prove unitarie | 462 | **523** |
+| Prove di integrazione | 47 | **48** |
+| File controllati da mypy | 58 | **64** |
+| Prove degli strumenti | 166 | 166 |
+| ADR del repository | 93 | **99** |
+| Fonti esterne nel registro dell'app | 16 | **17** |
+| Misure nel registro dell'app | 39 | **43** |
+| Porte del dominio | 5 | **6** |
+| Eventi del dominio | 9 | **10** |
+
 ---
 
 ## Che cosa manca
@@ -959,10 +1068,10 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | ~~`SdamBridge` e la coda: il comportamento di PyMongo va **osservato**, non solo letto~~ | [08](08-il-ponte-sdam-e-i-thread-del-driver.md) | **chiuso** al Task 7, per la parte che non richiede un cluster |
 | ~~Nessun `ClusterInspector` reale: il `TopologyWatcher` ha visto solo topologie finte~~ | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | **chiuso** al Task 8: quattordici prove di integrazione guardano tre topologie vere |
 | ~~L'osservatore interroga invece di ascoltare: la risoluzione è l'intervallo~~ | [08](08-il-ponte-sdam-e-i-thread-del-driver.md) | **chiuso** al Task 7: il ponte riceve i cambiamenti quando accadono |
-| L'intervallo predefinito di 500 ms è scelto, non misurato | [07](07-topologia-failover-e-i-due-numeri.md#il-limite-di-questo-osservatore-dichiarato) | il primo failover cronometrato: serve il Blocco 2 in funzione, non un ispettore |
-| Il `TopologyWatcher` non ha un invariante di thread: oggi lo usa un thread solo | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | Task 13: al Task 11 la sentinella è stata **tolta** da `watch` — un secondo narratore sullo stesso fatto ([ADR-0089](../../docs/Decision.md#adr-0089)) — quindi in produzione oggi non la usa nessuno, e il punto scade quando `scenari.py` la rimetterà in servizio |
+| ~~L'intervallo predefinito di 500 ms è scelto, non misurato~~ | [07](07-topologia-failover-e-i-due-numeri.md#il-limite-di-questo-osservatore-dichiarato) | **decaduto** al Task 13: l'interruzione non si sonda più, si **deduce** dagli eventi del ponte ([ADR-0096](../../docs/Decision.md#adr-0096)), quindi la risoluzione della misura non dipende più da nessun intervallo. I 500 ms restano il ritmo con cui la scena drena la coda verso lo schermo, che è un'altra cosa |
+| Il `TopologyWatcher` non ha un invariante di thread: oggi non lo usa nessuno | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | **Task 13 non l'ha rimesso in servizio, e la scadenza cade**: `ScenarioFailover` deduce l'interruzione dal ponte ([ADR-0096](../../docs/Decision.md#adr-0096)), non da una sentinella che interroga. Il `TopologyWatcher` resta codice provato che nessun comando costruisce: la domanda vera, da porre al Task 18, non è più «che invariante di thread ha» ma «serve ancora» |
 | `ChunkMigrated` potrebbe non essere osservabile da un client di `mongos` | [08](08-il-ponte-sdam-e-i-thread-del-driver.md#che-cosa-non-è-ancora-verificato) | Task 15 |
-| Un'eccezione dentro un listener finisce su `stderr`, e sotto un `Live` non si vede | [M-015](Sources.md#m-015) | **aperto, e da Task 11 reale**: `watch --sink rich` mette per la prima volta un `Live` e gli ascoltatori del driver nello stesso processo. La difesa di oggi è che gli ascoltatori sono **totali** — `ruolo_di` non solleva su un nome sconosciuto — non che l'errore si veda. Task 13 |
+| Un'eccezione dentro un listener finisce su `stderr`, e sotto un `Live` non si vede | [M-015](Sources.md#m-015) | **ancora aperto dopo il Task 13, e più esposto**: `demo failover` senza `--step` usa `--sink rich` per default, e ci mette dentro un failover vero, cioè il momento in cui gli ascoltatori lavorano di più. La difesa resta la stessa — gli ascoltatori sono **totali** — e non è che l'errore si veda. Task 18, con la registrazione che è il controllo |
 | La soglia della prova cronometrata non prende una `f-string` nel callback | [M-013, riserve](Sources.md#m-013) | dichiarata, non si chiude |
 | Le unità delle durate sono lette nel sorgente di PyMongo, non viste su un battito vero | [M-012, riserve](Sources.md#m-012) | il primo battito su un cluster in movimento: il Task 8 ha collegato l'ispettore, non il ponte |
 | ~~Come le prove di integrazione ricevono la credenziale senza violare ADR-0054~~ | [decisioni](decisioni-che-vincolano-app.md#adr-0054) | **chiuso** al Task 8: [M-018](Sources.md#m-018) e [ADR-0083](../../docs/Decision.md#adr-0083) |
@@ -986,16 +1095,22 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | `_RefreshThread` è privato di Rich e può cambiare senza avviso | [A-015, riserve](Sources.md#a-015) | dichiarata: la difesa è la prova che conta i thread, che si accorgerebbe del cambiamento |
 | Sullo stack 03 `lab.carico-*` **non è distribuita**: `init/30-dati-demo.js` distribuisce solo `lab.ordini` su `{_id: "hashed"}` | [ADR-0088, riserve](../../docs/Decision.md#adr-0088) | Task 16, ed è la prima cosa che quel task deve decidere: o distribuire la collezione, o dichiarare che misura un solo shard |
 | `TOPOLOGIA singola → singola` è vera e non utile: cambia la *descrizione*, non la forma | [12](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md#che-cosa-questo-capitolo-lascia-aperto) | decidendo che cosa quella riga debba dire, non aggiungendo un osservatore |
-| Il ciclo di `watch` vive in `cli.py`: orchestrazione dentro la radice di composizione | [12](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md#che-cosa-questo-capitolo-lascia-aperto) | Task 13, con `application/scenari.py` |
-| Le letture fallite si contano ma non emettono nessun evento: nel consuntivo ci sono, in cronaca no | [12](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md#che-cosa-questo-capitolo-lascia-aperto) | Task 13, se la scena del failover dovrà mostrarle |
+| ~~Il ciclo di `watch` vive in `cli.py`: orchestrazione dentro la radice di composizione~~ | [12](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md#che-cosa-questo-capitolo-lascia-aperto) | **chiuso** al Task 13: è `sorveglia` in `application/scenari.py`, e la regola delle attese — `giri - 1` e non `giri` — adesso ha le sue prove |
+| Le letture fallite si contano ma non emettono nessun evento: nel consuntivo ci sono, in cronaca no | [12](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md#che-cosa-questo-capitolo-lascia-aperto) | **il Task 13 non l'ha chiesto, e per scelta**: la scena del failover gira con `--readers 0`, perché durante l'elezione le letture su un secondario continuano a riuscire e mescolate alle scritture renderebbero illeggibile l'unica cosa che quella scena misura. Torna al Task 16, dove le letture sono il contenuto |
 | `rapporto()` riceve la porta invece dei valori già letti, quindi l'ordine delle interrogazioni è affar suo | [12](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md#terzo-la-fotografia-diceva-sconosciuto-di-un-server-sano) | dichiarata: chi volesse comporre un rapporto da dati raccolti altrove oggi non può |
 | La mappa dei bersagli contiene le porte **predefinite**, e i Compose le scrivono `${PORTA_...:-27021}` | [ADR-0087, riserve](../../docs/Decision.md#adr-0087) | dichiarata: la difesa sarebbe una prova che rilegge il `compose.yaml` e confronta |
-| La scoperta è misurata su un set **con** il primario: il ramo `updateRSWithoutPrimary` non è stato visto | [M-036, riserve](Sources.md#m-036) | Task 13, che è dove il failover si mette in scena |
+| La scoperta è misurata su un set **con** il primario: il ramo `updateRSWithoutPrimary` non è stato visto | [M-036, riserve](Sources.md#m-036) | **chiuso a metà** al Task 13: [M-043](Sources.md#m-043) attraversa lo stato senza primario e ne esce con un primario diverso, quindi il ramo viene percorso; ciò che resta non visto è la parte che dà il nome al ramo — un server **aggiunto** mentre non c'è primario — perché i tre membri erano già tutti noti. Servirebbe un membro aggiunto al set durante l'elezione, che non è una scena del talk |
 | Il bind mount del sorgente fa vincere l'host sull'immagine: in sala sarebbe una sorpresa | [13](13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md#che-cosa-questo-capitolo-lascia-aperto) | Task 18: chi registra i filmati di riserva ricostruisce prima |
 | `make app-image` costruisce sempre attraverso lo stack 01, dando per scontato che i tre servizi `app` siano identici | [ADR-0092, riserve](../../docs/Decision.md#adr-0092) | dichiarata: la difesa è la prova che verifica che i tre stack dichiarino la stessa immagine |
 | `check_stack.py` legge le righe `FROM` con una regex, non con un parser di Dockerfile | [ADR-0093, riserve](../../docs/Decision.md#adr-0093) | dichiarata: basta per i Dockerfile che questo repository scrive |
 | `M-037` è misurata con l'archivio immagini di containerd: con il vecchio archivio a grafo il comportamento è un altro | [M-037, riserve](Sources.md#m-037) | dichiarata: la decisione non cambia, la sua motivazione sì |
 | Le prove d'integrazione **dichiarano** il punto di vista invece di leggerlo dall'ambiente | [ADR-0090, riserve](../../docs/Decision.md#adr-0090) | dichiarata: è una precauzione contro una `MONGOLAB_PUNTO_DI_VISTA` esportata a mano, non contro il codice |
+| La scena dal vivo richiede **due terminali**: uno mostra, l'altro esegue il guasto annunciato | [14](14-la-scena-del-failover-e-i-due-numeri.md#il-guasto-entra-da-una-porta-e-la-porta-è-nata-da-unimpossibilità) | non si chiude, si prova: è [ADR-0095](../../docs/Decision.md#adr-0095), e l'alternativa era il socket Docker nel container. Da portare al PO prima delle prove generali |
+| `--step` con `--sink rich` è **rifiutato**: dal palco la resa è `plain` | [ADR-0098, riserve](../../docs/Decision.md#adr-0098) | Task 18: se in proiezione `plain` non reggesse, la decisione va riaperta, con la sospensione del `Live` come prima candidata |
+| `--mode sospendi` non ha una prova di integrazione: che `pause` dia un **timeout** invece di un connection refused è affermato, non misurato | [14](14-la-scena-del-failover-e-i-due-numeri.md#il-supplemento-irraggiungibile-ma-vivo) | il Passo 3 del Task 13 ha prodotto il codice e non la misura. Prima delle prove generali, perché è la scena che il pubblico non si aspetta |
+| I 10 019 ms dipendono dalle impostazioni di elezione **di questo lab** | [M-043, riserve](Sources.md#m-043) | dichiarata: la frase in sala è «su questo lab», non «in MongoDB» |
+| «Zero scritture perse» dipende da un default **del server**, non da una scelta dell'applicazione | [M-041](Sources.md#m-041) | dichiarata: un `setDefaultRWConcern` più debole cambierebbe il numero, ed è una cosa da dire, non un difetto da correggere |
+| La prova di integrazione della scena assicura una banda larga (5-15 s), non il numero | [14](14-la-scena-del-failover-e-i-due-numeri.md#contro-lo-stack-vero-una-prova-che-fa-da-umano) | dichiarata: la banda intercetta l'errore di categoria, il numero preciso sta in [M-043](Sources.md#m-043) |
 
 ---
 

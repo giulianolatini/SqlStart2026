@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 .PHONY: help docs-check tools-test images-pull images-verify preflight stack-check \
-        app-test app-check app-test-integration \
+        app-demo app-test app-check app-test-integration \
         app-stats app-watch app-workload app-image \
         up-01 down-01 reset-01 logs-01 seed-01 smoke-01 reset-demo-01 \
         up-02 down-02 reset-02 logs-02 seed-02 smoke-02 reset-demo-02 \
@@ -130,6 +130,20 @@ app-workload: ## Manda carico contro uno stack: make app-workload TARGET=rs [DOV
 	$(CHIEDI_TARGET)
 	$(CHIEDI_DOVE)
 	$(ESEGUI) workload --target $(TARGET) $(ARGS)
+
+# La scena centrale del Blocco 2. `DOVE` qui pesa più che altrove, ed è la ragione per cui
+# il predefinito resta `rete`: la cronaca dell'elezione esiste solo da dentro la rete
+# Compose (M-019), e da lì l'applicazione non ha il socket del demone — quindi annuncia il
+# comando e aspetta che qualcuno lo dia da un'altra finestra. Con `DOVE=host` è il
+# contrario: il guasto lo provoca da sé, e la cronaca non ce l'ha.
+#
+# Dal palco: `make app-demo TARGET=rs ARGS="--step --sink plain"`. Il `--sink plain` non è
+# gusto — `--step` e il `Live` di Rich vogliono lo stesso terminale, e la riga di comando
+# lo rifiuta invece di lasciar premere Invio alla cieca.
+app-demo: ## La scena del failover: make app-demo TARGET=rs [DOVE=host] [ARGS="--step --sink plain"]
+	$(CHIEDI_TARGET)
+	$(CHIEDI_DOVE)
+	$(ESEGUI) demo failover --target $(TARGET) $(ARGS)
 
 # La costruzione passa per Compose e non per un `docker build` scritto qui: gli argomenti
 # con cui si pinna la base — PYTHON_IMAGE, UV_IMAGE — sono già dichiarati nel servizio

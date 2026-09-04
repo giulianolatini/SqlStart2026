@@ -5998,3 +5998,145 @@ Stato aggiornato: decisioni fino ad **ADR-0093**, verifiche fino a **V-074**, no
 alla **194**. Le suite: **166** prove per gli strumenti, **462** per l'applicazione più **47** di
 integrazione, `mypy --strict` verde su 58 file. Prossimo passo: **Task 13** del
 [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md).
+
+---
+
+## 2026-09-04 — `feature/04`, Task 13: la scena centrale, la sesta porta, e i due numeri che tengono
+
+Il Task 13 costruisce l'Atto II del Blocco 2: carico attivo, il primario che cade, la cronaca
+dell'elezione con il timestamp al millisecondo, e in fondo **durata dell'interruzione** e
+**scritture perse**. È la scena per cui l'applicazione esiste — le altre si potrebbero fare con
+`mongosh` e pazienza, questa no. Ne escono `app/src/mongolab/application/scenari.py`, la sesta
+porta del dominio, il decimo evento, la sottocomanda `demo failover`, e sei ADR. Le prove unitarie
+passano da **462 a 523**, quelle d'integrazione da **47 a 48**, `mypy --strict` da 58 a **64** file.
+
+**La scena, eseguita per la prima volta, si è rivelata impossibile per un processo solo.** La
+cronaca dell'elezione esiste solo se il client fa scoperta, e la scoperta funziona solo da dentro
+la rete Compose — è la conclusione del Task 12. Il guasto è un `docker compose kill`, e vuole il
+socket del demone, che il container dell'applicazione **non ha** per una scelta deliberata dello
+stesso Task 12. Dall'host, per giunta, il primario si chiama `localhost:27021`, che non è il nome
+di nessun servizio che si possa fermare. Da qui [ADR-0095](Decision.md#adr-0095): la porta `Regia`
+con quattro verbi e **due adattatori opposti** — `RegiaCompose` esegue e vive sull'host,
+`RegiaAnnunciata` annuncia la riga esatta e si blocca finché un umano non l'ha eseguita. La
+conseguenza va portata al PO: la scena dal vivo richiede due terminali.
+
+**Il piano diceva `stop`, e le slide dicevano un altro numero.** Il Passo 2 nomina alla lettera
+`docker compose stop`; eseguito, `stop` manda `SIGTERM`, e `mongod` cede il ruolo con ordine —
+574, 480, 486 ms secondo [V-029](Sources.md#v-029), **senza elezione da raccontare**. Con `docker
+kill` sono 9 812, 10 619 e 10 943 ms, che sono i numeri già proiettati come «forbice 8-10 s»
+([V-031](Sources.md#v-031)). Le slide riportano una misura fatta, il piano ha una svista:
+[ADR-0097](Decision.md#adr-0097) fissa `kill -s SIGKILL` come guasto predefinito e tiene `stop`
+documentato e configurabile, perché il confronto è il pezzo di didattica migliore dei due.
+
+**Guardare non è aspettare.** Contro un replica set sanissimo, `demo failover` usciva con «nessun
+primario in vista su «rs»»: `Inspector.topology()` legge la descrizione che il driver **ha già**,
+e subito dopo `connetti` quella descrizione è vuota, perché la scoperta comincia in quel momento
+([M-042](../app/docs/Sources.md#m-042)). Gli altri comandi non ci inciampavano per caso — `stats`
+chiede `serverStatus`, che aspetta la selezione, e `watch` guarda la topologia proprio mentre
+cambia. La correzione è un `ping`, che essendo un comando su `admin` va sul primario per
+impostazione predefinita ([A-017](../app/docs/Sources.md#a-017)) e quindi aspetta. Il posto comodo
+era `cli.py`, e `test_pymongo_si_importa_solo_nell_infrastruttura` lo vieta: la guardia non è stata
+toccata, e il codice è finito meglio di dove voleva andare
+([ADR-0099](Decision.md#adr-0099)).
+
+**Il confronto del Passo 5 è la vera chiusura del task.** Contro lo stack vero, dal container, con
+un processo che faceva da umano: interruzione **10 019 ms**, **0 scritture perse** su 15 229
+confermate, primario passato da `mongo-rs-1:27017` a `mongo-rs-3:27017`
+([M-043](../app/docs/Sources.md#m-043)). I 10 019 ms cadono dentro la forbice di V-029; lo zero
+ripete [V-033](Sources.md#v-033), che ne aveva confermate 12 901 e perdute nessuna. Il piano
+chiedeva di fermarsi se non avessero coinciso: coincidono, e nessuno dei due va corretto.
+
+Lo zero, però, ha una spiegazione che cambia la frase da dire in sala. Il `WriteConcern` del client
+è **vuoto**: `mongolab` non chiede niente, e `w: majority` arriva dal server come default
+*implicito* ([M-041](../app/docs/Sources.md#m-041), MongoDB 7.0.40). Non «la mia applicazione usa
+`w: majority`», che sarebbe falso, ma «nessuno qui ha chiesto niente, e il server ha scelto bene».
+
+**Un rifiuto invece di una gentilezza.** `--step` legge da stdin sul thread della scena, e il
+`Live` di Rich ridisegna sul suo: il prompt «Invio per proseguire» finisce sotto il ridisegno
+successivo, e chi tiene la tastiera dal palco non vede più che cosa sta aspettando. La
+combinazione è rifiutata come errore di parametro, prima che la scena cominci
+([ADR-0098](Decision.md#adr-0098)). Degradare in silenzio a `plain` sarebbe stato più gentile e
+peggiore: una scena che cambia da sola la propria resa mostra dal vivo qualcosa di diverso da
+quello che si è provato la sera prima.
+
+Fuori copione, il ciclo di `watch` ha lasciato `cli.py` ed è diventato `sorveglia`: dentro la
+radice di composizione era provabile solo aprendo una connessione, e la sua regola più delicata —
+si aspetta `giri - 1` volte e non `giri` — non aveva nessuna prova.
+
+### Note di metodo
+
+195. **Quando due requisiti legittimi non stanno nello stesso processo, la risposta è una porta con
+     due adattatori — non un compromesso.** La scena voleva la scoperta, che c'è solo dentro la rete,
+     e il socket Docker, che c'è solo sull'host. Le vie di mezzo erano tutte peggiori: montare il
+     socket nel container (e proiettare in sala il modo più diretto di prendere la macchina),
+     rinunciare alla cronaca (e perdere metà dell'Atto II), o inventare un agente che riceva ordini
+     dal container. Dichiarare il verbo come porta e dare due implementazioni ha lasciato intatti
+     entrambi i vincoli, e ha reso il vincolo stesso **didattico**: in sala si vede che quel
+     container non può toccare il demone. La regola pratica: davanti a due requisiti che non
+     convivono, prima di cercare la scorciatoia, chiedersi se la separazione non sia essa stessa
+     ciò che c'è da mostrare.
+
+196. **Un piano è un documento, e la sua lettera si verifica come qualunque altra affermazione.**
+     Il piano scriveva `docker compose stop`; eseguito, produce mezzo secondo e nessuna elezione,
+     cioè una scena in cui non succede la cosa che il talk annuncia. Le slide, scritte da una
+     misura, dicevano dieci secondi. La correzione è andata al piano e non alle slide, ed è stata
+     scritta in un ADR invece che applicata in silenzio. La regola pratica: quando il piano e una
+     misura si contraddicono, vince la misura — e la contraddizione va **registrata**, perché è la
+     sola traccia che qualcuno ci ha pensato.
+
+197. **Fra un fallimento immediato e un'informazione mancante, il costo è tutto dalla parte
+     dell'informazione mancante.** `RegiaCompose` trasforma un'uscita diversa da zero in
+     un'eccezione che ferma la scena. Se non lo facesse, un `kill` fallito lascerebbe il primario in
+     piedi e la scena arriverebbe in fondo con zero millisecondi di interruzione e zero scritture
+     perse: **i numeri di un failover perfetto**, prodotti dall'assenza del failover. La regola
+     pratica: quando un'operazione fallita produce un risultato *plausibile* invece di un errore,
+     fermarsi non è prudenza, è l'unica difesa che esista.
+
+198. **Guardare non è aspettare, ed è una distinzione che i doppi non insegnano.** Una lettura pura
+     che restituisce lo stato corrente e una chiamata che blocca finché lo stato non è quello giusto
+     hanno la stessa firma e sembrano intercambiabili. Contro un doppio lo sono, perché il doppio
+     risponde subito: cinquecento prove verdi non hanno visto niente. Contro un sistema vero, la
+     prima è una fotografia di un istante in cui non era ancora successo nulla. La regola pratica:
+     per ogni chiamata che legge uno stato appena creato, chiedersi **chi** garantisce che lo stato
+     ci sia già — e se la risposta è «di solito fa in tempo», serve un'attesa esplicita.
+
+199. **Una guardia che dà fastidio ha spesso ragione, e il codice esce migliore dall'averle
+     obbedito.** L'attesa del primario stava comodamente in `cli.py`, e la guardia che vieta
+     `pymongo` fuori dall'infrastruttura l'ha respinta. Obbedire ha prodotto due cose invece di una:
+     `SenzaPrimario`, che è un fatto dell'infrastruttura, e `niente_da_fermare`, che è la frase che
+     la riga di comando ne ricava — e che, restituendo l'eccezione invece di sollevarla, si prova
+     senza dover fabbricare un replica set malato. La regola pratica: quando una regola del
+     repository blocca qualcosa di legittimo, la prima ipotesi non è che la regola sia troppo
+     rigida, è che il codice stia nel posto sbagliato.
+
+200. **Una prova che ricostruisce un fatto invece di leggerlo dichiarato può passare per la ragione
+     sbagliata.** L'asserzione sull'elezione prendeva la prima riga `SERVER … → primario`, che è la
+     scoperta iniziale: nominava il primario di sempre. Il fallimento era rumoroso e innocuo; il
+     pericolo era il caso opposto, perché una prova così passerebbe anche se il guasto non fosse
+     mai arrivato. Adesso legge la riga di continuazione `da … a …`, che la cronaca stampa solo se
+     qualcuno ha davvero preso il posto di qualcun altro — cioè verifica ciò che la sala legge. La
+     regola pratica: quando una prova deriva un fatto da dati grezzi, chiedersi se esista una riga
+     che quel fatto lo **dichiara**, e asserire su quella.
+
+201. **Una banda larga scelta apposta prova più di una soglia stretta.** La prova d'integrazione
+     accetta un'interruzione fra 5 e 15 secondi, non i 10 019 ms misurati. Non è indulgenza: la
+     soglia stretta fallirebbe sul portatile di qualcun altro senza che niente sia rotto, e sarebbe
+     spenta entro un mese. La banda intercetta l'errore di **categoria** — zero, cioè il guasto non
+     è arrivato; sessanta secondi, cioè l'elezione non è avvenuta — e il numero preciso vive nel
+     registro delle misure, che è il posto dei numeri precisi. La regola pratica: separare che cosa
+     la suite deve **impedire** da che cosa il registro deve **ricordare**, e non chiedere alla
+     prima di fare il mestiere del secondo.
+
+202. **Un numero giusto per una ragione che non è la propria è una frase sbagliata in attesa di
+     essere detta.** «Zero scritture perse» è vero, ed è facile attribuirlo all'applicazione. Il
+     `WriteConcern` del client è vuoto: `w: majority` lo impone il server come default implicito, e
+     `getDefaultRWConcern` lo dichiara. Detta male, la frase diventa falsa e — peggio — non
+     riproducibile su un cluster con un default diverso. La regola pratica: prima di portare un
+     numero su una slide, risalire a **chi** lo produce; se la risposta è «qualcun altro», è quella
+     la cosa da dire.
+
+Stato aggiornato: decisioni fino ad **ADR-0099**, verifiche fino a **V-074**, note di metodo fino
+alla **202**. Le suite: **166** prove per gli strumenti, **523** per l'applicazione più **48** di
+integrazione, `mypy --strict` verde su 64 file. Prossimo passo: **Task 14** del
+[piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), che è anche dove si decide se
+`mongodump` entra nell'immagine ([M-039](../app/docs/Sources.md#m-039)).
