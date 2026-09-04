@@ -543,20 +543,20 @@ invece che collegamenti.
 
 **File:** `docs/05-talk/registrazioni/` e il suo `README.md`; `docs/registro-operativo-sviluppo.md`.
 
-- [ ] **Passo 1.** Le registrazioni si producono con `--sink plain` e senza `--step`, cioè con lo
+- [x] **Passo 1.** Le registrazioni si producono con `--sink plain` e senza `--step`, cioè con lo
       stesso codice della scena dal vivo: è la proprietà che il Task 13 ha costruito apposta, e che
       rende la registrazione una copia fedele invece di una ricostruzione.
-- [ ] **Passo 2.** Il formato è `asciicast` ([ADR-0050](../Decision.md#adr-0050)): leggero,
+- [x] **Passo 2.** Il formato è `asciicast` ([ADR-0050](../Decision.md#adr-0050)): leggero,
       versionabile, testo copiabile. Gli `.mp4` **non** entrano in git e restano compito del
       relatore — l'avviso di `preflight` diventa bloccante dal 18 settembre.
-- [ ] **Passo 3.** Indice delle registrazioni aggiornato con che cosa mostra ciascuna, come è stata
+- [x] **Passo 3.** Indice delle registrazioni aggiornato con che cosa mostra ciascuna, come è stata
       prodotta e quando si usa.
-- [ ] **Passo 4.** I controlli, tutti: `make preflight`, `make docs-check`, `make stack-check`,
+- [x] **Passo 4.** I controlli, tutti: `make preflight`, `make docs-check`, `make stack-check`,
       `make tools-test`, `make app-test`, `make app-check`. Il conteggio delle prove va scritto nel
       registro.
-- [ ] **Passo 5.** Voce di chiusura nel registro con le note di metodo prodotte dal branch e la riga
+- [x] **Passo 5.** Voce di chiusura nel registro con le note di metodo prodotte dal branch e la riga
       di stato — decisioni, verifiche, note, prove.
-- [ ] **Passo 6.** PR verso `develop`. **Mai `git flow feature finish`**: salta la revisione, ed è
+- [x] **Passo 6.** PR verso `develop`. **Mai `git flow feature finish`**: salta la revisione, ed è
       già successo con la PR #1. La fusione la fa il Product Owner. A PR unita, la chiusura del
       worktree segue l'ordine di [ADR-0079](../Decision.md#adr-0079) — **si sgancia la sessione
       prima di rimuovere la directory** — e i `.env` si salvano prima

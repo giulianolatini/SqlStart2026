@@ -15,6 +15,13 @@ registrata non sarebbe quella che il pubblico vede.
 Riproduce anche, e senza `asciinema`: una registrazione di riserva che per essere
 vista richiede di installare qualcosa non è una registrazione di riserva.
 
+Con `--regia PREFISSO` fa anche da **seconda finestra**: le righe che il comando
+registrato stampa e che cominciano con quel prefisso vengono eseguite qui, e poi
+un Invio torna al comando. Serve alle scene che l'applicazione gira dentro la
+rete Compose, dove vede la topologia ma non ha il socket del demone: annuncia il
+comando che ferma il primario e aspetta che qualcuno lo dia altrove. Dal palco
+quel qualcuno è una persona; per registrare la scena dev'essere questo strumento.
+
 Uso:
     python3 tools/registra-terminale.py <destinazione.cast> -- <comando> [argomenti]
     python3 tools/registra-terminale.py --riproduci <registrazione.cast>
@@ -32,8 +39,10 @@ import json
 import os
 import pty
 import select
+import shlex
 import shutil
 import signal
+import subprocess
 import sys
 import time
 
@@ -57,7 +66,32 @@ def imposta_dimensioni(discendente: int, righe: int, colonne: int) -> None:
     fcntl.ioctl(discendente, termios.TIOCSWINSZ, struct.pack("HHHH", righe, colonne, 0, 0))
 
 
-def registra(destinazione: str, comando: list[str], titolo: str, righe: int, colonne: int) -> int:
+def seconda_finestra(riga: str, canale: int) -> None:
+    """Esegue la riga annunciata e manda l'Invio a chi la aspettava.
+
+    L'ordine è l'unico possibile: prima il comando, poi la conferma. Invertirli
+    vorrebbe dire una scena che riparte prima che il guasto sia avvenuto, cioè un
+    failover raccontato senza failover — che è esattamente ciò che la conferma
+    esiste per impedire.
+
+    L'uscita del comando si cattura e si riassume su stderr invece di lasciarla
+    andare: **non** deve finire nel .cast — nel .cast va ciò che il pubblico
+    vedrebbe nella finestra di sinistra — e chi registra deve comunque sapere se
+    il comando è riuscito.
+    """
+    esito = subprocess.run(shlex.split(riga), capture_output=True, text=True)
+    print("regia: %s · uscita %d" % (riga, esito.returncode), file=sys.stderr)
+    os.write(canale, b"\n")
+
+
+def registra(
+    destinazione: str,
+    comando: list[str],
+    titolo: str,
+    righe: int,
+    colonne: int,
+    regia: str | None = None,
+) -> int:
     """Esegue `comando` in uno pseudo-terminale e ne scrive la registrazione.
 
     Restituisce il codice di uscita del comando: una registrazione di una demo
@@ -122,6 +156,11 @@ def registra(destinazione: str, comando: list[str], titolo: str, righe: int, col
         "title": titolo,
     }
 
+    # Ciò che è arrivato dal pty e non è ancora una riga intera. La regia guarda le
+    # righe e non i blocchi: il pty consegna quando gli pare, e un comando annunciato
+    # spezzato a metà fra due letture non comincerebbe con il prefisso.
+    sospeso = ""
+
     # Lo stato del comando, se a raccoglierlo è il ramo non bloccante qui sotto: da
     # quel momento il processo non esiste più, e la `waitpid` finale non lo troverebbe.
     raccolto = None
@@ -145,6 +184,12 @@ def registra(destinazione: str, comando: list[str], titolo: str, righe: int, col
                 testo = dati.decode("utf-8", errors="replace")
                 uscita.write(json.dumps([trascorso, "o", testo], ensure_ascii=False) + "\n")
                 uscita.flush()
+                if regia is not None:
+                    sospeso += testo
+                    *complete, sospeso = sospeso.split("\n")
+                    for vista in complete:
+                        if vista.strip().startswith(regia):
+                            seconda_finestra(vista.strip(), figlio)
             else:
                 # Nessun output: si controlla se il comando è finito senza chiudere
                 # il pty — succede quando lascia dietro di sé un figlio. Lo stato si
@@ -206,6 +251,16 @@ def main(argomenti: list[str] | None = None) -> int:
         "--riproduci", action="store_true", help="riproduce la registrazione invece di crearla"
     )
     analizzatore.add_argument("--velocita", type=float, default=1.0)
+    # Il prefisso è un valore e non un predefinito nascosto: qui si dichiara che cosa
+    # questo strumento è autorizzato a eseguire, e lo si legge nella riga di comando
+    # che ha prodotto la registrazione. Un `--regia` senza argomento eseguirebbe ciò
+    # che un comando registrato decide di stampare, e la riga non lo direbbe.
+    analizzatore.add_argument(
+        "--regia",
+        metavar="PREFISSO",
+        default=None,
+        help="esegue le righe che cominciano così, e poi manda un Invio",
+    )
 
     # La divisione su `--` si fa a mano invece che con `argparse.REMAINDER`, che
     # dopo il primo argomento posizionale inghiotte anche le opzioni di questo
@@ -220,6 +275,11 @@ def main(argomenti: list[str] | None = None) -> int:
         letti = analizzatore.parse_args(miei)
         if comando:
             analizzatore.error("--riproduci non registra niente: togliere il comando dopo `--`")
+        if letti.regia is not None:
+            analizzatore.error(
+                "--regia fa da seconda finestra mentre la scena gira: una "
+                "riproduzione non ne ha una"
+            )
         if letti.velocita <= 0:
             # Dividere per zero qui vuol dire un traceback al posto della riserva, il
             # giorno in cui la demo dal vivo è già fallita una volta.
@@ -234,7 +294,9 @@ def main(argomenti: list[str] | None = None) -> int:
     # .cast troncato senza che nessuno lo sappia.
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
-    uscita = registra(letti.destinazione, comando, letti.titolo, letti.righe, letti.colonne)
+    uscita = registra(
+        letti.destinazione, comando, letti.titolo, letti.righe, letti.colonne, letti.regia
+    )
     if not os.path.exists(letti.destinazione):
         return uscita
 

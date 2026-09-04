@@ -7215,3 +7215,133 @@ Tre conseguenze, ed è per queste che la decisione esiste:
 
 **Fonti:** [S-076](Sources.md#s-076), [S-077](Sources.md#s-077), [V-083](Sources.md#v-083),
 [V-088](Sources.md#v-088)
+
+<a id="adr-0115"></a>
+
+## ADR-0115 — Chi registra fa da seconda finestra: `--regia PREFISSO`
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** la scena centrale del Blocco 2 — il primario che cade sotto carico — gira
+l'applicazione **dentro** la rete Compose, che è l'unico posto da cui si veda la cronaca
+dell'elezione: dall'host il client è `directConnection` su una porta pubblicata, non ha topologia da
+osservare e la scena perde esattamente ciò che deve mostrare. Ma dentro la rete l'applicazione non
+ha il socket del demone, quindi non può uccidere il container: annuncia il comando e si ferma su un
+`input()` finché qualcuno non l'ha eseguito altrove. Dal palco quel qualcuno è una persona con un
+secondo terminale aperto; la prova di integrazione ha già un ponte che fa la stessa cosa.
+`tools/registra-terminale.py` invece non scriveva **mai** sul lato padrone dello pseudo-terminale:
+una registrazione di quella scena si sarebbe piantata per sempre sul `input()`.
+
+Il Task 18 chiede che le registrazioni si producano «con lo stesso codice della scena dal vivo»
+([ADR-0098](#adr-0098)): la modalità da palco cambia una funzione di attesa, non il flusso. Rinunciare
+alla scena, o girarla dall'host perdendo la cronaca, sarebbero state due riserve che non
+sostituiscono la scena che devono sostituire.
+
+**Decisione:** lo strumento di registrazione impara a fare da seconda finestra. Con `--regia
+PREFISSO`, ogni **riga intera** che il comando registrato stampa e che comincia con quel prefisso
+viene eseguita da chi registra, e subito dopo un `\n` va sul lato padrone dello pseudo-terminale:
+prima il comando, poi la conferma. L'ordine è l'unico possibile — invertirlo produrrebbe una scena
+che riparte prima che il guasto sia avvenuto, cioè un failover raccontato senza failover.
+
+Tre vincoli che fanno parte della decisione:
+
+- **Il prefisso è un argomento obbligatorio dell'opzione, non un predefinito.** Un `--regia` senza
+  valore eseguirebbe ciò che un comando registrato decide di stampare, e la riga di comando che ha
+  prodotto la registrazione non direbbe che cosa. Così invece la ricetta dichiara che cosa lo
+  strumento è autorizzato a eseguire, e chi rilegge lo legge lì.
+- **L'uscita del comando eseguito non entra nel `.cast`.** Si cattura e si riassume su `stderr`
+  (`regia: … · uscita 0`): nel tracciato va ciò che il pubblico vedrebbe nella finestra di sinistra,
+  e chi registra deve comunque sapere se il comando è riuscito.
+- **La regia guarda le righe, non i blocchi.** Lo pseudo-terminale consegna quando gli pare, e un
+  comando annunciato spezzato a metà fra due letture non comincerebbe con il prefisso. Il residuo
+  non terminato resta in sospeso fino alla lettura successiva.
+
+Su `--riproduci` l'opzione è un errore dichiarato e non un'opzione ignorata: una riproduzione non ha
+una seconda finestra, e un'opzione che non fa niente in silenzio è peggio di un rifiuto.
+
+**Conseguenze:** la scena 12 esiste, dura 53 secondi ed è una copia della scena dal vivo invece di
+una ricostruzione ([V-089](Sources.md#v-089)). In cambio lo strumento di registrazione **esegue
+comandi**, che prima non faceva, e la superficie di ciò che può eseguire è tutta nel prefisso
+scritto sulla riga.
+
+Il conto è arrivato subito. `make` fa l'eco della ricetta prima di eseguirla, e l'eco comincia con
+`docker compose ` esattamente come il comando annunciato: la prima corsa ha rilanciato la scena
+dentro se stessa. Si registra con `make -s`, e la trappola è scritta nella ricetta dell'indice
+perché è invisibile finché non succede. È il costo di riconoscere un comando dal **prefisso** invece
+che da un canale separato, e si paga una volta.
+
+**Alternative scartate.**
+
+- *Registrare la scena dall'host.* Nessuna riga di cronaca dell'elezione: il client è
+  `directConnection`, non fa scoperta e non ha transizioni da annunciare. Si sarebbe registrata una
+  scena diversa con lo stesso nome.
+- *Un `--sblocca` che manda l'Invio dopo N secondi.* Non esegue il guasto: qualcuno dovrebbe
+  comunque darlo da fuori, con il rischio che l'Invio arrivi prima. Una scena che riparte prima del
+  guasto è indistinguibile, nel `.cast`, da un failover istantaneo.
+- *Uno script esterno che pilota tutto e la registrazione come sottoprodotto.* È la soluzione usata
+  per la scena 11, dove va bene perché `watch` non annuncia niente e i tempi sono liberi. Per la 12
+  vorrebbe dire indovinare quando l'applicazione ha annunciato: la sincronizzazione esiste già, ed è
+  la riga stampata.
+- *Un canale separato — un file, un FIFO, una variabile d'ambiente — invece del prefisso sul testo.*
+  Più solido e meno fedele: cambierebbe ciò che l'applicazione fa quando è registrata, che è
+  precisamente la proprietà che [ADR-0098](#adr-0098) protegge.
+
+**Fonti:** [V-089](Sources.md#v-089), [ADR-0050](#adr-0050), [ADR-0055](#adr-0055),
+[ADR-0098](#adr-0098)
+
+<a id="adr-0116"></a>
+
+## ADR-0116 — Le registrazioni dell'applicazione pesano quanto il carico che mostrano, e restano intere
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** le nove registrazioni degli stack stanno in trentun kilobyte. Le due
+dell'applicazione sotto carico ne pesano **sei megabyte**, cioè il 99,9 % della cartella
+([V-089](Sources.md#v-089)). Non è un difetto: `PlainSink` scrive una riga per evento e non taglia
+niente — è ciò che lo rende adatto a una riserva, perché ciò che il pubblico vede dal vivo è
+esattamente quel flusso — e una scena che conferma trentaduemila scritture produce
+sessantaquattromila righe. Le vie d'uscita erano tutte disponibili: accorciare il copione, ridurre
+gli scrittori, campionare gli eventi, tenere i file fuori da git.
+
+**Decisione:** le due scene restano intere, con il copione predefinito, dentro il repository. Il
+peso si dichiara nell'indice con la tabella che lo spiega, e non si compra riducendo la scena.
+
+Una riserva serve quando la demo dal vivo non parte. Se la registrazione di riserva dura la metà
+della scena che sostituisce, o mostra un carico che non è quello del talk, il momento in cui se ne
+scopre la differenza è davanti a cento persone — che è precisamente il momento in cui la riserva
+doveva servire. Il criterio è lo stesso di [ADR-0055](#adr-0055) e per la stessa ragione: una
+registrazione vale se, riprodotta, mostra quello che deve mostrare.
+
+Nel pacchetto di git i sei megabyte diventano ~640 K, perché sono righe quasi identiche: il costo
+reale sta fra i due numeri, ed è più vicino al piccolo.
+
+**Conseguenze:** `git clone` del repository trasporta ~640 K in più, una volta. Chi apre le due
+scene con `--riproduci` le vede scorrere per cinquantatré e undici secondi, che è il punto. Il
+confronto automatico su file di quella lunghezza ha fatto emergere il difetto della regola di
+normalizzazione dei ritorni a capo, che sulle dodici scene corte non si vedeva: le registrazioni
+grandi hanno pagato una parte del loro peso trovando un errore nella pagina che le descrive.
+
+Resta scoperta la resa `rich`: nessuna delle cinque la registra, e `app/docs/11-tre-rese-e-un-solo-thread-che-disegna.md` prometteva il contrario. La promessa era sbagliata,
+non la scelta — un pannello che si ridisegna dieci volte al secondo produce un `.cast` illeggibile
+e pesantissimo insieme, e `plain` porta lo stesso **contenuto**. Chi vuole vedere la resa la fa
+girare; in sala la vedrà chi guarda il filmato.
+
+**Alternative scartate.**
+
+- *Un copione più corto per le registrazioni.* Riserva più leggera e scena diversa: si scoprirebbe
+  dal vivo, nell'unico momento in cui la riserva serve.
+- *Meno scrittori, o `--duration` ridotta.* Cambia i numeri che la scena porta — 31 952 scritture
+  confermate, 0 perse — e quei numeri sono la scena.
+- *Campionare gli eventi nel sink, o troncare la registrazione.* `PlainSink` scrive ciò che il
+  pubblico vede; un sink che taglia solo quando registra rompe la proprietà di
+  [ADR-0098](#adr-0098) e fa della riserva una ricostruzione.
+- *Tenere i `.cast` pesanti fuori da git, accanto agli `.mp4`.* Gli `.mp4` stanno fuori perché sono
+  binari grandi e opachi ([ADR-0016](#adr-0016)); un `.cast` è testo versionabile e diffabile, e
+  fuori dal repository non sarebbe più disponibile offline con un `clone`, che è la ragione per cui
+  la cartella esiste.
+- *Comprimerli in `.cast.gz`.* Nove decimi del peso in meno e la riproduzione non funziona più
+  direttamente: `--riproduci` vorrebbe una decompressione preventiva, cioè un passo in più proprio
+  nel momento in cui la riserva serve.
+
+**Fonti:** [V-089](Sources.md#v-089), [ADR-0016](#adr-0016), [ADR-0050](#adr-0050),
+[ADR-0055](#adr-0055), [ADR-0098](#adr-0098)

@@ -21,9 +21,12 @@ parte», la registrazione di terminale copre il caso «la demo parte ma stiamo f
 <a id="registrazioni-di-terminale"></a>
 ## Le registrazioni di terminale, che ci sono
 
-Nove scene, trentun kilobyte in tutto: quattro del Blocco 2 — il replica set — e cinque del
-Blocco 3, lo sharded cluster. Nessuna è montata: ognuna è **una** esecuzione intera, con i tempi
-che ha avuto.
+Quattordici scene: quattro del Blocco 2 — il replica set — cinque dell'applicazione `mongolab`
+sullo stesso stack, e cinque del Blocco 3, lo sharded cluster. Nessuna è montata: ognuna è **una**
+esecuzione intera, con i tempi che ha avuto.
+
+Dodici stanno in trentasei kilobyte. Le altre due sono l'applicazione sotto carico e pesano sei
+megabyte: il perché è scritto più sotto, e non è un difetto da correggere.
 
 ### Blocco 2 — il replica set
 
@@ -40,6 +43,64 @@ Misurate sullo stack `docker/02-replicaset`, con i tre membri sani prima di cias
 Le scene 2 e 3 vanno **una dopo l'altra**, perché il punto non è nessuna delle due: è che il gesto
 brutale costa dieci secondi e quello educato uno, cioè il contrario di quello che il pubblico si
 aspetta ([ADR-0034](../../Decision.md#adr-0034), [ADR-0044](../../Decision.md#adr-0044)).
+
+### Blocco 2 — l'applicazione `mongolab`
+
+Cinque scene girate alla fine di `feature/04`, sullo stesso stack `docker/02-replicaset` e con i
+tre membri riportati sani prima di ciascuna. I numeri dei file proseguono la serie perché sono
+state prodotte dopo; nella scaletta stanno **dentro** il Blocco 2, subito dopo le quattro di sopra
+([V-089](../../Sources.md#v-089)).
+
+Tutte e cinque sono girate con `--sink plain` e **senza** `--step`, cioè con lo stesso codice che
+gira dal vivo: la modalità da palco cambia una funzione di attesa, non la scena
+([ADR-0098](../../Decision.md#adr-0098)). È la proprietà che rende queste registrazioni una copia
+e non una ricostruzione.
+
+| # | File | Che cosa mostra | Durata | Il numero che porta | Momento |
+|---:|---|---|---:|---|---|
+| 10 | [`10-app-fotografia-dello-stack.cast`](10-app-fotografia-dello-stack.cast) | `mongolab stats`: topologia, versione, database e distribuzione in otto righe | 1,5 s | `mongod 7.0.40` · tre membri e un primario · `lab` con **50 000** documenti | apertura dell'Atto I — «che cosa c'è, prima che lo rompa» |
+| 11 | [`11-app-cronaca-dell-elezione.cast`](11-app-cronaca-dell-elezione.cast) | `mongolab watch`: l'elezione **senza carico intorno**, una riga per transizione | 42,5 s | primario perso a `26.047`, `mongo-rs-2` eletto a `36.082`: **10 035 ms** | l'Atto I quando la domanda è «e il driver come fa a saperlo?» |
+| 12 | [`12-app-failover-e-i-due-numeri.cast`](12-app-failover-e-i-due-numeri.cast) | la scena centrale: carico attivo, `SIGKILL` sul primario, l'elezione, il bilancio | 53,3 s | interruzione **10 019 ms** · **0 scritture perse** · 31 952 confermate contro 31 955 ritrovate | l'Atto II, ed è la ragione per cui l'applicazione esiste |
+| 13 | [`13-app-backup-a-caldo.cast`](13-app-backup-a-caldo.cast) | `mongodump --readPreference=secondary --oplog` mentre il carico continua a scrivere | 11,4 s | ritmo **546/s** prima, **539/s** durante: **calo 1,3 %** | l'Atto III — «si fa a caldo, e questo è quanto costa» |
+| 14 | [`14-app-restore-e-i-due-conteggi.cast`](14-app-restore-e-i-due-conteggi.cast) | la copia rientra in `lab_ripristinato`, e i due conteggi **non** coincidono | 3,2 s | 5 886 all'origine · 5 740 nella copia · **differenza 146** | subito dopo la 13: la finestra che il dump non copre |
+
+Le scene 13 e 14 vanno **una dopo l'altra** e in quest'ordine, perché la 14 conta ciò che la 13 ha
+copiato: i 146 documenti di differenza sono quelli scritti *mentre* il dump era in corso, e stanno
+nell'oplog che `mongorestore` senza `--oplogReplay` non riapplica. Il numero della 13 — un calo
+dell'1,3 % — e il numero della 14 sono lo stesso fatto visto dai due lati: il backup a caldo costa
+pochissimo in ritmo e lascia una finestra, e la finestra è ciò che si paga.
+
+**Nella 12 le elezioni sono due, e la seconda non è nel copione.** La prima è quella che la scena
+provoca; la seconda avviene da sé a `40:45`, quando `mongo-rs-1` rientra e si riprende il ruolo —
+otto secondi dopo essere tornato secondario. Si legge dagli `ERRORE NotPrimaryError` seguiti da
+`RITENTO tentativo 2 dopo 50 ms`: sono i tentativi automatici del driver che assorbono
+l'avvicendamento, e sono la ragione per cui le scritture perse restano zero anche lì. Non era
+previsto, non è stato tolto, ed è la parte della registrazione che risponde meglio alla domanda
+«ma allora a che serve `retryWrites`?».
+
+Da leggere accanto: la fase `durante` dichiara **13 786 scritture, tutte confermate**, con un p95
+di 49,5 ms — *più basso* di quello della fase precedente. Non è un miglioramento: quella fase dura
+venticinque secondi, i primi dieci non ne contengono nemmeno una, e i quindici che restano girano
+contro un primario appena eletto e scarico. È il tipo di numero che una registrazione mostra e una
+tabella nasconde.
+
+#### Quanto pesano, e perché
+
+| | scene | byte |
+|---|---:|---:|
+| gli stack (1–9) | 9 | 31 K |
+| l'applicazione (10, 11, 14) | 3 | 4,8 K |
+| l'applicazione sotto carico (12, 13) | 2 | **6,3 M** |
+
+Due scene su quattordici fanno il 99,9 % della cartella, e non è un difetto della registrazione: è
+il carico. `PlainSink` scrive **una riga per evento** e non taglia niente — è ciò che lo rende
+adatto a una riserva, perché ciò che il pubblico vede dal vivo è esattamente questo — e una scena
+che confeziona trentaduemila scritture produce sessantaquattromila righe. Nel pacchetto di git
+scendono a ~640 K, perché sono righe quasi identiche.
+
+La scorciatoia sarebbe accorciare il copione. Non è stata presa, ed è
+[ADR-0116](../../Decision.md#adr-0116): una riserva che dura la metà della scena che sostituisce
+non è la riserva di quella scena.
 
 ### Blocco 3 — lo sharded cluster
 
@@ -159,19 +220,80 @@ python3 tools/registra-terminale.py \
 Finito, il `.env` va rimesso com'era. Quel file non sta nel repository, non c'è controllo che se ne
 accorga, e chi lo lascia a tre membri si ritrova il profilo `palco` che non parte più.
 
+#### L'applicazione
+
+Le cinque scene di `mongolab` girano contro lo stesso stack `docker/02-replicaset`, con
+`./tools/reset-demo.sh 02` prima di ciascuna. Due particolari le distinguono dalle altre, e sono
+tutt'e due trappole.
+
+**`make -s`, non `make`.** `make` fa l'eco della ricetta prima di eseguirla, e l'eco comincia
+esattamente come il comando che l'applicazione annuncia: `docker compose …`. Con la regia accesa —
+qui sotto — quell'eco viene **eseguita**, e la scena riparte da capo dentro se stessa. `-s` toglie
+l'eco, e la registrazione perde una riga che al pubblico non serviva.
+
+```bash
+./tools/reset-demo.sh 02
+
+python3 tools/registra-terminale.py \
+  docs/05-talk/registrazioni/10-app-fotografia-dello-stack.cast \
+  --titolo "feature/04 — mongolab stats: la fotografia del replica set (Blocco 2, Atto I)" \
+  -- make app-stats TARGET=rs
+```
+
+**La seconda finestra.** La scena 12 gira l'applicazione *dentro* la rete Compose, dove vede la
+topologia ma non ha il socket del demone: annuncia il comando che uccide il primario e si ferma su
+un `input()` finché qualcuno non l'ha dato altrove. Dal palco quel qualcuno è una persona con un
+secondo terminale aperto; per registrare dev'essere lo strumento stesso, ed è `--regia`
+([ADR-0115](../../Decision.md#adr-0115)):
+
+```bash
+python3 tools/registra-terminale.py \
+  docs/05-talk/registrazioni/12-app-failover-e-i-due-numeri.cast \
+  --titolo "feature/04 — mongolab demo failover: il primario cade sotto carico (Blocco 2, Atto II)" \
+  --regia "docker compose " \
+  -- make -s app-demo TARGET=rs ARGS="--sink plain"
+```
+
+Il prefisso è un argomento e non un predefinito nascosto: la riga di comando dichiara che cosa lo
+strumento è autorizzato a eseguire, e chi rilegge la ricetta lo legge lì. L'esito del comando finisce
+su `stderr` di chi registra — `regia: … · uscita 0` — e **non** nel `.cast`, dove va solo ciò che il
+pubblico vedrebbe nella finestra di sinistra.
+
+La scena 11 ha lo stesso bisogno e non passa dalla regia: `watch` non annuncia niente, sta solo a
+guardare. Lì il guasto si dà da fuori, con uno script che aspetta dieci secondi, ferma `mongo-rs-1`,
+ne aspetta venti e lo riavvia, mentre la registrazione è già partita.
+
+Le scene 13 e 14 girano **dall'host** e in quest'ordine, perché la 14 conta ciò che la 13 ha
+copiato. Il nome della collezione che la 13 stampa va copiato nel `--collection` della 14: lo genera
+il carico, e cambia a ogni corsa.
+
+```bash
+uv run --directory app mongolab demo backup-live --target rs --sink plain
+
+uv run --directory app mongolab demo restore --target rs --sink plain \
+  --from /tmp/mongolab-backup --collection carico-20260904-184403
+```
+
 #### E poi si riproduce, prima di dichiararla buona
 
 Una registrazione non è buona perché il comando è finito bene: è buona se, **riprodotta**, mostra
-quello che deve mostrare. Ognuna delle nove è stata riaperta con `--riproduci` per intero prima di
-entrare in questa pagina ([ADR-0055](../../Decision.md#adr-0055)). È lì che si scopre quello che
+quello che deve mostrare. Ognuna delle quattordici è stata riaperta con `--riproduci` per intero
+prima di entrare in questa pagina ([ADR-0055](../../Decision.md#adr-0055)). È lì che si scopre quello che
 durante l'esecuzione non si vede — una scena che *afferma* un'elezione invece di mostrarla, un
 titolo che dice un profilo e un contenuto che ne dice un altro.
 
-Per le cinque dello sharded il controllo è stato anche automatico: la riproduzione è stata eseguita
-dentro uno pseudo-terminale e il testo raccolto confrontato **byte per byte** con l'originale. Tutte
-e cinque coincidono. Un dettaglio da sapere se lo si rifà: lo pseudo-terminale traduce ogni `\n` in
-`\r\n`, quindi un `\r\n` registrato torna indietro come `\r\r\n` e va normalizzato prima di
-confrontare — altrimenti il confronto fallisce su una differenza che non esiste.
+Il controllo è stato anche automatico, e alla fine di `feature/04` su tutte e quattordici: la
+riproduzione è stata eseguita dentro uno pseudo-terminale e il testo raccolto confrontato **byte per
+byte** con l'originale. Tutte e quattordici coincidono, e in tutte il titolo compare
+([V-089](../../Sources.md#v-089)).
+
+**Una correzione a quello che questa pagina diceva prima.** La regola scritta qui — «lo
+pseudo-terminale traduce ogni `\n` in `\r\n`, quindi un `\r\n` registrato torna indietro come
+`\r\r\n` e va normalizzato» — è vera e insufficiente. Sulle due registrazioni lunghe compaiono anche
+`\r\r\r\n`: il ritorno a capo si accumula quando la stessa riga ripassa per la traduzione. Con la
+regola vecchia il confronto falliva **a 66 354 byte**, dopo che due terzi del file avevano coinciso
+— cioè nel modo in cui fallirebbe una registrazione davvero rotta. La regola buona è comprimere
+`\r+\n` in `\n` da **tutt'e due** le parti, l'originale compreso, e poi confrontare.
 
 **I numeri di una registrazione non sono la misura.** Ogni scena è **una** esecuzione, girata di
 seguito alle altre. Le misure del branch stanno in [V-029](../../Sources.md#v-029) e
@@ -222,8 +344,14 @@ Procedura, quando si gira:
   criteri di rinuncia — è `05-talk/runbook-demo.md`, dovuto a `release/1.0`
   ([ADR-0015](../../Decision.md#adr-0015)). Qui c'è solo il materiale di riserva.
 - **Non contiene le scene dello standalone.** Il Blocco 1 non ne ha nessuna: `feature/01` è passata
-  senza registrarne, e se ne servisse una si gira con lo stesso strumento e finisce qui. Le nove che
-  ci sono vengono da `feature/02` e da `feature/03`.
+  senza registrarne, e se ne servisse una si gira con lo stesso strumento e finisce qui. Le
+  quattordici che ci sono vengono da `feature/02`, da `feature/03` e da `feature/04`.
+- **Non contiene una registrazione della schermata `rich`.** Le cinque dell'applicazione sono tutte
+  `--sink plain`, perché una riserva deve mostrare ciò che il pubblico vedrebbe, e ciò che il
+  pubblico vede dal vivo è il pannello. Il pannello si ridisegna dieci volte al secondo e in un
+  `.cast` diventa illeggibile e pesantissimo insieme; `plain` è il **contenuto** delle stesse righe
+  ([ADR-0116](../../Decision.md#adr-0116)). Chi vuole vedere la resa `rich` la fa girare, o guarderà
+  il filmato quando ci sarà.
 - **Le registrazioni non sostituiscono i filmati, e i due branch lo chiedono in modo diverso.** Il
   criterio 8 di `feature/02` chiedeva entrambe le specie — «almeno una registrazione di riserva
   esiste in locale e `make preflight` non avvisa più» — ed è soddisfatto a metà, con la metà
@@ -240,7 +368,10 @@ si riproduce prima di dichiararla buona), [ADR-0034](../../Decision.md#adr-0034)
 [ADR-0045](../../Decision.md#adr-0045) (la maggioranza persa),
 [ADR-0010](../../Decision.md#adr-0010) (i due profili dello sharded cluster),
 [ADR-0073](../../Decision.md#adr-0073) (una scena di riserva è l'uscita di un comando del
-repository), [ADR-0015](../../Decision.md#adr-0015) (il documento unico del talk).
+repository), [ADR-0015](../../Decision.md#adr-0015) (il documento unico del talk),
+[ADR-0115](../../Decision.md#adr-0115) (chi registra fa da seconda finestra),
+[ADR-0116](../../Decision.md#adr-0116) (le registrazioni dell'applicazione pesano quanto il carico
+che mostrano).
 
 **Fonti:** [V-029](../../Sources.md#v-029), [V-031](../../Sources.md#v-031),
-[V-045](../../Sources.md#v-045), [V-068](../../Sources.md#v-068)
+[V-045](../../Sources.md#v-045), [V-068](../../Sources.md#v-068), [V-089](../../Sources.md#v-089)

@@ -1,0 +1,5 @@
+{"version": 2, "width": 100, "height": 30, "timestamp": 1788539550, "env": {"SHELL": "/bin/zsh", "TERM": "xterm-256color"}, "title": "feature/04 — mongolab stats: la fotografia del replica set (Blocco 2, Atto I)"}
+[0.025259, "o", "docker compose --env-file tools/images.env --env-file docker/02-replicaset/.env -f docker/02-replicaset/compose.yaml run --rm app stats --target rs \r\n"]
+[0.177101, "o", " Container sqlstart-02-replicaset-app-run-f26475b6243c Creating \r\n"]
+[0.222859, "o", " Container sqlstart-02-replicaset-app-run-f26475b6243c Created \r\n"]
+[1.522334, "o", "rs (docker/02-replicaset)\r\ntopologia   replica set con primario · rs0\r\n            mongo-rs-1:27017      primario            0.9 ms\r\n            mongo-rs-2:27017      secondario          0.5 ms\r\n            mongo-rs-3:27017      secondario          0.6 ms\r\nserver      mongod 7.0.40 · attivo da 40 m 6 s · connessioni 20\r\ndatabase    lab · 50000 documenti · dati 5.8 MB · indici 1.4 MB\r\nshard       nessuno: questo non è uno sharded cluster\r\n"]

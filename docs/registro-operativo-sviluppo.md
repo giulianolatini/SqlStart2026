@@ -6677,3 +6677,186 @@ più **58** di integrazione, `mypy --strict` verde su 66 file. Porte **sette**, 
 questo task non ha toccato `app/src/`. Prossimo passo: **Task 18** del
 [piano](00-progetto/2026-09-02-piano-feature-04-app-python.md), l'ultimo — la chiusura di
 `feature/04` e la sua PR.
+
+## 2026-09-04 — `feature/04`, fuori dai task: la quinta opzione di misura, e un debito che era vero solo sulla riga di comando
+
+Il Task 17 si era chiuso registrando fra i punti aperti dell'applicazione che «il carico non sa
+chiedere un write concern diverso dal predefinito, **quindi** la corsa con `w: 1` che isolerebbe i
+18 390 µs del primario non è eseguibile». Il Product Owner ha obiettato al *quindi*: `w` è un
+parametro della stringa di connessione, nella sezione dopo il `?`. Il manuale gli dà ragione
+([S-076](Sources.md#s-076)) — le opzioni di write concern nell'URI sono `w`, `journal`, `wtimeoutMS`
+— e nel codice il meccanismo c'era da tredici task: `opzioni_di_misura` parla i nomi dell'URI dal
+Task 16, `connetti(**extra)` li porta al client dal Task 5. Mancava **la parola sulla riga di
+comando**, non il meccanismo ([ADR-0114](Decision.md#adr-0114)).
+
+Tre righe di codice: `--write-concern` per esteso e non `--w`, testo e non intero perché `majority`
+è un valore legittimo quanto `1`, e `w` prima di `journal` nella mappa perché quello è l'ordine
+dell'URI e le due opzioni si condizionano. Cinque prove nuove, tutte viste fallire: 639 unitarie.
+
+**Il manuale ha cambiato il disegno della prova prima che partisse.** Con `j` non specificato,
+`w: "majority"` **equivale a `j: true`** e `w: <numero>` equivale a `j: false`
+([S-077](Sources.md#s-077)): scendere da `majority` a `1` spegne due cose insieme. Quindi tre corse
+e non due ([V-088](Sources.md#v-088)) — il predefinito, `w: 1` con il giornale acceso, `w: 1` nudo.
+
+La riserva di [V-083](Sources.md#v-083) si chiude e la lettura era giusta: `opLatencies.writes` sul
+primario passa da **18 913 µs a 644**, un fattore 29. Ma a giornale costante la maggioranza costa
+**1,38×** di resa, e a conferme costanti il giornale **2,24×**: la cosa cara che il predefinito fa
+senza dirlo è **il disco, non la rete**. Un confronto a due corse avrebbe dato il numero giusto con
+la spiegazione sbagliata, e non ci sarebbe stato modo di accorgersene guardando i risultati.
+
+Due code sono venute dietro. I 644 µs che restano, contro i 67 dello standalone che non ha nessuno
+da aspettare, sono **quanto costa essere un primario**, prima confuso dentro il fattore 274. E il
+server non metteva in coda niente perché il freno era la maggioranza: con `w: 1`
+`totalTimeQueuedMicros` passa da 10 388 µs a **308 413**, trenta volte tanto. La conclusione di
+V-083 non si rovescia — resta l'1,5 % della latenza — ma la sua *ragione* sì.
+
+Riscritte di conseguenza la sesta sezione di `03-amministrazione/statistiche-monitoraggio.md`, le
+conseguenze di [ADR-0112](Decision.md#adr-0112) e le riserve di V-083. Tre citazioni per le slide.
+
+### Note di metodo
+
+223. **«Non è possibile» e «non è chiedibile» sono due debiti diversi, e uno dei due nessuno lo
+    riapre.** La riga registrata al Task 17 diceva che la misura decisiva non era eseguibile; era
+    vera per metà, e la metà sbagliata è quella che ha tenuto la riserva aperta per un task. Il
+    meccanismo c'era, mancava l'opzione. La regola pratica: quando si registra un limite, si scrive
+    **che cosa manca**, non che cosa non si può fare — «manca l'opzione X sulla riga di comando» si
+    chiude in tre righe di codice, «non è eseguibile» resta lì finché qualcuno non la rilegge con
+    sospetto. Il costo della parola sbagliata non si vede mai nel momento in cui la si scrive.
+224. **Una variabile per volta, anche — soprattutto — quando il manuale ne accoppia due in una riga
+    sola.** Il piano era due corse, `majority` contro `1`. Il manuale dice, dentro una tabella, che
+    `majority` implica `j: true`: le due variabili viaggiano incollate, e un confronto a due avrebbe
+    attribuito alla replica un costo che è per due terzi del disco. La regola pratica: prima di
+    disegnare un confronto, leggere che cosa il valore predefinito **accende oltre a sé stesso**; se
+    ne accende due, le corse sono tre.
+225. **Un collo di bottiglia nasconde il successivo, e misurare a un solo punto di funzionamento
+    significa fotografare quale limite era attivo quel giorno.** «Il server non mette in coda
+    niente» era la conclusione che chiudeva l'indagine, ed era vera e fuorviante insieme: tolto il
+    write concern, la stessa corsa fa il triplo delle scritture e l'attesa cumulativa per un ticket
+    va a 308 ms. La regola pratica: una misura di saturazione vale per il regime in cui è stata
+    presa; per dire *dov'è* il collo bisogna spostare il carico almeno una volta e guardare se il
+    collo si sposta con lui.
+
+---
+
+## 2026-09-04 — `feature/04`, Task 18: le registrazioni del Blocco 2, e chi fa da seconda finestra
+
+L'ultimo task del piano. Cinque registrazioni di terminale dell'applicazione — `stats`, `watch`,
+`demo failover`, `demo backup-live`, `demo restore` — girate contro `docker/02-replicaset` con
+`--sink plain` e **senza** `--step`, cioè con lo stesso codice della scena dal vivo: è la proprietà
+che il Task 13 aveva costruito apposta ([ADR-0098](Decision.md#adr-0098)), ed è ciò che rende la
+registrazione una copia invece di una ricostruzione. La cartella passa da nove scene a
+**quattordici** ([V-089](Sources.md#v-089)).
+
+**La scena centrale non era registrabile, e il motivo era buono.** `demo failover` gira
+l'applicazione dentro la rete Compose, che è l'unico posto da cui si veda la cronaca dell'elezione:
+dall'host il client è `directConnection` su una porta pubblicata, non fa scoperta, e la scena perde
+esattamente ciò che deve mostrare. Ma dentro la rete non c'è il socket del demone, quindi
+l'applicazione annuncia il comando che uccide il primario e si ferma su un `input()`. Dal palco quel
+comando lo dà una persona con un secondo terminale aperto; `tools/registra-terminale.py` invece non
+scriveva **mai** sul lato padrone dello pseudo-terminale, e la registrazione si sarebbe piantata per
+sempre.
+
+Quindi `--regia PREFISSO` ([ADR-0115](Decision.md#adr-0115)): chi registra esegue la riga annunciata
+e poi manda l'Invio — in quest'ordine, perché invertirli produrrebbe una scena che riparte prima che
+il guasto sia avvenuto, cioè un failover raccontato senza failover. Il prefisso è un argomento
+obbligatorio e non un predefinito nascosto: la ricetta dichiara che cosa lo strumento è autorizzato
+a eseguire. L'uscita del comando va su `stderr` di chi registra e **non** nel `.cast`, dove va solo
+ciò che il pubblico vedrebbe. Quattro prove nuove, tutte viste fallire: **172** per gli strumenti.
+
+**Il conto è arrivato alla prima corsa.** `make` fa l'eco della ricetta prima di eseguirla, e l'eco
+comincia con `docker compose ` esattamente come il comando annunciato: la regia ha eseguito l'eco, e
+la scena è ripartita da capo dentro se stessa. Si registra con `make -s`.
+
+I numeri che le scene portano: `mongod 7.0.40` e 50 000 documenti nella fotografia; **10 035 ms** di
+elezione senza carico; **10 019 ms** di interruzione con carico e **zero scritture perse**, 31 952
+confermate contro 31 955 ritrovate; un dump a caldo che costa **l'1,3 %** del ritmo; e 5 886
+documenti all'origine contro 5 740 nella copia, **differenza 146** — la finestra che il dump non
+copre, che sta nell'oplog e che `mongorestore` senza `--oplogReplay` non riapplica.
+
+**La scena del failover ha eletto due volte, e la seconda non era nel copione.** Avviene da sé otto
+secondi dopo il rientro di `mongo-rs-1`, quando si riprende il ruolo: nel tracciato è un
+`ERRORE NotPrimaryError` seguito da `RITENTO tentativo 2 dopo 50 ms`. I tentativi automatici del
+driver l'hanno assorbita, e le scritture perse restano zero anche lì. Non era previsto e non è stato
+tolto: è la miglior risposta che il branch abbia prodotto alla domanda «a che serve `retryWrites`?».
+
+**Due scene su quattordici fanno il 99,9 % della cartella.** Le nove degli stack pesano 31 K, le tre
+dell'applicazione senza carico 4,8 K, le due sotto carico **6,3 M**: `PlainSink` scrive una riga per
+evento e trentaduemila scritture sono sessantaquattromila righe. Restano intere
+([ADR-0116](Decision.md#adr-0116)) — una riserva che dura la metà della scena che sostituisce non è
+la riserva di quella scena — e nel pacchetto del versionatore pesano ~640 K, perché sono righe quasi
+identiche.
+
+Tutte e quattordici sono state riprodotte dentro uno pseudo-terminale e confrontate con l'originale.
+**La regola di normalizzazione scritta nell'indice era insufficiente** e la pagina è stata corretta:
+le dodici corte coincidevano con `\r\r\n` → `\r\n`, le due lunghe fallivano a 66 354 byte, dopo che
+due terzi del file avevano coinciso. La regola buona è comprimere `\r+\n` in `\n` da tutt'e due le
+parti.
+
+**Cinque righe dei punti aperti dicevano «Task 18, con la registrazione che è il controllo». Una
+sola si chiude.** Le cinque scene sono `plain`, quindi non c'è nessun `Live` sopra cui un'eccezione
+possa sparire (M-015 resta aperto), nessun disegno che possa risultare a scatti, e nessuno sguardo
+vero sulla schermata `rich` — che `app/docs/11-tre-rese-e-un-solo-thread-che-disegna.md` prometteva
+per questo task, e la promessa era sbagliata, non la scelta. Il Ctrl-C durante il dump non è stato
+provato: la scena 13 è corsa fino in fondo, che è ciò che una riserva deve mostrare. Quello che si
+chiude davvero è la riga più vecchia delle cinque: il sink testuale esisteva dal Task 10 e non era
+mai stato collegato allo strumento di registrazione. Adesso lo è. Risposta anche alla domanda che il
+piano assegnava a questo task sul `TopologyWatcher`: **nessun comando lo costruisce e nessuna scena
+lo attraversa**; toglierlo è una scelta di progetto, e la raccomandazione è di toglierlo.
+
+### Note di metodo
+
+226. **Se una scena dal vivo ha bisogno di due finestre, lo strumento che la registra deve
+    diventare la seconda — oppure si registra un'altra scena.** L'alternativa gratis c'era: girare
+    la stessa demo dall'host, dove il guasto si dà da soli. Avrebbe prodotto un file con lo stesso
+    nome, la stessa durata e senza la cosa da guardare, perché da lì il client non fa scoperta e non
+    ha transizioni da annunciare. La regola pratica: prima di semplificare il modo in cui si
+    registra una demo, chiedersi quale **osservabile** la semplificazione spegne; se l'osservabile è
+    il motivo della scena, il lavoro è insegnare allo strumento a fare la cosa scomoda.
+227. **Un prefisso su un canale di testo non distingue chi parla.** La regia eseguiva le righe che
+    cominciavano con `docker compose `, e `make` stampa la ricetta prima di eseguirla: la prima
+    registrazione è ripartita da capo dentro se stessa. È il difetto strutturale di ogni protocollo
+    che viaggia sullo stesso canale del testo per gli umani — la stessa famiglia della SQL injection
+    e dell'iniezione di prompt — in una forma abbastanza piccola da starci in tre righe. La regola
+    pratica: quando si riconosce un comando dal testo, si mette per iscritto chi altro può produrre
+    quel testo; qui la risposta era «lo strumento di build», e la difesa è una lettera.
+228. **Una prova può passare per il motivo sbagliato quando asserisce su una stringa che
+    l'infrastruttura stampa comunque.** La prova sul rifiuto di `--regia` durante una riproduzione
+    cercava `--regia` in `stderr` — e argparse ci stampa la riga d'uso, che contiene tutte le
+    opzioni. Passava prima dell'implementazione. Cambiata su una frase che solo il messaggio di
+    rifiuto contiene, è tornata rossa. La regola pratica: se una prova è verde appena scritta,
+    l'asserzione va spostata su qualcosa che **solo** il codice mancante può produrre; guardarla
+    fallire non è un rituale, è l'unico modo di sapere che cosa sta guardando.
+229. **Una regola di normalizzazione tarata sui casi corti fallisce sui lunghi, e fallisce nel modo
+    che somiglia a un guasto vero.** `\r\r\n` → `\r\n` valeva per dodici registrazioni su
+    quattordici; nelle due lunghe compaiono anche `\r\r\r\n`, e il confronto divergeva a due terzi
+    del file dopo che tutto il resto aveva coinciso — cioè con la firma di una registrazione rotta.
+    La diagnosi è venuta da una sonda banale: il **prefisso comune più lungo**, e i due byte che
+    stanno subito dopo. La regola pratica: davanti a un confronto che fallisce tardi, prima si
+    guarda *dove* diverge e cosa c'è in quel punto, poi si formula l'ipotesi; e una regola di
+    pulizia va scritta come classe (`\r+`) e non come caso (`\r\r`).
+230. **Un percentile calcolato su una finestra che contiene un'interruzione descrive i
+    sopravvissuti.** La fase «durante» della scena dichiara un p95 di 49,5 ms, **più basso** delle
+    fasi accanto: dura venticinque secondi, i primi dieci non contengono nessuna scrittura, e i
+    quindici che restano girano contro un primario appena eletto e scarico. Le richieste peggiori
+    non sono lente, sono assenti, e un cruscotto di latenze le conta zero volte. La regola pratica:
+    accanto a un percentile che copre un guasto si scrive sempre il **conteggio** e la **durata
+    dell'interruzione**; il numero che descrive un failover non è un percentile.
+231. **Chiudere i punti aperti vuol dire anche dichiarare quali non si sono chiusi, e perché.**
+    Cinque righe rimandavano a questo task «con la registrazione che è il controllo». La
+    registrazione è `plain` e ne controlla una sola: le altre quattro riguardano la resa `rich`, che
+    per ottime ragioni non è stata registrata. Riscriverle come chiuse sarebbe costato zero e
+    nessuno se ne sarebbe accorto. La regola pratica: quando un task promesso arriva, si rilegge
+    ogni riga che lo nominava e le si risponde **una per una** — «chiuso», «non controllato, ecco
+    perché», «la promessa era sbagliata» sono tre esiti diversi, e solo il primo è una chiusura.
+
+Stato aggiornato: decisioni fino ad **ADR-0116**, verifiche fino a **V-089**, note di metodo fino
+alla **231**. I controlli, tutti: `make preflight` **9 superati · 1 avviso · 0 errori** — l'avviso è
+la cartella dei filmati, che è vuota davvero e dal 18 settembre diventa bloccante —, `make
+docs-check` verde, `make stack-check` **3 stack conformi**, `make tools-test` **172**, `make
+app-test` **639**, `make app-check` con `mypy --strict` verde su **66** file, `make
+app-test-integration` **58** in 87 s, con la prova intermittente passata. Registrazioni di
+terminale: **14**. Porte **sette**, eventi **nove**; `app/src/` non è stata toccata. Prossimo passo:
+**PR di `feature/04` verso `develop`**, mai la scorciatoia di git-flow che salta la revisione; la
+fusione è del Product Owner, e a PR unita il worktree si chiude nell'ordine di
+[ADR-0079](Decision.md#adr-0079) — prima si sgancia la sessione, poi si rimuove la directory — dopo
+aver salvato i `.env` ([ADR-0056](Decision.md#adr-0056)).

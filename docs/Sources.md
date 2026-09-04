@@ -9515,3 +9515,82 @@ make app-workload TARGET=rs ARGS="… --write-concern 1"
 - **Usata da:** ADR-0114
 
 ---
+
+<a id="v-089"></a>
+### V-089 — Cinque scene dell'applicazione, registrate una volta ciascuna, e quattordici riproduzioni che coincidono
+
+- **Comandi:** `./tools/reset-demo.sh 02` prima di ciascuna, poi lo strumento del repository. Le
+  prime tre girano l'applicazione dentro la rete Compose attraverso i bersagli del `Makefile`, le
+  ultime due dall'host:
+
+```
+python3 tools/registra-terminale.py <file>.cast --titolo "…" -- make app-stats TARGET=rs
+python3 tools/registra-terminale.py <file>.cast --titolo "…" -- make -s app-watch TARGET=rs ARGS="--sink plain --duration 45"
+python3 tools/registra-terminale.py <file>.cast --titolo "…" --regia "docker compose " -- make -s app-demo TARGET=rs ARGS="--sink plain"
+uv run --directory app mongolab demo backup-live --target rs --sink plain
+uv run --directory app mongolab demo restore --target rs --sink plain --from /tmp/mongolab-backup --collection carico-20260904-184403
+```
+
+  Tutte con `--sink plain` e **senza** `--step`: è lo stesso codice della scena dal vivo, non una
+  variante per registrare. Una corsa per scena, il 4 settembre 2026, sullo stesso stack e di
+  seguito. La scena 11 ha ricevuto il guasto da uno script esterno (attesa 10 s, `stop
+  mongo-rs-1`, attesa 20 s, `start`), perché `watch` non annuncia niente e non c'è nulla che la
+  regia possa intercettare.
+
+- **Esito, primo punto — i numeri che le cinque scene portano.**
+
+| scena | durata | il numero |
+|---|---:|---|
+| 10 `stats` | 1,5 s | `mongod 7.0.40` · tre membri, un primario · `lab` 50 000 documenti · dati 5,8 MB, indici 1,4 MB |
+| 11 `watch` | 42,5 s | primario perso a `16:42:26.047`, `mongo-rs-2` eletto a `16:42:36.082`: **10 035 ms**; rientro di `mongo-rs-1` a `16:42:56.147` |
+| 12 `demo failover` | 53,3 s | interruzione **10 019 ms** · **0 scritture perse** · 31 952 confermate contro 31 955 ritrovate |
+| 13 `demo backup-live` | 11,4 s | ritmo 546/s prima, 539/s durante: **calo 1,3 %** · 5 886 documenti, 158 voci di oplog |
+| 14 `demo restore` | 3,2 s | 5 886 all'origine · 5 740 nella copia · **differenza 146** |
+
+- **Esito, secondo punto — la scena 12 ha eletto due volte, e la seconda non era nel copione.** La
+  prima elezione è quella provocata; la seconda avviene a `16:40:45`, otto secondi dopo che
+  `mongo-rs-1` è rientrato come secondario, quando si riprende il ruolo di primario. Nel tracciato
+  si legge come `ERRORE NotPrimaryError` seguito da `RITENTO tentativo 2 dopo 50 ms`: i tentativi
+  automatici del driver l'hanno assorbita, e le scritture perse restano zero anche lì. Non era
+  previsto e non è stato tolto.
+
+- **Esito, terzo punto — la fase `durante` ha il p95 più basso, e non è un miglioramento.** 13 786
+  scritture, tutte confermate, p95 **49,5 ms** contro i 61,0 della fase precedente e i 57,9 della
+  successiva. La fase dura venticinque secondi, i primi dieci non contengono nessuna scrittura, e i
+  quindici che restano girano contro un primario appena eletto e ancora scarico. Un p95 calcolato su
+  una fase che contiene un'interruzione descrive la coda, non il servizio.
+
+- **Esito, quarto punto — due scene su quattordici fanno il 99,9 % della cartella.** Le nove degli
+  stack pesano 31 K di testo; le tre dell'applicazione senza carico 4,8 K; la 12 e la 13 **6,3 M**.
+  Non è un difetto della registrazione: `PlainSink` scrive una riga per evento senza tagliare
+  niente, e trentaduemila scritture confermate sono sessantaquattromila righe. `gzip` le porta a
+  516 311 e 121 565 byte (10,2× e 8,9×), quindi nel pacchetto di git pesano ~640 K.
+
+- **Esito, quinto punto — la regola di normalizzazione scritta nell'indice era insufficiente.**
+  Tutte e quattordici le registrazioni sono state riprodotte dentro uno pseudo-terminale e
+  confrontate con il testo originale. Le dodici corte coincidevano con la regola vecchia (`\r\r\n`
+  → `\r\n`); le due lunghe no, e il confronto falliva a **66 354 byte**, dopo che due terzi del file
+  avevano coinciso. Il prefisso comune finisce dove la riproduzione ha `\r\r\n` e l'originale
+  `\r\n`; nella riproduzione compaiono anche **quattro** occorrenze di `\r\r\r\n`. Comprimendo
+  `\r+\n` in `\n` da tutt'e due le parti, tutte e quattordici coincidono e in tutte il titolo
+  compare.
+
+- **Esito, sesto punto — l'eco di `make` è indistinguibile dal comando annunciato.** La prima corsa
+  della scena 12 è ripartita da capo dentro se stessa: `make` stampa la ricetta prima di eseguirla,
+  la ricetta comincia con `docker compose ` esattamente come il comando che l'applicazione annuncia,
+  e la regia ha eseguito l'eco. Con `make -s` la scena è corretta. È il costo di riconoscere un
+  comando dal prefisso invece che da un canale separato, ed è dichiarato in
+  [ADR-0115](Decision.md#adr-0115).
+
+- **Riserve:** una corsa per scena, non tre. I tempi — 10 035 ms di elezione senza carico, 10 019
+  con — sono singole osservazioni e ballano come tutte le altre della cartella; le misure ripetute
+  del branch stanno altrove. Il calo dell'1,3 % della scena 13 è la differenza fra due finestre
+  della stessa corsa e non fra due corse, quindi dice che il dump non ha fermato il carico, non
+  quanto costa un dump in generale. La differenza di 146 documenti della scena 14 dipende da quanto
+  è durato il dump e dal ritmo del carico: è la dimostrazione che la finestra esiste, non la sua
+  misura. Le cinque scene sono girate una dopo l'altra sulla stessa macchina, quindi condividono
+  qualunque deriva della giornata.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0115, ADR-0116
+
+---

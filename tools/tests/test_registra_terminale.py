@@ -216,3 +216,77 @@ def test_il_codice_di_uscita_sopravvive_a_un_figlio_che_tiene_aperto_il_pty(tmp_
     esito = esegui(str(destinazione), "--", sys.executable, "-c", lascia_un_discendente)
 
     assert esito.returncode == 7
+
+
+# --- La regia: chi fa da seconda finestra -----------------------------------------------
+#
+# `mongolab demo failover`, girando dentro la rete Compose, vede la topologia ma non ha il
+# socket del demone: annuncia il comando che ferma il primario e aspetta un Invio da chi lo
+# ha eseguito altrove. Dal palco quel qualcuno è una persona; per registrare la scena deve
+# essere questo strumento, o la registrazione non esisterebbe.
+
+
+def copione(percorso: Path, riga_annunciata: str) -> Path:
+    """Un finto comando che annuncia una riga e poi aspetta che qualcuno confermi."""
+    sorgente = percorso / "scena.py"
+    sorgente.write_text(
+        "import sys\n"
+        f"print({riga_annunciata!r}, flush=True)\n"
+        "input('   Invio quando è stato eseguito ')\n"
+        "print('ripartito', flush=True)\n",
+        encoding="utf-8",
+    )
+    return sorgente
+
+
+def test_la_regia_esegue_la_riga_annunciata_e_poi_manda_l_invio(tmp_path):
+    """Le due metà del ponte: il comando gira davvero, e la scena riparte."""
+    fatto = tmp_path / "fatto"
+    scena = copione(tmp_path, f"touch {fatto}")
+    destinazione = tmp_path / "prova.cast"
+
+    esito = esegui(
+        str(destinazione), "--regia", "touch ", "--", sys.executable, str(scena)
+    )
+
+    assert esito.returncode == 0, esito.stderr
+    assert fatto.exists(), "la regia non ha eseguito la riga annunciata"
+    _, testo = intestazione_e_testo(destinazione)
+    assert "ripartito" in testo, "la scena non ha ricevuto l'Invio"
+
+
+def test_senza_regia_la_riga_annunciata_resta_una_riga(tmp_path):
+    """La regia è esplicita: senza, questo strumento registra e basta."""
+    fatto = tmp_path / "fatto"
+    scena = tmp_path / "scena.py"
+    scena.write_text(f"print('touch {fatto}')\n", encoding="utf-8")
+    destinazione = tmp_path / "prova.cast"
+
+    esito = esegui(str(destinazione), "--", sys.executable, str(scena))
+
+    assert esito.returncode == 0, esito.stderr
+    assert not fatto.exists(), "senza --regia nessuna riga si esegue"
+
+
+def test_la_regia_esegue_solo_le_righe_che_cominciano_con_il_prefisso(tmp_path):
+    """Il prefisso è la guardia: una riga qualsiasi dell'uscita non è un comando."""
+    fatto = tmp_path / "fatto"
+    scena = tmp_path / "scena.py"
+    scena.write_text(f"print('non è un comando: touch {fatto}')\n", encoding="utf-8")
+    destinazione = tmp_path / "prova.cast"
+
+    esito = esegui(str(destinazione), "--regia", "touch ", "--", sys.executable, str(scena))
+
+    assert esito.returncode == 0, esito.stderr
+    assert not fatto.exists(), "il prefisso vale dall'inizio della riga, non ovunque"
+
+
+def test_la_regia_su_una_riproduzione_si_ferma_invece_di_non_fare_niente(tmp_path):
+    """Una registrazione già girata non ha una seconda finestra da azionare."""
+    destinazione = tmp_path / "prova.cast"
+    esegui(str(destinazione), "--", "echo", "x")
+
+    esito = esegui(str(destinazione), "--riproduci", "--regia", "touch ")
+
+    assert esito.returncode != 0
+    assert "seconda finestra" in esito.stderr

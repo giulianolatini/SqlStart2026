@@ -1554,10 +1554,106 @@ documentazione si stava scrivendo codice — cioè che il codice non era finito.
 
 ---
 
+## Task 18 — Le registrazioni, e chi fa da seconda finestra
+
+Questo task non ha aggiunto una riga all'applicazione. Ha **guardato** l'applicazione da fuori, che
+è l'unica cosa che il registro dell'app non aveva ancora fatto: cinque registrazioni di terminale
+del Blocco 2, girate contro lo stack `docker/02-replicaset` con lo stesso codice della scena dal
+vivo. Stanno in [`docs/05-talk/registrazioni/`](../../docs/05-talk/registrazioni/README.md), i
+numeri e le riserve in [V-089](../../docs/Sources.md#v-089).
+
+### Lo strumento di registrazione non sapeva rispondere, e la scena centrale glielo chiedeva
+
+Il Task 13 aveva costruito apposta la proprietà che rende una registrazione una copia invece di una
+ricostruzione: senza `--step` la scena è la stessa, cambia una funzione di attesa
+([ADR-0098](../../docs/Decision.md#adr-0098)). Il Task 18 l'ha usata, e ha scoperto che mancava
+l'altra metà.
+
+La scena del failover gira l'applicazione **dentro** la rete Compose, che è l'unico posto da cui si
+veda la cronaca dell'elezione. Da lì non c'è il socket del demone, quindi l'applicazione annuncia il
+comando che uccide il primario e si ferma su un `input()`
+([`RegiaAnnunciata`](13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md)). Dal palco quel
+comando lo dà una persona con un secondo terminale aperto; la prova di integrazione ha già un ponte
+che fa la stessa cosa. `tools/registra-terminale.py` invece non scriveva **mai** sul lato padrone
+dello pseudo-terminale: la registrazione si sarebbe piantata per sempre.
+
+Quindi `--regia PREFISSO` ([ADR-0115](../../docs/Decision.md#adr-0115)): chi registra esegue la riga
+annunciata e poi manda l'Invio, in quest'ordine — invertirli produrrebbe una scena che riparte prima
+che il guasto sia avvenuto. Quattro prove nuove, tutte viste fallire prima; le prove degli strumenti
+passano da 168 a **172**. Una era passata per il motivo sbagliato — asserendo che `--regia` comparisse
+in `stderr`, che è vero anche solo perché argparse stampa la riga d'uso — e l'asserzione è stata
+cambiata su una frase che l'implementazione produce davvero.
+
+Il conto è arrivato subito: `make` fa l'eco della ricetta prima di eseguirla, e l'eco comincia con
+`docker compose ` esattamente come il comando annunciato. La prima corsa ha rilanciato la scena
+dentro se stessa. Si registra con `make -s`.
+
+### Che cosa le cinque registrazioni hanno chiuso, e che cosa no
+
+Una registrazione è un controllo solo di ciò che mostra. Cinque righe di questa tabella dicevano
+«Task 18, con la registrazione che è il controllo», e la risposta onesta è diversa da riga a riga:
+tutte e cinque le scene sono `--sink plain`, perché una riserva deve mostrare quello che il pubblico
+vedrebbe e in un `.cast` un pannello che si ridisegna dieci volte al secondo è illeggibile e
+pesantissimo insieme ([ADR-0116](../../docs/Decision.md#adr-0116)). Quindi **niente `rich`**, quindi
+i punti aperti che riguardano la resa `rich` restano aperti, e sono segnati così qui sotto.
+
+Quello che invece le registrazioni hanno chiuso è la riga vecchia di otto task: il sink testuale
+esisteva dal Task 10 e non era mai stato collegato allo strumento di registrazione. Adesso lo è, e
+il collegamento ha un nome — `--regia` — e una trappola documentata.
+
+### Due cose che si sono viste solo perché le scene erano lunghe
+
+**La regola di normalizzazione scritta nell'indice era insufficiente.** Le quattordici registrazioni
+sono state riprodotte dentro uno pseudo-terminale e confrontate con il testo originale. Le dodici
+corte coincidevano con la regola vecchia (`\r\r\n` → `\r\n`); le due lunghe fallivano a **66 354
+byte**, dopo che due terzi del file avevano coinciso — cioè nel modo in cui fallirebbe una
+registrazione davvero rotta. Nelle riproduzioni lunghe compaiono anche `\r\r\r\n`. La regola buona è
+comprimere `\r+\n` in `\n` da tutt'e due le parti.
+
+**La scena del failover ha eletto due volte.** La seconda elezione non è nel copione: avviene otto
+secondi dopo il rientro di `mongo-rs-1`, quando si riprende il ruolo. Nel tracciato si legge come
+`ERRORE NotPrimaryError` seguito da `RITENTO tentativo 2 dopo 50 ms` — i tentativi automatici del
+driver l'hanno assorbita, e le scritture perse restano zero anche lì. È la miglior risposta che il
+branch abbia prodotto alla domanda «ma allora a che serve `retryWrites`?», e nessuno l'ha scritta:
+è successa.
+
+### Un numero da leggere due volte
+
+La fase `durante` del bilancio dichiara 13 786 scritture, tutte confermate, con un p95 di **49,5
+ms** — più basso dei 61,0 della fase precedente. Non è un miglioramento: la fase dura venticinque
+secondi, i primi dieci non contengono nessuna scrittura, e i quindici che restano girano contro un
+primario appena eletto e ancora scarico. Un percentile calcolato su una finestra che contiene
+un'interruzione descrive chi è sopravvissuto alla finestra, non il servizio. È una proprietà del
+modo in cui le fasi sono tagliate, non un difetto della misura, e va detta a voce accanto alla
+scena.
+
+### Numeri
+
+| | Prima | Dopo |
+|---|---|---|
+| Prove unitarie | 639 | 639 |
+| Prove di integrazione | 58 | 58 |
+| File controllati da mypy | 66 | 66 |
+| Prove degli strumenti | 168 | **172** |
+| ADR del repository | 114 | **116** |
+| Verifiche empiriche del repository | 88 | **89** |
+| Fonti esterne nel registro dell'app | 17 | 17 |
+| Misure nel registro dell'app | 58 | 58 |
+| Registrazioni di terminale nel repository | 9 | **14** |
+| Porte del dominio | 7 | 7 |
+| Eventi del dominio | 9 | 9 |
+
+Le colonne dell'applicazione sono tutte ferme, e quella degli strumenti no. È la firma di un task
+che registra: se si fossero mosse le prove unitarie, vorrebbe dire che per registrare la scena si
+stava cambiando la scena — cioè esattamente ciò che [ADR-0098](../../docs/Decision.md#adr-0098)
+esiste per impedire.
+
+---
+
 ## Che cosa manca
 
-Resta da eseguire il task 18, l'ultimo: le registrazioni del Blocco 2 e la chiusura della feature con
-la sua PR. Le tre pagine che `docs/README.md` prometteva esistono dal Task 17. Le pagine dei principi dicono, dove descrivono il futuro,
+I diciotto task del piano sono eseguiti. Resta la PR verso `develop`, che è del Product Owner, e
+restano — dichiarati, non nascosti — i punti della tabella qui sotto. Le tre pagine che `docs/README.md` prometteva esistono dal Task 17. Le pagine dei principi dicono, dove descrivono il futuro,
 che lo stanno facendo, e vanno riscritte man mano che il futuro arriva: l'avviso di stato in testa a
 [04-eventi-del-driver-e-concorrenza.md](04-eventi-del-driver-e-concorrenza.md) è stato riscritto al
 Task 7, e il §6.3 di [06](06-carico-tentativi-e-latenze.md) al Task 16, perché entrambi
@@ -1578,9 +1674,9 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | ~~Nessun `ClusterInspector` reale: il `TopologyWatcher` ha visto solo topologie finte~~ | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | **chiuso** al Task 8: quattordici prove di integrazione guardano tre topologie vere |
 | ~~L'osservatore interroga invece di ascoltare: la risoluzione è l'intervallo~~ | [08](08-il-ponte-sdam-e-i-thread-del-driver.md) | **chiuso** al Task 7: il ponte riceve i cambiamenti quando accadono |
 | ~~L'intervallo predefinito di 500 ms è scelto, non misurato~~ | [07](07-topologia-failover-e-i-due-numeri.md#il-limite-di-questo-osservatore-dichiarato) | **decaduto** al Task 13: l'interruzione non si sonda più, si **deduce** dagli eventi del ponte ([ADR-0096](../../docs/Decision.md#adr-0096)), quindi la risoluzione della misura non dipende più da nessun intervallo. I 500 ms restano il ritmo con cui la scena drena la coda verso lo schermo, che è un'altra cosa |
-| Il `TopologyWatcher` non ha un invariante di thread: oggi non lo usa nessuno | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | **Task 13 non l'ha rimesso in servizio, e la scadenza cade**: `ScenarioFailover` deduce l'interruzione dal ponte ([ADR-0096](../../docs/Decision.md#adr-0096)), non da una sentinella che interroga. Il `TopologyWatcher` resta codice provato che nessun comando costruisce: la domanda vera, da porre al Task 18, non è più «che invariante di thread ha» ma «serve ancora» |
+| Il `TopologyWatcher` non ha un invariante di thread: oggi non lo usa nessuno | [registro, Task 6](#task-6--losservatore-della-topologia-e-i-due-numeri-del-failover) | **Task 13 non l'ha rimesso in servizio, e la scadenza cade**: `ScenarioFailover` deduce l'interruzione dal ponte ([ADR-0096](../../docs/Decision.md#adr-0096)), non da una sentinella che interroga. Il `TopologyWatcher` resta codice provato che nessun comando costruisce: **risposto al Task 18, e la risposta è no**: nessuno dei cinque comandi registrati lo costruisce, e nessuna delle cinque scene lo attraversa. Resta codice provato e fuori servizio. Toglierlo o rimetterlo in servizio è una scelta di progetto e non di questo branch: passa al Product Owner, con la raccomandazione di **toglierlo** — un osservatore che interroga accanto a un ponte che ascolta è la seconda fonte di verità che [ADR-0096](../../docs/Decision.md#adr-0096) ha già scartato una volta |
 | ~~`ChunkMigrated` potrebbe non essere osservabile da un client di `mongos`~~ | [08](08-il-ponte-sdam-e-i-thread-del-driver.md#che-cosa-non-è-ancora-verificato) | **chiuso** al Task 15, e non per la ragione attesa: non è l'osservabilità a mancare, è la migrazione — 1 153 giri di balancer, zero `moveChunk` ([M-049](Sources.md#m-049)). L'evento è uscito dal dominio ([ADR-0103](../../docs/Decision.md#adr-0103)) |
-| Un'eccezione dentro un listener finisce su `stderr`, e sotto un `Live` non si vede | [M-015](Sources.md#m-015) | **ancora aperto dopo il Task 13, e più esposto**: `demo failover` senza `--step` usa `--sink rich` per default, e ci mette dentro un failover vero, cioè il momento in cui gli ascoltatori lavorano di più. La difesa resta la stessa — gli ascoltatori sono **totali** — e non è che l'errore si veda. Task 18, con la registrazione che è il controllo |
+| Un'eccezione dentro un listener finisce su `stderr`, e sotto un `Live` non si vede | [M-015](Sources.md#m-015) | **ancora aperto dopo il Task 13, e più esposto**: `demo failover` senza `--step` usa `--sink rich` per default, e ci mette dentro un failover vero, cioè il momento in cui gli ascoltatori lavorano di più. La difesa resta la stessa — gli ascoltatori sono **totali** — e non è che l'errore si veda. **Il Task 18 non l'ha controllato**: le cinque registrazioni sono `--sink plain` ([ADR-0116](../../docs/Decision.md#adr-0116)), quindi non c'è nessun `Live` sopra cui l'eccezione possa sparire. Resta aperto, e il primo controllo vero sarà il filmato della scena dal vivo |
 | La soglia della prova cronometrata non prende una `f-string` nel callback | [M-013, riserve](Sources.md#m-013) | dichiarata, non si chiude |
 | Le unità delle durate sono lette nel sorgente di PyMongo, non viste su un battito vero | [M-012, riserve](Sources.md#m-012) | il primo battito su un cluster in movimento: il Task 8 ha collegato l'ispettore, non il ponte |
 | ~~Come le prove di integrazione ricevono la credenziale senza violare ADR-0054~~ | [decisioni](decisioni-che-vincolano-app.md#adr-0054) | **chiuso** al Task 8: [M-018](Sources.md#m-018) e [ADR-0083](../../docs/Decision.md#adr-0083) |
@@ -1591,16 +1687,16 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | Dopo un arresto sporco, `$shardedDataDistribution` può riportare conteggi imprecisi | [A-012, riserve](Sources.md#a-012) | dichiarata: il Blocco 3 fa un `docker kill`, e va detto dal palco |
 | L'ispettore dipende da `config`, che il manuale dichiara interno | [A-013, riserve](Sources.md#a-013) | dichiarata: la difesa è la prova sullo stack 03, che diventa rossa se il formato cambia |
 | `ordered=False` è stato misurato solo su istanza singola in loopback | [M-021, riserve](Sources.md#m-021) | se il Blocco 3 mostrerà scritture lente |
-| Il sink testuale per le registrazioni di riserva | [decisioni](decisioni-che-vincolano-app.md#adr-0050) | il sink **c'è** dal Task 10 ([`PlainSink`](11-tre-rese-e-un-solo-thread-che-disegna.md#plainsink-il-flush-non-è-prudenza-è-il-contenuto)); resta collegarlo a `tools/registra-terminale.py`, al Task 18 |
-| Uccidere il client `docker exec` non uccide `mongodump` dentro il container | [10](10-processi-esterni-e-il-verdetto-che-manca.md#literatore-abbandonato-e-un-limite-che-va-detto) | **la scelta è stata fatta al Task 14, il limite resta**: gli strumenti restano nei nodi e si raggiungono con `docker compose exec`, perché copiarli nell'immagine produce un container che non parte ([M-044](Sources.md#m-044), [ADR-0100](../../docs/Decision.md#adr-0100)). Adesso la porta `BackupTool` è collegata a due comandi veri, quindi il limite è **esposto**: un Ctrl-C durante `demo backup-live` lascia `mongodump` a girare dentro il nodo. Task 18, con la registrazione che è il controllo |
-| `Progress.completati` non porta l'unità: documenti per il dump, byte per il restore | [10](10-processi-esterni-e-il-verdetto-che-manca.md#un-inconveniente-dichiarato-completati-non-porta-con-sé-lunità) | Task 10 è passato senza chiederlo: la TUI stampa la percentuale, non il numero. Torna al Task 18 se una registrazione mostrerà il conteggio |
+| Il sink testuale per le registrazioni di riserva | [decisioni](decisioni-che-vincolano-app.md#adr-0050) | il sink **c'è** dal Task 10 ([`PlainSink`](11-tre-rese-e-un-solo-thread-che-disegna.md#plainsink-il-flush-non-è-prudenza-è-il-contenuto)); **chiuso al Task 18**: cinque registrazioni prodotte con `--sink plain` e senza `--step`, e il collegamento ha richiesto una cosa in più dello strumento — `--regia PREFISSO`, che fa da seconda finestra alla scena che annuncia il guasto ([ADR-0115](../../docs/Decision.md#adr-0115), [V-089](../../docs/Sources.md#v-089)) |
+| Uccidere il client `docker exec` non uccide `mongodump` dentro il container | [10](10-processi-esterni-e-il-verdetto-che-manca.md#literatore-abbandonato-e-un-limite-che-va-detto) | **la scelta è stata fatta al Task 14, il limite resta**: gli strumenti restano nei nodi e si raggiungono con `docker compose exec`, perché copiarli nell'immagine produce un container che non parte ([M-044](Sources.md#m-044), [ADR-0100](../../docs/Decision.md#adr-0100)). Adesso la porta `BackupTool` è collegata a due comandi veri, quindi il limite è **esposto**: un Ctrl-C durante `demo backup-live` lascia `mongodump` a girare dentro il nodo. **Il Task 18 non l'ha controllato**: la scena 13 è stata registrata fino in fondo, che è quello che deve mostrare una riserva. Il limite resta esposto e non provato, e chi prova a interrompere una demo in sala lo scopre lì |
+| `Progress.completati` non porta l'unità: documenti per il dump, byte per il restore | [10](10-processi-esterni-e-il-verdetto-che-manca.md#un-inconveniente-dichiarato-completati-non-porta-con-sé-lunità) | Task 10 è passato senza chiederlo: la TUI stampa la percentuale, non il numero. **la registrazione 14 mostra il conteggio, e non è quello di `Progress`**: in `plain` passa la riga dello strumento (`5740/5740 (100.0%)`), che l'unità ce l'ha per conto suo. La domanda resta aperta solo per la resa `rich`, che nessuna registrazione mostra |
 | Il formato del testo di `mongodump`/`mongorestore` è quello della 100.18.0 | [M-024, riserve](Sources.md#m-024) | dichiarata: la difesa è la suite di integrazione, che diventa rossa se il formato cambia |
 | Un `BrokenPipeError` scrivendo la password a un processo già morto non è gestito | [M-023, riserve](Sources.md#m-023) | la prima volta che si riprodurrà: gestire un caso mai visto è codice che nessuna prova copre |
 | `--nsFrom`/`--nsTo` senza `--nsInclude` è stato osservato una volta e non ripetuto | [M-024, riserve](Sources.md#m-024) | dichiarata: ripeterlo significa far passare `mongorestore` sugli utenti dell'amministratore |
 | `PlainSink` non gestisce `BrokenPipeError`: chi reindirizza su `head` vede una traccia invece di una fine | [11](11-tre-rese-e-un-solo-thread-che-disegna.md#che-cosa-questo-capitolo-lascia-aperto) | la prima volta che succederà dentro una registrazione |
 | ~~Non esiste ancora un `Orologio` di sistema: `RichTui` lo riceve, e in produzione nessuno glielo dà~~ | [11](11-tre-rese-e-un-solo-thread-che-disegna.md#che-cosa-questo-capitolo-lascia-aperto) | **chiuso** al Task 11: `SystemClock` è ancorato al muro una volta sola e avanzato dal contatore monotono ([ADR-0086](../../docs/Decision.md#adr-0086), [M-030](Sources.md#m-030)) |
-| Nessuna prova guarda che cosa Rich disegna davvero: il Passo 4 lo vieta | [11](11-tre-rese-e-un-solo-thread-che-disegna.md#il-divieto-del-passo-4-letto-due-volte) | Task 18: la registrazione `.cast` **è** il controllo, e la guarda una persona |
-| Il costo di un disegno è misurato su `StringIO`, non su un terminale vero | [M-028, riserve](Sources.md#m-028) | Task 18, se la registrazione risultasse a scatti |
+| Nessuna prova guarda che cosa Rich disegna davvero: il Passo 4 lo vieta | [11](11-tre-rese-e-un-solo-thread-che-disegna.md#il-divieto-del-passo-4-letto-due-volte) | **il Task 18 non l'ha controllato, e la promessa era sbagliata**: le cinque registrazioni sono `plain`, perché un pannello che si ridisegna dieci volte al secondo produce un `.cast` illeggibile e pesantissimo insieme ([ADR-0116](../../docs/Decision.md#adr-0116)). Il primo sguardo vero sulla schermata sarà il filmato del relatore |
+| Il costo di un disegno è misurato su `StringIO`, non su un terminale vero | [M-028, riserve](Sources.md#m-028) | **non verificabile al Task 18**: nessuna registrazione usa `rich`, quindi non c'è niente che possa risultare a scatti. La misura su `StringIO` resta l'unica |
 | `_RefreshThread` è privato di Rich e può cambiare senza avviso | [A-015, riserve](Sources.md#a-015) | dichiarata: la difesa è la prova che conta i thread, che si accorgerebbe del cambiamento |
 | ~~Sullo stack 03 `lab.carico-*` **non è distribuita**: `init/30-dati-demo.js` distribuisce solo `lab.ordini` su `{_id: "hashed"}` | [ADR-0088, riserve](../../docs/Decision.md#adr-0088) | **Task 15, non Task 16**: ADR-0088 lo aveva intestato al confronto di prestazioni, ma il Passo 1 del Task 15 chiede la distribuzione dei chunk **sotto carico**, e su una collezione che nessuno ha distribuito non c'è nessun chunk da guardare. Le strade sono tre: la scena distribuisce la collezione appena creata — che essendo **vuota** riceve subito due chunk per shard ([S-066](../../docs/Sources.md#s-066)) e senza la quale finisce tutta sullo **shard primario** ([§6.3](../../docs/02-architetture/sharded-cluster.md#63-le-collezioni-non-distribuite-e-lo-shard-primario)) — oppure scrive in `lab.ordini`, riaprendo l'accoppiamento che ADR-0088 aveva scartato, oppure si dichiara che misura un solo shard. Il Task 16 eredita la stessa scelta.~~ **Chiuso al Task 15 con la prima strada e la seconda insieme**: la scena carica *entrambe*, una collezione nuova non distribuita come metro e `lab.ordini` come misura, e l'accoppiamento temuto non si paga perché le scene di `demo` non numerano gli `_id` ([ADR-0106](../../docs/Decision.md#adr-0106)). Il Task 16 eredita una scelta già fatta |
 | ~~Il Passo 1 del Task 15 promette «**balancer al lavoro**», e questo repository non l'ha mai visto muoversi~~ | [`sharded-cluster.md`, riserva](../../docs/02-architetture/sharded-cluster.md#cosa-questa-pagina-non-dice) e [V-061](../../docs/Sources.md#v-061) | **Task 15**: la soglia di squilibrio è **384 MB** e il lab ne muove 2,4 — è provato che sotto la soglia il balancer sta fermo, non che sopra si muova. In più una chiave **hashed** tiene gli shard pari per costruzione, quindi lo squilibrio che farebbe muovere il balancer non si forma. Quello che una corsa può mostrare è la **divisione** dei chunk, non la migrazione, e solo scrivendo abbastanza: o si usa `--doc-size` per gonfiare i documenti, o si abbassa `chunksize` nel cluster, o il passo si riscrive per quello che è osservabile.~~ **Chiuso al Task 15 riscrivendo il passo**, e con una misura al posto di una previsione: 1 153 giri di balancer e **zero** `moveChunk` in tutto il `changelog` del cluster ([M-049](Sources.md#m-049)). La scena mostra i chunk fermi e ne dà la ragione; l'evento `ChunkMigrated` è uscito dal dominio ([ADR-0103](../../docs/Decision.md#adr-0103)) |
@@ -1610,17 +1706,17 @@ I punti su cui questo registro tornerà, perché sono dichiarati aperti:
 | `rapporto()` riceve la porta invece dei valori già letti, quindi l'ordine delle interrogazioni è affar suo | [12](12-la-radice-di-composizione-e-la-prima-esecuzione-vera.md#terzo-la-fotografia-diceva-sconosciuto-di-un-server-sano) | dichiarata: chi volesse comporre un rapporto da dati raccolti altrove oggi non può |
 | La mappa dei bersagli contiene le porte **predefinite**, e i Compose le scrivono `${PORTA_...:-27021}` | [ADR-0087, riserve](../../docs/Decision.md#adr-0087) | dichiarata: la difesa sarebbe una prova che rilegge il `compose.yaml` e confronta |
 | La scoperta è misurata su un set **con** il primario: il ramo `updateRSWithoutPrimary` non è stato visto | [M-036, riserve](Sources.md#m-036) | **chiuso a metà** al Task 13: [M-043](Sources.md#m-043) attraversa lo stato senza primario e ne esce con un primario diverso, quindi il ramo viene percorso; ciò che resta non visto è la parte che dà il nome al ramo — un server **aggiunto** mentre non c'è primario — perché i tre membri erano già tutti noti. Servirebbe un membro aggiunto al set durante l'elezione, che non è una scena del talk |
-| Il bind mount del sorgente fa vincere l'host sull'immagine: in sala sarebbe una sorpresa | [13](13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md#che-cosa-questo-capitolo-lascia-aperto) | Task 18: chi registra i filmati di riserva ricostruisce prima |
+| Il bind mount del sorgente fa vincere l'host sull'immagine: in sala sarebbe una sorpresa | [13](13-il-container-sulla-rete-e-la-scoperta-che-si-vede.md#che-cosa-questo-capitolo-lascia-aperto) | **confermato al Task 18, e questa volta ha giocato a favore**: le tre scene dentro la rete girano con `../../app/src:/app/src:ro` attivo, quindi hanno registrato il codice dell'albero di lavoro senza che l'immagine fosse ricostruita. È la sorpresa descritta, con il segno buono; chi registra i filmati ricostruisce lo stesso, perché il segno dipende da quale dei due è più recente |
 | `make app-image` costruisce sempre attraverso lo stack 01, dando per scontato che i tre servizi `app` siano identici | [ADR-0092, riserve](../../docs/Decision.md#adr-0092) | dichiarata: la difesa è la prova che verifica che i tre stack dichiarino la stessa immagine |
 | `check_stack.py` legge le righe `FROM` con una regex, non con un parser di Dockerfile | [ADR-0093, riserve](../../docs/Decision.md#adr-0093) | dichiarata: basta per i Dockerfile che questo repository scrive |
 | `M-037` è misurata con l'archivio immagini di containerd: con il vecchio archivio a grafo il comportamento è un altro | [M-037, riserve](Sources.md#m-037) | dichiarata: la decisione non cambia, la sua motivazione sì |
 | Le prove d'integrazione **dichiarano** il punto di vista invece di leggerlo dall'ambiente | [ADR-0090, riserve](../../docs/Decision.md#adr-0090) | dichiarata: è una precauzione contro una `MONGOLAB_PUNTO_DI_VISTA` esportata a mano, non contro il codice |
 | La scena dal vivo richiede **due terminali**: uno mostra, l'altro esegue il guasto annunciato | [14](14-la-scena-del-failover-e-i-due-numeri.md#il-guasto-entra-da-una-porta-e-la-porta-è-nata-da-unimpossibilità) | non si chiude, si prova: è [ADR-0095](../../docs/Decision.md#adr-0095), e l'alternativa era il socket Docker nel container. Da portare al PO prima delle prove generali |
-| `--step` con `--sink rich` è **rifiutato**: dal palco la resa è `plain` | [ADR-0098, riserve](../../docs/Decision.md#adr-0098) | Task 18: se in proiezione `plain` non reggesse, la decisione va riaperta, con la sospensione del `Live` come prima candidata |
+| `--step` con `--sink rich` è **rifiutato**: dal palco la resa è `plain` | [ADR-0098, riserve](../../docs/Decision.md#adr-0098) | **non deciso al Task 18**: in proiezione `plain` non è ancora stato visto, e le registrazioni non lo dicono — mostrano `plain` su un terminale, non su uno schermo a dieci metri. La decisione si riapre alla prova in sala, con la sospensione del `Live` come prima candidata |
 | Le due scene dell'Atto III girano **solo dall'host** e **solo su `rs`**: è l'inverso di `demo failover` | [15](15-il-backup-a-caldo-e-la-finestra-che-si-misura.md#due-guardie-nuove-e-unasimmetria-voluta) | non si chiude, si mette in scaletta: fra Atto II e Atto III si cambia terminale, ed è [ADR-0100](../../docs/Decision.md#adr-0100). **Accettato dal PO il 4 settembre 2026**: il cambio di terminale entra in scaletta. Resta invece aperto il caso diverso di [ADR-0095](../../docs/Decision.md#adr-0095), dove i due terminali servono **insieme** |
 | Fra l'Atto II e l'Atto III il primario ci mette **quattro secondi** a tornare al suo posto | [M-048](Sources.md#m-048) | dichiarata: sono misurati **dopo** una scena che comprende già cinque secondi di recupero, quindi a freddo il tempo è presumibilmente più lungo. La prova concede sessanta secondi proprio per questo. **Accettati dal PO il 4 settembre 2026** come tempo di scaletta |
 | `--readPreference=secondary` è misurato una volta sola, e la ripartizione fra i due secondari non la governa niente di dichiarato | [M-046, riserve](Sources.md#m-046) | dichiarata: è la selezione del driver degli strumenti, e su un'altra macchina può cadere diversamente. La conclusione — il primario passa da +15 a +0 — non dipende da quella ripartizione |
-| Che davanti a un `mongodump` che esce con uno lo schermo dica la cosa giusta entro un secondo è **ragionato, non misurato** | [15](15-il-backup-a-caldo-e-la-finestra-che-si-misura.md#chi-sta-su-quale-thread-e-perché-due-e-non-tre) | il `finally` che ferma il carico è provato con i doppi; il comportamento in scena no. Task 18, insieme alle altre prove di come si presenta un guasto |
+| Che davanti a un `mongodump` che esce con uno lo schermo dica la cosa giusta entro un secondo è **ragionato, non misurato** | [15](15-il-backup-a-caldo-e-la-finestra-che-si-misura.md#chi-sta-su-quale-thread-e-perché-due-e-non-tre) | il `finally` che ferma il carico è provato con i doppi; il comportamento in scena no, e il Task 18 non l'ha provato: le due scene di backup sono corse a buon fine, che è ciò che una riserva deve mostrare. Resta ragionato |
 | Il dump non esce dal nodo: `/tmp/mongolab-backup` vive dentro `mongo-rs-1` e sparisce con lui | [15](15-il-backup-a-caldo-e-la-finestra-che-si-misura.md#che-cosa-questo-capitolo-lascia-aperto) | non si chiude qui: dove vada una copia vera, con quale rotazione e quale cifratura, è la stessa lacuna che dichiara [la pagina canonica](../../docs/03-amministrazione/backup-restore.md) |
 | `--mode sospendi` non ha una prova di integrazione: che `pause` dia un **timeout** invece di un connection refused è affermato, non misurato | [14](14-la-scena-del-failover-e-i-due-numeri.md#il-supplemento-irraggiungibile-ma-vivo) | il Passo 3 del Task 13 ha prodotto il codice e non la misura. Prima delle prove generali, perché è la scena che il pubblico non si aspetta |
 | I 10 019 ms dipendono dalle impostazioni di elezione **di questo lab** | [M-043, riserve](Sources.md#m-043) | dichiarata: la frase in sala è «su questo lab», non «in MongoDB» |

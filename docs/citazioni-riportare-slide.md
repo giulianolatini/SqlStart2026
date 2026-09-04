@@ -3136,3 +3136,50 @@ giorno, e chiamarlo *il* limite.
 «non è possibile», nessuno lo riapre; scritto «manca l'opzione», qualcuno la aggiunge il giorno
 dopo. La parola scelta per registrare un limite decide quanto a lungo il limite resta lì, e il costo
 di sbagliarla non si vede mai nel momento in cui la si scrive.
+
+---
+
+### Per registrare una scena che chiede una seconda finestra, chi registra deve diventarla
+
+> L'applicazione, dentro la rete Compose, vede l'elezione ma non può provocarla: annuncia il comando
+> che uccide il primario e aspetta. Dal palco quel comando lo dà una persona con un secondo
+> terminale. Per registrare la scena — la stessa, senza varianti — lo strumento di registrazione ha
+> imparato a essere quella persona: esegue la riga annunciata, poi manda l'Invio. In quest'ordine, o
+> si registra un failover senza failover.
+> Fonte: [ADR-0115](Decision.md#adr-0115), [V-089](Sources.md#v-089).
+
+**Perché una slide:** perché mostra che cosa costa davvero la regola «la registrazione dev'essere lo
+stesso codice della scena dal vivo». La scorciatoia c'era ed era gratis: girare la scena dall'host,
+dove il guasto si dà da soli. Avrebbe prodotto un file con lo stesso nome e senza la cosa da
+guardare — il client dall'host non fa scoperta, e la cronaca dell'elezione semplicemente non esiste.
+Fedeltà e comodità qui puntano in direzioni opposte, e si vede solo se si sa dove guardare.
+
+---
+
+### La prima registrazione della scena è ripartita da capo dentro se stessa
+
+> La regia esegue le righe che cominciano con `docker compose `. Ma `make` fa l'eco della ricetta
+> prima di eseguirla, e la ricetta comincia con `docker compose `. Lo strumento ha eseguito l'eco, e
+> la scena è ripartita dentro se stessa. Si registra con `make -s`.
+> Fonte: [V-089](Sources.md#v-089), [ADR-0115](Decision.md#adr-0115).
+
+**Perché una slide:** perché è il difetto strutturale di ogni protocollo che viaggia sullo stesso
+canale del testo per gli umani — un prefisso non distingue chi parla. È la stessa famiglia della SQL
+injection e dell'iniezione di prompt, in una forma abbastanza piccola da stare in tre righe e
+abbastanza vera da essere costata una registrazione. Chi la vede qui la riconosce dove fa danni.
+
+---
+
+### Il p95 più basso è quello della fase in cui il database era morto
+
+> Nella scena del failover la fase «durante» dichiara 13 786 scritture, tutte confermate, con un p95
+> di 49,5 ms: **più basso** di quello della fase precedente. Non è un miglioramento. La fase dura
+> venticinque secondi, i primi dieci non contengono nessuna scrittura, e i quindici che restano
+> girano contro un primario appena eletto e ancora scarico.
+> Fonte: [V-089](Sources.md#v-089).
+
+**Perché una slide:** perché un percentile calcolato su una finestra che contiene un'interruzione
+non descrive il servizio: descrive chi è sopravvissuto alla finestra. Le richieste peggiori non sono
+lente, sono **assenti** — non hanno nemmeno cominciato — e un cruscotto che mostra solo latenze le
+conta zero volte. È il motivo per cui il numero che conta in quella scena non è un percentile ma
+un'interruzione: 10 019 millisecondi, e zero scritture perse.
