@@ -598,6 +598,47 @@ def test_il_pool_si_puo_stringere() -> None:
     assert opzioni_di_misura(max_pool_size=4) == {"maxPoolSize": 4}
 
 
+def test_il_write_concern_si_chiede_per_numero_o_per_maggioranza() -> None:
+    """Un numero resta un numero, `majority` resta una parola.
+
+    Sono le due forme che l'URI ammette dopo il `?` ([S-076](../../../docs/Sources.md#s-076)),
+    e la mappa le tiene distinte perché sono due domande diverse: «quanti nodi» e «la
+    maggioranza, quanti che siano». Il numero arriva dalla riga di comando come testo e
+    qui torna intero, così la mappa che si stampa è identica a quella che il client userà
+    — pymongo converte comunque, ma allora la riga annunciata direbbe una cosa e il
+    `write_concern` del client un'altra.
+    """
+    assert opzioni_di_misura(write_concern="1") == {"w": 1}
+    assert opzioni_di_misura(write_concern="majority") == {"w": "majority"}
+
+
+def test_il_write_concern_precede_il_giornale_nella_mappa() -> None:
+    """`w` prima di `journal`, come nell'URI, e non è ordine alfabetico.
+
+    Le due opzioni appartengono allo stesso write concern e si condizionano: con
+    `journal=true` e un `w` minore di 1 prevale il giornale
+    ([S-076](../../../docs/Sources.md#s-076)). Chi rilegge la riga annunciata deve trovarle
+    accostate e nell'ordine in cui si leggono in una stringa di connessione, non separate
+    da tre opzioni che parlano di lettura e di pool.
+    """
+    assert list(opzioni_di_misura(write_concern="1", journal=True)) == ["w", "journal"]
+
+
+def test_il_write_concern_arriva_davvero_al_client() -> None:
+    """La mappa giusta non basta: `w` scritto storto darebbe un client identico a prima."""
+    cliente = connetti(
+        BERSAGLI["rs"],
+        punto=PuntoDiVista.HOST,
+        connect=False,
+        **opzioni_di_misura(write_concern="1"),
+    )
+    try:
+        assert cliente.write_concern.document == {"w": 1}
+        assert cliente["lab"]["ordini"].write_concern.document == {"w": 1}
+    finally:
+        cliente.close()
+
+
 def test_le_quattro_opzioni_stanno_insieme_e_in_ordine_fisso() -> None:
     """L'ordine non è estetica: è ciò che rende la riga annunciata a schermo confrontabile.
 

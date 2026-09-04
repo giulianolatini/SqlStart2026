@@ -1,4 +1,4 @@
-# 17. Le quattro opzioni, e i debiti di misura che saldano
+# 17. Le opzioni di misura, e i debiti che saldano
 
 > Il principio in una riga: **chi non chiede non riceve.** Un'opzione lasciata a `None` non entra
 > nel client, e la riga di base resta byte per byte quella di ieri. È la sola condizione perché due
@@ -7,7 +7,8 @@
 Quattro pagine di `docs/02-architetture` avevano scritto per iscritto la stessa frase: quella
 misura «ha senso solo sotto carico controllato, cioè con l'applicazione Python di `feature/04`, e
 prima di allora sarebbe aria». Era una promessa con un debitore preciso. Questo capitolo è il
-saldo: quattro opzioni nuove sulla riga di comando, sette misure, e sette righe di «cosa questa
+saldo: quattro opzioni nuove sulla riga di comando — cinque, con quella che il Task 18 ha
+aggiunto in fondo — sette misure, e sette righe di «cosa questa
 pagina non dice» che smettono di essere scoperti e diventano rimandi.
 
 La riga che l'applicazione stampa quando una di quelle opzioni è accesa:
@@ -350,6 +351,81 @@ scegliere non aiuta nessuno alle nove di sera in sala.
 
 ---
 
+## La quinta opzione, e un debito che era vero solo sulla riga di comando
+
+Il Task 16 aveva chiuso con quattro opzioni; questa sezione ne aggiunge una, ed è stata scritta due
+task dopo per una ragione che vale più dell'opzione.
+
+Il Task 17 aveva registrato fra i punti aperti che «il carico non sa chiedere un write concern
+diverso dal predefinito, quindi la corsa con `w: 1` che isolerebbe i 18 390 µs del primario non è
+eseguibile». Il Product Owner ha obiettato al **quindi**: `w` è un parametro della stringa di
+connessione, nella sezione dopo il `?`. Il manuale gli dà ragione
+([S-076](../../docs/Sources.md#s-076)): le opzioni di write concern nell'URI sono `w`, `journal` e
+`wtimeoutMS`, e `w` accetta un numero, `majority`, o un tag set.
+
+**Il debito era vero per metà.** La mappa di questo capitolo parla i nomi dell'URI — è la quarta
+regola, e l'aveva scritto la docstring — e `connetti(**extra)` inoltra a pymongo qualunque opzione
+le si dia, dal Task 5. Il meccanismo per portare `w: 1` fino al client c'era da tredici task.
+Mancava la parola per chiederla:
+
+```python
+def opzioni_di_misura(
+    *,
+    write_concern: str | None = None,
+    journal: bool | None = None,
+    ...
+```
+
+Tre dettagli, ciascuno con la sua ragione ([ADR-0114](../../docs/Decision.md#adr-0114)):
+
+- **Testo e non intero**, perché `majority` è un valore legittimo quanto `1`. Diventa intero se è
+  tutto cifre, così la mappa annunciata a schermo è identica a quella che il client userà: pymongo
+  converte comunque, ma allora la riga stampata direbbe una cosa e il `write_concern` del client
+  un'altra.
+- **`w` prima di `journal` nella mappa**, che è l'ordine dell'URI e non quello alfabetico. Le due
+  opzioni si condizionano — con `journal: true` e un `w` minore di 1 prevale il giornale — e chi
+  rilegge una registrazione deve trovarle accostate.
+- **`--write-concern` per esteso sulla riga di comando**, non `--w`. La regola «i nomi sono quelli
+  dell'URI» vale per la mappa; accanto a `--writers` e `--writes`, un `--w` sarebbe un prefisso
+  ambiguo che Typer risolve senza chiedere.
+
+### Che cosa ha trovato la misura che l'opzione ha reso possibile
+
+La riserva di [V-083](../../docs/Sources.md#v-083) si chiude, e la lettura era giusta: con `w: 1` il
+cronometro del server passa da 18 913 µs a **644**, un fattore 29.
+
+Ma il manuale ha cambiato il disegno della prova prima che partisse
+([S-077](../../docs/Sources.md#s-077)): con `j` non specificato, `w: "majority"` **equivale a
+`j: true`**, mentre `w: <numero>` equivale a `j: false`. Scendere da `majority` a `1` spegne due
+cose insieme. Quindi tre corse e non due ([V-088](../../docs/Sources.md#v-088)):
+
+| corsa | `opLatencies.writes` | inserimenti/s | p50 client |
+|---|---|---|---|
+| `w: majority` (predefinito) | 18 913 µs | 351 | 9,8 ms |
+| `w: 1` + `--journal` | 11 547 µs | 486 | 7,5 ms |
+| `w: 1` | 644 µs | 1 087 | 3,4 ms |
+
+A giornale costante la maggioranza costa **1,38×** di resa; a conferme costanti il giornale costa
+**2,24×**. **La cosa cara che il predefinito fa senza dirlo è il disco, non la rete.** Un confronto
+a due corse avrebbe dato il numero giusto con la spiegazione sbagliata, e non ci sarebbe stato modo
+di accorgersene guardando i risultati.
+
+### Le prove
+
+Cinque, tutte unitarie, tutte viste fallire prima:
+
+```python
+assert opzioni_di_misura(write_concern="1") == {"w": 1}
+assert opzioni_di_misura(write_concern="majority") == {"w": "majority"}
+assert list(opzioni_di_misura(write_concern="1", journal=True)) == ["w", "journal"]
+```
+
+più quella che costruisce il client e guarda il `write_concern` che ne esce — un nome sbagliato di
+una lettera produce una mappa perfetta e un client identico a prima — e le due sulla riga di
+comando: che `--write-concern` compaia in `--help`, e che la riga annunciata dica `opzioni w=1`.
+
+---
+
 ## Che cosa questo capitolo lascia aperto
 
 - **Perché un membro in pausa costi ventisette volte.** Con `mongo-rs-3` congelato il replica set
@@ -379,7 +455,8 @@ chiede non riceve), [ADR-0110](../../docs/Decision.md#adr-0110) (`analyzeShardKe
 [ADR-0107](../../docs/Decision.md#adr-0107) (il carico scrive nella sua collezione),
 [ADR-0088](../../docs/Decision.md#adr-0088) (il dataset deterministico e il seme),
 [ADR-0072](../../docs/Decision.md#adr-0072) (le misure che una decisione invalida si riscrivono
-subito).
+subito), [ADR-0114](../../docs/Decision.md#adr-0114) (la quinta opzione, e il debito che era vero
+solo sulla riga di comando).
 
 **Fonti:** [M-054](Sources.md#m-054), [M-055](Sources.md#m-055), [M-056](Sources.md#m-056),
 [M-057](Sources.md#m-057), [M-019](Sources.md#m-019),
@@ -387,4 +464,6 @@ subito).
 [V-076](../../docs/Sources.md#v-076), [V-077](../../docs/Sources.md#v-077),
 [V-078](../../docs/Sources.md#v-078), [V-079](../../docs/Sources.md#v-079),
 [V-080](../../docs/Sources.md#v-080), [V-081](../../docs/Sources.md#v-081),
-[S-035](../../docs/Sources.md#s-035), [S-067](../../docs/Sources.md#s-067)
+[V-083](../../docs/Sources.md#v-083), [V-088](../../docs/Sources.md#v-088),
+[S-035](../../docs/Sources.md#s-035), [S-067](../../docs/Sources.md#s-067),
+[S-076](../../docs/Sources.md#s-076), [S-077](../../docs/Sources.md#s-077)

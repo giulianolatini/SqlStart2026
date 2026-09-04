@@ -3091,3 +3091,48 @@ stesse domande dell'originale.
 caso in cui il guadagno non è teorico: non solo la prova diventa istantanea, ma diventa **più
 severa**. Un millisecondo di pazienza in più è un giro in più — cioè si verifica che la soglia
 scatti quando deve *e non prima*, distinzione che con un'attesa vera non sarebbe misurabile.
+
+---
+
+### Delle due cose che il write concern predefinito fa senza dirlo, quella cara è il disco
+
+> Un replica set senza arbitri conferma con `w: majority`, e `majority` accende **anche** la
+> sincronizzazione sul giornale, senza che nessuno l'abbia scritta. Tre corse identiche tranne che
+> per una cosa alla volta: a giornale costante la maggioranza costa **1,38×** di resa; a conferme
+> costanti il giornale costa **2,24×**. Insieme, 3,1×.
+> Fonte: [V-088](Sources.md#v-088), [S-077](Sources.md#s-077).
+
+**Perché una slide:** perché chi ottimizza un replica set lento comincia dal numero di secondari, e
+sta lavorando sul fattore piccolo. Le due variabili viaggiano incollate — il manuale lo dice in una
+riga sola, dentro una tabella — e chiunque confronti «con e senza maggioranza» in due corse
+attribuirà alla rete un costo che è quasi tutto del disco. È anche il caso di scuola di come si fa
+una misura: una variabile per volta, o il numero è giusto e la spiegazione è sbagliata.
+
+---
+
+### Il server non metteva in coda niente perché non gli veniva chiesto di andare abbastanza forte
+
+> Sotto carico saturo, il primario dichiarava code vuote e 10 ms cumulativi di attesa per un ticket.
+> Tolto il write concern predefinito, la stessa corsa fa il triplo delle scritture e l'attesa
+> cumulativa passa a **308 ms**: trenta volte tanto. Il collo di bottiglia non era WiredTiger, era
+> la conferma — e togliendola il collo si sposta di livello.
+> Fonte: [V-088](Sources.md#v-088), [V-083](Sources.md#v-083).
+
+**Perché una slide:** perché «le code sono vuote» è la conclusione che chiude un'indagine, e qui era
+vera e fuorviante insieme. Un sistema mostra il suo secondo limite solo dopo che si è tolto il
+primo; misurare a un solo punto di funzionamento significa fotografare quale limite era attivo quel
+giorno, e chiamarlo *il* limite.
+
+---
+
+### Non era «non eseguibile»: era «non chiedibile»
+
+> Un debito registrato diceva che la misura decisiva non si poteva fare. Verificato sul manuale, `w`
+> era un'opzione della stringa di connessione come `journal`, e il codice la portava al client da
+> tredici task. Mancava una parola sulla riga di comando: tre righe di codice, due minuti di misura.
+> Fonte: [ADR-0114](Decision.md#adr-0114), [S-076](Sources.md#s-076).
+
+**Perché una slide:** perché è il modo più comune in cui un debito tecnico si autoconserva. Scritto
+«non è possibile», nessuno lo riapre; scritto «manca l'opzione», qualcuno la aggiunge il giorno
+dopo. La parola scelta per registrare un limite decide quanto a lungo il limite resta lì, e il costo
+di sbagliarla non si vede mai nel momento in cui la si scrive.

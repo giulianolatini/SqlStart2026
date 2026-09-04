@@ -481,6 +481,7 @@ def attendi_il_primario(cliente: MongoClient[dict[str, Any]]) -> None:
 
 def opzioni_di_misura(
     *,
+    write_concern: str | None = None,
     journal: bool | None = None,
     retry_writes: bool | None = None,
     max_staleness_s: int | None = None,
@@ -494,6 +495,17 @@ def opzioni_di_misura(
     `retryWrites=false` e `maxStalenessSeconds` sul replica set, `maxPoolSize` stretto
     sotto il numero degli scrittori. Va a `connetti(**extra)`, che dal Task 5 aveva già
     il gancio e ne aveva già scritto il perché.
+
+    **La quinta è del Task 18, e salda un debito che era mezzo falso.** Il Task 17 aveva
+    registrato che «il carico non sa chiedere un write concern diverso dal predefinito»,
+    e da lì che la corsa con `w: 1` — quella che isolerebbe i 18 390 µs di
+    `opLatencies.writes` sul primario ([V-083](../../../docs/Sources.md#v-083)) — non
+    fosse eseguibile. Vero sulla riga di comando, falso qui sotto: `w` è un'opzione della
+    stringa di connessione esattamente come `journal`
+    ([S-076](../../../docs/Sources.md#s-076)), questa mappa parla i nomi dell'URI, e
+    `connetti` inoltra a pymongo qualunque cosa le si dia. Mancava **la parola per
+    chiederla**, non il meccanismo per portarla. `write_concern` prende testo e non un
+    intero perché `majority` è un valore legittimo quanto `1`.
 
     **Chi non chiede non riceve.** Un argomento lasciato a `None` non compare nella mappa,
     e il client resta byte per byte quello di prima. Non è avarizia: è la condizione
@@ -519,6 +531,8 @@ def opzioni_di_misura(
     incollare in un URI e in una `MONGO_URI` senza tradurla.
     """
     opzioni: dict[str, Any] = {}
+    if write_concern is not None:
+        opzioni["w"] = int(write_concern) if write_concern.isdigit() else write_concern
     if journal is not None:
         opzioni["journal"] = journal
     if retry_writes is not None:

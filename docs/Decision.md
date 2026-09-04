@@ -7067,6 +7067,13 @@ lasciarglielo scoprire. Nasce inoltre un debito che questa decisione non salda: 
 prova che la chiuderebbe è la stessa corsa con `w: 1` sul replica set, ed è dichiarata fra le
 riserve di [V-083](Sources.md#v-083).
 
+*Debito saldato lo stesso giorno da [ADR-0114](#adr-0114) e [V-088](Sources.md#v-088).* La corsa con
+`w: 1` è stata eseguita e l'interpretazione regge — 18 913 µs contro 644 — ma con una correzione che
+tocca proprio questa pagina: fra il predefinito e `w: 1` non cambia solo il numero di conferme,
+cambia anche il giornale, e il giornale costa più della maggioranza. La sesta sezione della pagina è
+stata riscritta di conseguenza: dire «l'attesa della maggioranza» e fermarsi lì sarebbe stata la
+spiegazione giusta a metà.
+
 **Alternative scartate.**
 
 - *L'elenco commentato dei campi di `serverStatus`.* Duplica il manuale, invecchia a ogni versione
@@ -7137,3 +7144,74 @@ al futuro e le collega; il legame diventa reciproco, e un collegamento rotto lo 
   dal codice che descrive, che è esattamente ciò che la fa marcire.
 
 **Fonti:** nessuna (decisione organizzativa), [ADR-0024](#adr-0024), [ADR-0078](#adr-0078)
+
+---
+
+<a id="adr-0114"></a>
+
+## ADR-0114 — La quinta opzione di misura: `--write-concern`, e un debito che era vero solo sulla riga di comando
+
+**Data:** 2026-09-04 · **Stato:** Accettata
+
+**Contesto:** il Task 17 si è chiuso registrando un debito fra i punti aperti del registro
+dell'applicazione: «il carico non sa chiedere un write concern diverso dal predefinito, quindi la
+corsa con `w: 1` che isolerebbe i 18 390 µs del primario non è eseguibile». La riserva di
+[V-083](Sources.md#v-083) e le conseguenze di [ADR-0112](#adr-0112) dicevano la stessa cosa in
+forma più prudente: l'interpretazione è coerente ma **non isolata**, e la prova che la chiuderebbe
+è la stessa corsa con `w: 1`.
+
+Il Product Owner ha obiettato al debito, non alla riserva: `w` è un parametro della stringa di
+connessione, nella sezione dopo il `?`. La verifica sul manuale gli dà ragione
+([S-076](Sources.md#s-076)): le opzioni di write concern nell'URI sono tre — `w`, `journal`,
+`wtimeoutMS` — e `w` accetta un numero, `majority`, o un tag set.
+
+**Il debito era vero per metà, ed è la metà che conta meno.** `opzioni_di_misura` parla i nomi
+dell'URI dal Task 16 — è scritto nella sua docstring — e `connetti(**extra)` inoltra a pymongo
+qualunque opzione le si dia, dal Task 5. Il meccanismo per portare `w: 1` fino al client c'era da
+tredici task; mancava **la parola per chiederla** dalla riga di comando. Scrivere «non è eseguibile»
+al posto di «non è chiedibile» ha trasformato una parola mancante in un impedimento, e ha tenuto
+aperta per un task una riserva che costava tre righe di codice e due minuti di misura.
+
+La verifica ha anche cambiato il disegno della misura. [S-077](Sources.md#s-077) dice che con `j`
+non specificato `w: "majority"` equivale a `j: true` — via `writeConcernMajorityJournalDefault`, che
+è `true` di suo — mentre `w: <numero>` equivale a `j: false`. Cioè scendere da `majority` a `1`
+spegne **due** cose: l'attesa dei secondari e la sincronizzazione del giornale. Un confronto a due
+corse avrebbe attribuito alla maggioranza un costo che è in gran parte del giornale.
+
+**Decisione:** `mongolab workload` riceve una quinta opzione di misura, `--write-concern`, che vale
+un numero o `majority` e va in `opzioni_di_misura` come `w`, prima di `journal` — l'ordine dell'URI,
+non quello alfabetico, perché le due opzioni si condizionano. Il valore arriva come testo e diventa
+intero se è tutto cifre, così la mappa annunciata a schermo è identica a quella che il client userà.
+
+Con la parola disponibile, la riserva di [V-083](Sources.md#v-083) si chiude con **tre** corse e non
+due ([V-088](Sources.md#v-088)): il predefinito, `w: 1` con il giornale acceso, e `w: 1` nudo.
+
+Tre conseguenze, ed è per queste che la decisione esiste:
+
+- **La riserva si chiude, e l'interpretazione era giusta.** `opLatencies.writes` sul primario passa
+  da 18 913 µs a **644 µs** con `w: 1`, un fattore 29. Quello che il primario contava e lo
+  standalone no era davvero l'attesa della conferma.
+- **Ma la maggioranza è la metà piccola del conto.** A giornale costante la maggioranza costa
+  1,38× di resa; a conferme costanti il giornale costa 2,24×. La pagina sul monitoraggio non può
+  più dire «l'attesa della maggioranza» e fermarsi lì: **la cosa cara che il predefinito fa senza
+  dirlo è la sincronizzazione su disco.**
+- **Restano 644 µs contro i 67 dello standalone**, cioè quasi dieci volte, senza nessuno da
+  aspettare. È il costo di essere un primario, e prima di questa misura era confuso dentro il
+  fattore 274.
+
+**Alternative scartate.**
+
+- *Lasciare il debito aperto e chiuderlo dopo la PR.* Sarebbe stato registrato come limite di
+  progetto un limite di vocabolario, e la pagina sul monitoraggio avrebbe portato al talk una
+  spiegazione a metà — quella che attribuisce alla maggioranza il costo del giornale.
+- *Un'opzione `--w` con il nome dell'URI.* Coerente con la regola «i nomi sono quelli dell'URI», che
+  però vale per la **mappa**, non per la riga di comando: `--w 1` accanto a `--writers 8` e
+  `--writes 100` è un prefisso ambiguo che Typer risolve senza chiedere. La mappa continua a dire
+  `w`; la riga di comando dice per esteso.
+- *Un intero invece di una stringa.* Escluderebbe `majority`, cioè proprio il valore che serve per
+  chiedere esplicitamente il predefinito e distinguere una corsa dichiarata da una implicita.
+- *Due corse invece di tre.* Avrebbe prodotto il numero giusto con la spiegazione sbagliata, e non
+  ci sarebbe stato modo di accorgersene guardando i risultati.
+
+**Fonti:** [S-076](Sources.md#s-076), [S-077](Sources.md#s-077), [V-083](Sources.md#v-083),
+[V-088](Sources.md#v-088)

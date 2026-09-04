@@ -698,6 +698,13 @@ def workload(
             help="Quante scritture fare, invece di quanti secondi durare.",
         ),
     ] = None,
+    write_concern: Annotated[
+        str | None,
+        typer.Option(
+            "--write-concern",
+            help="Quante conferme aspettare: un numero, oppure majority.",
+        ),
+    ] = None,
     journal: Annotated[
         bool | None,
         typer.Option(
@@ -737,6 +744,12 @@ def workload(
     pagine delle architetture, e ognuna vale come mezza misura: `--journal` contro
     `--no-journal`, `--retry-writes` contro `--no-retry-writes`. Chi ne cita una sola in
     una voce di `Sources.md` sta riportando la buona notizia senza il suo prezzo.
+
+    **`--write-concern` è la quinta, e arriva dal Task 18** (ADR-0114). Serve a isolare
+    che cosa il primario di un replica set stia contando quando dichiara 18 390 µs di
+    `opLatencies.writes` contro i 67 µs dello standalone: la stessa corsa con `w: 1`
+    risponde, e senza questa parola non era chiedibile dalla riga di comando. Vale un
+    numero o `majority`, come nell'URI.
     """
     if writes is not None and duration is not None:
         # Il rifiuto sta qui e non in `WorkloadRunner.esegui`, che pure ha già la regola:
@@ -750,6 +763,7 @@ def workload(
     cablaggio = cabla(target, sink)
     genera = con_dimensione(DataGenerator().documento, byte_di(doc_size))
     misura = opzioni_di_misura(
+        write_concern=write_concern,
         journal=journal,
         retry_writes=retry_writes,
         max_staleness_s=max_staleness,

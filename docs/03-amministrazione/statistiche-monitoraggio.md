@@ -143,6 +143,44 @@ server e quello del client sono dello stesso ordine (p50 9,0 ms); sullo standalo
 > una metrica che cambia significato.** Sullo standalone misura il lavoro locale; sul primario
 > misura il lavoro locale più l'attesa della rete. Confrontare i due valori fra architetture è un
 > confronto fra due grandezze diverse con lo stesso nome.
+
+E qui la lettura ovvia — «è l'attesa della maggioranza» — è **giusta a metà**, il che è il modo più
+scomodo di avere ragione. Ripetendo la stessa corsa tre volte, cambiando ogni volta una cosa sola
+([V-088](../Sources.md#v-088)):
+
+| corsa | `opLatencies.writes` | inserimenti/s | p50 lato client |
+|---|---|---|---|
+| `w: majority` — il predefinito di questo insieme | 18 913 µs | 351 | 9,8 ms |
+| `w: 1` con il giornale ancora acceso | 11 547 µs | 486 | 7,5 ms |
+| `w: 1` | 644 µs | 1 087 | 3,4 ms |
+
+La terza riga chiude il punto: **con `w: 1` il cronometro del server scende di un fattore 29**, e
+quello che il primario contava e lo standalone no era davvero l'attesa della conferma. La seconda
+riga dice però che quell'attesa non è la voce cara. Il write concern predefinito di un replica set
+senza arbitri è `majority` ([S-077](../Sources.md#s-077)), e `majority` con `j` non specificato
+**equivale a `j: true`**: chiedere la maggioranza accende anche la sincronizzazione sul giornale,
+senza che nessuno l'abbia scritto in nessuna riga di comando. A giornale costante la maggioranza
+costa **1,38×** di resa; a conferme costanti il giornale costa **2,24×**.
+
+> **Delle due cose che il predefinito fa senza dirlo, quella cara è il disco, non la rete.** Chi
+> ottimizza un replica set lento partendo dal numero di secondari sta lavorando sul fattore piccolo.
+
+E resta un terzo pezzo, che nessuna delle due spiegazioni copre: 644 µs contro i 67 µs dello
+standalone sono **quasi dieci volte**, senza nessuno da aspettare e senza giornale. È quanto costa
+*essere* un primario — l'oplog, la macchina di replica, il resto — e prima di questa misura stava
+nascosto dentro il fattore 274.
+
+Una nota che smentisce la sezione precedente, e va detta: **il server non metteva in coda niente
+perché non gli veniva chiesto di andare abbastanza forte.** Con `w: 1`, `totalTimeQueuedMicros`
+passa da 10 388 µs cumulativi a **308 413**, cioè da 1,0 a 9,8 µs per scrittura. Resta l'1,5 % della
+latenza, quindi la conclusione «le code sono vuote» tiene — ma il freno era la maggioranza, non
+WiredTiger, e togliendolo il collo di bottiglia si sposta di livello.
+
+Il prezzo va citato insieme al guadagno, sempre: `w: 1` è la conferma del solo primario, e il
+manuale è esplicito su cosa comporti — «Data can be rolled back if the primary steps down before the
+write operations replicate to any of the secondaries» ([S-077](../Sources.md#s-077)). Il 3,1× di
+resa si compra con la possibilità di perdere scritture già confermate nell'istante di un failover:
+cioè proprio la scena che lo stack 02 esiste per mostrare.
 >
 > Questa lettura è coerente con i numeri ma **non è stata isolata**: la prova che la chiuderebbe è
 > la stessa corsa con `w: 1` sul replica set, ed è dichiarata fra le riserve di
@@ -427,9 +465,11 @@ E tre numeri da non guardare: il ritardo di replica calcolato dagli `optimeDate`
 - **Non è il riferimento dei campi di `serverStatus`.** Quello è il manuale, ed è la scelta
   registrata da [ADR-0112](../Decision.md#adr-0112). Chi cerca il significato di un campo che qui
   non compare lo trova là, aggiornato alla sua versione.
-- **Non dice se i 18 390 µs del primario siano davvero l'attesa della maggioranza.** La lettura è
-  coerente con i numeri, non isolata. La prova che chiuderebbe il punto è la stessa corsa con
-  `w: 1` sul replica set, ed è un debito dichiarato in [V-083](../Sources.md#v-083).
+- **Non dice quanto valga la maggioranza da sola su un insieme più grande.** Le tre corse di
+  [V-088](../Sources.md#v-088) scompongono i 18 913 µs del primario in giornale, maggioranza e costo
+  di essere primario, ma su **tre** membri in un container da 0,75 CPU. Con cinque membri, o con un
+  secondario in un'altra regione, il fattore 1,38 della maggioranza è il primo a cambiare — ed è
+  anche il meno solido dei tre numeri, perché viene da una corsa sola per configurazione.
 - **Non copre `top`, `collStats` in dettaglio, `currentOp`, `$indexStats`, né il profiler.** Sono
   strumenti di diagnosi puntuale, e questa pagina risponde a «cosa guardare mentre gira», non a
   «come si indaga una query lenta» — per cui c'è
@@ -457,9 +497,12 @@ smentiscono la lettura ingenua, e dichiara inutilizzabile il ritardo di replica)
 [ADR-0111](../Decision.md#adr-0111) (la riserva viaggia con il numero),
 [ADR-0024](../Decision.md#adr-0024) (il materiale divulgativo non è documentazione normativa),
 [ADR-0031](../Decision.md#adr-0031) (il lab funziona senza rete),
-[ADR-0046](../Decision.md#adr-0046) (il costo della maggioranza, misurato).
+[ADR-0046](../Decision.md#adr-0046) (il costo della maggioranza, misurato),
+[ADR-0114](../Decision.md#adr-0114) (la quinta opzione di misura, che ha permesso di scomporre i
+18 913 µs del primario).
 
-**Fonti:** [V-027](../Sources.md#v-027), [V-031](../Sources.md#v-031),
-[V-076](../Sources.md#v-076), [V-079](../Sources.md#v-079), [V-082](../Sources.md#v-082),
-[V-083](../Sources.md#v-083), [V-084](../Sources.md#v-084), [V-085](../Sources.md#v-085),
-[V-086](../Sources.md#v-086), [V-087](../Sources.md#v-087)
+**Fonti:** [S-077](../Sources.md#s-077), [V-027](../Sources.md#v-027),
+[V-031](../Sources.md#v-031), [V-076](../Sources.md#v-076), [V-079](../Sources.md#v-079),
+[V-082](../Sources.md#v-082), [V-083](../Sources.md#v-083), [V-084](../Sources.md#v-084),
+[V-085](../Sources.md#v-085), [V-086](../Sources.md#v-086), [V-087](../Sources.md#v-087),
+[V-088](../Sources.md#v-088)

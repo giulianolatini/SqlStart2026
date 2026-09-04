@@ -1144,8 +1144,35 @@ def test_senza_limiti_espliciti_workload_resta_la_riga_del_design() -> None:
     assert "120" in testo
 
 
+def test_workload_sa_chiedere_un_write_concern() -> None:
+    """La quinta opzione, e l'unica aperta dal Task 18 invece che dal 16.
+
+    Il Task 17 aveva registrato come debito che «il carico non sa chiedere un write
+    concern diverso dal predefinito». Il debito era vero sulla riga di comando e falso
+    sotto: `w` è un'opzione della stringa di connessione come `journal`
+    ([S-076](../../../docs/Sources.md#s-076)), e `connetti` passa a pymongo qualunque
+    opzione le si dia dal Task 5. Mancava solo la parola per chiederla.
+    """
+    codice, testo = esegui("workload", "--help")
+
+    assert codice == 0
+    assert "--write-concern" in testo
+
+
 def test_senza_opzioni_di_misura_non_si_annuncia_niente() -> None:
     assert riga_delle_opzioni({}) == ""
+
+
+def test_la_riga_annunciata_dice_il_write_concern_per_esteso() -> None:
+    """`w=1` a schermo, perché è la metà della misura che non si vede nei numeri.
+
+    Una corsa sul primario con `w: 1` e una senza producono due `opLatencies.writes`
+    diversi per un fattore che si conta a centinaia. Se la riga annunciata non dicesse
+    quale delle due è, i due `.cast` sarebbero indistinguibili.
+    """
+    misura = opzioni_di_misura(write_concern="1")
+
+    assert riga_delle_opzioni(misura) == "opzioni w=1"
 
 
 def test_la_riga_annunciata_e_la_stessa_mappa_che_va_al_client() -> None:

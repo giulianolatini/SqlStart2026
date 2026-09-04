@@ -9027,8 +9027,14 @@ primario rs:          totalTickets  8 →  7   (available … ,    out 0–1)
   primario contengano l'attesa della maggioranza — è coerente con i numeri ma **non è stata
   isolata**: servirebbe la stessa corsa con `w: 1` sul replica set. Il costo del campionatore è
   stato controllato a parte e sta nel rumore (+1,4 % e −5,9 % su due coppie, segno che cambia).
+- **Riserva chiusa lo stesso giorno da [V-088](#v-088).** La corsa con `w: 1` è stata eseguita: il
+  cronometro del server scende da 18 913 a 644 µs, e l'interpretazione era giusta. Con una
+  correzione che questa voce non poteva prevedere: fra le due configurazioni non cambia solo il
+  numero di conferme, cambia anche il giornale ([S-077](#s-077)), e delle due è il giornale a
+  costare di più. Anche la conclusione «non ha mai messo in coda» va letta insieme a V-088: era vera
+  perché la maggioranza faceva da freno prima di WiredTiger.
 - **Data:** 2026-09-04
-- **Usata da:** ADR-0112
+- **Usata da:** ADR-0112, ADR-0114
 
 ---
 
@@ -9312,5 +9318,200 @@ fsUsedSize   31 512 723 456 fsTotalSize 62 671 097 856
   zavorra.
 - **Data:** 2026-09-04
 - **Usata da:** ADR-0112
+
+---
+
+<a id="s-076"></a>
+### S-076 — MongoDB Manual: Connection String URI Format, opzioni di write concern
+
+- **URL:** https://www.mongodb.com/docs/manual/reference/connection-string-options/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** manual (corrente)
+- **Consultata:** 2026-09-04
+- **Verdetto:** conferma, e smentisce mezzo debito di questo repository
+- **Perché è stata cercata.** Il Task 17 aveva chiuso registrando che «il carico non sa chiedere un
+  write concern diverso dal predefinito», e da lì che la corsa con `w: 1` — quella che isolerebbe i
+  18 390 µs di `opLatencies.writes` del primario, [V-083](#v-083) — non fosse eseguibile. Il Product
+  Owner ha obiettato che `w` è un parametro della stringa di connessione, nella sezione dopo il `?`,
+  e ha chiesto di verificarlo sul manuale invece di discuterne.
+- **Cosa afferma, primo punto — le opzioni di write concern nell'URI sono tre.** La sezione «Write
+  Concern Options» elenca `w`, `wtimeoutMS` e `journal`. Su `w`: «Corresponds to the write concern
+  `w` Option. The `w` option requests acknowledgment that the write operation has propagated to a
+  specified number of `mongod` instances or to `mongod` instances with specified tags.» E i valori
+  ammessi: «You can specify a `number`, the string `majority`, or a `tag set`.»
+- **Cosa afferma, secondo punto — il nome dell'opzione URI è `journal`, non `j`.** «Corresponds to
+  the write concern `j` Option option. The `journal` option requests acknowledgment from MongoDB
+  that the write operation has been written to the journal.» `j` è il nome dell'opzione di write
+  concern sottostante; nella stringa di connessione si scrive `journal`. È esattamente il nome che
+  `opzioni_di_misura` usa dal Task 16, e la coincidenza non era stata verificata su questa pagina.
+- **Cosa afferma, terzo punto — le due si condizionano.** «If you set `journal` to `true`, and
+  specify a `w` value less than 1, `journal` prevails.»
+- **Cosa afferma, quarto punto — l'URI perde contro il parametro del metodo.** «You can specify write
+  concern both in the connection string and as a parameter to methods like `insert` or `update`. If
+  specified in both places, the method parameter overrides the connection string.» È la ragione per
+  cui accendere il write concern sul **client** basta a cambiare come scrive un adattatore che
+  riceve una collezione e non sa da quale client venga: finché nessuno lo chiede per operazione,
+  vince quello del client.
+- **Cosa afferma, quinto punto — l'esempio è una riga intera.**
+
+  ```
+  mongodb://myDatabaseUser:D1fficultP%40ssw0rd@db0.example.com,db1.example.com,db2.example.com/?replicaSet=myRepl&w=majority&wtimeoutMS=5000
+  ```
+
+- **Cosa afferma, sesto punto — `wtimeoutMS` è deprecata.** «The `wtimeoutMS` option is deprecated.
+  Set `timeoutMS` instead. `timeoutMS` overrides `wtimeoutMS`.» E, sul comportamento residuo: «When
+  `wtimeoutMS` is `0`, write operations never time out.»
+- **Cosa afferma, settimo punto — chi le legge.** Le opzioni della stringa di connessione sono
+  supportate «by MongoDB drivers, `mongosh`, `mongofiles`, `mongoimport`, and `mongorestore`». Cioè
+  la stessa parola vale nell'applicazione, nella shell e negli strumenti di backup.
+- **Riserve:** la pagina **non** dichiara nessun predefinito lato server per `w`, e non descrive come
+  il write concern predefinito di un replica set interagisca con un `w` passato nell'URI: rimanda
+  alla pagina di riferimento sul write concern, che è [S-077](#s-077). L'unica affermazione di
+  predefinito è specifica di Atlas — «MongoDB Atlas deployment connection strings use `"majority"` by
+  default» — e non vale per questo laboratorio.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0114
+
+---
+
+<a id="s-077"></a>
+### S-077 — MongoDB Manual: Write Concern, il predefinito implicito e il prezzo di `w: 1`
+
+- **URL:** https://www.mongodb.com/docs/manual/reference/write-concern/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** manual (corrente)
+- **Consultata:** 2026-09-04
+- **Verdetto:** conferma, e cambia il disegno della misura
+- **Perché è stata cercata.** Prima di confrontare una corsa con `w: 1` e una senza serviva sapere
+  **che cosa** sia «senza»: se il predefinito di questo insieme sia `1` o `majority`, la stessa
+  misura racconta due storie opposte. E serviva sapere se cambiando `w` cambi solo `w`.
+- **Cosa afferma, primo punto — il predefinito implicito è la maggioranza, con un'eccezione da
+  arbitri.** «The implicit default write concern is `w: majority`.» L'eccezione, per esteso: «The
+  voting majority of a replica set is 1 plus half the number of voting members, rounded down. If the
+  number of data-bearing voting members is not greater than the voting majority, the default write
+  concern is `{ w: 1 }`. In all other scenarios, the default write concern is `{ w: "majority" }`.»
+  Con tre membri portatori di dati e nessun arbitro — la forma dello stack 02 — si ricade nel caso
+  generale, cioè `majority`.
+- **Cosa afferma, secondo punto — `w: 1` è il primario e basta, e si può perdere.** «Requests
+  acknowledgment that the write operation has propagated to the standalone `mongod` or the primary in
+  a replica set. **Data can be rolled back if the primary steps down before the write operations
+  replicate to any of the secondaries.**» È il prezzo esatto della resa che [V-088](#v-088) misura, e
+  va citato insieme al guadagno.
+- **Cosa afferma, terzo punto — cambiare `w` cambia anche il giornale, senza dirlo.** Con `j` non
+  specificato e `w: "majority"`: «If `true`, acknowledgment requires MongoDB to make writes durable
+  by syncing them to on-disk journal, equivalent to `j: true`», dove `true` è il valore di
+  `writeConcernMajorityJournalDefault`, che «defaults to `true`». Con `j` non specificato e
+  `w: <number>`: «Acknowledgment requires writing the operation in memory, **equivalent to
+  `j: false`**.» Cioè passare da `majority` a `1` spegne per conseguenza anche la sincronizzazione
+  del giornale: due variabili in una mossa, ed è la ragione per cui [V-088](#v-088) ha tre corse e
+  non due.
+- **Cosa afferma, quarto punto — `j: true` non protegge dal failover.** «`j: true` alone does not
+  guarantee that the write will not roll back due to replica set primary failover.» E, sulla portata:
+  «With `j: true`, MongoDB returns only after the requested number of members, including the primary,
+  have written to the journal.»
+- **Cosa afferma, quinto punto — `wtimeout` non si applica sotto la soglia.** «`wtimeout` does not
+  apply if `w` is less than or equal to `1`.» E, se manca: «If you do not specify the `wtimeout`
+  option and the level of write concern is unachievable, the write operation will block
+  indefinitely.»
+- **Riserve:** la pagina descrive il predefinito **implicito**; un `setDefaultRWConcern` esplicito lo
+  sostituirebbe, e la pagina non dice come accorgersene. La verifica che su questo laboratorio il
+  predefinito sia davvero implicito è misurata in [V-088](#v-088) con `getDefaultRWConcern`, non
+  dedotta da qui.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0114
+
+---
+
+<a id="v-088"></a>
+### V-088 — La maggioranza è la metà piccola del conto: tre corse sul primario, e il giornale che costa di più
+
+- **Comandi:** lo stesso campionatore di [V-083](#v-083), con in più l'autenticazione — la password
+  arriva per `--env-file` e non compare mai sulla riga di comando ([ADR-0054](Decision.md#adr-0054)):
+
+```
+docker cp campiona-w.js mongo-rs-1:/tmp/campiona-w.js
+docker exec -i --env-file docker/02-replicaset/.env mongo-rs-1 \
+  mongosh --quiet --host localhost admin --file /tmp/campiona-w.js
+```
+
+  e in parallelo, dall'host, tre corse identiche tranne che per le opzioni di write concern:
+
+```
+make app-workload TARGET=rs ARGS="--duration 30 --doc-size 2k --writers 8 --readers 4 --sink null"
+make app-workload TARGET=rs ARGS="… --write-concern 1 --journal"
+make app-workload TARGET=rs ARGS="… --write-concern 1"
+```
+
+- **Ambiente:** MongoDB 7.0.40, stack 02, `mongod` con `cpus: 0.75` e `mem_limit: 768m` per membro,
+  applicazione nel container con `cpus: 1.0` — il lab predefinito di [V-079](#v-079), lo stesso di
+  [V-083](#v-083). Primario `mongo-rs-1`, tre membri con voto, **nessun arbitro**,
+  `writeConcernMajorityJournalDefault: true`, e `getDefaultRWConcern` risponde
+  `{"w":"majority","wtimeout":0}` con `defaultWriteConcernSource: implicit`. Cioè il predefinito di
+  questo insieme è la maggioranza per la regola generale di [S-077](#s-077), e nessuno l'ha
+  impostato a mano.
+- **Che cosa si voleva sapere:** la riserva di [V-083](#v-083). Sul primario `opLatencies.writes`
+  vale 18 390 µs contro i 67 µs dello standalone, e la lettura proposta era «il cronometro del server
+  include l'attesa della maggioranza». Coerente, ma non isolata. La corsa con `w: 1` la isola — e
+  [S-077](#s-077) ha aggiunto che non la isola da sola, perché scendendo da `majority` a un numero si
+  spegne anche il giornale. Da qui la terza corsa.
+- **Esito, primo punto — le tre corse viste dal server e dal client:**
+
+| | `w: majority` (predefinito) | `w: 1` + `journal` | `w: 1` |
+|---|---|---|---|
+| giornale | implicito `j: true` | `j: true` chiesto | implicito `j: false` |
+| scritture confermate in 30 s | 10 544 | 14 585 | **31 535** |
+| inserimenti/s medi | 351 | 486 | **1 087** |
+| `opLatencies.writes` medio | **18 913 µs** | 11 547 µs | **644 µs** |
+| p50 lato client | 9,8 ms | 7,5 ms | **3,4 ms** |
+| p95 lato client | 79,5 ms | 65,7 ms | 42,2 ms |
+| p99 lato client | 97,2 ms | 89,0 ms | 70,2 ms |
+| `totalTimeQueuedMicros`, delta | 10 388 µs | 2 783 µs | **308 413 µs** |
+| letture riuscite | 26 370 | 20 588 | 13 976 |
+
+  La corsa con il predefinito riproduce [V-083](#v-083) a distanza di ore: 18 913 µs contro 18 390,
+  10 544 scritture contro 10 928. La riserva era ben posta e la misura è ripetibile.
+
+- **Esito, secondo punto — la riserva di V-083 si chiude, e la risposta è sì.** Con `w: 1` il
+  cronometro del server scende da 18 913 a **644 µs**, cioè di un fattore **29**. Ciò che il primario
+  contava e lo standalone no era davvero l'attesa della conferma, e adesso è misurato invece che
+  argomentato.
+- **Esito, terzo punto — ma la maggioranza è la metà piccola.** Tenendo il giornale acceso e
+  cambiando solo il numero di conferme, la resa passa da 486 a 351 inserimenti/s: la maggioranza
+  costa **1,38×**. Tenendo `w: 1` e accendendo il giornale, la resa passa da 1 087 a 486: il giornale
+  costa **2,24×**. Il prodotto è il 3,10× fra il predefinito e `w: 1`. **Delle due cose che il
+  predefinito fa senza dirlo, quella cara è la sincronizzazione su disco, non l'attesa dei due
+  secondari** — e nessuna delle due si vede nella riga di comando di chi non le ha chieste.
+- **Esito, quarto punto — restano 644 µs che non sono né maggioranza né giornale.** Lo standalone
+  della corsa B di [V-083](#v-083), con lo stesso carico, dichiarava **67 µs**. Il primario con
+  `w: 1` e senza giornale ne dichiara 644, cioè **9,6×**. Non c'è nessuno da aspettare: è quanto
+  costa **essere** un primario — l'oplog, il conteggio, il resto della macchina di replica — e vale
+  circa un ordine di grandezza. Il fattore 274 fra le due architetture non era tutto attesa.
+- **Esito, quinto punto — tolto il collo di bottiglia, il collo si sposta.** [V-083](#v-083) aveva
+  concluso che «il server non mette in coda niente», con 9,8 ms cumulativi di attesa per un ticket su
+  50 664 scritture. Con `w: 1` il primario accumula **308 413 µs** di coda in 31 535 scritture, cioè
+  **9,8 µs per scrittura** contro l'1,0 della corsa predefinita: trenta volte tanto. Resta l'1,5 %
+  della latenza media, quindi la conclusione di V-083 non si rovescia — ma la ragione per cui il
+  server non metteva in coda niente era che **non gli veniva chiesto di andare abbastanza forte**.
+  Era la maggioranza a fare da freno, non WiredTiger.
+- **Esito, sesto punto — le letture pagano il conto delle scritture.** Le stesse quattro letture
+  concorrenti riescono 26 370 volte nella corsa lenta e 13 976 in quella veloce. Non è un
+  peggioramento del server: è che gli otto scrittori, non dovendo più aspettare, competono per la
+  stessa CPU limitata. Un confronto di latenza di lettura fra due corse con write concern diversi
+  misura la contesa, non la lettura.
+- **Il prezzo, che va citato insieme al guadagno.** `w: 1` è la conferma del solo primario, e
+  [S-077](#s-077) dice cosa comporta: «Data can be rolled back if the primary steps down before the
+  write operations replicate to any of the secondaries.» Il 3,10× di resa si compra con la
+  possibilità di perdere le scritture confermate nell'istante di un failover — cioè esattamente lo
+  scenario che lo stack 02 esiste per mostrare.
+- **Riserve:** tre corse, una per configurazione, non tre ripetizioni per configurazione: la
+  variabilità fra corse identiche misurata in [V-083](#v-083) è del 20 % sulla resa, quindi il
+  fattore 1,38 della maggioranza è il meno solido dei tre numeri e andrebbe ripetuto prima di
+  portarlo in una slide. I 67 µs dello standalone vengono dalla sessione di [V-083](#v-083) e non da
+  questa: stessa giornata e stesso lab, ma non la stessa ora. Le tre corse hanno la stessa
+  **concorrenza offerta** (otto scrittori) e non lo stesso carico effettivo, quindi le latenze medie
+  non si sommano né si sottraggono: i rapporti riportati sono di resa, che è la grandezza a
+  concorrenza costante, e le latenze sono osservazioni accanto, non addendi.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0114
 
 ---
