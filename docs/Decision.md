@@ -8266,3 +8266,315 @@ distrugge dati ([ADR-0119](#adr-0119)).
   shard **perso**, non uno shard che si ripara.
 
 **Fonti:** [V-097](Sources.md#v-097), [S-069](Sources.md#s-069), [ADR-0119](#adr-0119)
+
+---
+
+<a id="adr-0129"></a>
+## ADR-0129 — Il nome del progetto Compose si impone sulla riga di comando: dentro il file è solo un augurio
+
+**Data:** 2026-09-06 · **Stato:** Accettata
+
+**Contesto:** i tre file Compose dichiarano `name:`, e per mesi è bastato. La review generale ha
+chiesto se bastasse davvero, e la risposta misurata è no: `COMPOSE_PROJECT_NAME` nell'ambiente di
+chi lancia `make` passa davanti al `name:` del file senza avvisare. Non è una variabile esotica —
+è una riga che qualcuno può avere nel proprio profilo di shell per un altro progetto e non
+ricordarsene. Da lì in poi `ps` non elenca più niente, un `down` diventa un nulla di fatto che esce
+**0**, e `reset-02` cancella i volumi per nome letterale mentre il `down` che avrebbe dovuto
+smontarli prima non ha fatto niente.
+
+**Decisione.** Ogni invocazione di `docker compose` nel Makefile porta `-p` con il nome del
+progetto, e il nome sta in una variabile sola per stack — `PROGETTO_01`, `PROGETTO_02`,
+`PROGETTO_03` — da cui si costruiscono anche i nomi dei volumi. `-p` ha la precedenza
+sull'ambiente, quindi il progetto non dipende più da chi lancia il comando. Il `name:` resta nei
+file Compose per chi li usa senza `make`: non è ridondanza, è il valore predefinito che continua a
+valere quando la flag non c'è.
+
+**Conseguenze.** I bersagli del Makefile diventano insensibili all'ambiente di chi li invoca, ed è
+la proprietà che serve a un lab che gira sulla macchina di chi assiste al talk e non su una
+macchina preparata. Il nome del progetto acquista una sede unica: `preflight.sh` la legge per sapere
+quali container sono del lab, e una prova tiene allineati i due elenchi
+([ADR-0131](#adr-0131)). Il costo è tre flag in più su ogni riga, e la disciplina di aggiungerle
+anche alle righe nuove — che è la ragione per cui la prova esiste.
+
+**Alternative scartate.**
+
+- *Fidarsi di `name:` e documentare la variabile come «da non impostare».* Sposta il problema su
+  chi legge la documentazione prima di sbagliare, cioè su nessuno. Una convenzione che si può
+  violare per distrazione va imposta dallo strumento, non chiesta all'utente.
+- *`unset COMPOSE_PROJECT_NAME` in cima al Makefile.* Funzionerebbe, e sarebbe il Makefile che
+  decide che cosa può esserci nell'ambiente di chi lo invoca. `-p` ottiene lo stesso risultato
+  dichiarando che cosa vuole invece di distruggere che cosa trova.
+- *Nominare i volumi anche in `reset-01`, come chiedeva il rilievo C-5.* Respinta, e la misura dice
+  perché: `reset-01` è `down -v`, e `-v` segue la selezione del progetto. Con l'ambiente ostile non
+  cancella niente — sbaglia per difetto. Nominare i volumi lo porterebbe dentro il difetto di
+  `reset-02`, dove i volumi si cancellano per nome mentre i container sono ancora accesi.
+
+**Fonti:** [V-098](Sources.md#v-098)
+
+---
+
+<a id="adr-0130"></a>
+## ADR-0130 — Una guardia che valida un valore non lo interpreta
+
+**Data:** 2026-09-06 · **Stato:** Accettata
+
+**Contesto:** la guardia `profilo-03` controlla che `PROFILO` sia uno dei profili dichiarati nel
+file Compose, e lo faceva interpolando il valore dentro il testo della shell. Due difetti diversi
+sulla stessa riga. Il primo, segnalato: un apice nel valore chiude la stringa, e quello che segue
+non è più un dato. Il secondo, che nessun recensore aveva visto e che la misura ha trovato: `grep
+-qx` tratta ciò che riceve come **espressione regolare**, quindi `palco[ ]*` passava la guardia —
+0, valido — e arrivava a Compose come nome di profilo letterale, dove non corrisponde a niente.
+
+**Decisione.** Il valore arriva alla guardia per **ambiente**, non interpolato nel testo del
+comando, e il confronto è letterale: `grep -qxF -- "$PROFILO"`. Le tre parti fanno tre cose diverse
+e servono tutte: l'ambiente toglie il valore dalla sintassi, `-F` gli toglie il significato di
+regex, `--` gli toglie la possibilità di sembrare un'opzione. L'elenco dei profili validi non si
+scrive nel Makefile: viene da `config --profiles`, cioè dal file Compose, che è l'unico posto dove
+quell'elenco è vero.
+
+**Conseguenze.** `PROFILO="palco'; echo IRRUZIONE; #"` esce dalla guardia come dato e finisce nel
+messaggio d'errore intero, apice compreso; `IRRUZIONE` non viene eseguito. `PROFILO='palco[ ]*'`
+viene respinto. `PROFILO=palco` passa in silenzio. Un profilo nuovo aggiunto al file Compose diventa
+valido senza che nessuno si ricordi di aggiornare il Makefile. In cambio, uno spazio finale
+invisibile ora è un valore diverso e viene respinto con un messaggio che non aiuta a vederlo: è il
+prezzo del confronto letterale, e si paga volentieri.
+
+**Alternative scartate.**
+
+- *Ripulire il valore prima di confrontarlo — togliere apici, spazi, metacaratteri.* Una lista di
+  cose da togliere è una lista che qualcuno completerà male. Non interpretare il valore è più corto
+  da scrivere e non ha una lista.
+- *Scrivere i tre profili validi nel Makefile e confrontarli con `case`.* Toglie la dipendenza da
+  `config --profiles`, e crea una seconda copia dell'elenco che si scollerà dal file Compose alla
+  prima aggiunta. È lo stesso motivo per cui `DATI_03` si costruisce con `addprefix` invece che con
+  nove nomi a mano.
+- *Nessuna guardia: lasciare che sia Compose a protestare.* Non protesta. Con un profilo che non
+  esiste sceglie i soli servizi senza profilo, e l'avvio muore molto più tardi accusando il keyfile
+  — che è il difetto già registrato in [V-069](Sources.md#v-069) e la ragione per cui la guardia
+  esiste.
+
+**Fonti:** [V-099](Sources.md#v-099)
+
+---
+
+<a id="adr-0131"></a>
+## ADR-0131 — Il preflight non esce dalla macchina, e sa quali container sono suoi
+
+**Data:** 2026-09-06 · **Stato:** Accettata
+
+**Contesto:** `preflight.sh` esiste per una scena sola: la sala, mezz'ora prima del talk, senza
+rete. Due rilievi lo hanno colto a tradire proprio quella scena. Senza `--pull=never`, la sonda che
+verifica la presenza delle immagini andava a chiederle al registro — cioè usciva in rete
+esattamente nel caso che deve diagnosticare, «le immagini non ci sono». E il conteggio delle porte
+occupate filtrava su `label=com.docker.compose.project`, che seleziona ogni container avviato da
+Compose sulla macchina: su una macchina di sviluppo annunciava porte occupate che nessun bersaglio
+di questo `make` avrebbe mai chiesto.
+
+**Decisione.** La sonda delle immagini porta `--pull=never`: se l'immagine non c'è, la risposta è
+«No such image» in 0,023 s, senza una richiesta di rete. Il conteggio delle porte guarda soltanto i
+container dei tre progetti del lab, nominati in un elenco esplicito. Poiché quell'elenco è la
+seconda copia di una verità che vive nel Makefile ([ADR-0129](#adr-0129)), lo tiene onesto una
+prova: `test_il_preflight_conosce_i_progetti_del_makefile` legge i due elenchi dai due file e li
+confronta.
+
+**Conseguenze.** Il preflight diventa dicibile in una frase — «non esce dalla macchina» — e questa
+è una proprietà che si può promettere a chi lo lancia in sala. La diagnosi «immagini assenti» torna
+in millisecondi invece che dopo il timeout di un client che cerca un server irraggiungibile: la
+misura di 1,011 s è stata presa con la rete funzionante, quindi **sottostima** il danno che
+descrive. L'elenco duplicato è un debito, e la prova è il modo in cui questo repository paga i
+debiti di duplicazione: i due lettori sono stati verificati sui valori veri, così la prova non passa
+a vuoto su due liste vuote.
+
+**Alternative scartate.**
+
+- *Ricavare i progetti dal Makefile a tempo di esecuzione, con `make -p` o un `grep`.* Toglie la
+  duplicazione e ne aggiunge una peggiore: un parser del Makefile dentro uno script di shell, che
+  si rompe in silenzio quando il Makefile cambia forma. La prova fa lo stesso lavoro una volta sola,
+  al momento giusto, e quando si rompe lo dice.
+- *Filtrare le porte per numero invece che per progetto.* Sarebbe la domanda giusta — «questa porta
+  è libera?» — ma non distingue chi la occupa, e il messaggio utile al relatore è proprio quello:
+  «la 27152 è occupata da un tuo container del lab» si risolve con `make down-03`, «è occupata da
+  qualcos'altro» no.
+- *Lasciare che la sonda scarichi, visto che con la rete funziona.* È la definizione del difetto:
+  uno strumento che funziona in tutte le condizioni tranne quella per cui è stato scritto.
+
+**Fonti:** [V-100](Sources.md#v-100)
+
+---
+
+<a id="adr-0132"></a>
+## ADR-0132 — Un ✓ verde si stampa dopo aver guardato l'esito, e un valore atteso vive nel codice, non in un commento
+
+**Data:** 2026-09-06 · **Stato:** Accettata
+
+**Contesto:** dieci rilievi della review generale toccavano il codice degli strumenti, e sette
+raccontavano lo stesso difetto sotto forme diverse: uno strumento che dichiara verde un esito che
+non ha guardato. `reset-demo.sh` toglieva le collezioni e poi annunciava che erano state tolte,
+senza rileggere. Confrontava l'impronta dei dati con un numero scritto in un **commento**, cioè con
+niente. Distingueva uno sharded cluster da un replica set travestito cercando **uno spazio** nella
+risposta, e `shard1rs=0 shard2rs=5` ne ha uno. `registra-terminale.py`, davanti a una riga di regia
+inanalizzabile, lasciava salire l'eccezione: usciva **1** invece di 125, stampava un traceback, e
+lasciava sul disco un `.cast` di 192 byte che sembra una registrazione e non lo è.
+
+**Decisione.** Un esito si stampa dopo averlo letto, e la lettura è un'operazione distinta
+dall'azione. In pratica, tre regole. **Prima:** dopo aver modificato uno stato lo si rilegge, e le
+risposte possibili sono almeno tre — riuscito, residui con i nomi, e nessuna risposta, perché
+un'interrogazione muta non è una riuscita. **Seconda:** un valore atteso è una costante nel codice
+e un confronto che stampa atteso e ottenuto quando divergono; se sta in un commento non esiste.
+**Terza:** un guasto previsto si prende, si nomina e diventa un codice di uscita che lo distingue
+dagli altri — 125 per «è fallita la regia», che non è la stessa cosa di «è fallito il comando
+registrato».
+
+**Conseguenze.** `reset-demo.sh` guadagna tre funzioni piccole — `ha_risposto`, `verdetto_pulizia`,
+`confronta` — e le usa in tutti i punti dove prima stampava a fiducia; i falsi verdi che sapeva
+produrre sono stati costruiti davvero e ora sono rossi. `registra-terminale.py` esce 125 con il nome
+dell'eccezione e senza traceback, e la scena non riparte su un comando mai eseguito. La suite di
+`tools` passa da 181 a 183 prove.
+
+Una non-modifica è deliberata e va scritta qui, perché l'istinto suggerisce il contrario: **il
+`.cast` continua a essere scritto anche quando la regia fallisce.** Cancellarlo sembrerebbe più
+pulito, e sarebbe peggio. L'uscita 125 e la riga di riepilogo raccontano già che quel file non è una
+registrazione riuscita; il file, invece, è la sola prova di che cosa la regia abbia provato a fare.
+Distruggere l'evidenza di un guasto per non lasciare in giro un file ambiguo è un cattivo scambio:
+l'ambiguità si toglie dicendolo, non cancellando.
+
+**Alternative scartate.**
+
+- *Verificare l'impronta dei dati con un checksum invece che con tre numeri.* Più corto e meno
+  utile: un checksum che non torna dice «diverso», tre numeri dicono **quanto** e **dove**, e in una
+  demo dal vivo la differenza tra le due diagnosi è il tempo che resta.
+- *Far uscire `registra-terminale.py` con 1 e basta, documentando che 1 vuol dire due cose.* Un
+  codice di uscita che vuol dire due cose costringe chi lo legge a guardare altrove: è la stessa
+  categoria di difetto del ✓ verde stampato a fiducia.
+- *Cancellare il `.cast` quando la regia fallisce.* Vedi sopra: toglie la prova insieme
+  all'ambiguità.
+- *Lasciare che l'eccezione salga, tanto il traceback dice tutto.* Dice tutto a chi sviluppa lo
+  strumento, e niente a chi registra una scena mezz'ora prima del talk. Un guasto **previsto** non
+  si racconta con un traceback.
+
+**Fonti:** [V-101](Sources.md#v-101), [V-103](Sources.md#v-103)
+
+---
+
+<a id="adr-0133"></a>
+## ADR-0133 — Una prova che apre una porta la richiude, e verifica di averla richiusa da fuori
+
+**Data:** 2026-09-06 · **Stato:** Accettata
+
+**Contesto:** `smoke-sharded.sh` verifica che l'eccezione localhost sia chiusa sugli shard, e lo fa
+nel solo modo onesto: prova a creare un amministratore senza presentare credenziali. Se la porta è
+chiusa riceve `Unauthorized` e ha finito. Se è aperta, però, l'utente **viene creato**, e la prova
+ha appena lasciato sul nodo un `root` che non doveva esistere. Il rilievo C-3 diceva questo, e
+aveva ragione. La causa che proponeva — che `dropUser` potesse fallire — era sbagliata, e la causa
+cambia il rimedio.
+
+**Decisione.** La sonda crea l'utente con una password **casuale**, lo toglie autenticandosi con
+quella, e verifica la rimozione da una **connessione nuova**: la prova che una credenziale non c'è
+più è che non apre più. La verifica non può stare nella stessa sessione, e non per stile: togliendo
+l'utente con cui ci si è autenticati si perdono nello stesso istante i privilegi per guardare se è
+andato via, e ogni lettura successiva risponde `Unauthorized`. Quando la sonda non riesce a
+richiudere, lo dice a voce alta e spiega che il residuo va tolto **prima** del riavvio del nodo.
+
+**Conseguenze.** Il rimedio poggia su un fatto misurato che va scritto perché è controintuitivo:
+l'eccezione localhost è un **fermo di processo**. Si chiude alla creazione del primo utente e resta
+chiusa per la vita di quel `mongod`, anche se poi gli utenti vengono tolti tutti; si riapre al
+riavvio. Un nodo che perde tutti i suoi amministratori quindi non è «aperto»: rifiuta finché è
+acceso, ed è spalancato appena riparte. È questo che rende urgente il «prima del riavvio» nel
+messaggio della sonda.
+
+La password casuale transita nell'argv del client `docker` sull'host, che
+[ADR-0054](#adr-0054) tiene lontano dalla credenziale vera. È una deroga, ed è ammessa qui per tre
+ragioni che devono valere tutte e tre: il valore è casuale, vive qualche millisecondo, e appartiene
+a un utente che lo stesso comando cancella. Fuori da questa combinazione la deroga non si estende.
+
+Vale anche la storia del rimedio, perché il repository registra le ipotesi smentite invece di
+lasciarle cadere: le prime due stesure sono state respinte dalla misura, non dal ragionamento. La
+prima verificava la rimozione con `countDocuments` nella stessa sessione e riceveva `Unauthorized`;
+la prima lettura di quel risultato — «il drop è fallito» — era sbagliata. La seconda confermava la
+rimozione rilanciando la sonda, e misurava il fermo di processo invece dell'esistenza dell'utente.
+
+**Alternative scartate.**
+
+- *Non provare l'eccezione localhost.* Sarebbe togliere il controllo che verifica la sola porta di
+  servizio che MongoDB apre per costruzione. Il rischio della prova è reale e si governa; la sua
+  assenza no.
+- *Provare l'eccezione senza creare l'utente, per esempio con un comando innocuo.* Non esiste: la
+  chiusura dell'eccezione si manifesta **soltanto** rifiutando la creazione del primo utente. Ogni
+  altra domanda misura qualcos'altro.
+- *Una password fissa e nota nello script.* Se la rimozione fallisse, ciò che resta sul nodo
+  sarebbe un `root` con una credenziale leggibile nel repository. Casuale, nel caso peggiore resta
+  un `root` con una password che nessuno conosce — un guasto da riparare, non una porta aperta.
+- *Verificare la rimozione con `getUsers` nella stessa sessione.* Misurato: `Unauthorized`. Non è
+  una scelta di stile, è una cosa che non si può fare.
+
+**Fonti:** [V-102](Sources.md#v-102), [ADR-0054](#adr-0054)
+
+---
+
+<a id="adr-0134"></a>
+## ADR-0134 — Il modello dei rami, la strategia di fusione e i messaggi di commit di questo repository
+
+**Data:** 2026-09-06 · **Stato:** Accettata
+
+**Contesto:** [ADR-0123](#adr-0123) dichiara che questo repository non ha una scheda che fissi il
+proprio modello dei rami, la strategia di merge o lo standard dei messaggi di commit. La review
+generale ha reso quella lacuna costosa: sei rilievi diversi — C-1, C-2, G-1, G-5, G-6, G-7 —
+chiedono cose che poggiano tutte sulla sede mancante, e finché la sede non c'è ognuno va arbitrato
+a mano contro una convenzione che esiste solo nella storia. Questa scheda è la sede. Non inventa
+niente: registra ciò che 164 commit fanno già, misurato in [V-104](Sources.md#v-104).
+
+**Decisione.**
+
+*I rami.* `main` riceve solo le release. `develop` è il ramo di lavoro dove entrano le feature. I
+rami di lavoro si chiamano `feature/NN-nome-parlante` con `NN` a due cifre nell'ordine in cui sono
+stati aperti, e le release `release/N.M`. Al 6 settembre 2026 `main` è ancora al commit iniziale, e
+non è una dimenticanza: è il modello.
+
+*La fusione.* Un ramo si chiude con una **pull request** e con un merge commit — mai con
+`git flow feature finish`, che salta la revisione, e mai con un rebase sopra `develop`, che
+riscrive commit già pubblicati. Le quattro fusioni della storia hanno tutte la forma
+`Merge pull request #N from …` e conservano il nome del ramo d'origine nel soggetto: quel nome è
+l'unico posto dove resta scritto che cosa quel gruppo di commit era.
+
+*I messaggi.* La forma è `tipo: soggetto`, e i tipi in uso sono cinque: `docs`, `feat`, `fix`,
+`test`, `chore`. Il tipo segue lo **scopo del lavoro**, non il tipo di file toccato: un commit che
+cambia uno script per far passare una prova è `fix`, anche se il file è codice, e un commit che
+aggiunge una scheda a `Decision.md` è `docs`, anche se accanto cambia un commento nel codice. Lo
+**scope non si usa**: zero volte su 159 commit, e resta così. Il soggetto è in **minuscolo**, salvo
+quando apre con qualcosa che si scrive maiuscolo — un identificatore del repository (`ADR-0123`,
+`V-090`, `PR`, `README`) o il designatore di un compito di piano (`Task 8 — …`). Il limite del
+soggetto è **100 colonne**, come il corpo dei documenti, non le 72 della tradizione:
+cinquantaquattro soggetti su 164 superano già le 72, e una regola che dichiara fuori norma un terzo della storia non
+è una regola. Il corpo spiega **perché**, e quando il commit chiude un rilievo o poggia su una
+misura, la nomina.
+
+**Conseguenze.** I sei rilievi che chiedevano questa sede si chiudono qui invece che uno per uno.
+Le due copie della convenzione che vivono altrove vanno allineate a questa e non viceversa:
+`.claude/skills/revisione-pr/prompt/revisione.md` chiede scope e soggetto minuscolo senza
+l'eccezione degli identificatori, e `.claude/skills/workflow-conventions/SKILL.md` cita numeri di
+ADR che appartengono al repository da cui la skill è stata importata, non a questo. Le due
+correzioni vanno fatte **prima della prossima revisione, non dopo**: una skill che chiede una
+convenzione diversa da quella del repository produce rilievi che non sono difetti.
+
+La scheda fissa una regolarità osservata e la trasforma in decisione, ed è un passaggio che cambia
+lo stato delle cose: da qui in avanti un commit fuori norma è un errore, mentre prima era soltanto
+inconsueto. Il prezzo è che i cinque tipi in uso diventano l'elenco: `refactor`, `style`, `perf`,
+`ci`, `build` non compaiono nella storia, e aggiungerne uno è una modifica a questa scheda, non una
+scelta del momento.
+
+**Alternative scartate.**
+
+- *Adottare Conventional Commits così com'è, scope compreso.* Sarebbe dichiarare fuori norma tutti
+  e 159 i commit convenzionali della storia per guadagnare una parentesi che nessuno ha mai sentito
+  mancare. In un repository con tre stack e un'applicazione lo scope avrebbe anche senso; qui non
+  è mai servito perché il soggetto lo dice già.
+- *Il limite di 72 colonne.* Tradizionale e giustificato — è la larghezza in cui `git log` sta
+  comodo in un terminale — ma questo repository scrive soggetti che sono frasi, non etichette, e
+  ne ha 54 già oltre. Cento è il limite che il repository usa ovunque.
+- *Rebase invece di merge, per una storia lineare.* Una storia lineare si legge meglio e perde
+  esattamente l'informazione che qui serve di più: dove finisce una feature. I quattro merge commit
+  sono i quattro capitoli di questo lavoro.
+- *Rimandare la scheda a dopo il talk.* La lacuna costa **adesso**, perché è adesso che si arbitra
+  una review. Una sede che manca si apre quando qualcosa ci sbatte contro.
+
+**Fonti:** [V-104](Sources.md#v-104), [ADR-0123](#adr-0123)

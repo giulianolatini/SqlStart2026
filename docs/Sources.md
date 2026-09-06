@@ -10204,3 +10204,402 @@ make guasto-03      # PROFILO=palco ./tools/demo-sharded.sh guasto
 
 - **Data:** 2026-09-06
 - **Usata da:** ADR-0128
+
+---
+
+<a id="v-098"></a>
+### V-098 — Chi vince sul nome del progetto Compose: la flag, l'ambiente, il `name:` del file
+
+- **Comandi:** lo stesso stack 02 acceso, interrogato con un ambiente ostile — una variabile che
+  qualcuno potrebbe avere nel proprio profilo di shell senza pensarci:
+
+```bash
+COMPOSE_PROJECT_NAME=altro docker compose \
+  --env-file tools/images.env --env-file docker/02-replicaset/.env \
+  -f docker/02-replicaset/compose.yaml config | grep -m1 '^name:'
+COMPOSE_PROJECT_NAME=altro docker compose … ps --format '{{.Name}}'
+COMPOSE_PROJECT_NAME=altro docker compose -p sqlstart-02-replicaset … ps --format '{{.Name}}'
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, stack 02 acceso con i tre membri, 6 settembre
+  2026.
+
+- **Che cosa si voleva sapere:** il rilievo C-4 della review generale osservava che i tre file
+  Compose dichiarano `name:` e che questo non basta a fissare il progetto. L'osservazione da sola
+  non dice niente di operativo: la domanda misurabile è **chi vince** quando i due si contraddicono,
+  e che cosa diventano i bersagli del Makefile quando a perdere è il file.
+
+- **Esito, primo punto — l'ambiente batte il file.** `config` risolve `name: altro`. Il `name:`
+  scritto dentro `compose.yaml` non è un'imposizione: è un valore predefinito, e
+  `COMPOSE_PROJECT_NAME` gli passa davanti senza avvisare.
+
+- **Esito, secondo punto — e allora `ps` non vede più niente.** Con l'ambiente ostile e senza `-p`,
+  l'elenco dei container è **vuoto**, mentre i tre membri sono accesi e `docker ps` li mostra. Non è
+  un errore: è una risposta corretta a una domanda su un progetto che non esiste. Un `down` lanciato
+  lì dentro sarebbe un nulla di fatto che esce 0 — la forma peggiore, perché somiglia alla riuscita.
+
+- **Esito, terzo punto — `-p` batte tutti e due.** Stesso ambiente ostile, `-p
+  sqlstart-02-replicaset` sulla riga di comando: `config` risolve `name: sqlstart-02-replicaset`, e
+  `ps` elenca `mongo-rs-1`, `mongo-rs-2`, `mongo-rs-3`.
+
+- **Esito, quarto punto — il danno non è uniforme, ed è questo che scagiona `reset-01`.** `reset-02`
+  è `down` seguito da `docker volume rm --force $(DATI_02)`, e `DATI_02` si costruisce da
+  `PROGETTO_02`: con l'ambiente ostile i volumi verrebbero cancellati **comunque**, per nome
+  letterale, mentre il `down` che avrebbe dovuto smontarli prima non ha fatto niente — cancellare i
+  volumi di container ancora accesi. `reset-01` invece è `down -v` e basta: `-v` segue la selezione
+  del progetto, quindi nell'ambiente ostile non cancella **niente**. Sbaglia per difetto, e per
+  difetto non fa danno. Il rilievo C-5 chiedeva di nominare i volumi anche in `reset-01`: sarebbe
+  stato portarlo dentro il difetto di `reset-02`, non toglierlo.
+
+- **Riserve:** misurato su Docker 29.7.2 con Compose v2; la precedenza flag > ambiente > file è
+  documentata e stabile, ma resta una scelta dell'implementazione, non una legge. Non è stato
+  provato `down` con l'ambiente ostile, e deliberatamente: lo stack 02 serviva acceso, e la
+  conseguenza si legge già in `ps`. Il caso in cui `COMPOSE_PROJECT_NAME` valga per caso proprio
+  uno dei tre nomi del lab non è stato costruito: lì non ci sarebbe niente da vedere.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0129
+
+---
+
+<a id="v-099"></a>
+### V-099 — Una guardia che valida un valore e nel farlo lo interpreta
+
+- **Comandi:** il meccanismo isolato dalla guardia che lo usa, e poi la guardia intera:
+
+```bash
+printf 'completo\npalco\nstrumenti\n' | grep -qx  -- 'palco[ ]*' ; echo $?
+printf 'completo\npalco\nstrumenti\n' | grep -qxF -- 'palco[ ]*' ; echo $?
+make profilo-03 PROFILO='palco[ ]*'
+make profilo-03 PROFILO="palco'; echo IRRUZIONE; #"
+make profilo-03 PROFILO=palco
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, GNU Make 3.81 di sistema, `grep` BSD di macOS, file Compose
+  `docker/03-sharded/compose.yaml` con i tre profili dichiarati, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** i rilievi G-2 e G-3 dicevano che la guardia del profilo interpolava
+  il valore dentro il testo della shell. Sono due difetti diversi con lo stesso indirizzo, e
+  valevano misurati separatamente: uno riguarda **che cosa può eseguire** un valore ostile, l'altro
+  **che cosa può far passare** un valore soltanto sciatto.
+
+- **Esito, primo punto — il metacarattere passava, ed è il difetto che nessun recensore aveva
+  visto.** `grep -qx` tratta ciò che riceve come espressione regolare: con `palco[ ]*` risponde
+  **0**, cioè valido, perché la regex descrive «palco seguito da zero o più spazi» e `palco` la
+  soddisfa. Con `-F` la stessa riga risponde **1**. Una guardia che accetta `palco[ ]*` non è
+  permissiva per un capello: accetta una famiglia infinita di stringhe che poi arrivano a Compose
+  come nomi di profilo letterali, e lì non corrispondono a niente.
+
+- **Esito, secondo punto — l'apice non chiude più niente.** `PROFILO="palco'; echo IRRUZIONE; #"`
+  arriva alla guardia e ne esce come dato: la parola `IRRUZIONE` **non compare** in nessun punto
+  dell'output, e il messaggio d'errore riporta il valore intero, apice compreso:
+
+```
+PROFILO=palco'; echo IRRUZIONE; # non è un profilo di docker/03-sharded/compose.yaml.
+Quelli dichiarati sono: completo palco strumenti
+```
+
+- **Esito, terzo punto — la guardia continua a fare il suo mestiere.** `PROFILO=palco` esce **0** e
+  non stampa niente; `PROFILO='palco[ ]*'` esce **1** con il messaggio che elenca i tre profili
+  veri. L'elenco non è scritto nel Makefile: viene da `config --profiles`, cioè dal file Compose,
+  che è l'unico posto dove quell'elenco è vero.
+
+- **Riserve:** `grep -qxF` confronta stringhe intere e non normalizza niente, quindi uno spazio
+  finale invisibile resta un valore diverso e viene respinto — corretto, ma il messaggio d'errore
+  non aiuta a vederlo, perché uno spazio in coda non si distingue a schermo. Il valore arriva alla
+  ricetta per ambiente: chi invocasse la guardia da un contesto che non esporta `PROFILO`
+  misurerebbe un'altra cosa. Non è stato cercato un valore che sopravviva a `-F` e faccia comunque
+  danno a valle: dopo la guardia il valore va solo a `--profile` di Compose, che lo tratta
+  come nome.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0130
+
+---
+
+<a id="v-100"></a>
+### V-100 — Una sonda che esce in rete proprio per diagnosticare che la rete non c'è, e che conta le porte di qualcun altro
+
+- **Comandi:** la stessa immagine assente chiesta nei due modi, cronometrata:
+
+```bash
+time docker run --rm mongo:immagine-che-non-esiste true
+time docker run --rm --pull=never mongo:immagine-che-non-esiste true
+docker ps --filter 'label=com.docker.compose.project' --format '{{.Label "com.docker.compose.project"}}'
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** due rilievi diversi sullo stesso strumento. C-6 diceva che
+  `preflight.sh` può scaricare; C-9 che il conteggio delle porte occupate guarda più in là del lab.
+  Il preflight esiste per una sola scena — la sala senza rete, mezz'ora prima del talk — e in quella
+  scena entrambi i difetti si pagano.
+
+- **Esito, primo punto — senza `--pull=never` la sonda esce dalla macchina.** Con l'immagine
+  assente, il comando impiega **1,011 s** e nel mezzo c'è una richiesta a `docker.io`. Con la flag
+  risponde «No such image» in **0,023 s** e non esce dalla macchina. Quarantatré volte più veloce è
+  il dettaglio meno interessante: il punto è che il caso da diagnosticare — «le immagini non ci
+  sono» — è esattamente il caso in cui la sonda andava a chiederle alla rete che non c'è, e lì i
+  1,011 s diventano il timeout di chi aspetta un server irraggiungibile.
+
+- **Esito, secondo punto — «le porte del lab» erano le porte di chiunque.** Il filtro
+  `label=com.docker.compose.project` seleziona **ogni** container avviato da Compose sulla macchina,
+  non i tre progetti di questo repository. Su una macchina di sviluppo con altri stack accesi il
+  preflight annunciava porte occupate che nessun bersaglio di questo `make` avrebbe mai chiesto, e
+  al tempo stesso non aveva modo di dire quale delle proprie porte fosse davvero contesa.
+
+- **Esito, terzo punto — l'elenco dei progetti non si scrive due volte.** Il rimedio nomina i tre
+  progetti nel preflight, e questo crea subito una seconda copia di una verità che sta nel Makefile.
+  La copia è tenuta onesta da una prova, `test_il_preflight_conosce_i_progetti_del_makefile`, che
+  legge i due elenchi dai due file e li confronta. I due lettori sono stati verificati:
+  restituiscono entrambi `['sqlstart-01-standalone', 'sqlstart-02-replicaset',
+  'sqlstart-03-sharded']`, cioè la prova non passa a vuoto su due liste vuote.
+
+- **Riserve:** i due tempi sono una misura sola per caso, su una macchina con rete funzionante: in
+  sala il ramo senza flag durerebbe quanto il timeout del client, non 1,011 s, e quindi la misura
+  qui **sottostima** il danno che descrive. Il conteggio per progetto resta cieco a una porta
+  occupata da un processo che non è un container: quella la vede solo chi prova ad aprirla.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0131
+
+---
+
+<a id="v-101"></a>
+### V-101 — Un valore atteso scritto in un commento non è una verifica, e uno spazio non è una distribuzione
+
+- **Comandi:** i controlli di `reset-demo.sh` staccati dallo script e provati su casi costruiti, più
+  un chunk vuoto spostato davvero su un database usa-e-getta:
+
+```bash
+./tools/prova-c8.sh          # il solo riconoscimento della risposta, su cinque casi
+mongosh --eval 'sh.moveChunk(…)'   # su un database usa-e-getta, non sul lab
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, stack 03 nel profilo **palco**, immagine
+  `mongo:7.0.40`, database usa-e-getta creato e distrutto nella stessa sessione, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** i rilievi C-7 e C-8 dicevano che `reset-demo.sh` stampa esiti che
+  non ha guardato. Sono due forme dello stesso difetto e valevano separate, perché la prima si vede
+  leggendo e la seconda no.
+
+- **Esito, primo punto — le tre pulizie stampavano il verde a comando dato, non a esito visto.** Le
+  collezioni venivano tolte e poi si annunciava che erano state tolte, senza rileggere. Se una
+  `drop` fosse fallita — o se una collezione fosse ricomparsa nel frattempo — lo script lo avrebbe
+  detto verde. Il rimedio rilegge `getCollectionNames()` dopo la rimozione e distingue tre risposte:
+  quelle andate via, `RESIDUI:` con i nomi di quelle rimaste, e la risposta vuota, che è il terzo
+  caso e prima non esisteva: un'interrogazione che non risponde non è una pulizia riuscita.
+
+- **Esito, secondo punto — l'impronta attesa era in un commento.** I 50 000 documenti e la loro
+  somma erano scritti accanto al codice come promemoria per chi legge, e nessuno li confrontava.
+  Ora sono due costanti, `IMPRONTA_50K` e `IMPRONTA_20K`, e il confronto è una funzione che stampa
+  l'atteso e l'ottenuto quando divergono. È la nota di metodo che ne è uscita: **un valore atteso
+  scritto in un commento non è una verifica, è una speranza documentata.**
+
+- **Esito, terzo punto — uno spazio non è una distribuzione, e il caso è stato costruito davvero.**
+  Il controllo che distingue uno sharded cluster da un replica set travestito cercava uno spazio
+  nella risposta. La risposta `shard1rs=0 shard2rs=5` ne ha uno: un chunk vuoto su uno shard e
+  cinque documenti sull'altro passavano per «documenti su entrambi gli shard». Il caso non è stato
+  immaginato: è stato costruito su un database usa-e-getta spostando un chunk vuoto sul secondo
+  shard, e la prima stesura del controllo l'ha dichiarato verde davanti alla misura. Il rimedio
+  conta i token `nome=numero` e chiede due cose insieme: almeno due shard letti, e tutti con
+  documenti.
+
+- **Esito, quarto punto — il riconoscimento provato in isolamento, su cinque casi.** Passa solo
+  `shard1rs=10000 shard2rs=10000`. Sono errori tutti e quattro gli altri: il falso verde originale
+  `shard1rs=0 shard2rs=5`, un solo shard, una risposta vuota, e un testo libero di errore. Provare
+  il riconoscitore staccato dallo script è ciò che ha reso possibile costruire i casi che sullo
+  stack vero non si sanno provocare senza rompere qualcosa.
+
+- **Riserve:** l'impronta è legata al seme dei dati di demo: se cambiano i documenti cambiano le due
+  costanti, e la prova diventa un promemoria da aggiornare — è il costo che si paga per avere un
+  confronto invece di un commento. Il conteggio dei token non verifica che gli shard nominati siano
+  quelli attesi, solo che siano almeno due e tutti popolati; nominare gli shard avrebbe legato lo
+  script al profilo. Il terzo caso, la risposta vuota, è provato in isolamento ma non è mai stato
+  osservato sullo stack vero.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0132
+
+---
+
+<a id="v-102"></a>
+### V-102 — L'eccezione localhost è un fermo di processo, e una sessione che si toglie l'utente non può verificare di averlo tolto
+
+- **Comandi:** tre misure su container usa-e-getta con `--auth` e **zero utenti**, che è la sola
+  condizione in cui l'eccezione localhost è aperta, e che sugli stack del lab non si verifica mai
+  perché l'init crea subito l'amministratore. Nessuna tocca il lab:
+
+```bash
+docker run -d --name c3-porta-aperta mongo@sha256:b6421fd6… --auth --bind_ip_all
+mongosh --host localhost --eval 'createUser → auth → dropUser → verifica'
+docker restart c3-latch      # e la stessa sonda, prima e dopo
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, immagine `mongo:7.0.40` fissata per digest,
+  container `c3-porta-aperta`, `c3-diagnosi`, `c3-latch`, `c3-finale`, tutti rimossi a fine misura,
+  6 settembre 2026.
+
+- **Che cosa si voleva sapere:** il rilievo C-3 diceva che la sonda dell'eccezione localhost in
+  `smoke-sharded.sh` può lasciare sullo shard un amministratore che non doveva esistere. Il rilievo
+  era giusto. La causa che proponeva — che `dropUser` potesse fallire — si è rivelata sbagliata, e
+  la causa cambia il rimedio.
+
+- **Esito, primo punto — l'utente viene rimosso, e la prima verifica lo negava.** La prima stesura
+  del rimedio verificava la rimozione con `admin.system.users.countDocuments(...)` subito dopo il
+  `dropUser`, nella stessa sessione. Misurato: `CREATO-VERIFICA-FALLITA: Unauthorized`. La prima
+  lettura — «il drop è fallito» — era **sbagliata**. La diagnosi passo per passo dice
+  `5 dropUser: OK` e mette il rosso solo sui passi successivi: togliendo l'utente con cui ci si è
+  autenticati si perdono nello stesso istante i privilegi per guardare se è andato via, e sia
+  `getUsers` sia `system.users` rispondono `Unauthorized`.
+
+- **Esito, secondo punto — la prova che una credenziale non c'è più è che non apre più.** Una
+  connessione nuova con la credenziale usa-e-getta risponde `MongoServerError: Authentication
+  failed.` — ed è l'unica verifica possibile, perché è l'unica che non ha privilegi da perdere. Per
+  fortuna è anche la più diretta: non chiede se il documento c'è, chiede se la porta si apre.
+
+- **Esito, terzo punto — anche il secondo controllo era invalido, e l'ha detto la misura.** Per
+  confermare la rimozione avevo rilanciato la sonda: «se il primo utente è sparito, la porta deve
+  essere di nuovo aperta». Non misura l'esistenza dell'utente. Costruito il caso apposta — creare
+  l'unico utente e toglierlo, poi chiedere — la risposta è `Unauthorized — eccezione CHIUSA` con
+  **zero utenti** nell'istanza. Dopo `docker restart`, la stessa domanda risponde
+  `CREATO — eccezione APERTA`. L'eccezione localhost è un **fermo di processo**: si chiude alla
+  creazione del primo utente e resta chiusa per la vita di quel `mongod`, indipendentemente da
+  quanti utenti restino.
+
+- **Esito, quarto punto — che cosa cambia per chi opera.** Un nodo che perde tutti i suoi
+  amministratori non è «aperto»: continua a rifiutare finché è acceso, e si riapre al riavvio. È il
+  contrario dell'intuizione, ed è la ragione per cui la nota della sonda dice di rimuovere a mano un
+  residuo **prima** del riavvio del nodo, non dopo.
+
+- **Esito, quinto punto — la forma finale provata sui due casi per cui esiste.** Porta aperta, su
+  container usa-e-getta: `TOLTO`, seguito da «la sua credenziale non apre più». Porta chiusa, sul
+  nodo vero `sh-shard1a`: `Unauthorized`, e **niente creato**. `make smoke-03` intero riporta le due
+  righe della sonda verdi.
+
+- **Riserve:** la password usa-e-getta transita nell'argv del client `docker` sull'host, che
+  [ADR-0054](Decision.md#adr-0054) tiene lontano dalla credenziale vera; è ammesso qui perché è
+  casuale, vive qualche millisecondo e appartiene a un utente che lo stesso comando cancella — ma
+  resta una deroga, non un modello da copiare. Il fermo di processo è misurato su MongoDB 7.0.40:
+  non è stato cercato nella documentazione se sia garantito o incidentale, e su un'altra versione
+  andrebbe rimisurato. Il ramo `NON-TOLTO` non è mai stato osservato: è provato per costruzione del
+  codice, non per esperimento.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0133
+
+---
+
+<a id="v-103"></a>
+### V-103 — Un file che sembra una registrazione e non lo è
+
+- **Comandi:** due copioni che sbagliano la riga di regia, provati contro la versione corretta e
+  contro la copia pre-rimedio presa da `HEAD`:
+
+```bash
+# riga con le virgolette aperte:      /bin/echo "non chiusa
+# riga che nomina un comando assente: /bin/comando-che-non-esiste
+uv run --directory tools pytest tools/tests/test_registra_terminale.py -q
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Python 3.13.15 di `uv`, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** il rilievo C-10 diceva che `registra-terminale.py` non gestisce una
+  riga di regia inanalizzabile. Restava da misurare che cosa succede davvero, perché la differenza
+  tra «esce con un errore brutto» e «lascia sul disco un file che mente» è tutta la differenza.
+
+- **Esito, primo punto — prima del rimedio, tre cose insieme.** Contro la copia di `HEAD`: uscita
+  **1**, un `Traceback` intero fino a `FileNotFoundError`, e sul disco un `.cast` di **192 byte**
+  che contiene la riga di regia e nessun marcatore. Il terzo è il danno vero: un file che ha
+  l'estensione giusta, l'intestazione giusta e nessun contenuto, e che chi lo trova più tardi non ha
+  modo di distinguere da una registrazione riuscita se non aprendolo.
+
+- **Esito, secondo punto — dopo il rimedio, le due scene escono 125.** Entrambi i casi escono
+  **125**, con il nome dell'eccezione nel messaggio (`ValueError`, `FileNotFoundError`) e **nessun**
+  traceback. Nel `.cast` la parola «ripartito» compare **zero** volte: la scena non riparte su un
+  comando che non è mai stato eseguito. Nessun processo resta appeso.
+
+- **Esito, terzo punto — 125 non è forma.** È il solo codice che distingue «è fallita la regia» da
+  «è fallito il comando registrato». Chi registra le scene ha bisogno della differenza, perché la
+  prima si ripara nel copione e la seconda no. Senza il rimedio l'eccezione saliva fino in cima e il
+  processo usciva **1**, cioè il codice che un comando registrato usa per dire di essere
+  andato male.
+
+- **Esito, quarto punto — il percorso buono non è cambiato.** Un copione che funziona esce **0** e
+  la scena riparte come prima. La suite di `tools` passa da 181 a **183** prove.
+
+- **Riserve:** il `.cast` continua a essere scritto anche quando la regia fallisce, ed è una scelta
+  — vedi [ADR-0132](Decision.md#adr-0132). Le due prove verificano il codice di uscita, l'assenza di
+  traceback e il contenuto del `.cast`, non il messaggio parola per parola: cambiare la formulazione
+  non le fa cadere, ed è voluto. Non sono stati cercati altri modi di far fallire `shlex.split` o
+  `subprocess.run` oltre a questi due: sono i due che `OSError` e `ValueError` coprono per
+  categoria, non per elenco.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0132
+
+---
+
+<a id="v-104"></a>
+### V-104 — La convenzione di questo repository, ricavata dai suoi 164 commit invece che dichiarata
+
+- **Comandi:** la storia interrogata, non la memoria:
+
+```bash
+git log --format=%s          # i 164 soggetti, poi contati per tipo, scope, maiuscola, lunghezza
+git log --merges --format='%h %s'
+git branch -a --format='%(refname:short)'
+git log --oneline -3 main
+```
+
+- **Ambiente:** `release/1.0` del repository al 6 settembre 2026, 164 commit dall'inizio.
+
+- **Che cosa si voleva sapere:** [ADR-0123](Decision.md#adr-0123) dichiara che questo repository non
+  ha una scheda che fissi il proprio modello dei rami, la strategia di merge o lo standard dei
+  messaggi di commit. Sei rilievi della review generale — C-1, C-2, G-1, G-5, G-6, G-7 — chiedono
+  cose diverse che poggiano tutte su quella sede mancante. Prima di scriverla bisognava sapere che
+  cosa il repository **fa già**, perché una convenzione dichiarata che contraddice
+  centosessantaquattro commit non è una convenzione: è un secondo problema.
+
+- **Esito, primo punto — cinque tipi, e la distribuzione dice a che cosa serve il repository.**
+  `docs` 77, `feat` 52, `fix` 22, `test` 5, `chore` 3. Centocinquantanove commit su 164 hanno la
+  forma `tipo: soggetto`; i cinque che non ce l'hanno sono i quattro merge di PR e il commit
+  iniziale. Che `docs` sia il tipo più frequente non è un'anomalia da correggere: questo è il
+  repository di un talk, e il materiale didattico è il prodotto quanto il codice.
+
+- **Esito, secondo punto — lo scope non si usa. Zero volte su 159.** Non «raramente», non «solo dove
+  serve»: mai. La parentesi di Conventional Commits non compare in nessun soggetto della storia.
+
+- **Esito, terzo punto — il soggetto è minuscolo, tranne quando comincia con qualcosa che si scrive
+  maiuscolo.** Ventinove soggetti su 159 cominciano con una maiuscola, e non sono eccezioni sparse:
+  tredici aprono con un identificatore del repository (`ADR-0123`, `V-090`, `PR`, `README`), sedici
+  con il designatore di un compito di piano (`Task 8 — le due morti di un primario…`). Nessuno dei
+  159 comincia con una parola comune maiuscola. La regola vera non è «minuscolo»: è «minuscolo,
+  e gli identificatori tengono le loro maiuscole».
+
+- **Esito, quarto punto — il soggetto non sta in 72 colonne, e nemmeno ci prova.** Cinquantaquattro
+  soggetti su 164 superano le 72 colonne, il più lungo ne ha **100**. Il limite di fatto è 100, lo
+  stesso del corpo dei documenti. Scrivere 72 in una scheda vorrebbe dire dichiarare fuori norma un
+  terzo della storia.
+
+- **Esito, quinto punto — quattro merge, tutti da PR, tutti in `develop`.** Le uniche fusioni della
+  storia sono `Merge pull request #2…#5`, una per feature, ciascuna con il nome del ramo d'origine
+  nel soggetto: `feature/01-stack-standalone`, `feature/02-stack-replicaset`,
+  `feature/03-stack-sharded`, `feature/04-app-python`. Nessun rebase sopra `develop`, nessuna
+  fusione fast-forward, nessun ramo chiuso fuori da una PR.
+
+- **Esito, sesto punto — `main` è fermo al commit iniziale.** Non è dimenticanza: è il modello. Il
+  lavoro vive su `develop`, i rami di feature entrano lì, e `main` riceve solo la release. Al 6
+  settembre 2026 `main` ha un commit solo, `1523ebf Initial commit`, e i rami che esistono sono
+  `main`, `develop`, `release/1.0`.
+
+- **Riserve:** questa è la convenzione **osservata**, non una che qualcuno abbia scelto in
+  anticipo — e la differenza conta, perché una regolarità può essere un'abitudine di chi ha scritto
+  finora invece di una decisione. Scriverla in una scheda la trasforma nella seconda, ed è
+  esattamente lo scopo. I quattro merge sono pochi per chiamarla strategia provata: dicono che
+  finora non se n'è usata un'altra, non che un'altra sia stata scartata. Il conteggio dei tipi vale
+  per la storia fino a qui: `refactor`, `style`, `perf`, `ci` e `build` non compaiono, ma non per un
+  divieto — semplicemente non è ancora capitato di averne bisogno.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0134
