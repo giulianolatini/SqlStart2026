@@ -7798,7 +7798,8 @@ Controlli alla chiusura: **650 unitarie**, **66 di integrazione**, **183 sugli s
 
 ### Prossimo passo
 
-Il rapporto al PO su ciò che va **segnalato e non riparato**: il falso allarme di
+**Il rapporto al PO è stato consegnato** a fine sessione, e conteneva ciò che va
+**segnalato e non riparato**: il falso allarme di
 WiredTiger nello smoke degli stack accesi da molte ore — `mongod` fa scorrere la riga
 `cache_size` fuori da un log `json-file 10m 3` in circa nove ore, quindi il controllo non
 la trova più ed è un difetto d'ambiente, non dello stack; i difetti della skill importata
@@ -7814,6 +7815,14 @@ per togliere il nome del repository d'origine. La discussione sulle priorità re
 per sua richiesta, fino alla sua passata a mano con il runbook. Nota a margine non ancora
 inseguita: l'appuntamento di [ADR-0058](Decision.md#adr-0058) riguarda MongoDB 8.0.30 e
 resta il **16 settembre**; i tre stack oggi dicono tutti `mongod 7.0.40`.
+
+**La sessione si sospende qui, su richiesta del PO** — «sono troppo stanco per decidere,
+riprendiamo domani». Non c'è lavoro a metà: albero pulito, `release/1.0` allineata a
+`origin` su `7f50e66`, 650 unitarie, 66 di integrazione, 183 sugli strumenti, `mypy` e
+`docs-check` verdi. **Si riprende dalle decisioni**, che sono tutte sue e nessuna urgente
+tranne una: il repository diventa pubblico fra dodici giorni, quindi la scelta se
+riscrivere la storia dei commit per togliere il nome del repository d'origine ha una
+scadenza, le altre no.
 
 Stato aggiornato: decisioni fino ad **ADR-0136**, verifiche fino a **V-104**, misure
 dell'applicazione fino a **M-064**, note di metodo fino alla **260**.
