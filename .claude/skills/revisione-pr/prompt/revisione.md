@@ -40,11 +40,27 @@ Guarda se:
 
 Cerca problemi reali e dimostrabili dal diff:
 
-- credenziali, chiavi, token o password scritti in chiaro, anche se di prova;
+- credenziali, chiavi, token o password scritti in chiaro. La domanda che decide è **«questo
+  valore apre qualcosa, adesso o in passato, qui o altrove?»**: se sì è un rilievo, e resta un
+  rilievo anche se il commit lo chiama «di prova», perché un valore che ha aperto qualcosa una
+  volta va ruotato. Se no — apre niente, e il nome o il contesto lo dichiarano finto: `finta`,
+  `sentinella`, `non-una-password`, un valore generato a caso e buttato — **non è un rilievo**, ed
+  è spesso l'esatto contrario: una sentinella esiste per essere riconoscibile, e serve a una prova
+  che verifica che la credenziale vera non compaia. Segnalarla spinge a togliere la guardia. Ciò
+  che resta da segnalare, in quel caso, è un valore finto che finisce in una **configurazione
+  predefinita** invece che in una prova;
 - dati personali o nomi di host, indirizzi, utenze interne finiti nel codice o nei documenti;
 - comandi di shell costruiti per concatenazione con valori non controllati; variabili non quotate
   che possono aprire un word splitting su input esterno;
-- percorsi di file temporanei prevedibili, permessi troppo larghi, `chmod 777`, `umask` allentate;
+- permessi troppo larghi, `chmod 777`, `umask` allentate; e percorsi di file temporanei
+  prevedibili — ma questi ultimi **solo dicendo chi vince la corsa**. Il difetto classico di
+  `/tmp/nome-noto` è che un altro utente, o un altro processo non fidato, scriva lì per primo e ci
+  metta un collegamento: richiede quindi che qualcun altro abbia accesso in scrittura a quella
+  directory. Se il percorso sta **dentro un container** che esegue un processo solo e contiene
+  soltanto dati generati, quel qualcun altro non c'è, e il rilievo va scritto come «prevedibile, e
+  qui non sfruttabile perché …» oppure non scritto. Tienine conto anche nel rimedio: `mktemp -d`
+  toglie la prevedibilità e in cambio lascia, se la corsa si interrompe, una directory di cui
+  nessuno conosce più il nome;
 - download di codice eseguito senza verifica (`curl … | sh`), pin di versione assenti dove
   contano, dipendenze aggiunte senza motivo dichiarato;
 - disattivazione di controlli di sicurezza (verifica dei certificati, sandbox, approvazioni) senza
