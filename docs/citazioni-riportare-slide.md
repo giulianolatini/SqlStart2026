@@ -3631,3 +3631,71 @@ di lasciarle cadere, perché un'ipotesi smentita è la cosa che più somiglia a 
 chiesta da una connessione che non ha privilegi da perdere. Non «il documento non c'è nella
 collezione»: quella è una domanda che richiede proprio i privilegi che l'operazione ha appena
 tolto.
+
+
+---
+
+### Una prova verde nel guasto per cui esiste non sorveglia niente
+
+> Tre prove di questo repository sono state accusate da una review di non verificare ciò che il
+> loro nome dichiara. L'arbitrato è stato mettere in produzione **esattamente il difetto che
+> ciascuna dichiarava di impedire**. Il lettore ciclico che smette di girare e cammina in avanti
+> per sempre: **650 prove su 650 restano verdi**. La promessa «restaura, **poi** conta» invertita
+> in «conta, poi restaura»: 650 su 650 verdi. E la più chiara delle tre, perché è successa dentro
+> una sola esecuzione: mentre la prova falliva dimostrando che il database della demo era stato
+> riscritto, l'asserzione sul suo conteggio — due righe più su, nella stessa corsa — **passava**.
+> Fonte: [ADR-0135](Decision.md#adr-0135),
+> [`app/docs/Sources.md` M-060](../app/docs/Sources.md#m-060),
+> [M-061](../app/docs/Sources.md#m-061), [M-064](../app/docs/Sources.md#m-064).
+
+**Perché una slide:** perché nessuna delle tre prove era scritta male, e il difetto era lo stesso
+in tutte e tre: **guardavano un valore che il guasto non cambia**. La prima ricalcolava dentro di
+sé la formula della produzione, e quando la produzione ha smesso di girare la copia ha smesso
+insieme a lei. La seconda contava una destinazione che il doppio non riempiva mai, e contare prima
+o dopo dava lo stesso numero. La terza contava documenti dopo un `mongorestore` che **inserisce e
+non aggiorna**: cinquantamila chiavi duplicate lasciano il conteggio esattamente dov'era, e con
+uscita 0. Tre prove verdi, tre guasti passati.
+
+**Perché una slide, secondo motivo:** perché dice che cosa fare, e non è «asserire di più». Su un
+valore cieco, asserire di più non serve: bisogna cambiare **che cosa si guarda**. Se la differenza
+sta in ciò che il codice *chiede* a un collaboratore, si registra l'argomento. Se la promessa è un
+**ordine** fra due passi, il doppio deve compiere davvero il primo, altrimenti i due momenti sono
+indistinguibili. Se il numero non cambia, si mette nel sistema una traccia che al momento del dump
+c'era e al momento del controllo non c'è più: se riappare, il guasto è avvenuto. **Finché non è
+stata vista fallire, una prova è una speranza.**
+
+**Il corollario scomodo:** la copertura contava tutte e tre. Le righe che il guasto ha cambiato
+erano eseguite da tutte e tre le prove. **La copertura misura le righe eseguite, non le promesse
+verificate**, e la distanza fra le due cose è tutto il rilievo.
+
+---
+
+### Ciò su cui una macchina deve decidere va scritto dove quella macchina legge
+
+> Due rilievi che sembravano di argomento diverso — uno sui marcatori di `pytest`, l'altro sulla
+> pulizia dei database di prova — misurati si sono rivelati lo stesso errore. Una prova che si
+> collegava allo sharded cluster aprendo un client per conto proprio, invece di chiedere la
+> fixture, restava fuori da `-m "not stack03"`: in questo repository il marcatore non si scrive,
+> lo **deriva** `pytest` dai `fixturenames`, e chi raggiunge lo stack per un'altra strada esce dal
+> meccanismo. E la spazzata iniziale, che toglie i database `mongolab_prove_*`, cancellava quelli
+> di una sessione ancora viva: **due `pytest` avviati insieme, e il secondo ha portato via i
+> cinque documenti su cui il primo stava lavorando — senza un errore, dentro una prova che parlava
+> d'altro.**
+> Fonte: [ADR-0136](Decision.md#adr-0136),
+> [`app/docs/Sources.md` M-062](../app/docs/Sources.md#m-062),
+> [M-063](../app/docs/Sources.md#m-063).
+
+**Perché una slide:** perché in tutti e due i casi **l'informazione esisteva**. La prova sapeva di
+volere lo stack 03 — c'era scritto nella sua docstring. Il processo sapeva di essere vivo. Ma
+stavano dove il meccanismo che decide non guarda: la selezione legge `fixturenames`, la spazzata
+legge il **nome** del database. Una dichiarazione che vive fuori da ciò che il meccanismo legge non
+è una dichiarazione: è un promemoria per gli umani, e nessuno lo esegue.
+
+**Perché una slide, secondo motivo:** perché il rimedio si è fatto bocciare dalla propria prova.
+La prima stesura risparmiava le altre sessioni vive e toglieva i **propri** residui, con un
+argomento che sembrava solido: alla prima spazzata i miei database non esistono ancora, quindi uno
+firmato con il mio numero viene da un `pid` riciclato. L'argomento è vero e poggia su un ordine di
+creazione delle fixture che nessuno verifica. La prova scritta per fissare il rimedio è diventata
+rossa alla prima corsa. **Un'assunzione tacita sull'ordine costa un modo silenzioso di cancellare
+lavoro vivo; un residuo di troppo costa una corsa.** L'invariante che è rimasto si dice in una
+riga: `spazza` non tocca niente che appartenga a una sessione viva.

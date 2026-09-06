@@ -8539,7 +8539,12 @@ l'unico posto dove resta scritto che cosa quel gruppo di commit era.
 *I messaggi.* La forma è `tipo: soggetto`, e i tipi in uso sono cinque: `docs`, `feat`, `fix`,
 `test`, `chore`. Il tipo segue lo **scopo del lavoro**, non il tipo di file toccato: un commit che
 cambia uno script per far passare una prova è `fix`, anche se il file è codice, e un commit che
-aggiunge una scheda a `Decision.md` è `docs`, anche se accanto cambia un commento nel codice. Lo
+aggiunge una scheda a `Decision.md` è `docs`, anche se accanto cambia un commento nel codice. Il caso
+limite lo ha trovato la review, e va detto: quando un commit **registra una decisione e la
+applica**, e l'applicazione cambia che cosa il lab esegue — la versione pinnata di un'immagine,
+un bersaglio nuovo, uno script nuovo — il tipo segue l'**effetto su chi esegue**, quindi `feat`
+o `chore`, non `docs`, per quanto la scheda sia il grosso del diff. Chi legge la storia cercando
+«quando è cambiato quello che gira» non deve trovarlo sotto `docs`. Lo
 **scope non si usa**: zero volte su 159 commit, e resta così. Il soggetto è in **minuscolo**, salvo
 quando apre con qualcosa che si scrive maiuscolo — un identificatore del repository (`ADR-0123`,
 `V-090`, `PR`, `README`) o il designatore di un compito di piano (`Task 8 — …`). Il limite del
@@ -8578,3 +8583,189 @@ scelta del momento.
   una review. Una sede che manca si apre quando qualcosa ci sbatte contro.
 
 **Fonti:** [V-104](Sources.md#v-104), [ADR-0123](#adr-0123)
+
+
+---
+
+<a id="adr-0135"></a>
+## ADR-0135 — Un rilievo su una prova si arbitra mutando la produzione, e una prova verde sotto il proprio difetto si riscrive perché osservi l'effetto
+
+**Data:** 2026-09-06 · **Stato:** Accettata
+
+**Contesto:** il dossier `app-prove` della review generale di `release/1.0` porta nove rilievi.
+Tre — C-3, C-6, C-7 — dicono la stessa cosa su tre prove diverse: la prova non verifica ciò che
+il suo nome dichiara. Un rilievo così non si può chiudere leggendo, perché leggere è il modo in
+cui la prova è nata sbagliata: chi l'ha scritta l'ha riletta e gli è sembrata giusta. L'unico
+arbitro è la produzione. Le tre misure sono [M-060](../app/docs/Sources.md#m-060),
+[M-064](../app/docs/Sources.md#m-064) e [M-061](../app/docs/Sources.md#m-061), e tutte e tre
+danno ragione al recensore.
+
+Messe in fila, le tre hanno lo stesso difetto e non è quello che sembra. Nessuna delle tre
+prove era distratta: tutte e tre guardavano un **valore che il difetto non cambia**. In C-3 la
+prova ricalcolava dentro di sé la formula della produzione, e quando la produzione ha smesso di
+girare la copia ha smesso insieme a lei. In C-7 il doppio del backup non scriveva niente nella
+destinazione, quindi contarla prima o contarla dopo il restore dava lo stesso numero. In C-6
+`mongorestore` inserisce e non aggiorna, quindi un restore che riscrive `lab` sopra sé stessa
+fallisce su ogni chiave e lascia il conteggio **esattamente** dov'era. Tre prove verdi nel
+guasto per cui esistevano.
+
+**Decisione.**
+
+*L'arbitrato.* Un rilievo che riguarda una prova si arbitra introducendo in produzione il
+difetto che quella prova dichiara di impedire, eseguendo, e leggendo il colore. Il verdetto è
+il colore, non l'opinione. Nessun rilievo su una prova si chiude per lettura del codice.
+
+*La riscrittura.* Se la prova resta verde, non si rinforza l'asserzione: si cambia **che cosa
+si guarda**, perché il valore che si stava guardando è cieco per costruzione. Tre forme, una
+per ciascun caso incontrato, e sono un repertorio non un elenco chiuso:
+
+- *registrare l'argomento.* Quando la differenza sta in ciò che la produzione **chiede** a un
+  collaboratore, la si osserva solo annotandolo. È `ArchivioCheAnnotaLePagine`, che tiene la
+  lista dei salti che si è visto passare.
+- *dare al doppio l'effetto vero.* Quando la promessa è un **ordine** fra due passi, serve un
+  doppio che il primo passo lo compia davvero, altrimenti i due momenti sono indistinguibili.
+  È `BackupCheRiempie`, che mette i documenti nella destinazione mentre l'iteratore scorre.
+- *scegliere una traccia che solo il difetto produce.* Quando il numero non cambia, si mette
+  nel sistema qualcosa che al momento del dump c'era e al momento del controllo non c'è più: se
+  riappare, il difetto è avvenuto. Sono le sentinelle di `test_backup.py`.
+
+*La sorgente torna com'era, la misura resta.* La mutazione si rimette a posto nella stessa
+sessione in cui si è fatta, e ciò che sopravvive è la voce `M-` con comando e output. La
+sorgente non deve portare segni; la prova sì.
+
+*Una prova nuova si vede rossa prima di dirsi scritta.* Vale per le prove nate da questi
+rilievi e per quelle che verranno: finché non è stata vista fallire sotto il mutante, una prova
+è una speranza.
+
+**Conseguenze.**
+
+Ogni rilievo su una prova costa almeno due esecuzioni della suite invece di una lettura. Sulla
+suite unitaria sono cinque secondi e mezzo l'una; su quella di integrazione sono minuti, e in
+C-6 sono state tre corse contro uno stack vero. È il prezzo, ed è basso rispetto a una prova
+che dice di sorvegliare e non sorveglia.
+
+La voce `M-` diventa la prova che la prova prova. Chi domani vorrà cambiare
+`test_il_lettore_predefinito_gira_dentro_una_finestra` troverà in M-060 il mutante esatto sotto
+cui deve restare rossa, e non dovrà indovinare che cosa quella prova stesse difendendo.
+
+C'è un limite dichiarato: il mutante è **uno**, scelto a mano, e vale per il difetto che la
+docstring nomina. Una prova che resta rossa sotto quel mutante non è per questo completa. In
+C-6, per esempio, il difetto è preso anche dal contatore dell'adattatore, e la seconda corsa è
+stata un doppio mutante per isolare che cosa sorvegliasse davvero la prova.
+
+**Alternative scartate.**
+
+- *Chiudere i tre rilievi leggendo il codice.* È il modo in cui le tre prove sono state scritte
+  e riviste, e sono passate. Una lettura in più non aggiunge una prova in più.
+- *Fidarsi della copertura.* Tutte e tre le prove eseguivano le righe che il difetto ha
+  cambiato: la copertura le contava. La copertura misura le righe eseguite, non le promesse
+  verificate, e qui la distanza fra le due cose è tutto il rilievo.
+- *Adottare uno strumento di mutation testing.* `mutmut` o `cosmic-ray` genererebbero i mutanti
+  al posto nostro e sistematicamente, ed è la direzione giusta a lungo termine. Non entra in
+  questa release: la scadenza è il 18 settembre 2026, lo strumento va tarato per non annegare
+  la suite di mutanti equivalenti, e il valore didattico di questo repository sta nel mutante
+  scelto e spiegato, non in una percentuale. Resta una proposta da portare al PO.
+- *Riscrivere le tre prove rinforzando le asserzioni.* Sarebbe stato il rimedio naturale e
+  sarebbe stato inutile: il valore osservato era cieco, e asserire di più su un valore cieco
+  non lo rende vedente.
+
+**Fonti:** [M-060](../app/docs/Sources.md#m-060), [M-061](../app/docs/Sources.md#m-061),
+[M-064](../app/docs/Sources.md#m-064), [M-024](../app/docs/Sources.md#m-024)
+
+---
+
+<a id="adr-0136"></a>
+## ADR-0136 — Ciò su cui un meccanismo automatico deve decidere va scritto dove quel meccanismo legge
+
+**Data:** 2026-09-06 · **Stato:** Accettata
+
+**Contesto:** due altri rilievi del dossier `app-prove`, C-4 e C-5, sembrano di argomento
+diverso — uno parla di marcatori `pytest`, l'altro di pulizia dei database — e misurati si
+rivelano lo stesso errore.
+
+In C-4 ([M-062](../app/docs/Sources.md#m-062)) una prova si collegava allo sharded cluster
+aprendo un client per conto proprio. Aveva una ragione buona, scritta nella sua docstring: il
+client della fixture `stack03` è caldo per costruzione, e il difetto che quella prova sorveglia
+si riproduce solo su un client freddo. Ma in questo repository il marcatore `stack03` non si
+scrive a mano: lo deriva `pytest_collection_modifyitems` guardando i `fixturenames`, proprio
+perché nessuno se ne dimentichi. Raggiungere lo stack per un'altra strada ha portato la prova
+fuori dal meccanismo: niente fixture, niente marcatore, e `-m "not stack03"` — il comando con
+cui la suite gira quando lo sharded è spento — la lasciava selezionata.
+
+In C-5 ([M-063](../app/docs/Sources.md#m-063)) ogni sessione di prova spazza appena parte i
+database che cominciano per `mongolab_prove_`. Quel prefisso distingue le prove da `lab` e non
+distingue una sessione dall'altra: due `pytest` avviati insieme sullo stesso stack, e il
+secondo cancella i database che il primo sta usando. Misurato: cinque documenti diventati zero,
+senza un errore, dentro una prova che parlava d'altro.
+
+Il meccanismo che decide legge una cosa sola. Per la selezione è `fixturenames`; per la
+spazzata è il **nome** del database. In tutti e due i casi l'informazione che serviva alla
+decisione esisteva — la prova sapeva di volere lo stack 03, il processo sapeva di essere vivo —
+e stava dove il meccanismo non guarda.
+
+**Decisione.**
+
+*La regola.* Quando un meccanismo automatico deve decidere qualcosa su una prova o su una sua
+risorsa, l'informazione che gli serve va scritta **dentro ciò che quel meccanismo legge**. Non
+accanto, non in un commento, non in una convenzione fra chi scrive le prove.
+
+*C-4, in concreto.* Una prova che tocca uno stack ne chiede la fixture, sempre, anche quando
+del valore non sa che farsene: `del stack03` sulla prima riga dichiara che la si chiede per
+l'accensione e per il marcatore. Se poi le serve un client diverso da quello della fixture, se
+lo costruisce — ed è lecito, perché la scoperta della topologia in PyMongo è per oggetto
+`MongoClient` e un client nuovo nasce freddo anche accanto a uno caldo. La misura verifica
+tutt'e due le metà: il marcatore compare, e la prova resta capace di fallire.
+
+*C-5, in concreto.* Il nome di un database usa-e-getta porta la sessione che l'ha creato:
+`mongolab_prove_<pid>_<coda>`. Il `pid` e non un `uuid`, perché deve essere **interrogabile** —
+`os.kill(pid, 0)` chiede al kernel se quel processo esiste ancora, e un identificatore casuale
+quella domanda non la sa reggere. L'invariante della spazzata si dice in una riga: **`spazza`
+non tocca niente che appartenga a una sessione viva.**
+
+*Il corollario che è costato di più.* La propria sessione si risparmia come le altre. La prima
+stesura del rimedio toglieva i propri residui, con l'argomento che alla prima spazzata i
+database di questa sessione non esistono ancora, quindi un nome firmato con il proprio numero
+viene per forza da un `pid` riciclato. L'argomento è vero e poggia su un ordine di creazione
+delle fixture che nessuno verifica e che il giorno in cui cambiasse non farebbe rumore. La
+prova scritta per fissare il rimedio l'ha bocciato alla prima corsa. Un residuo da `pid`
+riciclato costa una corsa in più prima di sparire; l'assunzione costava un modo silenzioso di
+cancellare del lavoro vivo.
+
+**Conseguenze.**
+
+`app/tests/integration/test_ambiente.py` nasce da qui: il modulo con cui tutte le prove
+raggiungono gli stack non aveva prove proprie, e conteneva l'unica funzione del repository il
+cui mestiere è cancellare. Uno strumento che cancella è quello da provare per primo, perché
+quando sbaglia lo fa in silenzio.
+
+Le due prove parallele diventano lecite: due sessioni sullo stesso stack non si disturbano più,
+e `pytest-xdist` funzionerebbe senza aggiunte perché ogni worker è un processo con il suo
+`pid`.
+
+Il limite è dichiarato dov'è scritto il rimedio: il `pid` è interrogabile finché le sessioni
+girano sulla stessa macchina degli stack, che è il caso di questo laboratorio — Compose in
+locale. Due macchine diverse contro lo stesso MongoDB si scambierebbero i numeri.
+
+**Alternative scartate.**
+
+- *Un `uuid` invece del `pid`.* Distingue le sessioni e non risponde alla domanda che serve:
+  chi l'ha scritto è ancora vivo? Senza quella risposta la spazzata può solo scegliere fra
+  cancellare tutto — e portarsi via il lavoro di chi sta girando — e non cancellare niente, e
+  lasciare che gli orfani si accumulino.
+- *Un registro delle sessioni attive, in una collezione dello stack.* Risponde alla domanda e
+  aggiunge uno stato da tenere aggiornato, con il suo problema di sessioni morte che non
+  cancellano la propria riga. Il `pid` la risposta ce l'ha già, in una chiamata di sistema e
+  senza registri.
+- *Togliere la spazzata dal percorso automatico e metterla in un bersaglio `make` esplicito.*
+  Elimina il problema alla radice: se nessuno spazza all'avvio, nessuno cancella il lavoro
+  altrui. In cambio gli orfani restano finché qualcuno non se ne ricorda, e su un laboratorio
+  che gira in demo dal vivo la pulizia automatica vale più della sua rarissima sorpresa. È
+  un'alternativa ragionevole e va portata al PO, non chiusa qui.
+- *Scrivere il marcatore `stack03` a mano sulla prova, senza chiedere la fixture.* Avrebbe
+  fatto funzionare `-m "not stack03"` e lasciato la prova senza accensione: girando con lo
+  stack spento sarebbe stata selezionata dal comando che li vuole tutti, e sarebbe fallita per
+  connessione rifiutata. È esattamente la dichiarazione slegata dal fatto che questa scheda
+  vieta.
+
+**Fonti:** [M-062](../app/docs/Sources.md#m-062), [M-063](../app/docs/Sources.md#m-063),
+[M-053](../app/docs/Sources.md#m-053)
