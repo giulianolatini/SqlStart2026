@@ -621,3 +621,72 @@ def test_il_verdetto_del_drop_non_si_fida_del_campo_dropped():
     assert "getDBNames" in blocco, (
         "per dire se il database c'era serve l'elenco, chiesto prima del drop"
     )
+
+
+def cartella_del_dump() -> str:
+    """Dove il dump atterra dentro il nodo: `DESTINAZIONE_DUMP`, letta da `cli.py`.
+
+    Non passa da `valore_di` perché la costante è avvolta in `Path(...)`: nel codice è un
+    percorso, qui serve la stringa che finisce scritta dentro `reset-demo.sh`.
+    """
+    for nodo in ast.walk(ast.parse(CLI.read_text(encoding="utf-8"))):
+        if (
+            isinstance(nodo, ast.AnnAssign)
+            and isinstance(nodo.target, ast.Name)
+            and nodo.target.id == "DESTINAZIONE_DUMP"
+            and isinstance(nodo.value, ast.Call)
+            and nodo.value.args
+            and isinstance(nodo.value.args[0], ast.Constant)
+        ):
+            return nodo.value.args[0].value
+    raise AssertionError("DESTINAZIONE_DUMP non si trova in cli.py")
+
+
+def blocco_del_dump() -> str:
+    """Il pezzo di `reset-demo.sh` che svuota la cartella in cui il dump atterra."""
+    testo = RESET_DEMO.read_text(encoding="utf-8")
+    apertura = 'titolo "La cartella del dump, dentro il nodo"'
+    assert apertura in testo, "il blocco della cartella del dump non c'è in reset-demo.sh"
+    return testo.split(apertura)[1].split('titolo "Dataset"')[0]
+
+
+def test_reset_demo_svuota_anche_la_cartella_del_dump():
+    """La copia non è un database e non è un volume: è una cartella dentro `mongo-rs-1`,
+    e `mongodump --out` non la svuota prima di scriverci — ci aggiunge. Alla quinta prova
+    generale la cartella tiene cinque dump, e `demo restore` li rimette in piedi tutti:
+    misurato il 6 settembre, **sei** collezioni ripristinate invece di una, elencate una
+    per riga su uno schermo proiettato.
+
+    È l'unico pezzo di stato della demo che non sta né in un database né in un volume, e
+    per questo era l'unico che nessuno toglieva.
+    """
+    cartella = cartella_del_dump()
+    blocco = blocco_del_dump()
+
+    assert cartella in blocco and "rm -rf" in blocco, (
+        f"reset-demo.sh non svuota {cartella}: chi ripete l'Atto III ritrova nella copia "
+        f"le collezioni di tutte le corse precedenti"
+    )
+
+
+def test_il_verdetto_della_cartella_guarda_prima_di_togliere():
+    """`rm -rf` esce zero sia se la cartella c'era sia se non c'era.
+
+    È lo stesso difetto del `dropDatabase` di due blocchi più su, con un altro comando:
+    un verdetto che si fida dell'esito racconta una pulizia che non ha fatto. Qui la
+    domanda si fa prima, con un `ls` che serve anche a dire **quanti** dump c'erano — che
+    è l'informazione per cui questo blocco esiste.
+    """
+    # I soli comandi: il commento qui sopra il blocco spiega perché `rm -rf` non basta, e
+    # quindi lo nomina prima del `ls` che invece lo precede davvero. Misurare l'ordine sul
+    # testo intero avrebbe accusato la spiegazione al posto del codice.
+    comandi = "\n".join(
+        riga for riga in blocco_del_dump().splitlines() if not riga.lstrip().startswith("#")
+    )
+
+    assert "ls " in comandi, (
+        "per dire se la cartella c'era serve guardarla: `rm -rf` non lo dice"
+    )
+    assert comandi.index("ls ") < comandi.index("rm -rf"), (
+        "la cartella si guarda **prima** di toglierla: dopo non c'è più niente da contare"
+    )

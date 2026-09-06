@@ -251,6 +251,36 @@ elif [[ "${STACK}" == "02" ]]; then
     ok "database rimosso: ${ripristino}"
   fi
 
+  titolo "La cartella del dump, dentro il nodo"
+  # L'unico pezzo di stato della demo che non sta ne' in un database ne' in un volume, e
+  # per questo era l'unico che non toglieva nessuno. `demo backup-live` scrive in
+  # `/tmp/mongolab-backup` **dentro** `mongo-rs-1` — il primo nodo e non il primario,
+  # perche' il restore deve ritrovare la copia nello stesso container qualche minuto dopo
+  # (`_nodo_degli_strumenti` in `cli.py`) — e `mongodump --out` non svuota la
+  # destinazione: ci aggiunge. Alla quinta prova generale la cartella tiene cinque dump e
+  # `demo restore` li rimette in piedi tutti: misurato il 6 settembre, sei collezioni
+  # ripristinate invece di una, elencate una per riga davanti alla sala.
+  #
+  # Il percorso sta scritto qui e in `cli.py`: a tenerli allineati e' la prova
+  # `test_reset_demo_svuota_anche_la_cartella_del_dump`. Il `ls` prima del `rm` non e'
+  # prudenza, e' l'unico modo di sapere che cosa c'era — `rm -rf` esce zero tanto se la
+  # cartella c'era quanto se non c'era, esattamente come `dropDatabase` risponde
+  # `dropped` in tutti e due i casi.
+  #
+  # Si contano i `.bson` sotto `lab` e non tutto l'albero: il dump porta anche `admin/` e
+  # `oplog.bson`, che il restore non rimette in piedi perche' li esclude
+  # (`--nsInclude lab.*`, `argomenti_restore` in `backup.py`). Il numero da dire e' quello
+  # che ricompare sullo schermo, non quello dei file.
+  copie="$(compose exec -T mongo-rs-1 ls -1 /tmp/mongolab-backup/lab 2>/dev/null \
+    | grep -c '\.bson$' || true)"
+  if ! compose exec -T mongo-rs-1 rm -rf /tmp/mongolab-backup; then
+    errore "la cartella del dump non si è potuta togliere da mongo-rs-1"
+  elif [[ "${copie}" -eq 0 ]]; then
+    ok "nessun dump da togliere"
+  else
+    ok "dump rimossi: ${copie} collezioni che il restore avrebbe rimesso in piedi"
+  fi
+
   titolo "Dataset"
   # Lo STESSO servizio che semina all'avvio, con RICARICA=1. Una sorgente sola.
   if ! compose run --rm -e RICARICA=1 rs-init > /dev/null 2>&1; then
