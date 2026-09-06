@@ -461,26 +461,95 @@ fi
 #    qualunque processo condividesse il namespace di rete del container (V-064 esito 5).
 #    Se un giorno tornasse a passare, vorrebbe dire che uno shard è ripartito senza il suo
 #    amministratore — e che la porta è di nuovo aperta.
-eccezione="$(compose exec -T "${SHARD1[0]}" mongosh --quiet --host localhost --eval '
-  try { db.getSiblingDB("admin").createUser({user: "smoke-non-deve-esistere", pwd: "x", roles: [{role: "root", db: "admin"}]}); print("CREATO"); }
-  catch (e) { print(e.codeName); }' 2>&1 | tr -d '\r' | tail -1)"
-if [[ "${eccezione}" == "Unauthorized" ]]; then
-  ok "l'eccezione localhost su ${SHARD1[0]} è chiusa (createUser senza credenziali: Unauthorized)"
-else
-  errore "l'eccezione localhost su ${SHARD1[0]} non è chiusa: «${eccezione}»"
-fi
+#
+#    Una sonda che apre una porta la richiude. La prima stesura tentava la creazione con
+#    `pwd: "x"`, e nel solo caso per cui la sonda esiste — la porta aperta — quel comando
+#    **riesce**: lasciava sullo shard un `root` permanente con una password scritta in
+#    chiaro in un file che dal 18 settembre è pubblico. E lasciava anche di peggio, perché
+#    l'eccezione localhost si chiude **dietro** l'utente appena creato: da quel momento
+#    quella diventa l'unica credenziale rimasta per entrare (V-102, ADR-0133).
+#
+#    Sostituirla con una verifica che non crea niente non è possibile, ed è il motivo per
+#    cui la forma resta questa: l'eccezione localhost riguarda la creazione del *primo*
+#    utente, e nessun comando di sola lettura la esercita. Cambiano tre cose — la password
+#    è casuale e vive quanto la sonda, l'utente si toglie subito, e la sua assenza si
+#    verifica invece di darla per fatta.
+UTENTE_SONDA=smoke-non-deve-esistere
+
+porta_di_servizio_chiusa() {
+  local servizio="$1"
+  # Casuale e non fissa: se il `dropUser` qui sotto fallisse, ciò che resta sullo shard
+  # non sarebbe comunque una credenziale che qualcuno può leggere nel repository. Il
+  # valore transita nell'argv del client `docker` sull'host, che ADR-0054 tiene lontano
+  # dalla credenziale vera — qui è ammesso perché è casuale, vive qualche millisecondo e
+  # appartiene a un utente che questo stesso comando cancella.
+  local usa_e_getta
+  usa_e_getta="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+
+  local esito
+  esito="$(compose exec -T "${servizio}" mongosh --quiet --host localhost --eval "
+    const nome = '${UTENTE_SONDA}';
+    const pwd = '${usa_e_getta}';
+    const admin = db.getSiblingDB('admin');
+    try {
+      admin.createUser({user: nome, pwd: pwd, roles: [{role: 'root', db: 'admin'}]});
+    } catch (e) {
+      print(e.codeName);
+      quit(0);
+    }
+    // Se siamo qui la porta era aperta, e adesso è chiusa dietro l'utente che abbiamo
+    // appena creato: per toglierlo bisogna presentarsi con la credenziale che gli
+    // abbiamo dato un istante fa. Qui si toglie e basta — la verifica NON può stare in
+    // questa sessione, e il perché è misurato: togliendo l'utente con cui ci si è
+    // autenticati si perdono nello stesso istante i privilegi per guardare se è andato
+    // via, e ogni lettura successiva risponde Unauthorized (V-102).
+    try {
+      admin.auth(nome, pwd);
+      admin.dropUser(nome);
+      print('TOLTO');
+    } catch (e) {
+      print('NON-TOLTO: ' + e.codeName);
+    }" 2>&1 | tr -d '\r' | tail -1)"
+
+  case "${esito}" in
+    Unauthorized)
+      ok "l'eccezione localhost su ${servizio} è chiusa (createUser senza credenziali: Unauthorized)"
+      ;;
+    TOLTO)
+      errore "l'eccezione localhost su ${servizio} è APERTA: un root si è creato senza presentare niente"
+      # `dropUser` non ha alzato eccezioni, e non basta: la prova che una credenziale non
+      # c'è più è che **non apre più**, chiesta da una connessione nuova che non ha
+      # privilegi da perdere. Questa è l'unica verifica possibile, e per fortuna è anche
+      # la più diretta.
+      local residuo
+      residuo="$(compose exec -T "${servizio}" mongosh --quiet --host localhost \
+        --username "${UTENTE_SONDA}" --password "${usa_e_getta}" \
+        --authenticationDatabase admin --eval 'print("APRE-ANCORA")' 2>&1 \
+        | tr -d '\r' | tail -1)"
+      if [[ "${residuo}" == *'Authentication failed'* ]]; then
+        nota "l'utente della sonda è stato rimosso: la sua credenziale non apre più"
+      else
+        errore "l'utente della sonda NON risulta rimosso: «${residuo}»"
+        nota "toglierlo a mano, e prima del riavvio del nodo: a mongod fermo e riacceso"
+        nota "l'eccezione si riapre, perché resta chiusa solo per la vita del processo (V-102)"
+      fi
+      ;;
+    NON-TOLTO*)
+      errore "l'eccezione localhost su ${servizio} è APERTA e la sonda non ha potuto richiuderla: «${esito}»"
+      nota "un root con una password casuale è rimasto su ${servizio}: toglierlo a mano"
+      ;;
+    *)
+      errore "l'eccezione localhost su ${servizio} non risponde come atteso: «${esito}»"
+      ;;
+  esac
+}
+
+porta_di_servizio_chiusa "${SHARD1[0]}"
 
 # 3. Lo stesso sul secondo shard, e non è una ripetizione pigra: l'eccezione è una
 #    condizione DI PROCESSO, per nodo. Uno shard riavviato senza il suo init la riapre da
 #    solo, e un controllo su un nodo solo non se ne accorgerebbe.
-eccezione2="$(compose exec -T "${SHARD2[0]}" mongosh --quiet --host localhost --eval '
-  try { db.getSiblingDB("admin").createUser({user: "smoke-non-deve-esistere", pwd: "x", roles: [{role: "root", db: "admin"}]}); print("CREATO"); }
-  catch (e) { print(e.codeName); }' 2>&1 | tr -d '\r' | tail -1)"
-if [[ "${eccezione2}" == "Unauthorized" ]]; then
-  ok "l'eccezione localhost su ${SHARD2[0]} è chiusa"
-else
-  errore "l'eccezione localhost su ${SHARD2[0]} non è chiusa: «${eccezione2}»"
-fi
+porta_di_servizio_chiusa "${SHARD2[0]}"
 
 # --- Quello che gira è quello che abbiamo pinnato -------------------------------------
 titolo "Versione e limiti"
