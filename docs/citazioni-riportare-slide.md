@@ -3400,3 +3400,30 @@ somiglia a un errore**, e vale identico sugli stack di questo lab — `up --wait
 replica set non ancora inizializzato, `dropDatabase()` che risponde `dropped` per un database mai
 esistito. In tutti e tre i casi il sistema non tace: risponde bene a una domanda diversa da quella
 che gli era stata fatta.
+
+---
+
+### La redazione più rapida è l'unica che non si può correggere rileggendo
+
+> Prima di rendere pubblico questo repository, il nome di un repository privato importato andava
+> tolto: **84 occorrenze in 28 file**. La sostituzione secca — quel nome, questo nome — è un comando
+> solo e rende **falsa metà del testo**, perché metà di quelle occorrenze nomina l'altro repository
+> **per contrasto**. «Nove descrizioni nominano *quel* repository come condizione e qui non si
+> sarebbero accese mai» diventa «nove descrizioni nominano SqlStart2026 come condizione e qui non si
+> sarebbero accese mai», che dice il contrario del vero. **Il nome costa riservatezza una volta; una
+> frase falsa costa credibilità per sempre.**
+> Fonte: [ADR-0125](Decision.md#adr-0125), [V-094](Sources.md#v-094).
+
+**Perché una slide:** perché è il caso più insidioso di modifica di massa. Una sostituzione che
+sbaglia la grammatica si vede — tre passaggi automatici sono stati buttati proprio così, con «chi
+nominal…» e «In il repository d'origine» in bella vista. Una sostituzione che sbaglia il *senso* non
+si vede: le frasi restano grammaticali, scorrevoli, e sbagliate. Non c'è `grep` che la trovi e non
+c'è rilettura veloce che la noti, perché il difetto non è nella riga, è nel rapporto fra la riga e
+il mondo. La regola che ne esce è indipendente dal caso: **prima di sostituire un nome, chiedersi
+di chi parla la frase** — e dove la risposta cambia, cambia anche la sostituzione.
+
+**Perché una slide, secondo motivo:** perché la stessa passata ha corretto una supposizione mai
+misurata. La giustezza dei documenti era «più o meno 95 colonne»; misurata, è **100** — moda fra 97
+e 99. Con la soglia supposta sarebbero stati riavvolti 28 paragrafi in più, e ognuno sarebbe stato
+una riga di diff da rileggere per niente. **Una convenzione che nessuno ha misurato è un'opinione
+con l'aria di una regola**, e il costo non è l'errore: è il lavoro inutile che l'errore autorizza.
