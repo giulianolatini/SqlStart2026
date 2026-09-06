@@ -47,6 +47,7 @@ from mongolab.domain.porte import Clock, DocumentStore, EventSink
 
 from tests.aiutanti import specie
 from tests.doppi import (
+    ArchivioCheAnnotaLePagine,
     ArchivioCheNonLegge,
     ArchivioCheRompe,
     ArchivioLento,
@@ -746,12 +747,28 @@ def test_una_lettura_fallita_non_produce_un_evento() -> None:
 
 
 def test_il_lettore_predefinito_gira_dentro_una_finestra() -> None:
-    # `skip` in MongoDB è lineare: un lettore che camminasse in avanti per sempre finirebbe
-    # per misurare il costo del salto invece di quello della lettura. La finestra è
-    # dichiarata, e questa prova la fissa.
-    saltati = {(ordine % PAGINE_LETTE) * PAGINA for ordine in range(PAGINE_LETTE * 3)}
-    assert min(saltati) == 0
-    assert max(saltati) == (PAGINE_LETTE - 1) * PAGINA
+    """`skip` in MongoDB è lineare: un lettore che camminasse in avanti per sempre
+    finirebbe per misurare il costo del salto invece di quello della lettura. La finestra
+    è dichiarata, e questa prova la fissa.
+
+    Chiama `pagina_ciclica` e guarda i salti che **l'archivio si è visto chiedere**. La
+    prima stesura di questa prova ricalcolava la formula dentro sé stessa e asseriva sulla
+    propria aritmetica: restava verde con il modulo tolto dalla produzione, cioè
+    esattamente sotto il difetto che dichiarava di impedire
+    ([M-060](../../docs/Sources.md#m-060), [ADR-0135](../../../docs/Decision.md#adr-0135)).
+    """
+    archivio = ArchivioCheAnnotaLePagine(InMemoryStore())
+    archivio.insert_many([{"indice": n} for n in range(PAGINA)])
+
+    giri = 3
+    for ordine in range(PAGINE_LETTE * giri):
+        pagina_ciclica(archivio, ordine)
+
+    atteso = tuple(pagina * PAGINA for pagina in range(PAGINE_LETTE)) * giri
+    assert archivio.salti == atteso
+    assert max(archivio.salti) == (PAGINE_LETTE - 1) * PAGINA
+    assert archivio.salti[PAGINE_LETTE] == 0, "il secondo giro non è ricominciato da capo"
+    assert {quanti for _, quanti in archivio.pagine} == {PAGINA}
 
 
 def test_il_lettore_predefinito_legge_una_pagina() -> None:

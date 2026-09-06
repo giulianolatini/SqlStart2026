@@ -289,7 +289,9 @@ def test_lo_stato_di_un_mongos_dice_di_essere_un_mongos(
     assert "wiredTiger" not in stato
 
 
-def test_la_prima_domanda_a_un_client_appena_aperto_non_nega_il_cluster() -> None:
+def test_la_prima_domanda_a_un_client_appena_aperto_non_nega_il_cluster(
+    stack03: MongoClient[dict[str, Any]],
+) -> None:
     """Il difetto che nessuna prova vedeva, perché tutte partivano da un client già caldo.
 
     `_e_sharded()` legge la topologia **come il client la conosce**, e un client appena
@@ -305,9 +307,18 @@ def test_la_prima_domanda_a_un_client_appena_aperto_non_nega_il_cluster() -> Non
     parte fredda — schermata con `sbilancio —` e `chunk —` su un cluster perfettamente
     distribuito ([M-053](../../docs/Sources.md#m-053)).
 
-    Questa prova apre il proprio client apposta e non usa `stack03`: il client della
-    fixture è caldo per costruzione, e su un client caldo il difetto non si riproduce.
+    Questa prova apre il proprio client apposta: quello della fixture è caldo per
+    costruzione, e su un client caldo il difetto non si riproduce. Ma **chiede** lo stack
+    03 lo stesso, e i due fatti non sono in conflitto — la scoperta della topologia è per
+    oggetto `MongoClient`, quindi la spazzata che scalda quello di sessione non tocca
+    questo. Chiedere la fixture procura le due cose che servono e che aprirsi un client da
+    soli non dà: lo stack **acceso** quando la prova gira da sola, e il marcatore
+    `stack03`, che `pytest_collection_modifyitems` deduce dalle fixture. Senza,
+    `-m "not stack03"` lasciava selezionata proprio la prova che si collega al cluster, e
+    il comando faceva il contrario di quello che dice
+    ([M-062](../../docs/Sources.md#m-062), [ADR-0136](../../../docs/Decision.md#adr-0136)).
     """
+    del stack03  # chiesto per l'accensione e per il marcatore, non per il client caldo
     cliente: MongoClient[dict[str, Any]] = connetti(BERSAGLI["sharded"])
     try:
         # Prima operazione in assoluto su questo client. Nessun ping, nessuna scrittura.

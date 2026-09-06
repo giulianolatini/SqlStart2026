@@ -57,6 +57,7 @@ from mongolab.domain.modelli import (
     TipoTopologia,
 )
 from tests.doppi import (
+    BackupCheRiempie,
     FakeBackup,
     FakeInspector,
     FakePlanner,
@@ -815,11 +816,17 @@ def test_i_due_conteggi_si_accostano_e_la_differenza_e_un_numero() -> None:
     rinomina di namespace che serve a restaurare su un database diverso. Ciò che manca è
     esattamente quello che è stato scritto **durante** il dump, e mostrarlo è metà della
     lezione dell'Atto III. Dichiararlo un fallimento sarebbe l'altra metà, sbagliata.
+
+    La destinazione parte **vuota** e la riempie il restore, mentre la cronaca scorre. Con
+    una destinazione già popolata questa prova restava verde anche contando prima di
+    restaurare, cioè non distingueva la scena dalla sua assenza
+    ([ADR-0135](../../../docs/Decision.md#adr-0135)).
     """
+    destinazione = _archivio_con(0)
     scenario, _ = _scena_restore(
-        FakeBackup(AVANZAMENTI),
+        BackupCheRiempie(destinazione, quanti=7, avanzamenti=AVANZAMENTI),
         origine=_archivio_con(10),
-        destinazione=_archivio_con(7),
+        destinazione=destinazione,
     )
 
     esito = scenario.esegui()
@@ -831,10 +838,11 @@ def test_i_due_conteggi_si_accostano_e_la_differenza_e_un_numero() -> None:
 
 
 def test_un_restore_che_ritrova_tutto_combacia() -> None:
+    destinazione = _archivio_con(0)
     scenario, _ = _scena_restore(
-        FakeBackup(AVANZAMENTI),
+        BackupCheRiempie(destinazione, quanti=10, avanzamenti=AVANZAMENTI),
         origine=_archivio_con(10),
-        destinazione=_archivio_con(10),
+        destinazione=destinazione,
     )
 
     esito = scenario.esegui()

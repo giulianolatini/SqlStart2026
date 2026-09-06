@@ -22,6 +22,7 @@ in `tests/unit/test_doppi.py`.
 """
 
 from tests.doppi.archivio import (
+    ArchivioCheAnnotaLePagine,
     ArchivioCheNonLegge,
     ArchivioCheRompe,
     ArchivioLento,
@@ -30,7 +31,7 @@ from tests.doppi.archivio import (
     NonSupportato,
     ScritturaRifiutata,
 )
-from tests.doppi.backup import FakeBackup
+from tests.doppi.backup import BackupCheRiempie, FakeBackup
 from tests.doppi.ispettore import FakeInspector
 from tests.doppi.orologio import FakeClock, OrologioCheScorre
 from tests.doppi.pianificatore import FakePlanner
@@ -38,9 +39,11 @@ from tests.doppi.raccoglitore import RecordingSink
 from tests.doppi.regia import NodoSconosciuto, RegiaCheRifiuta, RegiaFinta
 
 __all__ = [
+    "ArchivioCheAnnotaLePagine",
     "ArchivioCheNonLegge",
     "ArchivioCheRompe",
     "ArchivioLento",
+    "BackupCheRiempie",
     "FakeBackup",
     "FakeClock",
     "FakeInspector",
