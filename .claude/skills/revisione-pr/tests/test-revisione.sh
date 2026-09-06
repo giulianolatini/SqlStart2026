@@ -252,5 +252,100 @@ prova    "--help esce 0"          muto "$RV" --help
 
 # ------------------------------------------------------------------ esito ---
 
+# ------------------------------------------------- 13. dossier da rami ------
+#
+# Qui una release si revisiona PRIMA che la PR esista, perche' la PR la apre e
+# la fonde il Product Owner. Il dossier deve quindi sapersi costruire da un
+# intervallo di rami, e da un sottoinsieme di percorsi: la release intera non
+# entra in un prompt solo, e un revisore che riceve undici megabyte non
+# revisiona, scorre.
+
+caso "13. dossier-rami: che cosa rifiuta"
+
+prova_no "senza argomenti"                muto "$RV" dossier-rami
+prova_no "senza intervallo"               muto "$RV" dossier-rami area
+prova_no "un'etichetta con una barra"     muto "$RV" dossier-rami a/b main..lavoro
+prova_no "un'etichetta con maiuscole"     muto "$RV" dossier-rami Area main..lavoro
+prova_no "un'etichetta che inizia per -"  muto "$RV" dossier-rami -area main..lavoro
+prova_no "un intervallo senza i due punti" muto "$RV" dossier-rami area lavoro
+prova_no "un ramo che non esiste"         muto "$RV" dossier-rami area main..inesistente
+
+u="$("$RV" dossier-rami area lavoro 2>&1)"
+prova "e quando manca l'intervallo lo spiega" contiene "$u" "base>..<head"
+
+caso "14. dossier-rami: che cosa produce"
+
+# Un ramo con due commit e due cartelle: una da revisionare, una da lasciare
+# fuori. Serve a provare che il pathspec restringe davvero.
+git -C "$R" checkout -q -b lavoro
+mkdir -p "$R/beta" "$R/pesante"
+printf 'uno\n' > "$R/beta/beta.sh"
+git -C "$R" add beta/beta.sh
+git -C "$R" commit -qm "feat(beta): il primo pezzo
+
+Con un corpo, per vedere se arriva."
+printf 'due\n' > "$R/pesante/registrazione.cast"
+git -C "$R" add pesante/registrazione.cast
+git -C "$R" commit -qm "chore: una registrazione che nessuno legge"
+git -C "$R" checkout -q develop
+git -C "$R" checkout -q lavoro
+
+prova "il comando riesce" muto "$RV" dossier-rami area develop..lavoro
+
+D="$R/.revisioni/area/dossier.md"
+prova "la cartella non si chiama pr-area" test ! -d "$R/.revisioni/pr-area"
+prova "il dossier esiste"                 test -f "$D"
+
+d="$(cat "$D" 2>/dev/null || true)"
+prova "dice l'intervallo"                 contiene "$d" "develop..lavoro"
+prova "dice l'etichetta"                  contiene "$d" "area"
+prova "elenca il primo commit"            contiene "$d" "feat(beta): il primo pezzo"
+prova "riporta il corpo del commit"       contiene "$d" "Con un corpo, per vedere se arriva."
+prova "elenca il secondo commit"          contiene "$d" "una registrazione che nessuno legge"
+prova "elenca i file toccati"             contiene "$d" "beta/beta.sh"
+prova "e porta il diff"                   contiene "$d" "+uno"
+
+caso "15. dossier-rami: il pathspec restringe davvero"
+
+prova "il comando riesce con un percorso" muto "$RV" dossier-rami ristretta develop..lavoro beta
+
+d="$(cat "$R/.revisioni/ristretta/dossier.md" 2>/dev/null || true)"
+prova    "dice quali percorsi ha guardato" contiene "$d" "beta"
+prova    "il diff di beta c'è"             contiene "$d" "+uno"
+prova_no "quello di pesante no"            contiene "$d" "+due"
+
+prova "e l'esclusione funziona" muto "$RV" dossier-rami esclusa develop..lavoro . ':(exclude)*.cast'
+d="$(cat "$R/.revisioni/esclusa/dossier.md" 2>/dev/null || true)"
+prova    "beta resta"                      contiene "$d" "+uno"
+prova_no "il .cast se ne va"               contiene "$d" "+due"
+
+caso "16. dossier-rami: il resto del giro funziona uguale"
+
+prova "il setaccio gira sul dossier da rami" muto "$RV" segreti area
+
+u="$("$RV" interroga area 2>&1)"
+prova "interroga lo trova"          contiene "$u" "PROVA A VUOTO"
+prova "e non manda niente"          contiene "$u" "non e' stato mandato niente"
+
+printf '\n+PERPLEXITY_API_KEY=pplx-4f9b2c7d1e8a6b3f5c0d9e2a7b4c1f8e\n' >> "$D"
+prova_no "un segreto lo ferma anche qui" muto "$RV" interroga area --invia
+
+u="$("$RV" stato 2>&1)"
+prova "stato elenca la revisione da rami" contiene "$u" "area"
+prova "e non la chiama PR"                test "$(printf '%s' "$u" | grep -c 'PR #area')" -eq 0
+
+caso "17. archivia: la cartella dei documenti si scopre, non si presume"
+
+# Il repository di prova non ha ne' docs/ ne' Docs/: resta il valore storico,
+# che e' quello del repository d'origine. La prova 10 qui sopra lo verifica gia'.
+# Quando invece docs/ minuscolo esiste - come in SqlStart2026 - il foglio va
+# li', perche' una cartella con il case sbagliato su Linux ne diventa due.
+mkdir -p "$R/docs"
+sed -i.bak 's/_da compilare_/accolto: verificato/' "$LAV/rilievi.md" 2>/dev/null
+muto "$RV" archivia 7 --scrivi
+prova "con docs/ presente il case segue quello trovato" \
+      test -f "$R/alfa/docs/revisioni/$(date '+%Y-%m-%d')-pr-7.md"
+rm -rf "$R/docs" "$R/alfa/docs"
+
 printf '\n%d passate, %d fallite\n' "$PASSATI" "$FALLITI"
 [ "$FALLITI" -eq 0 ]

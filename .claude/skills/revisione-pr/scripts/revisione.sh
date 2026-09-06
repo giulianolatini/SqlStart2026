@@ -40,13 +40,49 @@ git rev-parse --git-dir >/dev/null 2>&1 || errore "non sei dentro un repository 
 radice="$(git rev-parse --show-toplevel)"
 skill="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-cartella_di () { printf '%s/.revisioni/pr-%s' "$radice" "$1"; }
+# Una revisione ha un nome: il numero della PR, oppure - quando la PR non c'e'
+# ancora - l'etichetta dell'area. I due non si confondono, perche' un numero
+# non e' un'etichetta valida e un'etichetta non e' fatta di sole cifre.
+cartella_di () {
+  case "$1" in
+    ''|*[!0-9]*) printf '%s/.revisioni/%s' "$radice" "$1" ;;
+    *)           printf '%s/.revisioni/pr-%s' "$radice" "$1" ;;
+  esac
+}
 
 numero_valido () {
   case "$1" in
     ''|*[!0-9]*) return 1 ;;
     *) return 0 ;;
   esac
+}
+
+# L'etichetta diventa un nome di cartella, quindi niente barre; minuscola e
+# senza spazi perche' i percorsi di questo repository si scrivono cosi'; e non
+# puo' cominciare per trattino, che a un comando sembra un'opzione.
+etichetta_valida () {
+  case "$1" in
+    ''|-*) return 1 ;;
+    *[!a-z0-9-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# Chi viene dopo il dossier - setaccio, interrogatorio, triage, archivio - non
+# ha motivo di sapere se sta lavorando su una PR o su un intervallo.
+identificativo_valido () {
+  numero_valido "$1" || etichetta_valida "$1"
+}
+
+# `Docs` con la maiuscola e' la convenzione del repository d'origine; qui la cartella e'
+# `docs`. Su macOS le due si confondono, su Linux diventano due cartelle
+# diverse, ed e' un guasto che si vede solo dopo il clone. Quindi non si
+# presume: si guarda quale delle due il repository ha davvero.
+nome_docs () {
+  if [ -d "$radice/docs" ]; then printf 'docs'
+  elif [ -d "$radice/Docs" ]; then printf 'Docs'
+  else printf 'Docs'
+  fi
 }
 
 # --------------------------------------------------------------- dossier -----
@@ -102,6 +138,109 @@ cmd_dossier () {
   printf 'dossier: %s (%s byte)\n' "$d" "$(wc -c < "$d" | tr -d ' ')"
 }
 
+# --------------------------------------------------- dossier da rami --------
+
+# Una release non ha una PR finche' non la apre chi la fonde, ma va revisionata
+# prima - altrimenti la revisione arriva quando la decisione e' gia' presa. E
+# non entra in un dossier solo: undici megabyte non sono una revisione, sono
+# uno scorrimento. Per questo si prende un intervallo e, se serve, una fetta
+# dell'albero.
+cmd_dossier_rami () {
+  local etichetta="${1:-}" intervallo="${2:-}"
+  shift 2 2>/dev/null || true
+
+  etichetta_valida "$etichetta" \
+    || errore "uso: revisione.sh dossier-rami <etichetta> <base>..<head> [percorso...]
+L'etichetta e' minuscola, senza spazi ne' barre: diventa un nome di cartella."
+  case "$intervallo" in
+    *..*) : ;;
+    *) errore "uso: revisione.sh dossier-rami <etichetta> <base>..<head> [percorso...]
+Serve un intervallo, non un ramo solo: e' il confronto che si revisiona." ;;
+  esac
+
+  local base="${intervallo%%..*}" head="${intervallo##*..}"
+  git rev-parse --verify --quiet "$base^{commit}" >/dev/null \
+    || errore "«$base» non è un commit di questo repository."
+  git rev-parse --verify --quiet "$head^{commit}" >/dev/null \
+    || errore "«$head» non è un commit di questo repository."
+
+  local lav; lav="$(cartella_di "$etichetta")"
+  mkdir -p "$lav"
+
+  # Tre punti e non due: si revisiona quello che il ramo ha aggiunto dal punto
+  # in cui si e' staccato, non anche quello che nel frattempo e' successo
+  # altrove. Con due punti un merge nella base comparirebbe nel diff come una
+  # rimozione, e il revisore inseguirebbe codice che nessuno ha tolto.
+  local diff="$lav/diff.patch"
+  git diff "$base...$head" -- "$@" > "$diff" \
+    || errore "git diff ha rifiutato «$base...$head»."
+
+  local commit; commit="$(git rev-list --reverse "$base..$head" -- "$@")"
+  local quanti; quanti="$(printf '%s' "$commit" | grep -c . || true)"
+  # L'apostrofo dentro un'espansione ${:-} apre una quota anche fra doppi
+  # apici: il valore di riserva si mette fuori, e la riga resta leggibile.
+  local percorsi="$*"
+  [ -n "$percorsi" ] || percorsi="tutto l'albero"
+
+  local d="$lav/dossier.md"
+  {
+    printf '# Dossier dell'\''intervallo `%s..%s` — %s\n\n' "$base" "$head" "$etichetta"
+    printf '| Campo | Valore |\n|---|---|\n'
+    printf '| Etichetta | `%s` |\n' "$etichetta"
+    printf '| Da | `%s` |\n' "$base"
+    printf '| A | `%s` |\n' "$head"
+    printf '| Percorsi guardati | `%s` |\n' "$percorsi"
+    printf '| Commit | %s |\n' "$quanti"
+    printf '| Peso del diff | %s byte |\n' "$(wc -c < "$diff" | tr -d ' ')"
+    printf '\n> Questa revisione non nasce da una pull request: il ramo e'\'' aperto e la PR\n'
+    printf '> la apre chi la fonde. Quello che segue e'\'' l'\''intervallo cosi'\'' com'\''e'\'' oggi.\n\n'
+
+    # La nota inquadra: senza, il revisore deve indovinare che cosa sta
+    # guardando dal diff, e indovina male.
+    printf '## Che cosa si sta revisionando\n\n'
+    if [ -f "$lav/nota.md" ]; then
+      cat "$lav/nota.md"
+      printf '\n'
+    else
+      printf '_(nessuna nota: scrivila in `%s` e rilancia)_\n\n' "$lav/nota.md"
+    fi
+
+    printf '## Commit, in ordine cronologico\n\n'
+    if [ -z "$commit" ]; then
+      printf '_(nessun commit in questo intervallo per i percorsi indicati)_\n\n'
+    else
+      local i=0 sha
+      while IFS= read -r sha; do
+        [ -n "$sha" ] || continue
+        i=$((i+1))
+        printf '### %s. `%s` — %s\n\n' "$i" "${sha:0:8}" "$(git log -1 --format=%s "$sha")"
+        local corpo; corpo="$(git log -1 --format=%b "$sha")"
+        if [ -z "$corpo" ]; then
+          printf '_(nessun corpo)_\n\n'
+        else
+          printf '```\n%s\n```\n\n' "$corpo"
+        fi
+      done <<< "$commit"
+    fi
+
+    printf '## File toccati\n\n'
+    git diff --numstat "$base...$head" -- "$@" \
+      | awk '{ printf "- `%s` (+%s −%s)\n", $3, $1, $2 }'
+    printf '\n## Diff\n\n```diff\n'
+    cat "$diff"
+    printf '```\n'
+  } > "$d" || errore "non sono riuscito a comporre il dossier."
+
+  local peso; peso="$(wc -c < "$d" | tr -d ' ')"
+  printf 'dossier: %s (%s byte, %s commit)\n' "$d" "$peso" "$quanti"
+  if [ "$peso" -gt "$LIMITE_INVIO" ]; then
+    avviso "oltre il limite d'invio di $LIMITE_INVIO byte: cosi' non parte. Restringi i percorsi."
+  elif [ "$peso" -gt "$SOGLIA_AVVISO" ]; then
+    avviso "sopra la soglia di attenzione ($SOGLIA_AVVISO byte): una revisione distratta e' quasi una revisione mancata."
+  fi
+  return 0
+}
+
 # --------------------------------------------------------------- segreti -----
 
 # Esce 0 se il file e' pulito, 1 se qualcosa somiglia a una credenziale.
@@ -138,7 +277,7 @@ scansiona () {
 
 cmd_segreti () {
   local n="${1:-}"
-  numero_valido "$n" || errore "uso: revisione.sh segreti <numero-pr>"
+  identificativo_valido "$n" || errore "uso: revisione.sh segreti <numero-pr|etichetta>"
   local d; d="$(cartella_di "$n")/dossier.md"
   [ -f "$d" ] || errore "manca $d. Lancia prima 'revisione.sh dossier $n'."
   if scansiona "$d"; then
@@ -152,7 +291,7 @@ cmd_segreti () {
 
 cmd_interroga () {
   local n="${1:-}"; shift || true
-  numero_valido "$n" || errore "uso: revisione.sh interroga <numero-pr> [--invia]"
+  identificativo_valido "$n" || errore "uso: revisione.sh interroga <numero-pr|etichetta> [--invia]"
   local invia=0
   [ "${1:-}" = "--invia" ] && invia=1
 
@@ -230,9 +369,9 @@ cmd_interroga () {
 
 cmd_rilievi () {
   local n="${1:-}"
-  numero_valido "$n" || errore "uso: revisione.sh rilievi <numero-pr>"
+  identificativo_valido "$n" || errore "uso: revisione.sh rilievi <numero-pr|etichetta>"
   local lav; lav="$(cartella_di "$n")"
-  [ -d "$lav" ] || errore "non c'è nessuna revisione aperta per la PR #$n."
+  [ -d "$lav" ] || errore "non c'è nessuna revisione aperta con il nome «$n»."
   [ -f "$lav/gemini.txt" ] || [ -f "$lav/codex.txt" ] \
     || errore "nessuna risposta in $lav. Hai lanciato 'interroga $n --invia'?"
   command -v python3 >/dev/null 2>&1 || errore "manca python3. Vedi INSTALL-ENV.md."
@@ -260,7 +399,7 @@ progetto_di () {
 
 cmd_archivia () {
   local n="${1:-}"; shift || true
-  numero_valido "$n" || errore "uso: revisione.sh archivia <numero-pr> [--scrivi]"
+  identificativo_valido "$n" || errore "uso: revisione.sh archivia <numero-pr|etichetta> [--scrivi]"
   local scrivi=0
   [ "${1:-}" = "--scrivi" ] && scrivi=1
 
@@ -274,15 +413,23 @@ cmd_archivia () {
 Un rilievo senza verdetto non e' stato valutato, e archiviarlo direbbe il contrario."
   fi
 
-  local prj destinazione
+  local prj destinazione doc
   prj="$(progetto_di "$lav")"
+  doc="$(nome_docs)"
   if [ -n "$prj" ] && [ -d "$radice/$prj" ]; then
-    destinazione="$radice/$prj/Docs/revisioni"
+    destinazione="$radice/$prj/$doc/revisioni"
   else
-    destinazione="$radice/Docs/revisioni"
+    destinazione="$radice/$doc/revisioni"
   fi
 
-  local nome; nome="$(date '+%Y-%m-%d')-pr-$n.md"
+  # Una revisione senza PR non si chiama «pr-qualcosa»: il nome del file dice
+  # da dove viene, altrimenti fra un anno nessuno sa che cosa ha guardato.
+  local nome
+  if numero_valido "$n"; then
+    nome="$(date '+%Y-%m-%d')-pr-$n.md"
+  else
+    nome="$(date '+%Y-%m-%d')-$n.md"
+  fi
   if [ "$scrivi" -eq 0 ]; then
     printf 'PROVA A VUOTO — copierei\n  %s\nin\n  %s/%s\n' "$f" "$destinazione" "$nome"
     printf '\nPer procedere: revisione.sh archivia %s --scrivi\n' "$n"
@@ -300,12 +447,17 @@ Un rilievo senza verdetto non e' stato valutato, e archiviarlo direbbe il contra
 cmd_stato () {
   local base="$radice/.revisioni"
   [ -d "$base" ] || { printf 'nessuna revisione aperta.\n'; return 0; }
-  local trovate=0 dir n
-  for dir in "$base"/pr-*; do
+  local trovate=0 dir n etichetta
+  for dir in "$base"/*; do
     [ -d "$dir" ] || continue
     trovate=1
-    n="$(basename "$dir" | sed 's/^pr-//')"
-    printf 'PR #%s — %s\n' "$n" "$dir"
+    etichetta="$(basename "$dir")"
+    case "$etichetta" in
+      pr-*) n="${etichetta#pr-}"
+            if numero_valido "$n"; then printf 'PR #%s — %s\n' "$n" "$dir"
+            else printf 'intervallo %s — %s\n' "$etichetta" "$dir"; fi ;;
+      *)    printf 'intervallo %s — %s\n' "$etichetta" "$dir" ;;
+    esac
     [ -f "$dir/dossier.md" ] && printf '  dossier   %s byte\n' "$(wc -c < "$dir/dossier.md" | tr -d ' ')"
     [ -f "$dir/gemini.txt" ] && printf '  gemini    risposto\n'
     [ -f "$dir/codex.txt"  ] && printf '  codex     risposto\n'
@@ -324,12 +476,19 @@ uso () {
 uso: revisione.sh <comando> [argomenti]
 
   dossier   <n>              raccoglie la PR in un unico file leggibile
-  interroga <n> [--invia]    la manda a Gemini Pro e a Codex
-  rilievi   <n>              unisce le risposte in un foglio di triage
-  archivia  <n> [--scrivi]   controlla che il triage sia completo e lo mette nel repo
+  interroga <id> [--invia]   lo manda a Gemini Pro e a Codex
+  rilievi   <id>             unisce le risposte in un foglio di triage
+  archivia  <id> [--scrivi]  controlla che il triage sia completo e lo mette nel repo
 
-  segreti   <n>              passa il dossier al setaccio, da solo
+  dossier-rami <etichetta> <base>..<head> [percorso...]
+                             come dossier, ma da un intervallo di rami: serve
+                             quando si revisiona prima che la PR esista, e
+                             quando l'intervallo intero non entra in un prompt
+
+  segreti   <id>             passa il dossier al setaccio, da solo
   stato                      che cosa c'e' nelle cartelle di lavoro
+
+<id> e' il numero di una PR oppure l'etichetta di un intervallo.
 
 Senza --invia non esce niente da questa macchina: si vede solo che cosa
 uscirebbe, verso chi e quanto grande. Il dossier viene comunque passato al
@@ -338,7 +497,8 @@ AIUTO
 }
 
 case "${1:-}" in
-  dossier)   shift; cmd_dossier   "$@" ;;
+  dossier)      shift; cmd_dossier      "$@" ;;
+  dossier-rami) shift; cmd_dossier_rami "$@" ;;
   segreti)   shift; cmd_segreti   "$@" ;;
   interroga) shift; cmd_interroga "$@" ;;
   rilievi)   shift; cmd_rilievi   "$@" ;;
