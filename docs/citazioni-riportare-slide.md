@@ -3373,3 +3373,30 @@ decisioni. Cercando la scheda che vieta `git flow feature finish` per citarla, n
 centoventitré schede questo repository non ha mai scritto il proprio modello dei rami. La regola era
 rispettata da tutti e scritta da nessuno — e a rendere visibile il vuoto è stato un pacchetto
 importato che quella scheda la pretendeva.
+
+---
+
+### Un doppio più ubbidiente dell'originale non prova niente
+
+> La skill di revisione chiedeva a `agy` una risposta conforme a uno schema con `--output-format
+> text --json-schema`. `agy 1.1.22` rifiuta quella combinazione, e usciva con un errore su tutti e
+> sei i fascicoli della release. Il difetto era sopravvissuto a **53 prove verdi** perché la finta
+> `agy` del banco stampava il JSON nudo e accettava qualunque opzione. Resa fedele — stesse opzioni,
+> stesso rifiuto, stessa busta — **sette prove sono diventate rosse in un colpo: le tre nuove e
+> quattro che passavano da sempre.**
+> Fonte: [ADR-0124](Decision.md#adr-0124), [V-093](Sources.md#v-093).
+
+**Perché una slide:** perché nomina il modo in cui una suite di prove mente senza che nessuno abbia
+mentito. Un doppio si scrive per non dipendere da un servizio esterno, e mentre lo si scrive si
+sceglie — senza accorgersene — quanto farlo somigliare all'originale. La tentazione è farlo
+*collaborativo*: risponde sempre, non si lamenta delle opzioni, restituisce esattamente la forma che
+il codice si aspetta. Ma il valore di un doppio sta tutto nei rifiuti che riproduce, non nelle
+risposte che dà: un finto che non sa dire di no verifica il codice contro un mondo che non esiste.
+
+**Perché una slide, secondo motivo:** perché il guasto non si presentava come un guasto. Codex
+rispondeva regolarmente, quindi il terminale non diceva «la revisione è rotta»: diceva «un revisore
+su due non ha trovato niente». **Un errore che somiglia a un esito è più caro di un errore che
+somiglia a un errore**, e vale identico sugli stack di questo lab — `up --wait` che esce zero su un
+replica set non ancora inizializzato, `dropDatabase()` che risponde `dropped` per un database mai
+esistito. In tutti e tre i casi il sistema non tace: risponde bene a una domanda diversa da quella
+che gli era stata fatta.

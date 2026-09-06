@@ -7923,3 +7923,88 @@ L'hanno resa visibile proprio le skill che quelle decisioni le pretendono.
   rende più pericolosa, non meno.
 
 **Fonti:** [V-092](Sources.md#v-092), [ADR-0052](#adr-0052)
+
+<a id="adr-0124"></a>
+## ADR-0124 — Gli script di una skill importata sono codice nostro: si correggono qui, con prove, e i doppi devono saper dire di no
+
+**Data:** 2026-09-06 · **Stato:** Accettata
+
+**Contesto:** la prima cosa fatta con la skill `revisione-pr` dopo averla adattata
+([ADR-0123](#adr-0123)) è stata usarla sul serio, per la revisione generale della `release/1.0`.
+L'uso reale ha trovato in poche ore due difetti che 53 prove verdi non avevano trovato mai
+([V-093](Sources.md#v-093)).
+
+Il primo è di taratura. Il setaccio dei segreti si è fermato otto volte su due fascicoli, e nessuno
+degli otto valori era una credenziale: erano `password=credenziali.password`, `password=PASSWORD_DI_PROVA`
+e frasi come `"non-e-un-segreto-e-non-lo-sara-mai"`. Il pattern è giusto — cerca valori, non nomi,
+com'è scritto in testa a `segreti.pattern` — ma le esclusioni erano tarate sui modi di scrivere del
+repository d'origine, e questo repository ne ha altri tre.
+
+Il secondo è peggiore. All'invio, `agy 1.1.22` è uscito con un errore su tutti e sei i fascicoli:
+la skill chiedeva `--output-format text --json-schema`, combinazione che quella versione rifiuta.
+Codex invece rispondeva. Il terminale quindi non diceva «la revisione è rotta»: diceva «un revisore
+su due non ha trovato niente», che è un'informazione, non un guasto. Ed è arrivato fin qui per una
+ragione precisa: **la finta `agy` del banco di prova stampava JSON nudo e accettava qualunque
+opzione.** Era più ubbidiente dell'originale.
+
+Le due strade erano: segnalare a monte e aspettare, oppure correggere qui. La prima lascia la
+release senza metà revisione a dodici giorni dal talk.
+
+**Decisione.** Quattro punti.
+
+1. **Gli script di una skill importata sono codice di questo repository.** I *corpi testuali* delle
+   skill restano intatti — è la scelta di [ADR-0123](#adr-0123), e serve a tenere leggibile il diff
+   verso monte. Gli **script** no: `revisione.sh`, `normalizza.py`, `segreti.esclusioni` e le suite
+   si correggono qui quando qui sbagliano, con la stessa disciplina di qualunque altro file. Una
+   divergenza in uno script è un costo dichiarato, non un incidente.
+
+2. **Un difetto trovato usando la skill si chiude in TDD, non a mano.** Prima la prova che fallisce,
+   poi la correzione. Vale anche — soprattutto — quando la correzione è di una riga: il valore non è
+   la riga, è la prova che resta a sorvegliarla quando `agy` cambierà versione.
+
+3. **Un doppio deve riprodurre i rifiuti dell'originale, non solo le sue risposte.** È la regola
+   generale che questo caso ha reso visibile. Un finto che risponde sempre, accetta qualunque
+   opzione e restituisce esattamente la forma attesa verifica il codice contro un mondo che non
+   esiste. Quando un doppio sostituisce un programma esterno, deve rifiutare le righe di comando che
+   l'originale rifiuta e restituire l'involucro che l'originale restituisce. Reso fedele quello di
+   `agy`, sette prove sono diventate rosse in un colpo, quattro delle quali passavano da sempre.
+
+4. **Le esclusioni del setaccio si ancorano alla forma del valore, mai al nome, e ognuna porta la
+   sua controprova.** Il rischio di un'esclusione non è essere inutile: è spegnere in silenzio anche
+   il segreto vero. Perciò ogni riga aggiunta a `segreti.esclusioni` sta in coppia con una prova che
+   nella stessa forma una credenziale continua a essere trovata — ed è per questo che l'esclusione
+   delle costanti pretende un underscore: senza, avrebbe coperto anche `AKIA…`.
+
+**Conseguenze.**
+
+`revisione-pr` diverge dal repository d'origine in quattro file invece che in uno, e il conto è
+dichiarato: il comando `dossier-rami` (aggiunto qui), tre righe in `segreti.esclusioni`, un flag
+in `revisione.sh`, la funzione `sbusta` in `normalizza.py`, e 45 prove in più. Un aggiornamento a
+monte di questi quattro file andrà fuso a mano; i corpi delle skill no, e restano un `diff`
+leggibile.
+
+I due difetti valgono anche a monte. Non sono stati segnalati al repository d'origine in questa
+sessione: resta da fare, e la decisione su come farlo è del Product Owner, che è il proprietario
+di entrambi i repository.
+
+Il punto 3 non riguarda solo le skill. Questo repository ha cinque doppi scritti a mano in
+`app/tests` — `InMemoryStore`, `FakeClock`, `FakeInspector`, `FakeBackup`, `RecordingSink` — e
+nessuno di essi è mai stato guardato con questa domanda: **quali rifiuti dell'originale riproduce?**
+Non è un difetto noto, è una verifica che non è mai stata fatta. Sta fra i punti aperti.
+
+**Alternative scartate.**
+
+- *Segnalare a monte e aspettare la correzione.* Onesto, e a dodici giorni dal talk vuol dire fare
+  la revisione con un revisore solo. La segnalazione resta da fare, ma non al posto della correzione.
+- *Aggirare `agy` chiamandolo a mano fuori dalla skill.* Avrebbe funzionato una volta e saltato il
+  setaccio dei segreti, che è la sola cosa che sta fra un repository privato e una pubblicazione
+  irreversibile. La regola che ostacola si apre, non si scavalca.
+- *Rilassare il pattern del setaccio invece delle esclusioni.* Avrebbe spento il controllo per tutti
+  i casi futuri anziché per tre forme note. Un controllo che grida al lupo viene spento, ma uno che
+  non grida mai è già spento.
+- *Tenere il doppio ubbidiente e aggiungere solo le tre prove nuove.* Sarebbe rimasto verde tutto,
+  comprese le quattro prove che mentivano. Il valore stava proprio nel farle diventare rosse.
+- *Escludere per nome di file o per riga specifica.* Più preciso oggi, inutile domani: la riga si
+  sposta di un carattere e l'esclusione non trova più niente, in silenzio.
+
+**Fonti:** [V-093](Sources.md#v-093), [ADR-0123](#adr-0123)

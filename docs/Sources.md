@@ -9852,3 +9852,103 @@ git flow feature finish <slug>
 - **Usata da:** ADR-0123
 
 ---
+
+---
+
+<a id="v-093"></a>
+### V-093 — La skill di revisione messa al lavoro sul serio: otto falsi positivi, e un revisore su due che non partiva
+
+- **Comandi:** la costruzione dei sei fascicoli della release, il setaccio su ciascuno, la prova a
+  vuoto, l'invio, e la suite dopo ogni correzione:
+
+```bash
+.claude/skills/revisione-pr/scripts/revisione.sh dossier-rami app-sorgenti main..HEAD app/src app/pyproject.toml
+.claude/skills/revisione-pr/scripts/revisione.sh segreti   app-sorgenti
+.claude/skills/revisione-pr/scripts/revisione.sh interroga app-sorgenti          # a vuoto
+.claude/skills/revisione-pr/scripts/revisione.sh interroga app-sorgenti --invia
+bash .claude/skills/revisione-pr/tests/test-revisione.sh
+```
+
+- **Ambiente:** portatile Apple Silicon, macOS 25.6, 6 settembre 2026. `codex-cli 0.153.4`
+  autenticato con ChatGPT, `agy 1.1.22` autenticato, modello `gemini-3.1-pro-high`. Repository
+  **privato** (`gh repo view --json isPrivate` → `true`), quindi l'invio è una pubblicazione verso
+  terzi che non si annulla. Intervallo revisionato: `main...HEAD` di `release/1.0`, merge-base
+  `1523ebf`, 213 file e 125 969 righe aggiunte in tutto.
+
+- **Esito, primo punto — l'intervallo non entra in un prompt, e va spezzato per aree.** Il diff
+  intero pesa 11 322 719 byte contro un limite d'invio di 700 000: oltre quella soglia il prompt non
+  entra più negli argomenti di un processo su macOS e `agy` lo riceverebbe **troncato in silenzio**.
+  Escluse le tre aree che non sono artefatto — i tre registri (1 738 597 byte: sono il verbale),
+  `docs/00-progetto` (i piani), `app/docs` (710 795 byte, sopra il limite da sola) e i due `.cast`
+  (tracciati di terminale illeggibili, 30 441 righe) — restano sei fascicoli:
+
+| fascicolo | percorsi | prompt (byte) | commit |
+|---|---|---|---|
+| `talk` | `docs/05-talk` senza i `.cast` | 91 255 | 9 |
+| `stack-docker` | `docker` | 232 200 | 20 |
+| `documentazione-tecnica` | `docs/01`…`docs/04` | 438 192 | 23 |
+| `app-sorgenti` | `app/src`, `app/pyproject.toml` | 456 168 | 19 |
+| `strumenti` | `tools`, `Makefile`, `README.md` | 518 821 | 60 |
+| `app-prove` | `app/tests` | 625 817 | 21 |
+
+  Il primo tentativo teneva `docker` e `tools` insieme: 718 038 byte, **oltre il limite**. È stato
+  il limite a decidere la partizione, non il gusto.
+
+- **Esito, secondo punto — il setaccio dei segreti si è fermato otto volte, e tutte e otto a
+  vuoto.** Due fascicoli su sei, `app-sorgenti` (1) e `app-prove` (7). Ogni valore segnalato è stato
+  confrontato con quelli dei due `.env` non versionati **per SHA-256, senza stampare né gli uni né
+  gli altri**: nessuna corrispondenza. Le forme erano tre sole:
+
+```
+password=credenziali.password,                    l'attributo di un oggetto
+password=PASSWORD_DI_PROVA,                       il nome di una costante
+password="non-e-un-segreto-e-non-lo-sara-mai"     una frase italiana in chiaro
+```
+
+  Il pattern che le trova è corretto e non è stato toccato: cerca un nome di credenziale seguito da
+  `=` e da almeno sedici caratteri buoni, e queste tre righe li hanno. La correzione sta dall'altra
+  parte, in `segreti.esclusioni`, ancorata alla forma del **valore** — mai al nome, che è la regola
+  scritta in testa a `segreti.pattern`. L'underscore obbligatorio nell'esclusione delle costanti è
+  ciò che le impedisce di spegnere anche `AKIAIOSFODNN7EXAMPLE`, e c'è una prova che lo verifica.
+
+- **Esito, terzo punto — la metà Gemini della revisione non partiva.** All'invio, `agy` è uscito
+  male su tutti e sei i fascicoli:
+
+```
+Error: --json-schema can only be used when --output-format is 'json' or 'stream-json'
+```
+
+  La skill chiedeva `--output-format text --json-schema`, combinazione che `agy 1.1.22` rifiuta.
+  Codex rispondeva regolarmente, quindi **il guasto non si presentava come un guasto**: si
+  presentava come «un revisore su due non ha trovato niente».
+
+- **Esito, quarto punto — perché 53 prove verdi non l'avevano visto.** La finta `agy` del banco
+  stampava il JSON nudo e accettava qualunque opzione. Riscritta fedele alla vera — legge le
+  opzioni, rifiuta la combinazione con lo stesso messaggio, avvolge la risposta nella stessa busta —
+  **sette prove sono diventate rosse: le tre nuove e quattro che passavano da sempre.** La busta
+  vera, verificata a mano su un prompt minuscolo prima di scrivere il doppio, è:
+
+```json
+{"conversation_id":"…","status":"SUCCESS","response":"…","structured_output":{…},"usage":{…}}
+```
+
+  Il primo oggetto bilanciato della risposta grezza è quindi la **busta**, non i rilievi: senza
+  sbustare, il foglio di triage avrebbe scritto «il JSON non contiene un elenco rilievi», di nuovo
+  indistinguibile da un revisore che non ha trovato niente. Verificato nello stesso passaggio che
+  `--effort high` con `gemini-3.1-pro-high` non fa conflitto, mentre `--effort low` sì.
+
+- **Verdetto.** La skill importata funziona nella struttura e falliva in due punti che solo l'uso
+  reale poteva mostrare: un setaccio tarato su un altro codice, e una riga di comando disallineata
+  dalla versione installata di `agy`. Entrambi corretti nel repository, entrambi con prove:
+  **98 passate, 0 fallite** contro le 53 di partenza.
+
+- **Riserve.** Il confronto SHA-256 dei valori segnalati copre le credenziali che stanno nei due
+  `.env` presenti sulla macchina al momento della misura: se un `.env` fosse cambiato dopo, la
+  verifica andrebbe rifatta. Le tre esclusioni sono ancorate alla forma e non al contesto: una riga
+  che contenesse insieme un segreto vero **e** una di quelle forme verrebbe scartata: è un limite
+  che il file delle esclusioni ha già per costruzione, non introdotto qui. Il collaudo di `agy` è
+  stato fatto su una versione sola, la 1.1.22: una versione successiva può cambiare di nuovo la
+  busta, e allora saranno le prove della sezione 19 a dirlo.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0124
