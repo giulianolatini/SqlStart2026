@@ -447,3 +447,64 @@ def test_il_guardiano_del_target_accetta_esattamente_i_bersagli():
         f"CHIEDI_TARGET accetta {sorted(ramo.group(1).split('|'))}, "
         f"BERSAGLI dichiara {sorted(bersagli_dell_applicazione())}"
     )
+
+
+# --- Le scene dell'applicazione e i bersagli che le girano ------------------------------
+
+CLI = RADICE / "app/src/mongolab/cli.py"
+
+
+def scene_della_cli():
+    """I nomi dei sottocomandi di `mongolab demo`, letti con `ast` da `cli.py`.
+
+    Il nome non è sempre quello della funzione: `@demo.command(name="backup-live")` lo
+    riscrive, ed è la forma che si digita. Si legge con `ast` per la stessa ragione di
+    `bersagli_dell_applicazione`: `tools/` è un progetto uv distinto e non ha `mongolab`
+    fra le dipendenze.
+    """
+    trovate = set()
+    for nodo in ast.walk(ast.parse(CLI.read_text(encoding="utf-8"))):
+        if not isinstance(nodo, ast.FunctionDef):
+            continue
+        for decoratore in nodo.decorator_list:
+            if not isinstance(decoratore, ast.Call):
+                continue
+            funzione = decoratore.func
+            if not (isinstance(funzione, ast.Attribute) and funzione.attr == "command"):
+                continue
+            if not (isinstance(funzione.value, ast.Name) and funzione.value.id == "demo"):
+                continue
+            detto = [chiave.value for chiave in decoratore.keywords if chiave.arg == "name"]
+            trovate.add(
+                ast.literal_eval(detto[0]) if detto else nodo.name.replace("_", "-")
+            )
+    return trovate
+
+
+def scene_del_makefile():
+    """`{scena: bersaglio che la gira}` dalle ricette che invocano `… demo <scena> …`."""
+    bersaglio = None
+    trovate = {}
+    intestazione = re.compile(r"^([a-zA-Z0-9_-]+):")
+    invocazione = re.compile(r"\bdemo ([a-z][a-z-]*)\b")
+    for riga in MAKEFILE.read_text(encoding="utf-8").splitlines():
+        if not riga.startswith("\t"):
+            nome = intestazione.match(riga)
+            if nome:
+                bersaglio = nome.group(1)
+            continue
+        trovata = invocazione.search(riga)
+        if trovata and bersaglio:
+            trovate.setdefault(trovata.group(1), bersaglio)
+    return trovate
+
+
+def test_ogni_scena_dell_applicazione_ha_un_bersaglio_nel_makefile():
+    # Il difetto che questa prova toglie non rompe niente: rende il copione bilingue. Con
+    # una scena sola nel Makefile, le altre tre si dicono in `uv run --directory app
+    # mongolab demo …`, e chi legge il runbook sotto pressione cambia registro a metà
+    # Atto III senza che nulla gli spieghi perché.
+    assert set(scene_del_makefile()) == scene_della_cli(), (
+        f"il Makefile gira {sorted(scene_del_makefile())}; "
+        f"la CLI dichiara {sorted(scene_della_cli())}"
+    )

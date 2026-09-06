@@ -5,6 +5,7 @@
 .PHONY: help docs-check tools-test images-pull images-verify preflight stack-check \
         app-demo app-test app-check app-test-integration \
         app-stats app-watch app-workload app-image \
+        app-backup app-restore app-sharding \
         up-01 down-01 reset-01 logs-01 seed-01 smoke-01 reset-demo-01 \
         up-02 down-02 reset-02 logs-02 seed-02 smoke-02 reset-demo-02 \
         failover-02 failover-02-termina failover-02-maggioranza \
@@ -27,6 +28,13 @@ STACK_03   := docker/03-sharded/compose.yaml
 help: ## Elenca i target disponibili
 	@grep -E '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+	@printf '\n  Variabili, che i bersagli qui sopra nominano fra parentesi:\n'
+	@printf '    \033[36m%-8s\033[0m %s\n' \
+		TARGET  'quale stack: standalone | rs | sharded — obbligatoria, nessun predefinito' \
+		DOVE    'da dove gira: rete (dentro la rete Compose, predefinito) | host (uv run)' \
+		ARGS    'opzioni girate alla CLI, per esempio ARGS="--step --sink plain"' \
+		PROFILO 'la taglia dello stack 03: palco (predefinito) | completo' \
+		NOMI    'quali immagini riscaricare: NOMI="PYTHON_IMAGE UV_IMAGE"'
 
 tools-test: ## Esegue la suite degli strumenti di repository
 	uv run --directory tools pytest -q
@@ -75,9 +83,15 @@ app-test-integration: ## Esegue la suite di integrazione dell'applicazione (acce
 # L'uscita è 2, la stessa con cui Typer respinge un parametro sbagliato: dal punto di
 # vista di chi legge un CI, sbagliare la riga di `make` e sbagliare la riga di `mongolab`
 # sono lo stesso errore, e meritano lo stesso codice.
+# L'esempio che il messaggio mostra quando `TARGET` manca. `rs` va bene per quasi
+# tutti i bersagli, e per il Blocco 3 no: `app-sharding TARGET=rs` supererebbe questo
+# guardiano per andare a sbattere contro il rifiuto della CLI due secondi dopo. Un
+# suggerimento che non funziona costa più del silenzio.
+ESEMPIO_TARGET = rs
+
 CHIEDI_TARGET = @case "$(TARGET)" in \
 		standalone|rs|sharded) ;; \
-		"") echo "manca TARGET: make $@ TARGET=rs (standalone, rs, sharded)" >&2; exit 2 ;; \
+		"") echo "manca TARGET: make $@ TARGET=$(ESEMPIO_TARGET) (standalone, rs, sharded)" >&2; exit 2 ;; \
 		*) echo "TARGET=«$(TARGET)» non è uno stack di questo repository: standalone, rs, sharded." >&2; exit 2 ;; \
 	esac
 
@@ -92,6 +106,19 @@ DOVE ?= rete
 CHIEDI_DOVE = @case "$(DOVE)" in \
 		rete|host) ;; \
 		*) echo "DOVE=«$(DOVE)» non esiste: «rete» esegue dentro la rete Compose, «host» sul portatile." >&2; exit 2 ;; \
+	esac
+
+# Le due scene dell'Atto III non hanno un `DOVE` da offrire, ed è l'inverso del
+# failover: `mongodump` non è nell'immagine dell'applicazione (M-044) e quel container
+# non ha il socket del demone Docker, quindi non può entrare in un nodo a cercarcelo.
+# La CLI le rifiuta da dentro la rete (`_solo_dall_host`), e il bersaglio le porta
+# sull'host da sé senza chiedere niente. Se però `DOVE` è scritto a mano diverso da
+# `host`, il bersaglio si ferma invece di eseguire altrove: obbedire a metà è il modo
+# peggiore di essere comodi. `$(origin DOVE)` distingue il predefinito di questo file
+# dalla riga di comando, ed è la ragione per cui il guardiano guarda due cose.
+CHIEDI_SOLO_HOST = @case "$(origin DOVE)/$(DOVE)" in \
+		file/*|default/*|*/host) ;; \
+		*) echo "questa scena si gira solo dall'host: mongodump non è nell'immagine dell'applicazione (M-044) e il container non ha il socket del demone Docker. Togli DOVE, oppure scrivi DOVE=host." >&2; exit 2 ;; \
 	esac
 
 # La mappa fra il nome del bersaglio e il file Compose che lo descrive. Con `=` e non
@@ -111,7 +138,8 @@ COMPOSE_DI_sharded = $(COMPOSE_03_BASE)
 # nessuna costruzione a sorpresa la sera del talk — sta altrove, e sta meglio: il servizio
 # scrive `pull_policy: never` nel file (ADR-0039) e `tools/preflight.sh` verifica la
 # mattina che l'immagine ci sia, dicendo `make app-image` se manca.
-ESEGUI = $(if $(filter host,$(DOVE)),uv run --directory app mongolab,$(COMPOSE_DI_$(TARGET)) run --rm app)
+DALL_HOST = uv run --directory app mongolab
+ESEGUI = $(if $(filter host,$(DOVE)),$(DALL_HOST),$(COMPOSE_DI_$(TARGET)) run --rm app)
 
 # `ARGS` è la valvola: `--sink plain`, `--writers 16`, `--duration 30` passano di lì senza
 # che il Makefile debba conoscerli. Un target per opzione invecchierebbe a ogni opzione
@@ -144,6 +172,29 @@ app-demo: ## La scena del failover: make app-demo TARGET=rs [DOVE=host] [ARGS="-
 	$(CHIEDI_TARGET)
 	$(CHIEDI_DOVE)
 	$(ESEGUI) demo failover --target $(TARGET) $(ARGS)
+
+# Le due scene dell'Atto III. `--target rs` non è cablato qui, e la tentazione c'era:
+# la CLI controlla la **proprietà** del bersaglio e non il suo nome
+# (`_solo_da_un_replica_set`), e il giorno in cui il repository avesse un secondo
+# replica set la riga giusta funzionerebbe da sé. Un `--target rs` scritto qui la
+# spegnerebbe, e in cambio di due parole risparmiate.
+app-backup: ## L'Atto III, il backup a caldo, solo dall'host: make app-backup TARGET=rs [ARGS="--step --sink plain"]
+	$(CHIEDI_TARGET)
+	$(CHIEDI_SOLO_HOST)
+	$(DALL_HOST) demo backup-live --target $(TARGET) $(ARGS)
+
+app-restore: ## L'Atto III, la copia rimessa altrove, solo dall'host: make app-restore TARGET=rs [ARGS="--step --sink plain"]
+	$(CHIEDI_TARGET)
+	$(CHIEDI_SOLO_HOST)
+	$(DALL_HOST) demo restore --target $(TARGET) $(ARGS)
+
+# Il Blocco 3, che un `DOVE` invece ce l'ha davvero: il router risponde da tutti e due
+# i posti, e il piano che `explain()` riporta è lo stesso.
+app-sharding: ESEMPIO_TARGET = sharded
+app-sharding: ## Il Blocco 3, i chunk e la chiave di shard: make app-sharding TARGET=sharded [DOVE=host] [ARGS="--step --sink plain"]
+	$(CHIEDI_TARGET)
+	$(CHIEDI_DOVE)
+	$(ESEGUI) demo sharding --target $(TARGET) $(ARGS)
 
 # La costruzione passa per Compose e non per un `docker build` scritto qui: gli argomenti
 # con cui si pinna la base — PYTHON_IMAGE, UV_IMAGE — sono già dichiarati nel servizio
