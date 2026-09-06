@@ -7274,3 +7274,82 @@ Stato aggiornato: decisioni fino ad **ADR-0119**, verifiche fino a **V-089**, mi
 **M-059**, note di metodo fino alla **244**. Controlli: `make docs-check` verde. Prossimo passo: il
 primo giro del Product Owner con il runbook in mano, e la discussione sui sospesi **dopo**, con in
 mano quello che il giro avrà trovato.
+
+## 2026-09-06 — Quattro scene, quattro bersagli, e tre guasti che solo l'esecuzione ha mostrato
+
+Il Product Owner ha fatto accendere i tre stack per il suo primo giro col runbook, e ha posto una
+domanda sul copione: perché `demo sharding` è l'unico comando senza un bersaglio nel `Makefile`, e
+non si può aggiungerlo. La prima risposta è che **non era l'unico: erano tre** — `backup-live`,
+`restore` e `sharding`. La nota di metodo 244, scritta ieri, dice «l'unico» perché chi l'ha scritta
+ha contato a mente invece di contare col codice; il conteggio l'ha fatto la prova, ed è rossa con i
+tre nomi in chiaro. La seconda risposta è che sì, si può, e il modo è
+[ADR-0120](Decision.md#adr-0120): quattro bersagli per quattro scene, `CHIEDI_SOLO_HOST` per le due
+dell'Atto III che il socket del demone non ce l'hanno, `ESEMPIO_TARGET` perché il suggerimento del
+guardiano non mandi `app-sharding` contro `TARGET=rs`, e la legenda delle variabili in coda a
+`make help`, che prima esistevano solo nei commenti del `Makefile`.
+
+Il conteggio a mano non serve più: `test_ogni_scena_dell_applicazione_ha_un_bersaglio_nel_makefile`
+legge i decoratori `@demo.command` con `ast` e le ricette del `Makefile`, e confronta gli insiemi.
+Scritta prima, rossa, verde dopo.
+
+**Poi si è provato, ed è lì che il pomeriggio ha reso.** Tre cose che nessuna rilettura del runbook
+aveva mostrato, tutte e tre nell'Atto III.
+
+1. **La riga del `restore` nel copione era incompleta.** Diceva `demo restore --target rs --step
+   --sink plain`, senza `--collection`. Senza quell'opzione il comando parte lo stesso e conta
+   `lab.ordini`, cinquantamila documenti da tutte e due le parti: i numeri attesi dal runbook —
+   5 886 · 5 740 · 146 — non sarebbero mai usciti. La collezione di carico ha la data nel nome e la
+   stampa la scena precedente, già completa: è l'unica riga del copione che **non** passa da `make`,
+   e ora il runbook dice perché.
+2. **`lab_ripristinato` non lo toglie nessuno.** `demo restore` lo costruisce; `reset-demo.sh 02`
+   ripulisce le collezioni di `lab` e non guarda gli altri database; `down`/`up` conservano i
+   volumi. Alla seconda corsa `mongorestore` ritrova i documenti già lì, li conta come falliti ed
+   esce **zero** — la perdita silenziosa di [M-024](../app/docs/Sources.md#m-024) — e
+   `RestoreIncompleto` ferma la scena. Misurato: **6 766 ripristinati, 55 740 persi**, dove 55 740 è
+   esattamente `ordini` più il carico del 4 settembre; la prova che era quello e non altro è una
+   corsa con `--into lab_prova_0906`, zero falliti. Sul palco vuol dire che **la prova generale
+   rompe la replica**: chi prova l'Atto III il 17 e non azzera, il 18 lo vede morire. Il runbook ora
+   lo dice nello stato atteso e nella tabella dei guasti; se `reset-demo.sh` debba togliere anche
+   quel database è una decisione del PO, non una svista da tappare di nascosto.
+3. **L'1,3 % dell'Atto III non si riproduce.** Quattro corse: **48,1 %** con Docker appena acceso e
+   `lab` sporca, **16,2 %** con la resa Rich e tre stack accesi, **15,4 %** con `--sink plain` e
+   tre stack, **11,9 %** col solo 02. La resa non c'entra, la contesa fra stack vale tre o quattro
+   punti: l'1,3 % della registrazione 13 era una corsa fortunata. L'atteso del runbook è diventato
+   un intervallo, 10–20 %, con la riga che conta: la percentuale non si annuncia prima di averla
+   letta. Le quattro misure restano qui e nel runbook, e **non** in `Sources.md`: una verifica nuova
+   dev'essere citata da un ADR per non restare orfana, e adottare un intervallo al posto del numero
+   registrato è una decisione, non una misura.
+
+Di passaggio, un quarto: lo stato atteso della §1.4 diceva «`ordini`, 50 000, si verifica con
+`make app-stats`», ma `stats` stampa il totale del **database**, non della collezione. Con le
+collezioni di carico delle prove dentro diceva **62 602**, e chi controllava avrebbe letto un guasto
+dove non c'era.
+
+Il laboratorio è rimasto pulito: `make reset-02`, `make up-02`, `smoke-02` a **42 · 0**, e
+`reset-demo.sh 02` alla fine per togliere le tre collezioni di carico delle prove. `lab.ordini` è a
+**50 000** e la sua impronta è quella del seed.
+
+### Note di metodo
+
+245. **Il primo dubbio da togliere è quello che costa meno, non quello che convince di più.** Il
+    calo del 48 % aveva una spiegazione elegante e pronta — tre stack che si contendono la CPU — e
+    verificarla voleva dire spegnere e riaccendere due stack, quattro minuti. L'ipotesi noiosa era
+    che la resa Rich costasse: trenta secondi per riprovare con `--sink plain`. Si è cominciato da
+    lì, e ha risposto no; poi si è fatta l'altra, e ha risposto «tre o quattro punti su undici». Due
+    misure hanno lasciato in piedi una sola spiegazione — che il numero di partenza fosse fortunato
+    — e nessuna delle due era quella che sembrava più promettente. La regola pratica: ordinare le
+    ipotesi per costo della verifica, non per plausibilità.
+246. **Una domanda del committente su una riga di documentazione va seguita fino a dove porta.** La
+    domanda era piccola e legittima: perché quel comando non ha un bersaglio. Rispondere voleva dire
+    aprire il `Makefile`, che ha mostrato che le scene scoperte erano tre; scrivere la prova, che ha
+    mostrato che una era il `restore`; provare il `restore`, che ha mostrato la riga incompleta, il
+    database che sopravvive e l'atteso che non si riproduce. Nessuna delle tre stava nella domanda,
+    e nessuna si sarebbe vista rileggendo. La regola pratica: quando chi commissiona indica un
+    punto, quel punto è un capo di filo — la risposta breve è quasi sempre corretta e quasi sempre
+    incompleta.
+
+Stato aggiornato: decisioni fino ad **ADR-0120**, verifiche fino a **V-089**, misure fino a
+**M-059**, note di metodo fino alla **246**. Controlli: `make docs-check` verde, `make tools-test`
+**176 passate**. Prossimo passo: il giro del PO con gli stack accesi, e la discussione sui sospesi
+con dentro le tre cose di oggi — se `reset-demo.sh` debba togliere `lab_ripristinato`, se la
+registrazione 13 vada rigirata, e con quale priorità rispetto a ciò che era già in lista.

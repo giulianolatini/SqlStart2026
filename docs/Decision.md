@@ -7590,3 +7590,84 @@ chiesto di smettere. È accettato consapevolmente: la riparazione è idempotente
   errore.
 
 **Fonti:** [ADR-0095](#adr-0095), [ADR-0115](#adr-0115), [ADR-0117](#adr-0117)
+
+---
+
+<a id="adr-0120"></a>
+
+## ADR-0120 — Quattro scene, quattro bersagli, e una prova che nessuna resti scoperta
+
+**Data:** 2026-09-06 · **Stato:** Accettata
+
+**Contesto:** il `Makefile` copriva una scena su quattro. `demo failover` aveva `app-demo`; `demo
+backup-live`, `demo restore` e `demo sharding` si scrivevano per esteso, `uv run --directory app
+mongolab demo …`. Non era una svista: il `README` dichiarava l'asimmetria — «i comandi di uso più
+frequente hanno un bersaglio nel `Makefile`» — e [ADR-0036](#adr-0036) aveva scartato l'idea di
+avvolgere *ogni* comando in un bersaglio, con una ragione che regge ancora: chi guarda le slide deve
+imparare `mongosh`, non questo repository. Il costo si è visto scrivendo il runbook, non
+ragionandoci: il copione diventa bilingue e cambia registro **a metà dell'Atto III**, cioè nel punto
+in cui chi conduce ha le mani più occupate. La domanda l'ha posta il Product Owner con gli stack
+accesi davanti, ed è la ragione per cui la risposta è cambiata.
+
+La ragione di [ADR-0036](#adr-0036) non morde qui, ed è il punto che distingue i due casi: là i
+comandi avvolti sarebbero stati comandi **MongoDB**, e nasconderli dietro `make` avrebbe insegnato
+il repository al posto del database. `mongolab demo sharding` è già un comando di questo repository:
+avvolgerlo non nasconde niente che valga la pena imparare.
+
+**Decisione.** Quattro punti.
+
+- **Ogni sottocomando di `mongolab demo` ha un bersaglio.** `app-demo` per il failover — invariato,
+  perché lo nominano le registrazioni, il runbook e tre pagine di `docs/`, e rinominarlo costerebbe
+  più di quanto renda — più `app-backup`, `app-restore`, `app-sharding`.
+- **La copertura è provata, non ricordata.**
+  `test_ogni_scena_dell_applicazione_ha_un_bersaglio_nel_makefile` legge i decoratori
+  `@demo.command` con `ast` e le ricette del `Makefile`, e confronta i due insiemi. Una scena nuova
+  senza bersaglio fa fallire `make tools-test`. È lo stesso rimedio di [ADR-0049](#adr-0049) per le
+  porte di `preflight`: non «era giusto quel giorno», ma «non è più sbagliabile in silenzio».
+- **Le due scene dell'Atto III non offrono `DOVE`.** `mongodump` non è nell'immagine
+  dell'applicazione ([M-044](../app/docs/Sources.md#m-044)) e quel container non ha il socket del
+  demone Docker: girano dall'host e basta. I bersagli ci vanno da sé — non c'è niente da ricordare —
+  ma se `DOVE` è scritto a mano diverso da `host`, `CHIEDI_SOLO_HOST` si ferma invece di eseguire
+  altrove. Il guardiano guarda `$(origin DOVE)` e non solo il valore, perché deve distinguere il
+  predefinito del file dalla richiesta esplicita di chi digita.
+- **L'esempio che il guardiano suggerisce segue il bersaglio.** `ESEMPIO_TARGET` vale `rs` ovunque e
+  `sharded` su `app-sharding`: prima, un `make app-sharding` senza `TARGET` consigliava
+  `TARGET=rs`, che supera il guardiano del `Makefile` per andare a sbattere contro il rifiuto della
+  CLI due secondi dopo. Un suggerimento che non funziona costa più del silenzio.
+
+**Conseguenze.** Tre scene su quattro del copione si dicono in `make`, e le quattro stanno vicine in
+`make help` con l'atto che le nomina. La quarta resta per esteso, e la ragione va scritta perché è
+l'eccezione che sembra una dimenticanza: la riga del `restore` la **stampa** `demo backup-live`,
+già completa del nome della collezione di carico, che ha la data dentro e cambia a ogni corsa
+(`_prossimo_passo`). Tradurla in `ARGS` chiederebbe di ricopiare a mano davanti alla sala esattamente
+la stringa che quel codice esiste per non far ricopiare. `app-restore` c'è lo stesso, e serve a chi
+userà il repository dopo il talk, quando la collezione la sceglie chi comanda. Il ramo host di `ESEGUI` diventa `DALL_HOST`, perché ora ha
+due usi e la stessa riga scritta due volte è la prima a divergere. `make help` guadagna in coda la
+legenda di `TARGET`, `DOVE`, `ARGS`, `PROFILO` e `NOMI`: erano spiegate solo nei commenti del
+`Makefile` e nelle pagine di `app/docs/`, cioè in nessun posto che chi arriva dopo il talk apra per
+primo.
+
+Il prezzo è un `Makefile` più lungo di una trentina di righe e quattro nomi in più da conoscere. È
+accettato: sono quattro nomi che `make help` elenca, contro tre righe di sessanta caratteri da
+ricopiare a memoria.
+
+**Alternative scartate.**
+
+- *Un bersaglio solo, `app-demo SCENA=failover|backup-live|restore|sharding`.* Più corto da
+  scrivere e peggiore da leggere: le tre scene hanno vincoli **diversi** — due vogliono l'host, una
+  vuole lo sharded — e un bersaglio unico o li ignora tutti o li controlla con un `case` dentro un
+  `case`. `make help` mostrerebbe una riga sola dove servono quattro.
+- *Rinominare `app-demo` in `app-failover`, con `app-demo` come alias.* Più simmetrico nell'elenco,
+  e due nomi per la stessa cosa sono esattamente la frizione che questa ADR toglie. Le quattordici
+  registrazioni non si rigirano per un nome.
+- *Cablare `--target rs` nei due bersagli dell'Atto III.* Risparmia due parole e spegne una
+  proprietà: la CLI controlla che il bersaglio **sia** un replica set, non che si chiami `rs`
+  (`_solo_da_un_replica_set`), e il giorno in cui il repository ne avesse un secondo la riga giusta
+  funzionerebbe da sé.
+- *Forzare `DOVE=host` con `override` nei due bersagli dell'Atto III.* Funziona sempre e mente una
+  volta: chi ha scritto `DOVE=rete` vedrebbe girare qualcos'altro senza che nessuno glielo dica.
+- *Lasciare com'era e spiegarlo nel runbook.* È ciò che il runbook faceva, in due righe di prosa.
+  Una spiegazione nel documento che si legge sotto pressione è un lavoro rimandato al momento
+  peggiore (nota di metodo 243).
+
+**Fonti:** [ADR-0012](#adr-0012), [ADR-0036](#adr-0036), [ADR-0049](#adr-0049), [ADR-0092](#adr-0092), [M-019](../app/docs/Sources.md#m-019), [M-044](../app/docs/Sources.md#m-044)

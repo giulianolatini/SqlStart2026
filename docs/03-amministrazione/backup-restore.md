@@ -408,6 +408,10 @@ uv run --directory app mongolab demo restore --target rs --collection carico-…
 
 La seconda riga non si scrive: la stampa la prima, già completa, nome della collezione compreso.
 
+Tutte e due hanno un bersaglio — `make app-backup TARGET=rs` e `make app-restore TARGET=rs`
+([ADR-0120](../Decision.md#adr-0120)) — e qui restano per esteso apposta: è la forma che la prima
+riga stampa e che si incolla, e i due bersagli girano comunque solo dall'host.
+
 ### Che cosa mostra, e in che ordine
 
 `demo backup-live` fa girare un carico di scrittura, ne misura il ritmo, poi lancia

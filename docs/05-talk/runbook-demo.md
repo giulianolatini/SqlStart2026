@@ -113,6 +113,25 @@ prevede, e si rimedia **adesso** con `./tools/reset-demo.sh <stack>`.
 | 02 replica set | `lab` | `ordini` | **50 000** | `make app-stats TARGET=rs` |
 | 03 sharded | `lab` | `ordini` | **20 000** | `make stato-03` |
 
+**Il numero è quello del database, non della collezione**, e vale 50 000 tondi **solo su uno stack
+pulito**: `mongolab stats` somma tutto ciò che sta in `lab`, e ogni corsa dell'Atto III ci lascia
+dentro una collezione `carico-AAAAMMGG-hhmmss` da qualche migliaio di documenti. Se la riga dice più
+di 50 000 non è rotto niente: è una prova di ieri. Misurato il 6 settembre, dopo le registrazioni
+del 4 e una corsa di prova: **62 602**.
+
+**Se l'Atto III è già stato provato su questo stack, la sera prima si azzera.** `demo restore`
+costruisce `lab_ripristinato`, e quel database **non lo toglie nessuno**: né `reset-demo.sh`, che
+ripulisce le collezioni di `lab` e non guarda gli altri database, né `down`/`up`, che conservano i
+volumi. Alla corsa successiva `mongorestore` ritrova i documenti già lì, li conta come falliti ed
+**esce zero**; l'applicazione lo intercetta e la scena muore con `RestoreIncompleto`. Misurato oggi:
+**6 766 ripristinati, 55 740 persi**. Il rimedio è lento e va dato la sera prima, non in sala:
+
+```bash
+make reset-02      # cancella i volumi dello stack 02, il keyfile resta
+make up-02         # riaccende e riemette il seed: lab torna a 50 000 esatti
+make smoke-02      # atteso: Superati: 42 · Errori: 0
+```
+
 Sullo stack 02 `mongolab stats` deve mostrare **tre membri e un primario**, e il primario deve
 essere quello con priorità 2 — `mongo-rs-1`. La scena del failover comincia da lì; se comincia da
 un primario diverso, il copione regge lo stesso ma la frase «il nodo con priorità più alta» non
@@ -346,14 +365,16 @@ container sano: un guasto che non lascia tracce nel posto in cui si guarda.
 
 ### Blocco 2, Atto III — il backup a caldo e la finestra che si paga · 4 minuti
 
-`demo backup-live` e `demo restore` girano **solo dall'host** e accettano **solo** `--target rs`:
-il dump lo esegue un processo dentro un nodo, e chi lo comanda deve avere il socket del demone.
-Se si sbaglia, la riga di comando lo dice e non parte.
+`app-backup` e `app-restore` girano **solo dall'host** e accettano **solo** `TARGET=rs`: il dump
+lo esegue un processo dentro un nodo, e chi lo comanda deve avere il socket del demone. I due
+bersagli ci vanno da sé, non c'è nessun `DOVE` da ricordare, e se lo si scrive diverso da `host`
+si fermano prima di partire ([ADR-0120](../Decision.md#adr-0120)). Se si sbaglia bersaglio, la riga
+di comando lo dice e non parte.
 
 **1. Il dump mentre si scrive.** Finestra A:
 
 ```bash
-uv run --directory app mongolab demo backup-live --target rs --step --sink plain
+make app-backup TARGET=rs ARGS="--step --sink plain"
 ```
 
 Il dump è `mongodump --readPreference=secondary --oplog`: legge da un **secondario**, così il
@@ -361,18 +382,40 @@ primario continua a servire le scritture, e `--oplog` cattura le operazioni avve
 dump, che è ciò che lo rende coerente rispetto a un istante.
 
 > **Atteso** (riferimento: registrazione [13](registrazioni/README.md#registrazioni-di-terminale),
-> 11,4 s): ritmo **546/s** prima, **539/s** durante — **calo dell'1,3 %**.
+> 11,4 s): qualche centinaio di scritture al secondo prima, e un **calo fra il 10 % e il 20 %**
+> mentre il dump gira.
+
+La registrazione segnò **546/s → 539/s**, cioè l'**1,3 %**, e quel numero **non si è riprodotto**.
+Quattro corse il 6 settembre, sullo stesso portatile: **48,1 %** con Docker appena acceso e `lab`
+sporca di prove precedenti, **16,2 %** con la resa Rich e tutti e tre gli stack su, **15,4 %** con
+`--sink plain` e tutti e tre, **11,9 %** col solo stack 02 acceso. La resa non c'entra e la contesa
+fra stack vale tre o quattro punti: l'1,3 % era una corsa fortunata, non una costante.
+
+**Che cosa vuol dire dal palco:** la frase regge — il backup a caldo si paga poco, e continua a
+pagarsi poco a un decimo di calo — ma **la percentuale non si annuncia prima di averla letta**. La
+si legge sullo schermo e la si commenta.
 
 C'è un tetto: `--tetto`, predefinito **300 secondi**. Oltre quello il dump viene abbattuto e la
 scena finisce con un errore che dice «ha superato il tetto», non «`mongodump` è uscito con
 codice -9». Sul palco non si tocca; esiste perché un dump che non torna non può tenere ferma la
 scena ([ADR-0118](../Decision.md#adr-0118)).
 
-**2. I due conteggi, che non coincidono.**
+**2. I due conteggi, che non coincidono.** Questa riga **non si scrive**: la stampa la scena
+precedente, già completa. Il nome della collezione di carico ha dentro la data e l'ora, cambia a
+ogni corsa, e ricopiarlo a mano davanti alla sala è il modo più prevedibile di sbagliare un
+comando. Si incolla, e si aggiungono `--step --sink plain`:
 
 ```bash
-uv run --directory app mongolab demo restore --target rs --step --sink plain
+# la stampa app-backup, in coda:  prossimo: mongolab demo restore --target rs …
+uv run --directory app mongolab demo restore --target rs --step --sink plain \
+  --from /tmp/mongolab-backup --collection carico-AAAAMMGG-hhmmss
 ```
+
+**È l'unica riga del copione che non passa da `make`, ed è deliberato.** `app-restore` esiste
+([ADR-0120](../Decision.md#adr-0120)) e qui non aiuta: vorrebbe la stessa collezione dentro
+`ARGS`, cioè una traduzione a mano nel momento peggiore. Senza `--collection` il comando parte
+lo stesso e conta `lab.ordini` — cinquantamila documenti da tutte e due le parti — e i numeri
+qui sotto non tornerebbero per niente.
 
 > **Atteso** (riferimento: registrazione [14](registrazioni/README.md#registrazioni-di-terminale),
 > 3,2 s): **5 886** all'origine · **5 740** nella copia · **differenza 146**.
@@ -425,11 +468,12 @@ la cosa che una platea SQL confonde più spesso.
 **3. La chiave di shard, cioè che cosa cambia se la si sceglie male.**
 
 ```bash
-uv run --directory app mongolab demo sharding --target sharded --step --sink plain
+make app-sharding TARGET=sharded ARGS="--step --sink plain"
 ```
 
-Non è `make app-demo`: quel target è la scena del **failover**, e `demo sharding` non ha un target
-suo nel Makefile.
+È `app-sharding` e non `app-demo`: quello è il **failover**. Le quattro scene hanno quattro
+bersagli distinti, e una prova del repository verifica che nessuna resti scoperta
+([ADR-0120](../Decision.md#adr-0120)).
 
 Lo stesso carico due volte: la prima corsa in una collezione **nuova, non distribuita** — finisce
 tutta su un solo shard; la seconda in `lab.ordini`, distribuita su `{_id: "hashed"}` — si
@@ -548,6 +592,7 @@ Tutti i rimedi valgono **dalla finestra C**, senza toccare la A.
 | Sintomo | Che cos'è | Azione |
 |---|---|---|
 | `make app-stats` dice 0 documenti | il seed non è passato, o la demo precedente ha lasciato la collezione a metà | `./tools/reset-demo.sh 02` — riavvia i container fermati, aspetta un primario, ricarica il dataset |
+| `RestoreIncompleto: … e averne persi N` nell'Atto III | `lab_ripristinato` è rimasto da una prova precedente: `mongorestore` ritrova i documenti già lì, e li conta come persi | **in sala non si ripara**, perché il rimedio azzera lo stack. Si dichiara la cosa, si passa al Blocco 3 e semmai si mostra la registrazione [14](registrazioni/README.md#registrazioni-di-terminale). Si previene la sera prima ([§1.4](#stato-atteso)) |
 | Il primario è `mongo-rs-2` o `-3` | una demo precedente non è rientrata | `./tools/reset-demo.sh 02`: aspetta che torni quello con priorità 2 |
 | «Connection refused» verso un nodo acceso e sano | trappola [4](../02-architetture/trappole-mongodb-in-docker.md#t-04) — si sta bussando alla porta dell'host invece che al nome interno | Comando dalla finestra giusta: dentro la rete si usa `mongo-rs-1:27017`, dall'host `localhost:27021` |
 | Il container ucciso non si rialza | trappola [6](../02-architetture/trappole-mongodb-in-docker.md#t-06) — `restart: unless-stopped` non rialza chi è stato fermato a mano | `docker compose ... start mongo-rs-1`, che è la riga che l'applicazione annuncia |
@@ -676,7 +721,7 @@ seconda non sono bastate.
 ## Il debito di questo documento
 
 Il runbook è scritto il **6 settembre 2026**, dieci giorni prima della data prevista per la
-`release/1.0`, e prima della prova generale cronometrata del 17. Due cose restano da chiudere, e
+`release/1.0`, e prima della prova generale cronometrata del 17. Tre cose restano da chiudere, e
 sono scritte qui perché chi legge sappia che cosa non è ancora stato verificato:
 
 - **I tempi della §2 sono quelli del design, non quelli misurati.** La ripartizione 4 / 13 / 8 / 2
@@ -687,3 +732,8 @@ sono scritte qui perché chi legge sappia che cosa non è ancora stato verificat
   non oggi: è l'ultimo momento utile per ripinnare e rigirare le registrazioni prima del talk. Il
   primo dei due controlli è stato speso ed è andato a vuoto. Aprire la release in anticipo **non**
   sposta il secondo: la procedura, sui tre canali, è in [V-074](../Sources.md#v-074).
+- **L'1,3 % dell'Atto III non è ancora una fonte.** Le quattro corse del 6 settembre stanno qui e
+  nel registro operativo, e non in `Sources.md`: una verifica nuova dev'essere citata da un ADR per
+  non restare orfana, e adottare un intervallo al posto del numero della registrazione è una
+  decisione, non una misura. Le due strade sono rigirare la registrazione 13 accettando il numero
+  che verrà, oppure scrivere l'ADR che dice perché un atteso di scena è un intervallo.

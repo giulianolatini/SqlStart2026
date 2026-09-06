@@ -56,9 +56,10 @@ Il repository è in costruzione fino a metà settembre 2026. Questo è quello ch
 
 L'applicazione Python `mongolab` è in `app/`, sviluppata su `feature/04-app-python`:
 genera carico, osserva la topologia mentre cambia, e mette in scena il failover, il backup a
-caldo e il ripristino. I comandi di uso più frequente hanno un bersaglio nel `Makefile`
-(`make app-stats`, `app-watch`, `app-workload`, `app-demo`); l'elenco completo lo dà
-`mongolab --help`. La sua documentazione sta in [`app/docs/`](app/docs/README.md), e
+caldo e il ripristino. Ogni comando ha un bersaglio nel `Makefile` — `make app-stats`, `app-watch`,
+`app-workload` e le quattro scene: `app-demo` (failover), `app-backup`, `app-restore`,
+`app-sharding` ([ADR-0120](docs/Decision.md#adr-0120)). `make help` li elenca con le variabili che
+accettano; le opzioni per esteso le dà `mongolab --help`. La sua documentazione sta in [`app/docs/`](app/docs/README.md), e
 [`docs/06-sviluppo/architettura-app.md`](docs/06-sviluppo/architettura-app.md) la racconta a
 chi non aprirà i sorgenti.
 
