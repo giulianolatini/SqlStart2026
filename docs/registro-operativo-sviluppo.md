@@ -7596,3 +7596,91 @@ Stato aggiornato: decisioni fino ad **ADR-0123**, verifiche fino a **V-092**, mi
 711 in tutto), le tre suite delle skill **127 passate**. Resta aperta **una** decisione del PO: se
 rendere confrontabili le due finestre dell'Atto III. Poi la discussione sulle priorità, che aspetta
 il suo giro con gli stack accesi, e la review generale della release, chiesta e non ancora fatta.
+
+
+## 2026-09-06 — La review generale, sospesa a metà: quarantacinque rilievi chiusi e sette correzioni misurate
+
+La review della release è stata chiesta con due strumenti nominati — `codex` e `agy` —
+e la prima cosa da fare era la meno interessante: verificare che ci fossero e fossero
+autenticati. C'erano. Poi sono partiti sei dossier, uno per perimetro, per un totale di
+**72 rilievi**.
+
+Quarantacinque sono chiusi con verdetto scritto: `talk` 17, `stack-docker` 7,
+`app-sorgenti` 12, `documentazione-tecnica` 9. Il dossier `strumenti` (18) è **misurato
+per intero ma senza verdetti scritti**, e `app-prove` (9) non è ancora stato aperto. La
+sessione si ferma qui per esaurimento del limite, non per un ostacolo tecnico.
+
+### Deciso
+
+Che i rilievi di un recensore esterno si arbitrano **eseguendo**, e che un rilievo respinto
+si motiva con la stessa cura di uno accolto. Sette dei diciotto rilievi di `strumenti`
+toccavano codice e sono corretti nel commit `096bdbd`; uno — C-5 — è respinto, e la
+motivazione è più utile della correzione che chiedeva: `reset-01` usa `down -v`, che segue
+la selezione del progetto ed è quindi **immune** al difetto di C-4. Applicare il rimedio
+proposto — nominare i volumi — avrebbe *introdotto* in `reset-01` il difetto che C-4
+segnalava altrove. Un rimedio giusto nel posto sbagliato è un difetto nuovo.
+
+Che sei rilievi su diciotto — C-1, C-2, G-1, G-5, G-6, G-7 — non sono sei problemi ma uno:
+puntano tutti alla sede che [ADR-0123](Decision.md#adr-0123) ha già dichiarato mancante,
+la scheda che fissa il modello dei rami, la strategia di merge e lo standard dei messaggi
+di commit di questo repository. Una decisione sola li chiude tutti e sei.
+
+### Misurato
+
+Ogni correzione prima di essere scritta. `COMPOSE_PROJECT_NAME` nell'ambiente ha davvero
+la precedenza sul `name:` del file Compose, e con il progetto dirottato `down` diventa un
+nulla di fatto mentre `reset-02` cancella comunque i volumi per nome. La sonda
+dell'immagine del preflight, senza `--pull=never`, va davvero in rete nel caso che deve
+diagnosticare: 1,011 s e una richiesta a `docker.io` contro 0,023 s e nessuna uscita dalla
+macchina. Un container estraneo che pubblica la 27152 faceva davvero contare al preflight
+nove porte «del lab» invece di otto. Con l'interrogazione che fallisce, `reset-demo.sh`
+stampava davvero «✓ database rimosso: » con il nome vuoto.
+
+E due volte la misura ha **corretto chi la faceva**. La prima: avevo previsto che il pty a
+100 colonne di `registra-terminale.py` avvolgesse una riga lunga e ne spezzasse le
+virgolette. Non succede — l'avvolgimento è una faccenda di resa, non del flusso di byte, e
+l'ipotesi è registrata come confutata invece di essere lasciata cadere in silenzio. La
+seconda: la prima riproduzione di C-7 girava con un `bash` qualsiasi e riportava «stato
+dell'interrogazione: 0», che avrebbe descritto male il repository. Gli strumenti usano
+`set -uo pipefail` — pipefail sì, errexit no, e deliberatamente — e rifatta con le stesse
+opzioni la misura dà **1**, con le tre righe verdi identiche. Lo stato c'era: nessuno lo
+guardava.
+
+Il rilievo C-8 ha chiesto di costruire il caso invece di descriverlo: su un database
+usa-e-getta dello stack 03, `DISTRIBUZIONE: shard1rs=0 shard2rs=5`. Il controllo cercava
+uno spazio nella risposta, e quella risposta uno spazio ce l'ha.
+
+### Note di metodo
+
+255. **Un valore atteso scritto in un commento non è una verifica.** In `reset-demo.sh`
+     l'impronta del dataset — `50000 124861860.70 150281` — stava in un commento sopra la
+     riga che la stampava, e non veniva confrontata con niente: il ripristino poteva finire
+     con il dataset sbagliato e dichiararsi riuscito. È lo stesso difetto che
+     [ADR-0126](Decision.md#adr-0126) ha nominato stamattina in un'altra forma, ed è il
+     terzo punto di C-7, che il recensore non aveva visto. La regola pratica: se un numero
+     atteso è scritto da qualche parte, o è in un confronto o è decorazione.
+
+256. **Un rilievo giusto può avere la causa sbagliata, e la causa cambia il rimedio.** G-3
+     segnalava che un `PROFILO` con uno spazio passa la guardia. Vero — ma non per il
+     motivo dichiarato, e non con la conseguenza dichiarata. Passa perché `grep -qx` tratta
+     il valore come **espressione regolare**, un terzo difetto sulla stessa riga che nessuno
+     aveva segnalato; e non «passa argomenti imprevisti allo script», perché lo script non
+     parte proprio: `/bin/sh` risponde `]*: command not found` ed esce 127. Verificare la
+     causa invece di fidarsi ha trasformato due rimedi separati in una riscrittura sola che
+     chiude tutti e tre i difetti. La regola pratica: prima di correggere un rilievo, si
+     riproduce il meccanismo, non solo il sintomo.
+
+### Prossimo passo
+
+Scrivere le fonti e le decisioni che i commenti appena committati **già citano** e che
+ancora non esistono: V-098…V-101 e ADR-0129…ADR-0132. È un debito aperto di proposito e va
+chiuso per primo, perché fino ad allora quei commenti rimandano a schede assenti. Poi i 18
+verdetti di `strumenti`, i tre rilievi di codice ancora scoperti — C-3 su
+`tools/smoke-sharded.sh`, C-10 su `tools/registra-terminale.py` — e il dossier `app-prove`,
+che non è stato aperto.
+
+Stato aggiornato: decisioni fino ad **ADR-0128**, verifiche fino a **V-097**, note di
+metodo fino alla **256**. Controlli: `make tools-test` **181 passate** (una in più: la
+coerenza fra i tre nomi di progetto del `Makefile` e quelli che `preflight.sh` riconosce).
+Restano aperte le decisioni del PO già in coda, e la review sospesa a due dossier dalla
+fine.
