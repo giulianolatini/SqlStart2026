@@ -26,3 +26,20 @@ op://
 
 # la riga sta descrivendo dove sta il segreto, non lo sta scrivendo
 (vive|sta|risiede|si trova|leggi|leggere|revoca|revocare|ruota|ruotare) (in|da|il|la)
+
+# --- aggiunte in SqlStart2026, 6 settembre 2026 ---
+# Tre falsi positivi pagati sui fascicoli della release/1.0. Ognuno e' ancorato
+# alla forma del VALORE, non al nome: cosi' non spegne il pattern che lo ha
+# trovato, spegne solo la forma che non puo' essere una credenziale.
+
+# il valore e' l'attributo di un oggetto: `password=credenziali.password,`
+[:=][[:space:]]*[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*[,)[:space:]]
+
+# il valore e' il nome di una costante: `password=PASSWORD_DI_PROVA,`.
+# L'underscore e' obbligatorio: senza, questa riga spegnerebbe anche AKIA….
+[:=][[:space:]]*[A-Z][A-Z0-9]*(_[A-Z0-9]+)+[,)[:space:]]
+
+# il valore e' una frase italiana fatta di parole minuscole unite da trattini,
+# fra virgolette e per intero: `"non-e-un-segreto-e-non-lo-sara-mai"`.
+# Nessuna credenziale ha questa forma; i doppi di prova di qui ce l'hanno tutti.
+["'][a-z]+(-[a-z]+){2,}["']

@@ -347,5 +347,50 @@ prova "con docs/ presente il case segue quello trovato" \
       test -f "$R/alfa/docs/revisioni/$(date '+%Y-%m-%d')-pr-7.md"
 rm -rf "$R/docs" "$R/alfa/docs"
 
+caso "18. segreti: le tre esclusioni aggiunte qui, e cio' che non spengono"
+
+# Le tre righe aggiunte in fondo a segreti.esclusioni sono state pagate su
+# fascicoli veri della release/1.0. Il rischio di un'esclusione non e' che sia
+# inutile: e' che spenga anche il segreto vero. Per ognuna c'e' quindi una prova
+# che il falso positivo tace, e accanto una prova che il segreto continua a
+# gridare nella stessa forma.
+
+cp "$BANCO/pulito.md" "$LAV/dossier.md"
+printf '\n+        password=credenziali.password,\n' >> "$LAV/dossier.md"
+prova    "un attributo di un oggetto non e' un valore"   muto "$RV" segreti 7
+
+cp "$BANCO/pulito.md" "$LAV/dossier.md"
+printf '\n+        password=PASSWORD_DI_PROVA,\n' >> "$LAV/dossier.md"
+prova    "il nome di una costante non e' un valore"      muto "$RV" segreti 7
+
+cp "$BANCO/pulito.md" "$LAV/dossier.md"
+printf '\n+FINTA = Credenziali(password="non-e-un-segreto-e-non-lo-sara-mai")\n' >> "$LAV/dossier.md"
+prova    "una frase italiana fra virgolette nemmeno"     muto "$RV" segreti 7
+
+# --- e adesso quello che le tre righe NON devono spegnere ---
+
+# Senza l'underscore obbligatorio, la seconda esclusione avrebbe spento anche
+# questa: e' la ragione per cui l'underscore c'e'.
+cp "$BANCO/pulito.md" "$LAV/dossier.md"
+printf '\n+aws_secret_access_key=AKIAIOSFODNN7EXAMPLE,\n' >> "$LAV/dossier.md"
+prova_no "una chiave AWS resta un segreto"               muto "$RV" segreti 7
+
+cp "$BANCO/pulito.md" "$LAV/dossier.md"
+printf '\n+        password=pplx-4f9b2c7d1e8a6b3f5c0d9e2a7b4c1f8e,\n' >> "$LAV/dossier.md"
+prova_no "una chiave vera senza virgolette resta un segreto" muto "$RV" segreti 7
+
+cp "$BANCO/pulito.md" "$LAV/dossier.md"
+printf '\n+        password="ghp_9f2b4c8d1e6a3f7b5c0d9e2a4b8c1f6e3a7d",\n' >> "$LAV/dossier.md"
+prova_no "un token GitHub fra virgolette resta un segreto"   muto "$RV" segreti 7
+
+# La terza esclusione chiede parole tutte minuscole: una vera credenziale con
+# un trattino in mezzo ha cifre o maiuscole, e quindi non le somiglia.
+cp "$BANCO/pulito.md" "$LAV/dossier.md"
+printf '\n+        password="Xk7-Qm2-Zt9-Rb4-Pv6-Lw1",\n' >> "$LAV/dossier.md"
+prova_no "una password con trattini ma non minuscola resta un segreto" \
+         muto "$RV" segreti 7
+
+cp "$BANCO/pulito.md" "$LAV/dossier.md"
+
 printf '\n%d passate, %d fallite\n' "$PASSATI" "$FALLITI"
 [ "$FALLITI" -eq 0 ]
