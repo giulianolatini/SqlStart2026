@@ -54,10 +54,30 @@ case "$1 $2" in
 esac
 FINTO
 
-# agy finto: risponde con un JSON pulito, come chiede lo schema.
+# agy finto. Fedele alla versione vera (1.1.22), e la fedelta' e' il punto:
+# la finta di prima stampava il JSON nudo e accettava qualunque opzione, cosi'
+# la suite restava verde mentre la vera rifiutava la riga di comando. Un doppio
+# piu' ubbidiente dell'originale non prova niente.
 cat > "$FINTI/agy" <<'FINTO'
 #!/usr/bin/env bash
-printf '%s\n' "$FINTA_RISPOSTA_AGY"
+formato=text
+schema=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --output-format) formato="$2"; shift 2 ;;
+    --json-schema)   schema="$2";  shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [ -n "$schema" ] && [ "$formato" != json ] && [ "$formato" != stream-json ]; then
+  echo "Error: --json-schema can only be used when --output-format is 'json' or 'stream-json'" >&2
+  exit 1
+fi
+# La busta della vera: la risposta utile sta in structured_output, mentre
+# response e' la stessa cosa come stringa e con dentro due chiavi in piu'.
+printf '{"conversation_id":"finta","status":"SUCCESS","response":%s,"structured_output":%s,"usage":{"total_tokens":1}}\n' \
+  "$(printf '%s' "$FINTA_RISPOSTA_AGY" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')" \
+  "$FINTA_RISPOSTA_AGY"
 FINTO
 
 # codex finto: risponde con lo stesso JSON dentro un recinto markdown, che e'
@@ -389,6 +409,30 @@ cp "$BANCO/pulito.md" "$LAV/dossier.md"
 printf '\n+        password="Xk7-Qm2-Zt9-Rb4-Pv6-Lw1",\n' >> "$LAV/dossier.md"
 prova_no "una password con trattini ma non minuscola resta un segreto" \
          muto "$RV" segreti 7
+
+cp "$BANCO/pulito.md" "$LAV/dossier.md"
+
+caso "19. agy: la busta della vera, e la riga di comando che la vera accetta"
+
+# Misurato sui sei fascicoli della release/1.0: `--output-format text` insieme a
+# `--json-schema` fa uscire agy 1.1.22 con un errore, e la revisione di Gemini
+# non parte. Il difetto e' sopravvissuto perche' il doppio ubbidiva sempre.
+
+cp "$BANCO/pulito.md" "$LAV/dossier.md"
+rm -f "$LAV/gemini.txt" "$LAV/gemini.err" "$LAV/codex.txt" "$LAV/rilievi.md"
+muto "$RV" interroga 7 --invia
+prova    "agy non esce male"        test ! -s "$LAV/gemini.err"
+prova    "e qualcosa ha risposto"   test -s "$LAV/gemini.txt"
+prova    "la risposta e' la busta"  contiene "$(cat "$LAV/gemini.txt")" "structured_output"
+
+muto "$RV" rilievi 7
+u="$(cat "$LAV/rilievi.md")"
+prova    "il rilievo di Gemini arriva al foglio"  contiene "$u" "variabile non quotata"
+prova_no "e non finisce fra i problemi"           contiene "$u" "Gemini Pro (agy): il JSON non contiene"
+
+# La busta non deve mangiarsi le chiavi che non c'entrano: `status` e `usage`
+# sono dell'involucro, non del rilievo.
+prova_no "status non diventa un rilievo"          contiene "$u" "SUCCESS"
 
 cp "$BANCO/pulito.md" "$LAV/dossier.md"
 

@@ -89,6 +89,34 @@ def estrai_json(testo):
     return None, "nessun JSON leggibile nella risposta"
 
 
+def sbusta(oggetto):
+    """Toglie la busta del CLI, se c'è, e restituisce la risposta del modello.
+
+    `agy --output-format json` non stampa la risposta: stampa una busta con
+    dentro `status`, `usage`, la risposta come stringa in `response` e la stessa
+    risposta già decodificata in `structured_output`. Il primo oggetto bilanciato
+    della risposta grezza è quindi la busta, non i rilievi, e senza questo passo
+    la revisione di Gemini risulterebbe «senza elenco rilievi» — cioè
+    indistinguibile da un revisore che non ha trovato niente.
+    """
+    if not isinstance(oggetto, dict) or "rilievi" in oggetto:
+        return oggetto
+
+    dentro = oggetto.get("structured_output")
+    if isinstance(dentro, dict):
+        return dentro
+
+    # `structured_output` manca quando il modello non ha rispettato lo schema:
+    # resta `response`, che è la stessa cosa come stringa.
+    testo = oggetto.get("response")
+    if isinstance(testo, str) and testo.strip():
+        riletto, _ = estrai_json(testo)
+        if isinstance(riletto, dict):
+            return riletto
+
+    return oggetto
+
+
 def leggi_fonte(cartella, nome_file, sigla, etichetta):
     percorso = cartella / nome_file
     if not percorso.exists():
@@ -97,6 +125,7 @@ def leggi_fonte(cartella, nome_file, sigla, etichetta):
     oggetto, motivo = estrai_json(percorso.read_text(encoding="utf-8", errors="replace"))
     if oggetto is None:
         return [], f"{etichetta}: {motivo} — la risposta grezza è in {nome_file}"
+    oggetto = sbusta(oggetto)
 
     grezzi = oggetto.get("rilievi")
     if not isinstance(grezzi, list):

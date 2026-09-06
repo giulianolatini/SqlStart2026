@@ -341,7 +341,7 @@ cmd_interroga () {
   if command -v "$AGY" >/dev/null 2>&1; then
     "$AGY" --print "$(cat "$prompt")" \
            --model "$MODELLO_AGY" --effort high \
-           --output-format text --json-schema "$schema" \
+           --output-format json --json-schema "$schema" \
            --print-timeout "$ATTESA" --sandbox \
            > "$lav/gemini.txt" 2> "$lav/gemini.err" &
     pid_agy=$!
