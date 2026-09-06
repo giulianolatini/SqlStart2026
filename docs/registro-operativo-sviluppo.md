@@ -7353,3 +7353,110 @@ Stato aggiornato: decisioni fino ad **ADR-0120**, verifiche fino a **V-089**, mi
 **176 passate**. Prossimo passo: il giro del PO con gli stack accesi, e la discussione sui sospesi
 con dentro le tre cose di oggi — se `reset-demo.sh` debba togliere `lab_ripristinato`, se la
 registrazione 13 vada rigirata, e con quale priorità rispetto a ciò che era già in lista.
+
+## 2026-09-06 — Tre decisioni del PO eseguite, e tre numeri che mentivano
+
+Il Product Owner ha risposto ai tre sospesi di stamattina in una volta: sì al drop di
+`lab_ripristinato` in `reset-demo.sh`; l'ADR che adotta un intervallo per l'Atto III, con la
+registrazione 13 rigirata accettando il numero che verrà; e `stats` che stampa il dettaglio per
+collezione e poi il totale, «così da avere una fotografia chiara e verificabile». Tutte e tre fatte.
+Tutte e tre hanno mostrato, **eseguendo**, qualcosa che nessuna delle tre domande conteneva.
+
+**1. Il drop c'era, il verdetto mentiva.** La prova rossa scritta stamattina verificava che il nome
+`lab_ripristinato` fosse scritto nello script accanto a `dropDatabase`, e quello era vero. Alla
+prima corsa dal vivo lo script ha detto «database rimosso: lab_ripristinato», giusto — il database
+c'era davvero. Alla seconda l'ha detto di nuovo, e non poteva. `dropDatabase()` risponde `dropped`
+**anche per un database che non è mai esistito**: misurato, `lab_inesistente_0906` risponde
+`{"ok":1,"dropped":"lab_inesistente_0906"}` come uno pieno. Il ramo «non c'era» non poteva accadere
+mai, e lo script raccontava a chi prova la vigilia una pulizia che non aveva fatto. Ora la domanda
+si fa prima, con `getDBNames().includes(nome)`, e le due facce sono state provate tutte e due dal
+vivo. La regressione la vieta `test_il_verdetto_del_drop_non_si_fida_del_campo_dropped`; l'altra
+prova cercava il nome e `dropDatabase` sulla **stessa riga** ed è saltata appena la stesura è
+cambiata — era legata al testo, non al comportamento. Adesso leggono lo stesso blocco.
+
+**2. La fotografia per collezione ha trovato due contatori fermi a zero.**
+[ADR-0121](Decision.md#adr-0121): riga `collezioni` con un `countDocuments` per collezione in ordine
+di nome, poi la riga `database` come prima. Il dettaglio **sopra** la somma, perché un totale
+stampato sopra i suoi addendi si legge come il primo di essi — ed è precisamente l'errore di lettura
+da cui la decisione viene. Le viste non si contano, `system.views` sì: è la collezione vera in cui
+il database tiene le definizioni, e togliere una riga per far pulizia romperebbe l'unica proprietà
+che rende la fotografia verificabile.
+
+Girata contro i tre stack, ha detto subito a che cosa serviva: `ordini` 50 000 su 01 e 02, 20 000 su
+03, e i totali dei database a **1 505 885** (01, trentotto collezioni), **55 386** (02) e **99 699**
+(03) — residui delle registrazioni del 4 settembre. Poi il conto non è tornato: sullo **stack 01**,
+che è uno standalone, le collezioni sommano **1 528 002** e `dbStats.objects` ne dichiara
+**1 505 885**. Non è sharding, non sono orfani, non è una vista. Lo scarto — **22 117** — sta tutto
+in due collezioni che nei metadati risultano a **zero** mentre contengono 7 847 e 14 270 documenti.
+`validate()` su una delle due risponde **`valid: true`, zero avvisi**, e intanto rimette il
+contatore a 7 847. La collezione non era corrotta: era stantio il numero, e nessuno lo segnalava.
+L'altra è stata lasciata così apposta, perché chi rifà la misura veda la differenza.
+[V-090](Sources.md#v-090). La causa dello zero è circoscritta e **non** dimostrata: il riavvio del 6
+è dichiarato pulito dal giornale di `mongod`, e i giornali del 4 non ci sono più.
+
+Due frasi scritte per prudenza sono diventate misure e sono state riscritte: la docstring
+dell'ispettore diceva «la stima, dopo un arresto sporco, *può* restare indietro», e la prova
+d'integrazione diceva «fuori da uno sharded cluster i due numeri **devono** coincidere» — una
+generalizzazione fatta su sedici documenti, che il laboratorio ha smentito con un milione e mezzo.
+La prova resta buona, perché lavora su un database appena creato; è la sua docstring che prometteva
+troppo.
+
+**3. La registrazione 13 è stata rigirata, ed è uscito −1,9 %.** Il ritmo è **salito** mentre il
+dump girava: 506/s prima, 516/s durante. Prima di rassegnarsi al numero si è fatta una corsa di
+controllo, e ha dato **−14,2 %**. A quel punto l'ipotesi «il portatile balla» non bastava più, e la
+risposta era dentro il `.cast`, negli istanti delle fasi: la fase `carico` dura **dieci secondi** e
+raccoglie cinquemila scritture, la fase `dump` dura **mezzo secondo** e ne raccoglie
+duecentocinquanta. `lab` pesa 5,8 MB e `mongodump` la copia in meno di un secondo. La percentuale è
+il rapporto fra una media su dieci secondi — che comprende l'avvio a freddo del client, primi
+inserimenti a 65 ms contro i 6 di regime — e una media su mezzo secondo. Nove corse fra il 4 e il 6
+danno da **−14,2 %** a **+53,7 %**, con tre valori negativi: non è rumore attorno a un valore, è un
+rapporto fra due cose non confrontabili.
+
+Quindi l'ADR che adotta un intervallo **non è stata scritta**, e la ragione va detta: un intervallo
+che contiene −14 % e +54 % non è un atteso, è la confessione che la misura non misura. Il runbook
+adesso dice che cosa non varia — le scritture non si fermano e sono tutte confermate, 275 su 275
+nella registrazione attuale — e che la percentuale si legge sullo schermo qualunque sia. Rendere le
+due finestre confrontabili, confrontando la **coda** della fase di carico lunga quanto il dump
+invece dei dieci secondi interi, è una modifica alla scena e la decisione è del PO.
+
+**Di passaggio, un quarto.** `/tmp/mongolab-backup` sta *dentro* `mongo-rs-1` e accumula un dump per
+corsa: nessuno lo svuota, né `reset-demo.sh` né `down`/`up`. Alla prima ripresa della scena 14 il
+`mongorestore` ha rimesso in piedi **sei** collezioni di carico invece di una, e su uno schermo
+proiettato è rumore. Tolto a mano per registrare, scritto nel runbook, e se debba entrare in
+`reset-demo.sh` è la stessa domanda di stamattina su `lab_ripristinato`: la decide il PO.
+
+Registrazioni rigirate: la **10** (2,3 s, `ordini · 50 000` e `lab · 50 000` sullo stack pulito), la
+**13** (11,3 s, 506/s → 516/s, −1,9 %) e la **14** (3,7 s, 5 386 all'origine · 5 295 nella copia ·
+differenza 91), che non poteva restare ferma perché conta ciò che la 13 ha copiato. Tutte e tre
+riprodotte con `--riproduci` prima di dichiararle buone. Le due pagine che citano la vecchia uscita
+di `stats` e la voce [V-089](Sources.md#v-089) **non** sono state toccate: sono verbali datati, non
+descrizioni dello strumento di oggi.
+
+### Note di metodo
+
+247. **Una prova che legge il file non sostituisce una corsa che legge il server, e va programmata
+    nello stesso compito.** La prova rossa del drop verificava un'affermazione vera — il nome è
+    scritto nello script — mentre la cosa che contava, il verdetto, era falsa. Non è una prova
+    scritta male: è una prova che non poteva sapere. Il difetto stava in una risposta del server, e
+    solo il server poteva darla. La regola pratica: quando la prova può affermare solo sull'artefatto,
+    la corsa dal vivo fa parte dello stesso compito, non del giro dopo — e le corse sono **due**, una
+    per faccia del ramo.
+248. **Prima di spiegare perché un rapporto varia, si controlla che i due termini siano
+    confrontabili.** Del calo dell'Atto III si sono cercate le cause fuori — la resa Rich, la contesa
+    fra stack, il portatile carico — per quattro corse. La risposta stava dentro, negli istanti delle
+    fasi già scritti nel `.cast`: dieci secondi contro mezzo secondo. Leggerli è costato trenta
+    secondi. La regola pratica: un rapporto fra due medie non si interpreta prima di aver guardato
+    quanto dura, e quanto contiene, ciascuna delle due.
+249. **Le parole «deve» e «sempre» in una docstring sono un debito, e si paga quando i dati
+    crescono.** «Fuori da uno sharded cluster i due numeri devono coincidere» era vero per la prova
+    che lo scriveva, sedici documenti in un database appena creato, e falso sullo stesso stack con un
+    milione e mezzo. Una docstring che generalizza dal caso di prova promette a nome di un dominio
+    che non ha autorizzato nessuno. La regola pratica: se la frase dice «deve», o c'è la misura che
+    lo regge o si scrive che cosa vale **qui**.
+
+Stato aggiornato: decisioni fino ad **ADR-0121**, verifiche fino a **V-090**, misure fino a
+**M-059**, note di metodo fino alla **249**. Controlli: `make docs-check` verde, `make tools-test`
+**178 passate**, `pytest` dell'applicazione **711 passate**, `mypy` pulito su 66 file. Prossimo
+passo: le due decisioni che restano al PO — se rendere confrontabili le due finestre dell'Atto III,
+e se `reset-demo.sh` debba svuotare anche `/tmp/mongolab-backup` — e la discussione sulle priorità,
+che aspetta il suo giro con gli stack accesi.

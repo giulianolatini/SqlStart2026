@@ -7671,3 +7671,84 @@ ricopiare a memoria.
   peggiore (nota di metodo 243).
 
 **Fonti:** [ADR-0012](#adr-0012), [ADR-0036](#adr-0036), [ADR-0049](#adr-0049), [ADR-0092](#adr-0092), [M-019](../app/docs/Sources.md#m-019), [M-044](../app/docs/Sources.md#m-044)
+
+---
+
+<a id="adr-0121"></a>
+
+## ADR-0121 — La fotografia dice di che cosa è fatta, e poi quanto fa in tutto
+
+**Data:** 2026-09-06 · **Stato:** Accettata
+
+**Contesto:** `mongolab stats` stampava una riga sola per i documenti, `database lab · 50 000
+documenti`, e quella riga è una **somma**. Su uno stack pulito coincide con `ordini` e nessuno se ne
+accorge; appena l'Atto III è girato una volta, in `lab` resta una collezione `carico-AAAAMMGG-hhmmss`
+da qualche migliaio di documenti e il totale sale. Il costo si è visto scrivendo il runbook: la
+§1.4 diceva «`ordini`, 50 000, si verifica con `make app-stats`», e il comando rispondeva **62 602**.
+Chi controlla lo stato atteso la sera prima del talk legge un guasto dove non c'è.
+
+Il caso limite l'ha dato lo stack 01, che porta i residui delle registrazioni del 4 settembre: la
+riga diceva **1 505 885**. Cinquantamila c'erano, e non c'era modo di saperlo dallo schermo
+([V-090](../docs/Sources.md#v-090)).
+
+**Decisione.** Tre punti.
+
+1. **`stats` stampa una riga per collezione, e poi il totale del database.** La riga `collezioni`
+   elenca ogni collezione con i suoi documenti, in ordine di nome; la riga `database` resta dov'era
+   e dice la stessa cosa di prima. Il modello è `ContoCollezione`, la porta è `collection_counts()`,
+   il rendering è `_collezioni` e riusa il gutter di `_topologia`.
+
+2. **Il dettaglio viene prima della somma.** Un totale stampato sopra i suoi addendi si legge come
+   il primo di essi, ed è precisamente l'errore di lettura da cui questa decisione viene. Sotto, la
+   riga `database` chiude il conto.
+
+3. **Il conteggio è esatto: `countDocuments`, non la stima dei metadati.** È lo stesso numero che
+   verificano `demo restore` e gli smoke, e una fotografia che dicesse 49 998 dove la scena dice
+   50 000 manderebbe a cercare un guasto nel posto sbagliato. Costa una scansione dell'indice `_id`,
+   che su un laboratorio da cinquantamila documenti non si sente.
+
+Le **viste** non si contano: `listCollections` le elenca insieme alle collezioni, e una vista non ha
+documenti propri — comparirebbe con il conteggio della sorgente, cioè come un raddoppio. Il filtro è
+`{"type": "collection"}`. `system.views`, invece, **si conta**: è la collezione vera in cui il
+database tiene le definizioni, `dbStats` la somma, ed escluderla per far pulizia sullo schermo
+romperebbe l'unica proprietà che rende la fotografia verificabile — che gli addendi facciano il
+totale. L'attesa opposta era scritta in una prova, ed è la prova che l'ha smentita.
+
+**Conseguenze.** La riga `collezioni` è lunga quanto le collezioni che ci sono: su uno stack pulito
+è una riga, sullo stack 01 di oggi sono trentotto. È il prezzo di dire la verità su uno stack
+sporco, e chi guarda capisce al primo sguardo *perché* il totale è quello.
+
+La proprietà «gli addendi fanno il totale» vale su dati appena scritti e **non è garantita**: il
+totale viene da `dbStats`, che somma contatori conservati per collezione, e quei contatori possono
+restare indietro. Misurato lo stesso giorno sullo stack 01: somma 1 528 002, `dbStats.objects`
+1 505 885, e lo scarto sta tutto in due collezioni che dichiarano **zero** mentre ne contengono
+7 847 e 14 270. `validate()` risponde `valid: true` senza avvisi e intanto rimette il contatore a
+posto. È la ragione per cui il conteggio è esatto e non stimato, ed è scritta nel runbook come
+regola di lettura: **se le due righe litigano, ha ragione quella sopra**.
+
+Attraverso un `mongos` le due righe possono divergere legittimamente: `dbStats` somma i metadati
+degli shard, orfani compresi, mentre `countDocuments` conta i documenti **posseduti**. È la stessa
+distinzione fra `numOwnedDocuments` e `numOrphanedDocs` che `shard_distribution` già tiene separate
+([ADR-0106](#adr-0106)), e farla sparire vorrebbe dire cancellare l'unico posto in cui una
+migrazione non ripulita si vede.
+
+**Alternative scartate.**
+
+- *Lasciare la riga sola e spiegarlo nel runbook.* È ciò che il runbook faceva, in due righe di
+  prosa. Una spiegazione nel documento che si legge sotto pressione è un lavoro rimandato al momento
+  peggiore (nota di metodo 243), e la prosa non dice mai *quale* collezione ha portato il totale a
+  62 602.
+- *Stampare solo la collezione che interessa, `ordini`.* Risolve la §1.4 e nasconde il resto: il
+  milione e mezzo dello stack 01 resterebbe invisibile, e con esso il fatto che l'Atto III non è mai
+  stato ripulito. La fotografia serve a far vedere lo stato, non a confermare un'attesa.
+- *Contare con `estimated_document_count`.* Un istante invece di una scansione, e un numero che può
+  essere **zero su una collezione piena** — misurato, due volte, lo stesso giorno
+  ([V-090](../docs/Sources.md#v-090)).
+- *Escludere `system.views` per pulizia.* Toglie una riga dallo schermo e rompe la somma. Una
+  fotografia in cui gli addendi non fanno il totale non si può controllare a mente, ed era l'unica
+  cosa che questa decisione prometteva.
+- *Restituire una mappa nome → documenti invece di una tupla ordinata.* L'ordine è parte del
+  risultato, perché è l'ordine in cui si legge; affidarlo all'ordine di inserimento di un `dict`
+  vorrebbe dire affidarlo a `listCollections`, che non lo garantisce.
+
+**Fonti:** [ADR-0092](#adr-0092), [ADR-0106](#adr-0106), [V-090](../docs/Sources.md#v-090)

@@ -113,18 +113,44 @@ prevede, e si rimedia **adesso** con `./tools/reset-demo.sh <stack>`.
 | 02 replica set | `lab` | `ordini` | **50 000** | `make app-stats TARGET=rs` |
 | 03 sharded | `lab` | `ordini` | **20 000** | `make stato-03` |
 
-**Il numero è quello del database, non della collezione**, e vale 50 000 tondi **solo su uno stack
-pulito**: `mongolab stats` somma tutto ciò che sta in `lab`, e ogni corsa dell'Atto III ci lascia
-dentro una collezione `carico-AAAAMMGG-hhmmss` da qualche migliaio di documenti. Se la riga dice più
-di 50 000 non è rotto niente: è una prova di ieri. Misurato il 6 settembre, dopo le registrazioni
-del 4 e una corsa di prova: **62 602**.
+**Si guarda la riga `collezioni`, non la riga `database`.** `stats` stampa tutte e due, e in
+quest'ordine ([ADR-0121](../Decision.md#adr-0121)):
 
-**Se l'Atto III è già stato provato su questo stack, la sera prima si azzera.** `demo restore`
-costruisce `lab_ripristinato`, e quel database **non lo toglie nessuno**: né `reset-demo.sh`, che
-ripulisce le collezioni di `lab` e non guarda gli altri database, né `down`/`up`, che conservano i
-volumi. Alla corsa successiva `mongorestore` ritrova i documenti già lì, li conta come falliti ed
-**esce zero**; l'applicazione lo intercetta e la scena muore con `RestoreIncompleto`. Misurato oggi:
-**6 766 ripristinati, 55 740 persi**. Il rimedio è lento e va dato la sera prima, non in sala:
+```
+collezioni  ordini · 50000 documenti
+database    lab · 50000 documenti · dati 5.8 MB · indici 1.3 MB
+```
+
+Su uno stack pulito coincidono. Non coincidono più appena l'Atto III è girato una volta: ogni corsa
+lascia in `lab` una collezione `carico-AAAAMMGG-hhmmss` da qualche migliaio di documenti, il totale
+del database le somma tutte, e la collezione che interessa resta a 50 000. E possono non coincidere
+anche quando le collezioni tornano: la riga `database` viene da `dbStats`, che somma **contatori
+conservati** per collezione, e quelli possono restare indietro — sullo stack 01, il 6 settembre, di
+22 117 documenti su 1,5 milioni ([V-090](../Sources.md#v-090)). La riga `collezioni` invece conta
+davvero. **Se le due righe litigano, ha ragione quella sopra.** Misurato il 6 settembre,
+dopo le registrazioni del 4 e una corsa di prova: `ordini` **50 000**, `lab` **62 602**. Prima che
+la riga `collezioni` esistesse, chi verificava leggeva 62 602 dove questa tabella diceva 50 000 e
+concludeva che lo stack fosse rotto.
+
+**Se l'Atto III è già stato provato su questo stack, si azzera — e adesso basta `reset-demo.sh`.**
+`demo restore` costruisce `lab_ripristinato`, e fino al 6 settembre quel database non lo toglieva
+nessuno: alla corsa successiva `mongorestore` ritrovava i documenti già lì, li contava come falliti
+ed usciva **zero**, e la scena moriva con `RestoreIncompleto` — misurato, **6 766 ripristinati e
+55 740 persi**. Ora lo toglie `./tools/reset-demo.sh 02`, che lo dice in chiaro:
+
+```
+Il database che il ripristino costruisce
+  ✓ database rimosso: lab_ripristinato       # c'era: l'Atto III era già girato qui
+  ✓ nessun database di ripristino da togliere # non c'era
+```
+
+Resta una cosa che `reset-demo.sh` **non** pulisce: `/tmp/mongolab-backup`, che sta *dentro*
+`mongo-rs-1` e accumula un dump per corsa. Non rompe niente — `mongorestore` li rimette tutti in
+`lab_ripristinato`, che poi si butta — ma la scena 2 dell'Atto III elenca una riga per ogni dump
+vecchio, e su uno schermo proiettato è rumore. Si toglie con
+`docker exec mongo-rs-1 rm -rf /tmp/mongolab-backup`.
+
+Se serve invece ripartire davvero da zero, il rimedio lento va dato la sera prima, non in sala:
 
 ```bash
 make reset-02      # cancella i volumi dello stack 02, il keyfile resta
@@ -382,18 +408,30 @@ primario continua a servire le scritture, e `--oplog` cattura le operazioni avve
 dump, che è ciò che lo rende coerente rispetto a un istante.
 
 > **Atteso** (riferimento: registrazione [13](registrazioni/README.md#registrazioni-di-terminale),
-> 11,4 s): qualche centinaio di scritture al secondo prima, e un **calo fra il 10 % e il 20 %**
-> mentre il dump gira.
+> 11,3 s): qualche centinaio di scritture al secondo prima, **tutte le scritture confermate anche
+> mentre il dump gira**, e una percentuale di calo che **non si può prevedere** — può uscire
+> negativa.
 
-La registrazione segnò **546/s → 539/s**, cioè l'**1,3 %**, e quel numero **non si è riprodotto**.
-Quattro corse il 6 settembre, sullo stesso portatile: **48,1 %** con Docker appena acceso e `lab`
-sporca di prove precedenti, **16,2 %** con la resa Rich e tutti e tre gli stack su, **15,4 %** con
-`--sink plain` e tutti e tre, **11,9 %** col solo stack 02 acceso. La resa non c'entra e la contesa
-fra stack vale tre o quattro punti: l'1,3 % era una corsa fortunata, non una costante.
+**La percentuale non è una misura, ed è bene saperlo prima del palco.** Nove corse fra il 4 e il 6
+settembre, sullo stesso portatile: **−14,2 %**, **−6,8 %**, **−1,9 %** (la registrazione attuale),
+**+1,3 %** (quella del 4 settembre), **+11,9 %**, **+15,4 %**, **+16,2 %**, **+48,1 %**, **+53,7 %**.
+Il segno cambia: tre volte su nove il ritmo è **salito** mentre il dump girava.
 
-**Che cosa vuol dire dal palco:** la frase regge — il backup a caldo si paga poco, e continua a
-pagarsi poco a un decimo di calo — ma **la percentuale non si annuncia prima di averla letta**. La
-si legge sullo schermo e la si commenta.
+Il motivo sta nelle due finestre, e si legge nel `.cast` stesso: la fase `carico` dura **dieci
+secondi** e raccoglie cinquemila scritture, la fase `dump` dura **mezzo secondo** e ne raccoglie
+duecentocinquanta. `lab` pesa 5,8 MB e `mongodump` la copia in meno di un secondo: il campione
+«durante» è troppo corto perché la sua media significhi qualcosa, e la media dei dieci secondi
+«prima» comprende l'avvio a freddo del client — i primi inserimenti costano 65 ms, quelli a regime
+6. Il rapporto fra i due è dominato da questo, non dal dump.
+
+**Che cosa vuol dire dal palco:** il fatto da mostrare **non** è la percentuale, è che le scritture
+non si fermano e sono tutte confermate — 275 su 275 nella registrazione attuale, zero perse. La
+percentuale si legge sullo schermo, qualunque sia, e la si commenta per quello che è: due finestre
+di lunghezza molto diversa sulla stessa corsa. Se esce negativa, si dice che è negativa e perché.
+
+> **Aperto:** rendere le due finestre confrontabili è una modifica alla scena — confrontare il
+> *coda* della fase di carico, lunga quanto il dump, invece dei dieci secondi interi — e la
+> decisione è del PO. Finché non è presa, l'atteso è quello scritto qui.
 
 C'è un tetto: `--tetto`, predefinito **300 secondi**. Oltre quello il dump viene abbattuto e la
 scena finisce con un errore che dice «ha superato il tetto», non «`mongodump` è uscito con
@@ -418,7 +456,7 @@ lo stesso e conta `lab.ordini` — cinquantamila documenti da tutte e due le par
 qui sotto non tornerebbero per niente.
 
 > **Atteso** (riferimento: registrazione [14](registrazioni/README.md#registrazioni-di-terminale),
-> 3,2 s): **5 886** all'origine · **5 740** nella copia · **differenza 146**.
+> 3,7 s): **5 386** all'origine · **5 295** nella copia · **differenza 91**.
 
 **Le due scene vanno in quest'ordine e attaccate**, perché la seconda conta ciò che la prima ha
 copiato. I documenti di differenza sono quelli scritti *mentre* il dump era in corso: stanno
@@ -540,8 +578,8 @@ proprietà che le rende una copia e non una ricostruzione.
 | 10 | `10-app-fotografia-dello-stack.cast` | **Atto I, punto 1** | 1,5 s | `mongod 7.0.40` · tre membri · 50 000 documenti |
 | 11 | `11-app-cronaca-dell-elezione.cast` | **Atto I, punto 3** | 42,5 s | elezione in **10 035 ms**, senza carico |
 | 12 | `12-app-failover-e-i-due-numeri.cast` | **Atto II per intero** | 53,3 s | **10 019 ms** · **0 scritture perse** |
-| 13 | `13-app-backup-a-caldo.cast` | **Atto III, punto 1** | 11,4 s | 546/s → 539/s: **calo 1,3 %** |
-| 14 | `14-app-restore-e-i-due-conteggi.cast` | **Atto III, punto 2** | 3,2 s | 5 886 · 5 740 · **differenza 146** |
+| 13 | `13-app-backup-a-caldo.cast` | **Atto III, punto 1** | 11,3 s | 506/s → 516/s: **calo −1,9 %** |
+| 14 | `14-app-restore-e-i-due-conteggi.cast` | **Atto III, punto 2** | 3,7 s | 5 386 · 5 295 · **differenza 91** |
 
 **Le coppie che vanno insieme, e in quest'ordine:** 2 e 3 (il gesto brutale costa dieci secondi,
 quello educato uno — il contrario di quello che il pubblico si aspetta); 8 e 9 (lo stesso comando
@@ -732,8 +770,10 @@ sono scritte qui perché chi legge sappia che cosa non è ancora stato verificat
   non oggi: è l'ultimo momento utile per ripinnare e rigirare le registrazioni prima del talk. Il
   primo dei due controlli è stato speso ed è andato a vuoto. Aprire la release in anticipo **non**
   sposta il secondo: la procedura, sui tre canali, è in [V-074](../Sources.md#v-074).
-- **L'1,3 % dell'Atto III non è ancora una fonte.** Le quattro corse del 6 settembre stanno qui e
-  nel registro operativo, e non in `Sources.md`: una verifica nuova dev'essere citata da un ADR per
-  non restare orfana, e adottare un intervallo al posto del numero della registrazione è una
-  decisione, non una misura. Le due strade sono rigirare la registrazione 13 accettando il numero
-  che verrà, oppure scrivere l'ADR che dice perché un atteso di scena è un intervallo.
+- **La percentuale dell'Atto III misura due finestre di lunghezza diversa, e la decisione è
+  aperta.** La registrazione 13 è stata rigirata il 6 settembre accettando il numero che veniva, ed
+  è uscito **−1,9 %**: il ritmo è salito. Nove corse danno da −14,2 % a +53,7 % ([§Atto
+  III](#blocco-2-atto-iii--il-backup-a-caldo-e-la-finestra-che-si-paga--4-minuti)). La causa è che «prima» è una
+  media su dieci secondi che comprende l'avvio a freddo del client e «durante» una media su mezzo
+  secondo. Renderle confrontabili è una modifica alla scena; finché non è decisa, il runbook dice
+  che la percentuale non si annuncia.

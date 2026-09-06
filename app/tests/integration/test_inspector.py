@@ -122,13 +122,21 @@ def test_le_collezioni_si_contano_una_per_una_e_in_ordine_di_nome(
 def test_la_somma_delle_collezioni_torna_con_il_totale_del_database(
     stack01: MongoClient[dict[str, Any]],
 ) -> None:
-    """La proprieta' per cui la fotografia si chiama verificabile.
+    """La proprieta' per cui la fotografia si chiama verificabile — su dati appena scritti.
 
-    Fuori da uno sharded cluster i due numeri devono coincidere, e chi guarda lo schermo
-    deve poterlo controllare a mente. Attraverso un mongos possono divergere — `dbStats`
-    somma i metadati degli shard, orfani compresi — ed e' il motivo per cui questa prova
-    sta sullo stack 01 e non sul 03: li' la disuguaglianza sarebbe un'informazione, non un
-    guasto, e una prova non deve promettere un'uguaglianza che il dominio non garantisce.
+    Attraverso un mongos i due numeri possono divergere, perche' `dbStats` somma i
+    metadati degli shard, orfani compresi: ed e' il motivo per cui questa prova sta sullo
+    stack 01 e non sul 03, dove la disuguaglianza sarebbe un'informazione e non un guasto.
+
+    **Ma nemmeno su uno standalone l'uguaglianza e' garantita, e questa prova non la
+    promette.** Vale qui perche' il database e' appena stato creato da questa corsa: i
+    metadati di `dbStats` sono contatori conservati per collezione, e possono restare
+    indietro. Misurato sullo stesso stack 01 il 6 settembre, su `lab`, che vive dal 4:
+    somma 1 528 002 contro `dbStats.objects` 1 505 885, con due collezioni ferme a zero
+    nei metadati e piene di 7 847 e 14 270 documenti
+    ([V-090](../../../docs/Sources.md#v-090)). La prima stesura di questa docstring diceva
+    «fuori da uno sharded cluster i due numeri **devono** coincidere»: era una
+    generalizzazione da sedici documenti, e il laboratorio l'ha smentita.
     """
     with collezione_usa_e_getta(stack01) as ordini:
         database = ordini.database

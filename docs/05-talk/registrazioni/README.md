@@ -58,11 +58,11 @@ e non una ricostruzione.
 
 | # | File | Che cosa mostra | Durata | Il numero che porta | Momento |
 |---:|---|---|---:|---|---|
-| 10 | [`10-app-fotografia-dello-stack.cast`](10-app-fotografia-dello-stack.cast) | `mongolab stats`: topologia, versione, database e distribuzione in otto righe | 1,5 s | `mongod 7.0.40` · tre membri e un primario · `lab` con **50 000** documenti | apertura dell'Atto I — «che cosa c'è, prima che lo rompa» |
+| 10 | [`10-app-fotografia-dello-stack.cast`](10-app-fotografia-dello-stack.cast) | `mongolab stats`: topologia, versione, **dettaglio per collezione**, totale del database e distribuzione | 2,3 s | `mongod 7.0.40` · tre membri e un primario · `ordini` con **50 000** documenti, e `lab` con lo stesso totale perché lo stack è pulito | apertura dell'Atto I — «che cosa c'è, prima che lo rompa» |
 | 11 | [`11-app-cronaca-dell-elezione.cast`](11-app-cronaca-dell-elezione.cast) | `mongolab watch`: l'elezione **senza carico intorno**, una riga per transizione | 42,5 s | primario perso a `26.047`, `mongo-rs-2` eletto a `36.082`: **10 035 ms** | l'Atto I quando la domanda è «e il driver come fa a saperlo?» |
 | 12 | [`12-app-failover-e-i-due-numeri.cast`](12-app-failover-e-i-due-numeri.cast) | la scena centrale: carico attivo, `SIGKILL` sul primario, l'elezione, il bilancio | 53,3 s | interruzione **10 019 ms** · **0 scritture perse** · 31 952 confermate contro 31 955 ritrovate | l'Atto II, ed è la ragione per cui l'applicazione esiste |
-| 13 | [`13-app-backup-a-caldo.cast`](13-app-backup-a-caldo.cast) | `mongodump --readPreference=secondary --oplog` mentre il carico continua a scrivere | 11,4 s | ritmo **546/s** prima, **539/s** durante: **calo 1,3 %** | l'Atto III — «si fa a caldo, e questo è quanto costa» |
-| 14 | [`14-app-restore-e-i-due-conteggi.cast`](14-app-restore-e-i-due-conteggi.cast) | la copia rientra in `lab_ripristinato`, e i due conteggi **non** coincidono | 3,2 s | 5 886 all'origine · 5 740 nella copia · **differenza 146** | subito dopo la 13: la finestra che il dump non copre |
+| 13 | [`13-app-backup-a-caldo.cast`](13-app-backup-a-caldo.cast) | `mongodump --readPreference=secondary --oplog` mentre il carico continua a scrivere | 11,3 s | ritmo **506/s** prima, **516/s** durante: **calo −1,9 %**, cioè il ritmo è salito | l'Atto III — «si fa a caldo, e questo è quanto costa» |
+| 14 | [`14-app-restore-e-i-due-conteggi.cast`](14-app-restore-e-i-due-conteggi.cast) | la copia rientra in `lab_ripristinato`, e i due conteggi **non** coincidono | 3,7 s | 5 386 all'origine · 5 295 nella copia · **differenza 91** | subito dopo la 13: la finestra che il dump non copre |
 
 Le scene 13 e 14 vanno **una dopo l'altra** e in quest'ordine, perché la 14 conta ciò che la 13 ha
 copiato: i 146 documenti di differenza sono quelli scritti *mentre* il dump era in corso, e stanno

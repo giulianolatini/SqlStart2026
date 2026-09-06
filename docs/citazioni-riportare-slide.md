@@ -3276,3 +3276,56 @@ durabilità, compra sapere**. Senza, l'applicazione ha scritture di cui non cono
 riprova a mano senza una chiave di idempotenza le duplica: il guasto non ha perso un dato, ne ha
 creato uno di troppo. È la distinzione che una platea abituata a una transazione SQL che o c'è o
 non c'è non ha mai dovuto fare, e sta in due colonne accostate.
+
+
+---
+
+### Il numero veloce dice zero, e la collezione ne contiene quattordicimila
+
+> Sullo stack 01, il 6 settembre: `mongolab stats` elenca trentotto collezioni in `lab` che sommano
+> **1 528 002** documenti, e la riga del database — che viene da `dbStats` — ne dichiara **1 505 885**.
+> Lo scarto, 22 117, sta tutto in **due** collezioni che nei metadati risultano a **zero** mentre
+> contengono 7 847 e 14 270 documenti. `validate()` su una delle due risponde **`valid: true`, zero
+> avvisi**, e intanto rimette il contatore a 7 847: la collezione non era corrotta, era **stantio il
+> numero**, e nessuno lo segnalava.
+> Fonte: [V-090](Sources.md#v-090), [ADR-0121](Decision.md#adr-0121).
+
+**Perché una slide:** perché è la differenza fra `count()` e `countDocuments()` mostrata invece che
+raccontata, e perché il caso peggiore non è il numero un po' sbagliato — è lo **zero**. Una collezione
+piena che dichiara zero passa qualunque controllo scritto come «se è vuota, salta»: il backup che non
+copia niente, la migrazione che non trova nulla da migrare, il monitoraggio che non allarma. Il numero
+veloce esiste per essere veloce, non per essere vero, e la platea che viene da SQL — dove `COUNT(*)`
+è sempre esatto e al massimo è lento — questa distinzione non l'ha mai dovuta fare.
+
+---
+
+### Un totale stampato sopra i suoi addendi si legge come il primo di essi
+
+> `mongolab stats` diceva `database lab · 50 000 documenti`, una riga sola. Su uno stack pulito
+> coincide con la collezione che interessa; appena una demo è girata, no. Chi verificava lo stato
+> atteso leggeva **62 602** dove il runbook diceva 50 000 e concludeva che lo stack fosse rotto —
+> era solo già stato usato. Sullo stack 01 la stessa riga diceva **un milione e mezzo**, e i
+> cinquantamila c'erano.
+> Fonte: [ADR-0121](Decision.md#adr-0121).
+
+**Perché una slide:** perché non è una decisione su MongoDB, è una decisione su come si scrive un
+numero, e vale ovunque. Il dettaglio va **prima** della somma: sotto, il totale chiude il conto;
+sopra, il totale diventa il primo addendo agli occhi di chi legge in fretta. E perché la regola di
+lettura che ne è uscita si porta via intera — **se le due righe litigano, ha ragione quella sopra**.
+
+---
+
+### `dropDatabase()` risponde «rimosso» anche per un database che non è mai esistito
+
+> `reset-demo.sh` doveva dire a chi prova la vigilia se l'Atto III era già girato su quello stack:
+> «database rimosso» oppure «non c'era». Il verdetto leggeva il campo `dropped` della risposta, che
+> sembra fatto apposta. Misurato su mongod 7.0.40: un nome inventato risponde
+> `{"ok":1,"dropped":"lab_inesistente_0906"}` esattamente come un database pieno. Lo script
+> raccontava una pulizia che non aveva fatto, e il ramo «non c'era» non poteva accadere mai.
+> Fonte: `tools/reset-demo.sh`, prova
+> `test_il_verdetto_del_drop_non_si_fida_del_campo_dropped`.
+
+**Perché una slide:** perché il nome del campo prometteva una cosa e il comando ne faceva un'altra, e
+nessuna rilettura del codice l'avrebbe mostrato — solo la seconda corsa. È l'esempio più corto che
+esista del perché una prova che legge il **file** non sostituisce una corsa che legge il **server**:
+la prova rossa scritta quella mattina verificava che il nome fosse scritto nello script, ed era vero.

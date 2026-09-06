@@ -108,8 +108,16 @@ class PymongoInspector:
         `_id`. Su un laboratorio da cinquantamila documenti la differenza non si sente, e
         in cambio il numero e' lo **stesso** che verificano `demo restore` e gli smoke:
         una fotografia che dicesse 49 998 dove la scena dice 50 000 farebbe cercare un
-        guasto nel posto sbagliato. La stima, per giunta, dopo un arresto sporco puo'
-        restare indietro finche' qualcuno non la ricalcola.
+        guasto nel posto sbagliato.
+
+        **E i metadati sbagliano davvero, su questo laboratorio.** Misurato sullo stack 01
+        il 6 settembre: 38 collezioni in `lab`, `countDocuments` somma 1 528 002 e
+        `dbStats.objects` ne dichiara 1 505 885. Lo scarto — 22 117 — sta tutto in **due**
+        collezioni che nei metadati risultano a **zero** mentre contengono 7 847 e 14 270
+        documenti. `validate()` su una delle due risponde `valid: true` senza un avviso e
+        intanto rimette il contatore a 7 847: la collezione non era corrotta, era stantio
+        il numero. Questo e' il motivo per cui la riga `collezioni` conta e non stima
+        ([V-090](../../../../docs/Sources.md#v-090)).
 
         **Attraverso un mongos i due numeri possono divergere da `dbStats`**, ed e'
         corretto che divergano: `dbStats` somma i metadati degli shard, orfani compresi,

@@ -9594,3 +9594,93 @@ uv run --directory app mongolab demo restore --target rs --sink plain --from /tm
 - **Usata da:** ADR-0115, ADR-0116
 
 ---
+
+<a id="v-090"></a>
+### V-090 — La riga del database dice 1 505 885 e le collezioni ne sommano 1 528 002: due contatori fermi a zero
+
+- **Comandi:** la fotografia nuova, contro i tre stack accesi insieme, e poi la caccia allo scarto
+  dal di dentro:
+
+
+```unknown
+make -s app-stats TARGET=standalone
+make -s app-stats TARGET=rs
+make -s app-stats TARGET=sharded
+```
+
+
+  e sullo stack 01, che non ha autenticazione, uno script che per ogni collezione di `lab` mette
+  accanto il contatore conservato e il conteggio vero:
+
+
+```unknown
+for (const nome of db.getCollectionNames()) {
+  const meta = db.getCollection(nome).stats().count;      // metadati
+  const vera = db.getCollection(nome).countDocuments({});  // scansione
+  if (meta !== vera) print(`${nome}: metadati ${meta}, contati ${vera}`);
+}
+```
+
+
+- **Ambiente:** MongoDB 7.0.40 su tutti e tre gli stack, portatile Apple Silicon, Docker Desktop,
+  i nove container accesi contemporaneamente. Gli stack 01 e 03 portavano i residui delle
+  registrazioni del 4 settembre e non erano stati azzerati; lo stack 02 era appena passato da
+  `./tools/reset-demo.sh 02`. Il container `mongo-standalone` era stato riavviato la mattina del 6
+  e il suo giornale dichiara `"Startup from clean shutdown?": true`: lo scarto **non** viene da
+  quell'avvio.
+
+- **Esito, primo punto — la fotografia distingue la collezione dal database, e i tre stack lo
+  mostrano subito.** Prima di questa riga `stats` stampava un totale solo, e quel totale è una
+  somma:
+
+| stack | `ordini` | collezioni in `lab` | totale del database |
+|---|---:|---:|---:|
+| 01 standalone | 50 000 | 38 | **1 505 885** |
+| 02 replica set | 50 000 | 2 | **55 386** |
+| 03 sharded | 20 000 | 12 | **99 699** |
+
+  Sullo stack 01 la vecchia riga diceva **un milione e mezzo** dove il runbook si aspettava
+  cinquantamila, e non c'era modo di sapere dallo schermo che i cinquantamila c'erano davvero: le
+  altre trentasette collezioni sono carichi dell'Atto III lasciati indietro dal 4 settembre.
+
+- **Esito, secondo punto — la somma delle collezioni e il totale del database non coincidono, su uno
+  standalone.** 1 528 002 contro 1 505 885: **22 117** di scarto, l'1,45 %. Non è sharding, non sono
+  orfani, non è una vista: `dbStats.objects` somma i `count` conservati per collezione, e **due**
+  collezioni dichiarano zero mentre contengono documenti.
+
+| collezione | metadati | contati |
+|---|---:|---:|
+| `carico-20260904-151041` | **0** | 14 270 |
+| `carico-20260904-151230` | **0** | 7 847 |
+
+  Sono le ultime due scritte quel giorno. 14 270 + 7 847 = 22 117, cioè tutto lo scarto: le altre
+  trentasei coincidono al documento.
+
+- **Esito, terzo punto — `validate()` rimette il contatore a posto, e non lo dice.** Su
+  `carico-20260904-151230`:
+
+
+```unknown
+prima  metadati 0 contati 7847
+validate: valid=true nrecords=7847 warnings=[]
+dopo   metadati 7847 contati 7847
+dbStats.objects: 1513732
+```
+
+
+  Risponde `valid: true` **senza un avviso**, e intanto il totale del database sale di 7 847. La
+  collezione non era corrotta: era stantio il numero, e nessuno lo segnalava. `carico-20260904-151041`
+  è stata lasciata così apposta, perché la differenza resti visibile a chi rifà la misura.
+
+- **Riserve:** la causa dello zero non è stata dimostrata, solo circoscritta. Il riavvio del 6
+  settembre è dichiarato pulito dal giornale di `mongod`, quindi il contatore era già zero prima; i
+  giornali del 4 settembre non ci sono più, perché `docker logs` conserva solo la corsa in corso, e
+  la spiegazione naturale — un arresto del container mentre quelle due collezioni erano appena state
+  scritte e il contatore non era ancora stato messo nel checkpoint — resta un'ipotesi. Ciò che è
+  misurato è il fatto, non il perché: il numero veloce può dire zero su una collezione che ne
+  contiene quattordicimila. Una osservazione sola, su un laboratorio, non tre corse.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0121
+
+---
