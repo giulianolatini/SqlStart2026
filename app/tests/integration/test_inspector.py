@@ -95,6 +95,84 @@ def test_le_statistiche_del_database_contano_la_collezione_che_c_e(
     assert vuoto["objects"] == 0
 
 
+def test_le_collezioni_si_contano_una_per_una_e_in_ordine_di_nome(
+    stack01: MongoClient[dict[str, Any]],
+) -> None:
+    """Il dettaglio che `dbStats` non da': quale numero appartiene a quale collezione.
+
+    Due collezioni con conteggi **diversi**, e diversi anche dal totale: un ispettore che
+    restituisse due volte lo stesso numero, o il totale del database per entrambe,
+    passerebbe una prova costruita con due collezioni uguali.
+
+    L'ordine e' asserito perche' e' parte del contratto della porta: questa fotografia
+    esiste per essere confrontata a colpo d'occhio con lo stato atteso del runbook, e un
+    elenco che si riordina da solo a ogni corsa non si confronta.
+    """
+    with collezione_usa_e_getta(stack01) as ordini:
+        database = ordini.database
+        ordini.insert_many([{"n": n} for n in range(7)])
+        database["carico-20260906-153012"].insert_many([{"n": n} for n in range(3)])
+
+        conti = PymongoInspector(stack01, database.name).collection_counts()
+
+    assert [conto.nome for conto in conti] == ["carico-20260906-153012", "ordini"]
+    assert [conto.documenti for conto in conti] == [3, 7]
+
+
+def test_la_somma_delle_collezioni_torna_con_il_totale_del_database(
+    stack01: MongoClient[dict[str, Any]],
+) -> None:
+    """La proprieta' per cui la fotografia si chiama verificabile.
+
+    Fuori da uno sharded cluster i due numeri devono coincidere, e chi guarda lo schermo
+    deve poterlo controllare a mente. Attraverso un mongos possono divergere — `dbStats`
+    somma i metadati degli shard, orfani compresi — ed e' il motivo per cui questa prova
+    sta sullo stack 01 e non sul 03: li' la disuguaglianza sarebbe un'informazione, non un
+    guasto, e una prova non deve promettere un'uguaglianza che il dominio non garantisce.
+    """
+    with collezione_usa_e_getta(stack01) as ordini:
+        database = ordini.database
+        ordini.insert_many([{"n": n} for n in range(11)])
+        database["carico"].insert_many([{"n": n} for n in range(5)])
+
+        ispettore = PymongoInspector(stack01, database.name)
+        conti = ispettore.collection_counts()
+        totale = int(ispettore.db_stats()["objects"])  # type: ignore[call-overload]
+
+    assert sum(conto.documenti for conto in conti) == totale == 16
+
+
+def test_una_vista_non_si_conta_come_collezione(
+    stack01: MongoClient[dict[str, Any]],
+) -> None:
+    """Una vista non ha documenti propri: contarla raddoppierebbe quelli della sorgente.
+
+    `listCollections` le elenca insieme alle collezioni, e senza il filtro sul tipo
+    `ordini_visti` comparirebbe con i quattro documenti di `ordini` — cioe' la somma
+    direbbe otto dove i documenti sono quattro.
+
+    **`system.views` invece si conta, ed e' giusto cosi'.** Non e' la vista: e' la
+    collezione vera in cui il database *scrive la definizione* della vista, un documento
+    per vista, e `dbStats` la somma insieme alle altre. Escluderla per farla sparire dallo
+    schermo romperebbe la sola proprieta' per cui questo dettaglio esiste — che i pezzi
+    tornino con il totale. Misurato scrivendo questa prova: l'attesa iniziale era che
+    creare una vista non lasciasse altro, e non e' vero.
+    """
+    with collezione_usa_e_getta(stack01) as ordini:
+        database = ordini.database
+        ordini.insert_many([{"n": n} for n in range(4)])
+        database.create_collection("ordini_visti", viewOn="ordini", pipeline=[])
+
+        ispettore = PymongoInspector(stack01, database.name)
+        conti = ispettore.collection_counts()
+        totale = int(ispettore.db_stats()["objects"])  # type: ignore[call-overload]
+
+    nomi = [conto.nome for conto in conti]
+    assert "ordini_visti" not in nomi, "una vista non e' una collezione da contare"
+    assert nomi == ["ordini", "system.views"]
+    assert sum(conto.documenti for conto in conti) == totale
+
+
 def test_su_un_istanza_singola_non_c_e_distribuzione_per_shard(
     stack01: MongoClient[dict[str, Any]],
 ) -> None:

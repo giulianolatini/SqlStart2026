@@ -2,7 +2,11 @@
 
 from typing import Mapping, Sequence
 
-from mongolab.domain.modelli import DescrizioneTopologia, Distribuzione
+from mongolab.domain.modelli import (
+    ContoCollezione,
+    DescrizioneTopologia,
+    Distribuzione,
+)
 
 __all__ = ["FakeInspector"]
 
@@ -41,6 +45,13 @@ class FakeInspector:
     collezione renderebbe le due fotografie identiche per costruzione, cioè proverebbe che
     il codice guarda e mai che accosta. Anche qui, finite le risposte si resta sull'ultima.
 
+    **Le collezioni sono una tupla, non una sequenza di risposte**, a differenza delle
+    topologie e delle distribuzioni: la fotografia di `stats` le chiede una volta sola, e
+    un doppio che cambiasse risposta a ogni chiamata offrirebbe una possibilita' che
+    nessuna scena usa — cioe' inviterebbe a scrivere una prova su un comportamento che il
+    codice vero non ha. Quando una scena avra' bisogno di due letture, la sequenza arriva
+    con quella scena.
+
     Ciò che questo doppio **non** sa ancora fare è fallire: un cluster irraggiungibile si
     racconta qui con una topologia senza primario, non con un'eccezione. Il giorno in cui
     una prova avrà bisogno di un `topology()` che solleva, l'iniezione dell'errore arriva
@@ -53,6 +64,7 @@ class FakeInspector:
         server_status: Mapping[str, object] | None = None,
         db_stats: Mapping[str, object] | None = None,
         distribuzioni: Mapping[str, Sequence[Distribuzione]] | None = None,
+        collezioni: Sequence[ContoCollezione] = (),
     ) -> None:
         if not topologie:
             raise ValueError(
@@ -65,6 +77,7 @@ class FakeInspector:
         self._distribuzioni = {
             nome: tuple(risposte) for nome, risposte in (distribuzioni or {}).items()
         }
+        self._collezioni = tuple(collezioni)
         self.letture = 0
         """Quante volte `topology()` è stato chiamato."""
         self.distribuzioni_chieste: list[str] = []
@@ -81,6 +94,9 @@ class FakeInspector:
 
     def db_stats(self) -> Mapping[str, object]:
         return self._db_stats
+
+    def collection_counts(self) -> tuple[ContoCollezione, ...]:
+        return self._collezioni
 
     def shard_distribution(self, collezione: str) -> Distribuzione:
         preparate = self._distribuzioni.get(collezione)

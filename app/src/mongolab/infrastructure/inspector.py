@@ -38,6 +38,7 @@ from pymongo.errors import OperationFailure
 from pymongo.read_preferences import ReadPreference
 
 from mongolab.domain.modelli import (
+    ContoCollezione,
     ContoShard,
     DescrizioneTopologia,
     Distribuzione,
@@ -98,6 +99,35 @@ class PymongoInspector:
         due.
         """
         return self._client[self._database].command("dbStats")
+
+    def collection_counts(self) -> tuple[ContoCollezione, ...]:
+        """Un `countDocuments` per collezione, in ordine di nome.
+
+        **`count_documents` e non `estimated_document_count`.** La stima legge i metadati
+        della collezione e torna in un istante; il conteggio esatto le scandisce l'indice
+        `_id`. Su un laboratorio da cinquantamila documenti la differenza non si sente, e
+        in cambio il numero e' lo **stesso** che verificano `demo restore` e gli smoke:
+        una fotografia che dicesse 49 998 dove la scena dice 50 000 farebbe cercare un
+        guasto nel posto sbagliato. La stima, per giunta, dopo un arresto sporco puo'
+        restare indietro finche' qualcuno non la ricalcola.
+
+        **Attraverso un mongos i due numeri possono divergere da `dbStats`**, ed e'
+        corretto che divergano: `dbStats` somma i metadati degli shard, orfani compresi,
+        mentre `countDocuments` conta i documenti **posseduti**. E' la stessa distinzione
+        di `numOwnedDocuments` in `shard_distribution`, e nasconderla facendo tornare i
+        conti vorrebbe dire cancellare l'unico posto in cui una migrazione non ripulita si
+        vede.
+
+        Le viste non si contano: `listCollections` le elenca insieme alle collezioni, e
+        una vista non ha documenti propri — comparirebbe con il conteggio della sorgente,
+        cioe' come un raddoppio.
+        """
+        database = self._client[self._database]
+        nomi = database.list_collection_names(filter={"type": "collection"})
+        return tuple(
+            ContoCollezione(nome=nome, documenti=database[nome].count_documents({}))
+            for nome in sorted(nomi)
+        )
 
     def shard_distribution(self, collezione: str) -> Distribuzione:
         """Quanti documenti e quanti chunk per shard, e i tre casi tenuti distinti.
