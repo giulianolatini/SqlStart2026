@@ -1,9 +1,17 @@
 ---
 name: registro-di-sviluppo
-description: Use when opening, updating or closing a project's Docs/registro/<data>-registro-di-sviluppo.md in the origin repository - the append-only development diary that, together with the ADRs, forms the ISO 27001 chronology of what was done, decided and fixed. Use also whenever a defect is found or a decision is taken during implementation, so it is recorded while it is still exact.
+description: Use when opening, updating or closing the append-only development diary of SqlStart2026. Here it is a SINGLE file, docs/registro-operativo-sviluppo.md, not one file per date under Docs/registro/: entries are H2 headings '## AAAA-MM-GG — titolo' appended at the end, each closing with numbered 'Note di metodo' that continue across the whole register. Use also whenever a defect is found or a decision is taken during implementation, so it is recorded while still exact.
 ---
 
 # Registro di sviluppo — il diario append-only del progetto
+
+> [!IMPORTANT]
+> **In SqlStart2026: governa, ma il file è uno solo.** Non `Docs/registro/<data>-registro-di-sviluppo.md`, uno per data, bensì un unico [`docs/registro-operativo-sviluppo.md`](../../../docs/registro-operativo-sviluppo.md) in cui le voci si aggiungono in coda come titoli di secondo livello `## AAAA-MM-GG — titolo`. Ogni voce si chiude con le **note di metodo**, numerate di seguito su tutto il registro — sono arrivate alla 251, e la numerazione non riparte. Il resto della disciplina vale parola per parola, compresa la parte che qui è costata di più: i difetti si registrano anche quando sono stati corretti subito, e una riga sbagliata si corregge **dicendo che è stata corretta**.
+>
+> Il corpo qui sotto è quello del repository d'origine, intatto. In caso di conflitto fra
+> questa skill e una scheda accettata di [`docs/Decision.md`](../../../docs/Decision.md),
+> **vince la scheda**. La provenienza e le divergenze misurate stanno in
+> [`concetti-generali/README.md`](../../../docs/06-sviluppo/concetti-generali/README.md).
 
 Standard del repository d'origine. È uno dei quattro registri del repo; il confine con gli altri è
 in fondo.

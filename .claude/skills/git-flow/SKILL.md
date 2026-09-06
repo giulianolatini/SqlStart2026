@@ -1,9 +1,17 @@
 ---
 name: git-flow
-description: Use when the repository in question is NOT the origin one and adopts (or should adopt) the original Git Flow branching model by Driessen - feature, release and hotfix branches with main/develop, correct merge directions, back-merges, annotated version tags. Use it to set up Git Flow in a repo for the first time, to open or close a release, to run a hotfix in production, to check that branches respect the model, and as the reference text when comparing branching models. In the origin repository the branch policy is a different one and is governed by the skill modello-dei-rami: do not apply this model there.
+description: Use when the repository in question is NOT SqlStart2026 and adopts (or should adopt) the original Git Flow branching model by Driessen — feature, release and hotfix branches with main/develop, correct merge directions, back-merges, annotated version tags. Use it to set up Git Flow elsewhere, or as the reference text when comparing branching models. SqlStart2026's own model has the shape of Git Flow but closes every branch with a reviewed pull request: `git flow feature finish` is FORBIDDEN here. Do not run this skill's commands against SqlStart2026.
 ---
 
 # Git Flow
+
+> [!IMPORTANT]
+> **In SqlStart2026: è testo di riferimento, e i suoi comandi non si eseguono.** Il modello di questo repository **ha la forma** di Git Flow — `main`, `develop`, `feature/NN-nome`, `release/1.0` — e per questo la somiglianza inganna. La differenza che conta è la chiusura: qui un ramo si chiude con una **pull request rivista e unita dal Product Owner**, mai con `git flow feature finish`. Quel comando salta la revisione, ed è già successo una volta, sulla PR #1. Il file [`references/comandi.md`](references/comandi.md) lo elenca fra gli equivalenti AVH: è la riga da non copiare. La procedura vera sta in [`docs/06-sviluppo/worktree-e-branch-di-lavoro.md`](../../../docs/06-sviluppo/worktree-e-branch-di-lavoro.md).
+>
+> Il corpo qui sotto è quello del repository d'origine, intatto. In caso di conflitto fra
+> questa skill e una scheda accettata di [`docs/Decision.md`](../../../docs/Decision.md),
+> **vince la scheda**. La provenienza e le divergenze misurate stanno in
+> [`concetti-generali/README.md`](../../../docs/06-sviluppo/concetti-generali/README.md).
 
 > [!IMPORTANT]
 > **Nel repository d'origine questo modello non si applica**, e il testo qui sotto è tenuto

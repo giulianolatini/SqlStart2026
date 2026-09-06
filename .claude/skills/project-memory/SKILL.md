@@ -1,9 +1,17 @@
 ---
 name: project-memory
-description: Use at the START of any session on a project of the origin repository to load its working memory from Memory/stato-del-lavoro.md, and BEFORE finishing to update it. It carries working state across sessions and workstations - where the project stands, what to do next, and what will make correct work look broken.
+description: Use at the START of any session on a project that keeps its working memory inside the repository, in Memory/stato-del-lavoro.md, and again before finishing. SqlStart2026 does NOT: its working memory lives outside the repository, in Claude Code's own session memory (~/.claude/projects/<progetto>/memory/), one fact per file with frontmatter and an index in MEMORY.md. This skill does not govern there.
 ---
 
 # Memory — la memoria di progetto
+
+> [!IMPORTANT]
+> **In SqlStart2026: non governa.** La memoria di lavoro di questo progetto non sta nel repository. Sta nella memoria di sessione di Claude Code, in `~/.claude/projects/-Users-…-SqlStart2026/memory/`, un fatto per file con il suo frontmatter e un indice in `MEMORY.md`. La differenza non è solo di percorso: quella memoria **non è versionata e non è evidenza**, mentre `docs/registro-operativo-sviluppo.md` lo e'. La regola di smistamento in coda a questa skill resta valida e vale la lettura: ciò che si sovrascrive sta nella memoria, ciò che è append-only sta nel registro.
+>
+> Il corpo qui sotto è quello del repository d'origine, intatto. In caso di conflitto fra
+> questa skill e una scheda accettata di [`docs/Decision.md`](../../../docs/Decision.md),
+> **vince la scheda**. La provenienza e le divergenze misurate stanno in
+> [`concetti-generali/README.md`](../../../docs/06-sviluppo/concetti-generali/README.md).
 
 Standard del repository d'origine. È uno dei quattro registri del repo; il confine con gli altri è
 in fondo.

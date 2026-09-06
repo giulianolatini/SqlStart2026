@@ -1,9 +1,17 @@
 ---
 name: github-flow
-description: Use when the repository in question is NOT the origin one and needs a branching model — a repo with a single main branch and no develop, where work happens on short-lived branches merged via pull request. Use also when comparing branching models, when someone mentions "github flow", "trunk based", "deploy da main", or when deciding which model a new repository should adopt. In the origin repository itself the model is a different one: see the skill modello-dei-rami.
+description: Use when the repository in question is NOT SqlStart2026 and needs a branching model — a repo with a single main branch and no develop, where work happens on short-lived branches merged via pull request. Use also when comparing branching models or deciding which model a new repository should adopt. SqlStart2026 has two permanent branches, main and develop, and versioned releases: this model does not apply there.
 ---
 
 # GitHub Flow
+
+> [!IMPORTANT]
+> **In SqlStart2026: non si applica.** GitHub Flow presuppone **un solo ramo permanente**. Qui ce ne sono due, `main` e `develop`, e una release versionata che si taglia a parte (`release/1.0`): sono esattamente le condizioni in cui questa skill stessa dice che il modello non basta. Resta utile come termine di paragone.
+>
+> Il corpo qui sotto è quello del repository d'origine, intatto. In caso di conflitto fra
+> questa skill e una scheda accettata di [`docs/Decision.md`](../../../docs/Decision.md),
+> **vince la scheda**. La provenienza e le divergenze misurate stanno in
+> [`concetti-generali/README.md`](../../../docs/06-sviluppo/concetti-generali/README.md).
 
 > [!IMPORTANT]
 > **Nel repository d'origine questo modello non si applica**, e la ragione è strutturale: qui esiste

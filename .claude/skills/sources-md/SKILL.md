@@ -1,9 +1,17 @@
 ---
 name: sources-md
-description: Use when creating, extending or reviewing a project's Docs/Sources.md in the origin repository - the chronological register of documentation sources consulted, cross-linked to the ADRs in Decision.md. Use also right after consulting official documentation during design work, so the source is recorded while it is still fresh.
+description: Use when creating, extending or reviewing docs/Sources.md in SqlStart2026 — the chronological register of sources consulted, cross-linked to the ADRs in docs/Decision.md. Use also right after consulting official documentation during design work, so the source is recorded while it is still fresh. Here entries are numbered V-NNN (V-001…V-091), each carries Verdetto, Riserve, Data and 'Usata da', and the two-way cross-check is `make docs-check`.
 ---
 
 # Sources.md — registro delle fonti documentali
+
+> [!IMPORTANT]
+> **In SqlStart2026: governa, con la numerazione di qui.** Il file è [`docs/Sources.md`](../../../docs/Sources.md), voce unica, e le voci si chiamano **V-NNN** — non `S01` — con l'ancora `<a id="v-NNN"></a>`. Ogni voce porta **Verdetto**, **Riserve**, **Data** e **Usata da**, e quest'ultima deve elencare esattamente le ADR che la citano: `tools/check_citations.py` confronta i due sensi e fallisce se una fonte non è citata da nessuno («orfana») o se l'elenco non corrisponde. Le **Riserve** non sono facoltative ed è la parte che vale di più: dicono il punto in cui la fonte smette di coprirci.
+>
+> Il corpo qui sotto è quello del repository d'origine, intatto. In caso di conflitto fra
+> questa skill e una scheda accettata di [`docs/Decision.md`](../../../docs/Decision.md),
+> **vince la scheda**. La provenienza e le divergenze misurate stanno in
+> [`concetti-generali/README.md`](../../../docs/06-sviluppo/concetti-generali/README.md).
 
 Standard del repository d'origine. Fa coppia con la skill `decision-md`: le fonti dichiarano quali
 ADR sostengono, le ADR citano le fonti, e i due file si verificano insieme.

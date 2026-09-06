@@ -1,9 +1,17 @@
 ---
 name: modello-dei-rami
-description: Use when work in the origin repository touches the branching model — opening or closing a feature, archiving a project on main as a release, needing a fix on something already released, checking that the branches still respect the model, or when someone mentions "git flow", "develop", "release branch", "taglia la release", "apri una feature", "chiudi la release", "hotfix urgente", "bump di versione". Also use when comparing the origin repository's model with the original Git Flow, or when setting up a branching model in a different repository.
+description: Use ONLY as a comparison text when discussing branch models. This skill describes the origin repository's branch model — where a feature IS a project, work happens in step/<prj>/<nome> worktrees and steps re-enter the feature fast-forward. That is NOT the model of SqlStart2026, where a feature is a slice of the talk's lab, worktrees live under .claude/worktrees/ one per feature or release, and every branch closes with a pull request. In SqlStart2026 the model is written in docs/06-sviluppo/worktree-e-branch-di-lavoro.md.
 ---
 
 # Il modello dei rami del repository d'origine — e dove diverge da Git Flow
+
+> [!IMPORTANT]
+> **In SqlStart2026: non governa.** Descrive il modello del repository d'origine, dove **una feature è un progetto** e sotto la feature sta lo step, `step/<prj>/<nome>`, che rientra in fast-forward. Qui non è così: una feature è una fetta del laboratorio del talk (`feature/00-fondamenta`, `feature/04-app-python`), non esiste il livello dello step, e i worktree stanno in `.claude/worktrees/`, uno per feature o per release. Il modello di qui sta in [`docs/06-sviluppo/worktree-e-branch-di-lavoro.md`](../../../docs/06-sviluppo/worktree-e-branch-di-lavoro.md), e le manovre di apertura e chiusura in ADR-0056, ADR-0079 e ADR-0083.
+>
+> Il corpo qui sotto è quello del repository d'origine, intatto. In caso di conflitto fra
+> questa skill e una scheda accettata di [`docs/Decision.md`](../../../docs/Decision.md),
+> **vince la scheda**. La provenienza e le divergenze misurate stanno in
+> [`concetti-generali/README.md`](../../../docs/06-sviluppo/concetti-generali/README.md).
 
 > [!IMPORTANT]
 > **Questa skill non è Git Flow, e non si chiama così apposta.** Descrive il modello del repository d'origine,

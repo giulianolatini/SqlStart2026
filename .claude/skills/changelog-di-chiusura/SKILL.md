@@ -1,9 +1,17 @@
 ---
 name: changelog-di-chiusura
-description: Use when closing a feature branch of the origin repository onto develop, or when archiving a project on main as a release, and a CHANGELOG has to be produced or checked. Also use when a CHANGELOG entry looks wrong, duplicated or out of date, or when deciding how commit messages should be written so they end up readable in it.
+description: Use when closing a feature branch onto develop in a repository that keeps a CHANGELOG.md, or when a CHANGELOG entry looks wrong, duplicated or out of date. SqlStart2026 has NO CHANGELOG.md and does not want one: here the story of what changed is told by docs/registro-operativo-sviluppo.md and by the commit messages. Do not run this skill's script in SqlStart2026 — it is kept as reference material.
 ---
 
 # changelog-di-chiusura — il racconto dei commit
+
+> [!IMPORTANT]
+> **In SqlStart2026: non governa.** Questo repository non ha un `CHANGELOG.md`, e non gli manca: la cronologia di che cosa è cambiato la tiene `docs/registro-operativo-sviluppo.md`, che però è un diario e non un derivato dei commit. Lo script `scripts/changelog.sh` qui non ha un file su cui lavorare. Resta come materiale di riferimento — e come promemoria che un changelog, se un giorno servisse, si genera dai commit e non si scrive a mano.
+>
+> Il corpo qui sotto è quello del repository d'origine, intatto. In caso di conflitto fra
+> questa skill e una scheda accettata di [`docs/Decision.md`](../../../docs/Decision.md),
+> **vince la scheda**. La provenienza e le divergenze misurate stanno in
+> [`concetti-generali/README.md`](../../../docs/06-sviluppo/concetti-generali/README.md).
 
 Standard del repository d'origine. Trasforma i commit di una feature in un `CHANGELOG.md`
 leggibile, e lo rifà da capo ogni volta invece di accodare: il file è **derivato**, non scritto a

@@ -1,9 +1,17 @@
 ---
 name: decision-md
-description: Use when creating, extending or reviewing a project's Docs/Decision.md in the origin repository - the chronological Architecture Decision Record register that gives a project its decisional memory. Use also whenever a design decision is taken during work on a project, so it gets recorded at the moment it is made.
+description: Use when creating, extending or reviewing docs/Decision.md in SqlStart2026 — the chronological, append-only Architecture Decision Record register that gives the project its decisional memory. Use also whenever a design decision is taken during work on the project, so it gets recorded the moment it is made. Here the register is a single file at docs/Decision.md (not <progetto>/Docs/), the numbering is four digits (ADR-0001…ADR-0122), the sources are V-NNN entries in docs/Sources.md, and the cross-check is `make docs-check`, not check-crosslinks.py.
 ---
 
 # Decision.md — registro delle decisioni di architettura (ADR)
+
+> [!IMPORTANT]
+> **In SqlStart2026: governa, con quattro differenze di forma.** Il registro è **uno solo** e sta in [`docs/Decision.md`](../../../docs/Decision.md): questo repository non è multiprogetto, quindi non c'è nessun prefisso `<progetto>/` e la cartella è `docs/` minuscolo. La numerazione è a **quattro cifre** e corre già oltre ADR-0122. Ogni scheda va preceduta da un'ancora esplicita `<a id="adr-NNNN"></a>`, perchè i titoli qui sono lunghi e l'ancora che GitHub genera da solo non è quella che le altre schede citano. Le fonti si chiamano `V-NNN` e vivono in [`docs/Sources.md`](../../../docs/Sources.md); la riga finale è `**Fonti:**` con i due punti. Il controllo non è `check-crosslinks.py` ma `make docs-check`, cioè `tools/check_citations.py` più `tools/check_links.py`.
+>
+> Il corpo qui sotto è quello del repository d'origine, intatto. In caso di conflitto fra
+> questa skill e una scheda accettata di [`docs/Decision.md`](../../../docs/Decision.md),
+> **vince la scheda**. La provenienza e le divergenze misurate stanno in
+> [`concetti-generali/README.md`](../../../docs/06-sviluppo/concetti-generali/README.md).
 
 Standard del repository d'origine. Fa coppia con la skill `sources-md`: le ADR citano le fonti, le
 fonti dichiarano quali ADR sostengono, e i due file si verificano insieme.

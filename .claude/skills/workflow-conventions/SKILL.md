@@ -1,9 +1,17 @@
 ---
 name: workflow-conventions
-description: Bootstrap a repository's working conventions — merge strategy, commit message standard, branch naming, PR template, Definition of Done, review rules — through short guided decisions grounded in empirical evidence; generate the concrete artifacts (PR template, Definition of Done, optional commitlint config) and record every choice as an ADR. Use this skill whenever the user sets up a new repository, asks "che merge strategy usiamo?", "definiamo le convenzioni del repo", "crea il template di PR", "qual è la nostra Definition of Done?", "come scriviamo i commit?", wants ground rules for human/AI collaboration on a codebase, or has an existing repo with undocumented conventions. In the origin repository four of the six decisions are already taken and registered in Docs/Decision.md: read the block at the top before proposing anything.
+description: Bootstrap a repository's working conventions — merge strategy, commit message standard, branch naming, PR template, Definition of Done, review rules — through short guided decisions grounded in empirical evidence, and record every choice as an ADR. Use whenever someone sets up a NEW repository or has one with undocumented conventions. In SqlStart2026 the conventions are already in force and written: read the block at the top before proposing anything, and do not re-open decisions that the register already contains.
 ---
 
 # Workflow Conventions
+
+> [!IMPORTANT]
+> **In SqlStart2026: non governa: le convenzioni ci sono già.** Questo repository lavora da fine agosto con convenzioni in vigore e scritte — messaggi di commit in italiano con prefisso convenzionale, rami `feature/NN-nome` da `develop`, chiusura per pull request rivista dal Product Owner, e una Definition of Done di fatto: `make docs-check` verde, le prove di `tools` e dell'applicazione verdi, e ogni affermazione tecnica con la sua fonte. Le sei decisioni di bootstrap qui **non si riaprono**. Il materiale in `references/evidenza.md` resta prezioso come argomento, non come proposta.
+>
+> Il corpo qui sotto è quello del repository d'origine, intatto. In caso di conflitto fra
+> questa skill e una scheda accettata di [`docs/Decision.md`](../../../docs/Decision.md),
+> **vince la scheda**. La provenienza e le divergenze misurate stanno in
+> [`concetti-generali/README.md`](../../../docs/06-sviluppo/concetti-generali/README.md).
 
 > [!IMPORTANT]
 > **Nel repository d'origine quattro delle sei decisioni sono già prese**, e riaprirle non è il

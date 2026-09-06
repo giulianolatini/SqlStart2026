@@ -1,9 +1,17 @@
 ---
 name: adr-brainstorm
-description: Guide a brainstorming conversation to a documented Architecture Decision Record (ADR) with explicit rationale, and manage the ADR lifecycle (numbering, status, superseding, index). Use this skill whenever the user wants to record, discuss, or revisit a technical or architectural decision — phrases like "write an ADR", "should we use X or Y?", "let's decide how to…", "registriamo questa decisione", "scriviamo un ADR", "meglio X o Y?", "perché avevamo scelto…?" — even if the word "ADR" never appears, and also proactively whenever a significant design choice emerges in the middle of another task (choosing a database, a framework, an integration pattern, a persistence or deployment strategy).
+description: Guide a brainstorming conversation into a documented Architecture Decision Record with an explicit rationale, and manage the ADR lifecycle (numbering, status, superseding, index). Use whenever the user wants to record, discuss or revisit a technical or architectural decision — phrases like "registriamo questa decisione", "scriviamo un ADR", "meglio X o Y?", "perché avevamo scelto…?" — even when the word ADR never appears, and proactively whenever a significant design choice emerges in the middle of another task. In SqlStart2026 phase 4 is different: the record does NOT go to docs/adr/NNNN-slug.md, it goes into the single append-only register docs/Decision.md — hand that phase to the skill decision-md.
 ---
 
 # ADR Brainstorm
+
+> [!IMPORTANT]
+> **In SqlStart2026: governa, tranne la fase 4.** Le fasi 0-3 valgono come sono scritte. La fase 4 no: qui le schede non stanno in `docs/adr/NNNN-slug.md` con un indice accanto, ma tutte dentro `docs/Decision.md`, in ordine cronologico, numerate a quattro cifre e con l'ancora `<a id="adr-NNNN"></a>` scritta a mano prima del titolo. La scheda **deve** chiudersi con `**Fonti:**`, altrimenti `make docs-check` fallisce. La forma esatta la sa la skill `decision-md`: arrivato alla scrittura, passale il lavoro.
+>
+> Il corpo qui sotto è quello del repository d'origine, intatto. In caso di conflitto fra
+> questa skill e una scheda accettata di [`docs/Decision.md`](../../../docs/Decision.md),
+> **vince la scheda**. La provenienza e le divergenze misurate stanno in
+> [`concetti-generali/README.md`](../../../docs/06-sviluppo/concetti-generali/README.md).
 
 Trasforma una conversazione di brainstorming in una decisione documentata con il suo razionale. L'architettura di un sistema è l'accumulo delle sue decisioni: questo skill serve a non perderle.
 

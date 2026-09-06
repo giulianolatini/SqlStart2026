@@ -1,9 +1,17 @@
 ---
 name: revisione-pr
-description: Use when a Pull Request of the origin repository needs review before merging, when asking Gemini Pro or Codex for an outside opinion on commits, security or ISO 27001 compliance, and when triaging what those external reviewers reported — deciding which findings are real, which are hallucinated, fixing the real ones and closing the rest with a written reason.
+description: Use when a SqlStart2026 pull request — or a release branch that has no pull request yet — needs an outside review before merging, when asking Gemini Pro (via agy) or Codex (via codex) for an independent opinion on commits, security or documentation coherence, and when triaging what those external reviewers reported: deciding which findings are real, which are hallucinated, fixing the real ones and closing the rest with a written reason. Sending a dossier is an irreversible publication to third parties: `interroga` without --invia sends nothing, and the secret sieve is blocking.
 ---
 
 # revisione-pr — due revisori esterni, e un triage che risponde di sé
+
+> [!IMPORTANT]
+> **In SqlStart2026: governa, ed è stata estesa.** Le regole valgono tutte, a partire da quella che governa il file: mandare un dossier a Gemini e a Codex è una pubblicazione verso terzi e non si torna indietro. Due cose sono diverse. La prima: qui una release si revisiona **prima** che la PR esista, perchè la PR la apre e la fonde il Product Owner — quindi il dossier si costruisce da un intervallo di rami e non da un numero di PR. La seconda: il foglio archiviato va in `docs/revisioni/`, perchè questo repository non ha cartelle di progetto di primo livello.
+>
+> Il corpo qui sotto è quello del repository d'origine, intatto. In caso di conflitto fra
+> questa skill e una scheda accettata di [`docs/Decision.md`](../../../docs/Decision.md),
+> **vince la scheda**. La provenienza e le divergenze misurate stanno in
+> [`concetti-generali/README.md`](../../../docs/06-sviluppo/concetti-generali/README.md).
 
 Standard del repository d'origine. Fa revisionare una PR da **Gemini Pro** (via `agy`) e da
 **Codex** (via `codex`), poi mette le due risposte in un unico foglio dove ogni rilievo riceve un

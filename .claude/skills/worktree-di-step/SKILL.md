@@ -1,9 +1,17 @@
 ---
 name: worktree-di-step
-description: Use at the START of any working step on a project of the origin repository, and again at its end, to open and close an isolated git worktree for that step. It lets two agents work on two different projects in the same repository at the same time without colliding, and closes the step by fast-forwarding the feature branch the work started from. Use also to resume a step after a dead session, or to abandon one.
+description: Use in a repository organised in steps under features, to open and close an isolated git worktree for a step. SqlStart2026 is not organised that way: there is no step level, worktrees live under .claude/worktrees/ one per feature or release, and they are opened and removed with plain git following docs/06-sviluppo/worktree-e-branch-di-lavoro.md. Do not run this skill's script there.
 ---
 
 # worktree-di-step — lo spazio isolato di uno step
+
+> [!IMPORTANT]
+> **In SqlStart2026: non governa.** Non esiste il livello dello step: qui si apre un worktree per feature o per release, sotto `.claude/worktrees/`, e lo script `scripts/step.sh` presuppone la gerarchia `step/<prj>/<nome>` che qui non c'è. La procedura di qui — con l'ordine vincolante della rimozione, che è costato un pomeriggio quando fu sbagliato — sta in [`docs/06-sviluppo/worktree-e-branch-di-lavoro.md`](../../../docs/06-sviluppo/worktree-e-branch-di-lavoro.md) e nelle schede ADR-0056, ADR-0079 e ADR-0083. La lezione trasferibile resta: **prima si sgancia chi sta dentro, poi si rimuove**.
+>
+> Il corpo qui sotto è quello del repository d'origine, intatto. In caso di conflitto fra
+> questa skill e una scheda accettata di [`docs/Decision.md`](../../../docs/Decision.md),
+> **vince la scheda**. La provenienza e le divergenze misurate stanno in
+> [`concetti-generali/README.md`](../../../docs/06-sviluppo/concetti-generali/README.md).
 
 Standard del repository d'origine. È il livello più basso del ciclo di vita dei rami: governa lo
 step dentro la feature, e nient'altro. Il resto — feature verso `develop`, `develop` verso `main`
