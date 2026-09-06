@@ -3348,3 +3348,28 @@ livello scrivibile del container non lo nomina nessuno: muore quando muore il co
 sempre finché il container vive. È la terza vita a fare i danni, perché è l'unica che nessuna
 procedura elenca — e la platea che viene da SQL, dove lo stato sta in un posto solo e quel posto ha
 un nome, questa distinzione non l'ha mai dovuta fare.
+
+---
+
+### Il testo che si accende da solo va letto prima di installarlo, e si legge dalla riga che lo accende
+
+> Dodici skill importate da un altro repository, con 127 prove che passano. Le prove dicono che il
+> codice è portabile; non dicono se qui servano. A quella domanda rispondono dodici righe di
+> frontmatter: **nove** nominano il repository d'origine come condizione e qui non si sarebbero
+> accese mai, **due** lo nominano per negazione — «use when the repository is NOT the origin one»
+> — e quelle qui si accendono sempre. Fra le due c'era `git-flow`, che offre `git flow feature
+> finish`: il comando vietato qui da quando, sulla PR #1, chiuse un ramo saltando la revisione.
+> Fonte: [ADR-0123](Decision.md#adr-0123), [V-092](Sources.md#v-092).
+
+**Perché una slide:** perché è il caso più netto in cui **la somiglianza è più pericolosa della
+differenza**. Un modello palesemente estraneo lo si scarta a colpo d'occhio; uno che combacia per il
+90% — stessi nomi di ramo, stesse direzioni di merge, una sola differenza nella chiusura — lo si
+segue fino al 10% che non combacia, ed è lì che si perde la revisione. Vale ben oltre le skill: è la
+stessa ragione per cui un replica set che *sembra* un'istanza singola inganna più di uno sharded
+cluster, che almeno dichiara di essere un'altra cosa.
+
+**Perché una slide, secondo motivo:** perché mostra a cosa serve davvero un registro delle
+decisioni. Cercando la scheda che vieta `git flow feature finish` per citarla, non c'era: in
+centoventitré schede questo repository non ha mai scritto il proprio modello dei rami. La regola era
+rispettata da tutti e scritta da nessuno — e a rendere visibile il vuoto è stato un pacchetto
+importato che quella scheda la pretendeva.

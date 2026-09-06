@@ -7514,3 +7514,85 @@ Stato aggiornato: decisioni fino ad **ADR-0122**, verifiche fino a **V-091**, mi
 **180 passate**, `pytest` dell'applicazione **711 passate**. Resta aperta **una** decisione del PO:
 se rendere confrontabili le due finestre dell'Atto III. Poi la discussione sulle priorità, che
 aspetta il suo giro con gli stack accesi.
+
+## 2026-09-06 — Dodici skill da un altro repository, e undici che qui non funzionavano
+
+Il Product Owner ha chiesto di riprendere dal repository d'origine, ramo
+`step/azure-policy/allineamento-e-fase-1`, il contenuto di `.claude/skills` e di
+`Docs/Concetti-Generali`, e di incorporarlo nella release. Sembrava un trasporto di file. Era una
+misura — [ADR-0123](Decision.md#adr-0123), verificata in [V-092](Sources.md#v-092).
+
+**Una skill non è documentazione.** È l'unica cosa che entra in un repository e poi si accende da
+sola: durante una sessione, quando il modello giudica che il caso sia suo, e da quel momento
+indirizza il lavoro. Il campo che decide se si accende è la `description` del frontmatter, ed è
+l'unica parte che non si può correggere da fuori — un blocco in testa, una nota nella pagina di
+provenienza, una scheda: tutto arriva **dopo** che la skill si è già presentata.
+
+**Undici su dodici, verbatim, erano o mute o fuori bersaglio.** Nove nominano il repository
+d'origine come condizione, e qui non si sarebbero accese mai. Due lo nominano **per negazione** —
+«use when the repository is NOT the origin one» — e quelle qui si accendono sempre, cioè
+esattamente dove non dovrebbero. Una è generica e scrive gli ADR in `docs/adr/`, che qui non
+esiste. Il censimento è sintattico e legge il testo, non il comportamento: la riserva sta scritta
+in V-092.
+
+**Il pericolo aveva la forma giusta.** Fra le due che si accendono c'è `git-flow`, e il suo
+`references/comandi.md` elenca `git flow feature finish`: il comando vietato qui da quando, sulla
+PR #1, chiuse un ramo saltando la revisione. Il modello dei rami di questo repository **ha la forma**
+di Git Flow — `main`, `develop`, `feature/NN-nome`, `release/1.0` — e differisce solo nella
+chiusura. Una skill che si accende da sola e propone quel comando non è un testo di riferimento
+sbagliato di poco: è una trappola che somiglia alla verità.
+
+**Verbatim prima, adattamento dopo.** Il pacchetto è entrato byte per byte in `65385ec`, verificato
+con `diff -r` contro il clone e passato al setaccio dei segreti — una segnalazione, una fixture,
+esclusa confrontando i prefissi SHA-256 senza stampare né l'una né l'altra. L'adattamento è il
+commit successivo, `25b5df6`: dieci righe per file, 108 in tutto, la `description` e un blocco in
+testa. **I corpi restano quelli del repository d'origine**, e non per pigrizia: con i corpi
+intatti un miglioramento fatto a monte si riporta con un diff, con i corpi riscritti si riporta
+con una fusione a mano. È il prezzo che il runbook d'origine dichiara, e conviene tenerlo basso.
+
+**La regola che rende innocuo tutto il resto sta in dodici posti.** In conflitto fra una skill e una
+scheda accettata di `docs/Decision.md`, vince la scheda — ripetuta nel blocco in testa a ognuna, non
+solo nella pagina di provenienza, perché una skill si presenta in mezzo a un lavoro e la regola
+deve stare dove arriva l'interruzione.
+
+**Poi i tre documenti**, in `docs/06-sviluppo/concetti-generali/`. Due intatti; il runbook adattato
+perché citava undici schede del repository d'origine con collegamenti relativi che qui puntano nel
+vuoto, e un rimando che si apre sulla pagina sbagliata è peggio di nessun rimando. Il README nuovo
+è la pagina che i dodici blocchi già citavano: provenienza, regola di precedenza, divergenze
+misurate, verdetto per skill, e il prezzo dichiarato.
+
+**Il vuoto che l'import ha scoperto.** Questo repository **non ha una scheda** che fissi il proprio
+modello dei rami, la strategia di merge o lo standard dei messaggi di commit. La pratica c'è, è
+coerente, ed è scritta in
+[`worktree-e-branch-di-lavoro.md`](06-sviluppo/worktree-e-branch-di-lavoro.md) — ma non è mai stata
+registrata come decisione, e in centoventitré schede nessuno se n'era accorto. Se n'è accorto adesso
+un pacchetto importato che quelle decisioni le pretende: `git flow feature finish` è vietato, e
+cercando la scheda che lo vieta non c'è.
+
+### Note di metodo
+
+252. **Ciò che si accende da sola va misurato prima di installarlo, e la misura è il suo testo di
+    innesco.** Dodici skill sono arrivate come file, e la domanda ovvia era se funzionassero: le
+    prove dicono di sì, 127 passate. La domanda giusta era un'altra — se si accendessero **qui** — e
+    la risposta stava in dodici righe di frontmatter, non nelle 127 prove. La regola pratica: quando
+    si importa materiale attivo, si legge per primo il campo che decide quando si attiva; il
+    collaudo prova che il codice è portabile, non che sia pertinente.
+253. **Un verdetto negativo scritto vale quanto uno positivo, e costa una riga.** Sette skill su
+    dodici qui non governano, e la scelta era fra toglierle e tenerle con scritto sopra che non
+    governano. Toglierle costa una ricerca il giorno che serviranno; tenerle mute costa un dubbio
+    ogni volta che qualcuno le apre. Tenerle **con il verdetto in testa** costa una tabella. La
+    regola pratica: quando si scarta qualcosa che potrebbe tornare utile, si scarta per iscritto e
+    nel posto dove verrà riletto — «non governa qui, ed ecco perché» è informazione, il silenzio no.
+254. **Una somiglianza forte è più pericolosa di una differenza.** `git-flow` non è stato pericoloso
+    perché descriva un modello estraneo, ma perché ne descrive uno quasi identico al nostro: stessi
+    nomi di ramo, stesse direzioni di merge, una sola differenza — la chiusura. Un testo palesemente
+    fuori contesto lo si scarta a colpo d'occhio; uno che combacia per il 90% lo si segue fino al
+    10% che non combacia. La regola pratica: quando si importa un modello simile al proprio, si
+    documenta la differenza, non l'affinità.
+
+Stato aggiornato: decisioni fino ad **ADR-0123**, verifiche fino a **V-092**, misure fino a
+**M-059**, note di metodo fino alla **254**. Controlli: `make docs-check` verde, `make tools-test`
+**180 passate**, `make app-test` **650 passate** (più le 61 di integrazione, che chiedono Docker:
+711 in tutto), le tre suite delle skill **127 passate**. Resta aperta **una** decisione del PO: se
+rendere confrontabili le due finestre dell'Atto III. Poi la discussione sulle priorità, che aspetta
+il suo giro con gli stack accesi, e la review generale della release, chiesta e non ancora fatta.

@@ -9759,3 +9759,96 @@ mongodb-27017.sock
 - **Usata da:** ADR-0122
 
 ---
+
+<a id="v-092"></a>
+### V-092 — Dodici skill importate: quante si accendono qui, e la riga che offre il comando vietato
+
+- **Comandi:** la copia e la sua verifica, il setaccio dei segreti, il censimento delle
+  descrizioni sul commit verbatim, e le tre suite di prove:
+
+```bash
+git clone --branch step/azure-policy/allineamento-e-fase-1 --depth 1 \
+  <URL del repository d'origine, privato> /tmp/origine
+diff -r /tmp/origine/.claude/skills .claude/skills
+python3 rimisura.py                       # legge da `git show 65385ec:<file>`
+bash .claude/skills/revisione-pr/tests/test-revisione.sh
+bash .claude/skills/changelog-di-chiusura/tests/test-changelog.sh
+bash .claude/skills/worktree-di-step/tests/test-step.sh
+```
+
+- **Ambiente:** portatile Apple Silicon, macOS 25.6, `git` di sistema, Python 3.13, nessuna
+  rete durante le prove. Il pacchetto misurato è quello del commit `65385ec` di
+  `release/1.0`, cioè la copia **prima** dell'adattamento: 33 file, 272 KB, 12 skill.
+  Il confronto `diff -r` contro il clone non ha prodotto alcuna riga: le due copie sono
+  identiche byte per byte.
+
+- **Esito, primo punto — la superficie che decide se una skill si accende.** Il campo
+  `description` del frontmatter è l'unica parte di una skill che non si può correggere da
+  fuori: è quella che il modello legge per stabilire se il caso è suo. Censite le dodici
+  descrizioni del pacchetto verbatim, distinguendo chi nomina il repository d'origine come
+  condizione da chi lo nomina per negazione:
+
+| Come nominano il repository d'origine | Quante | Quali |
+|---|---|---|
+| come **condizione** | 9 | `changelog-di-chiusura`, `decision-md`, `modello-dei-rami`, `project-memory`, `registro-di-sviluppo`, `revisione-pr`, `sources-md`, `workflow-conventions`, `worktree-di-step` |
+| per **negazione** («NOT the origin one») | 2 | `git-flow`, `github-flow` |
+| non lo nominano | 1 | `adr-brainstorm` |
+
+  Le nove della prima riga, importate così, non si sarebbero accese mai: la condizione che
+  chiedono qui è falsa. Le due della seconda si sarebbero accese **sempre**, perché la
+  condizione che chiedono è vera esattamente fuori dal repository d'origine. La dodicesima si
+  accende ma scrive gli ADR in `docs/adr/`, che qui non esiste.
+
+- **Esito, secondo punto — la riga che vale il rilievo.** `git-flow` è una delle due che si
+  accendono, e il suo file `references/comandi.md` elenca fra gli equivalenti AVH:
+
+```
+git flow feature finish <slug>
+```
+
+  È il comando che in questo repository è vietato da quando, sulla PR #1, chiuse un ramo
+  saltando la revisione. Il pericolo non è la presenza del testo — un repository può
+  benissimo ospitare la descrizione di un comando che non usa — ma la combinazione fra
+  quel testo e una descrizione che qui si accende da sola. Il modello dei rami di qui **ha
+  la forma** di Git Flow (`main`, `develop`, `feature/NN-nome`, `release/1.0`) e differisce
+  solo nella chiusura: è la somiglianza a rendere efficace la trappola.
+
+- **Esito, terzo punto — nomi di cartella.** Nel pacchetto verbatim ricorrono **95**
+  occorrenze di `Docs/` con la maiuscola, su 82 righe in 21 file: è la convenzione del
+  repository d'origine, dove le decisioni stanno in `Docs/Decision.md`. Qui la cartella è `docs/`,
+  minuscola. Su macOS il filesystem non distingue, su Linux sì — e la skill `git-flow`
+  dedica una sezione proprio a questo.
+
+- **Esito, quarto punto — il setaccio e le prove.** Il setaccio dei segreti di
+  `revisione-pr` passato sull'intero pacchetto ha prodotto **una** segnalazione, in una
+  fixture di prova: confrontata con la chiave vera per prefisso SHA-256, senza stampare né
+  l'una né l'altra, non coincide. Le tre suite, rilanciate **dopo** l'adattamento del
+  6 settembre:
+
+| Suite | Prove |
+|---|---|
+| `revisione-pr/tests/test-revisione.sh` | 53 passate, 0 fallite |
+| `changelog-di-chiusura/tests/test-changelog.sh` | 40 passate, 0 fallite |
+| `worktree-di-step/tests/test-step.sh` | 34 passati, 0 falliti |
+| **totale** | **127** |
+
+  Girano senza rete e senza spendere token: si costruiscono un repository temporaneo e
+  sostituiscono `gh`, `agy` e `codex` con dei finti.
+
+- **Riserve:** il censimento è **sintattico**. Legge il campo `description` e vi cerca la
+  stringa con il nome d'origine e la forma «NOT <quel nome>»; non prova che una descrizione così
+  scritta si accenda o non si accenda davvero in una sessione, perché quella decisione la
+  prende il modello e non è deterministica. Il verdetto «nove non si accendono mai» è
+  quindi una lettura del testo, non una misura di comportamento — solida perché il testo
+  dice esplicitamente «use when the repository in question is <il nome d'origine>», ma
+  una lettura.
+
+  Le 127 prove sono prove **degli script** della skill, non della loro applicabilità qui:
+  dicono che il codice è portabile, non che la skill sia adatta a questo repository. Il
+  `diff -r` è stato eseguito una volta sola, il giorno della copia; da lì in avanti le due
+  copie divergono per costruzione.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0123
+
+---

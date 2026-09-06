@@ -7816,3 +7816,110 @@ rimedio lento adesso serve ancora meno, perché il rimedio veloce fa la stessa c
   esito che vale in tutti e due i casi non è un verdetto, è una frase che sembra una risposta.
 
 **Fonti:** [ADR-0088](#adr-0088), [ADR-0102](#adr-0102), [V-091](Sources.md#v-091)
+
+<a id="adr-0123"></a>
+## ADR-0123 — Le skill importate si versionano col repository, entrano verbatim, e perdono contro una scheda
+
+**Data:** 2026-09-06 · **Stato:** Accettata
+
+**Contesto:** il 6 settembre il Product Owner ha chiesto di riprendere dal repository d'origine,
+ramo `step/azure-policy/allineamento-e-fase-1`, il contenuto di `.claude/skills` e di
+`Docs/Concetti-Generali`, e di incorporarlo nella release in corso.
+
+I tre documenti non pongono problemi: sono testi, si leggono, si citano. Le dodici skill sì. Una
+skill non è documentazione: **si accende da sola**, durante una sessione, quando il modello giudica
+che il caso sia suo, e da quel momento indirizza il lavoro. È materiale operativo che entra in un
+repository senza che nessuno lo abbia invocato, e che arriva da un progetto che ha preso decisioni
+proprie — alcune diverse dalle nostre, prese per ragioni che qui non valgono.
+
+Copiate e basta, non funzionavano. Misurato sul pacchetto verbatim ([V-092](Sources.md#v-092)):
+delle dodici descrizioni, **nove** nominano il repository d'origine come condizione e qui non si
+sarebbero accese mai; **due** lo nominano per negazione — «use when the repository is NOT the
+origin one» — e quelle qui si accendono sempre; **una** è generica e scrive gli ADR in
+`docs/adr/`, che qui non esiste. Undici su dodici erano quindi o mute o fuori bersaglio.
+
+E fra le due che si accendono c'è `git-flow`, il cui file `references/comandi.md` elenca
+`git flow feature finish`: il comando che in questo repository è vietato da quando, sulla PR #1,
+chiuse un ramo saltando la revisione. Il modello dei rami di qui ha la forma di Git Flow e
+differisce solo nella chiusura — è la somiglianza a rendere efficace la trappola.
+
+**Decisione.** Cinque punti.
+
+1. **Installazione di progetto, non personale.** Le skill stanno in `.claude/skills/` e si versionano
+   con il repository. Sono convenzioni di questo progetto, e il loro senso è viaggiare con esso: chi
+   clona ha il metodo insieme al codice, e una modifica al metodo si rivede in una PR come qualsiasi
+   altra. `.gitignore` continua a escludere solo ciò che è della macchina — `settings.local.json`,
+   `.headroom_*`, `worktrees/` — e in più `.revisioni/`, che è materiale di lavorazione della
+   revisione esterna: nel repository entra soltanto il foglio archiviato.
+
+2. **Verbatim prima, adattamento dopo, in due commit distinti.** Il pacchetto entra byte per byte
+   come sta a monte ([`65385ec`](https://github.com/giulianolatini/SqlStart2026/commit/65385ec)),
+   verificato con `diff -r` contro il clone; l'adattamento è il commit successivo
+   ([`25b5df6`](https://github.com/giulianolatini/SqlStart2026/commit/25b5df6)). Così ciò che
+   abbiamo cambiato **è un diff**, leggibile e discutibile, invece di un'affermazione. È la stessa
+   sequenza che il repository d'origine usò per sé.
+
+3. **L'adattamento tocca la `description` e un blocco in testa. I corpi restano intatti.** La
+   `description` perché è la superficie che decide se una skill si accende, ed è l'unica parte che
+   non si può correggere da fuori. Il blocco `[!IMPORTANT]` perché una skill dev'essere in grado di
+   dire, nel momento in cui viene letta, se qui governa, non governa, o è testo di riferimento.
+   Nient'altro: dieci righe per file, 108 in tutto. Il resto si lascia stare **apposta**, perché
+   queste sono copie e un miglioramento fatto a monte andrà riportato a mano — con i corpi intatti
+   quel riporto resta un diff, con i corpi riscritti diventa una fusione.
+
+4. **In conflitto fra una skill e una scheda accettata di questo file, vince la scheda.** La regola
+   sta nel blocco in testa a **tutte e dodici**, non solo nella pagina di provenienza: serve dove
+   viene letta. Una skill è un testo persuasivo che si presenta al momento giusto; senza una regola
+   di precedenza scritta, prima o poi riscrive una decisione presa, e nessuno se ne accorge.
+
+5. **Cinque governano, sette no, e ciascuna lo dice di sé.** Governano `decision-md`, `sources-md`,
+   `registro-di-sviluppo`, `revisione-pr` e `adr-brainstorm` (quest'ultima fino alla fase 3: la
+   scrittura passa a `decision-md`). Non governano `changelog-di-chiusura`, `project-memory`,
+   `worktree-di-step`, `modello-dei-rami`, `workflow-conventions`; `git-flow` e `github-flow`
+   restano testi di riferimento, **e i loro comandi non si eseguono qui**. Il quadro completo, con le
+   divergenze di forma di quelle che governano, sta in
+   [`docs/06-sviluppo/concetti-generali/README.md`](06-sviluppo/concetti-generali/README.md).
+
+**Conseguenze.** Cinque skill diventano operative subito, e portano dentro pratiche che qui erano
+consuetudine non scritta. Sette sono inerti per costruzione: continuano a occupare 272 KB nel
+repository, ed è un costo accettato in cambio della possibilità di riprenderle senza ripetere
+l'import.
+
+Le tre suite che le skill si portano dietro entrano nel repository e girano senza rete: 127 prove,
+tutte passate dopo l'adattamento. Non sono nel `make check` — provano gli script della skill, non il
+lab — ma esistono e si lanciano a mano.
+
+L'import ha scoperto un vuoto che non colma: **questo repository non ha una scheda che fissi il
+proprio modello dei rami, la strategia di merge o lo standard dei messaggi di commit.** La pratica
+c'è, è coerente ed è descritta in
+[`worktree-e-branch-di-lavoro.md`](06-sviluppo/worktree-e-branch-di-lavoro.md), ma non è mai stata
+registrata come decisione — e finora nessuno l'aveva notato, perché nessuno l'aveva contraddetta.
+L'hanno resa visibile proprio le skill che quelle decisioni le pretendono.
+
+**Alternative scartate.**
+
+- *Installazione personale, in `~/.claude/skills/`.* È l'altra strada che il runbook documenta, e
+  costa meno: nessun file nel repository, nessun peso nel diff. Ma il metodo resterebbe sulla
+  macchina di una persona, invisibile a chi clona e non rivedibile in una PR. Un repository che
+  registra ogni decisione in una scheda non può tenere fuori dal controllo di versione le regole con
+  cui quelle schede si scrivono.
+- *Importare solo le cinque che governano.* Toglie 272 KB e ogni ambiguità. Ma le sette scartate
+  sono scartate **oggi**: `changelog-di-chiusura` servirà il giorno in cui questo repository avrà un
+  `CHANGELOG.md`, e `github-flow` è il testo con cui si confronta il modello quando si discute di
+  cambiarlo. Scartare significa doverle ricercare, e la ricerca ricomincia da capo — mentre tenerle
+  con un verdetto scritto in testa costa una tabella.
+- *Riscrivere le skill invece di adattarle.* Produce testi che parlano di questo repository e di
+  nessun altro, più chiari da leggere. E rompe il legame con l'origine: da quel momento non esiste
+  più un `diff` da fare contro monte, e ogni miglioramento fatto là va riscoperto leggendo.
+- *Adattare tutto in un commit solo, senza il passaggio verbatim.* Un commit più corto, e la perdita
+  dell'unica cosa che rende verificabile l'import: senza la base identica, «i corpi sono intatti» è
+  una promessa e non un fatto controllabile.
+- *Mettere la regola di precedenza solo nella pagina di provenienza.* Una pagina che si potrebbe non
+  aprire. Le skill si presentano da sole, spesso in mezzo a un lavoro: la regola deve stare dove
+  arriva l'interruzione.
+- *Lasciare `git-flow` com'era, trattandolo come documentazione.* È ciò che sarebbe successo senza
+  guardare le descrizioni. Una skill che si accende da sola e offre il comando vietato non è
+  materiale di riferimento: è una trappola, e la sua forma somigliantissima al modello di qui la
+  rende più pericolosa, non meno.
+
+**Fonti:** [V-092](Sources.md#v-092), [ADR-0052](#adr-0052)
