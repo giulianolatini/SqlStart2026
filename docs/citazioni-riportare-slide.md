@@ -3427,3 +3427,117 @@ misurata. La giustezza dei documenti era «più o meno 95 colonne»; misurata, �
 e 99. Con la soglia supposta sarebbero stati riavvolti 28 paragrafi in più, e ognuno sarebbe stato
 una riga di diff da rileggere per niente. **Una convenzione che nessuno ha misurato è un'opinione
 con l'aria di una regola**, e il costo non è l'errore: è il lavoro inutile che l'errore autorizza.
+
+---
+
+### Una regola che sta fuori dal blocco che si copia non è una regola
+
+> Il §5 della pagina del backup stabiliva che un dump fallito lascia sul disco qualcosa che sembra
+> un backup, e che «l'unico segnale è il codice di uscita 1». Il §7, centoventi righe dopo,
+> consegnava al lettore un blocco unico da copiare in cui **nessuno legge quel codice** e il secondo
+> comando è un `dropDatabase()`. **Una regola che non sta dentro il blocco che il lettore esegue non
+> è una regola: è un'osservazione.**
+> Fonte: [ADR-0126](Decision.md#adr-0126), [V-095](Sources.md#v-095).
+
+**Perché una slide:** perché è il modo in cui una documentazione onesta produce un incidente. Nessuno
+ha nascosto niente: l'avvertimento c'era, scritto bene, nella stessa pagina. Ma chi esegue una
+procedura la esegue **dal blocco**, non dal paragrafo — e ogni riga di distanza fra la cautela e il
+comando è una probabilità che la cautela non venga applicata. La misura di una buona procedura non è
+quanto è completa: è quanto ne sopravvive al copia-incolla.
+
+**Perché una slide, secondo motivo:** perché il rimedio è banale e nessuno lo fa. Il controllo che
+mancava — `test -f "${DESTINAZIONE}/oplog.bson"` — non interroga il server, non costa niente, e
+distingue il dump completo da tutto il resto. Costava una riga. Stava già scritta in prosa.
+
+---
+
+### Misurato su un caso, scritto come se valesse su una classe
+
+> La regola «se `mongodump` fallisce, cancella la destinazione» nasce da un guasto vero, in cui il
+> dump si fermò **dopo** aver scritto 1,8 GB: lì `rm -rf` toglie esattamente ciò che il comando
+> aveva creato. Riprodotto un fallimento **precoce** — credenziale sbagliata, errore in fase di
+> handshake — il dump esce 1 senza creare niente, e la stessa regola cancella un backup preesistente
+> che non aveva mai toccato. **Un errore di quantificatore: misurato su un caso, scritto come se
+> valesse su una classe.**
+> Fonte: [ADR-0126](Decision.md#adr-0126), [V-095](Sources.md#v-095), [V-036](Sources.md#v-036).
+
+**Perché una slide:** perché è l'errore che si commette proprio quando si fa la cosa giusta. La
+regola non era inventata: era **estratta da una misura**, che è il modo raccomandato di scrivere le
+regole. Il salto avviene nel silenzio fra «ho visto fallire così» e «quando fallisce». Chi misura una
+volta si sente autorizzato a generalizzare più di chi non ha misurato affatto — ed è per questo che
+la trappola prende chi lavora bene.
+
+**Il rimedio, in tre parole:** `mktemp -d`. Non complica la regola, la **fonda**: la proprietà della
+directory è ciò che autorizza la cancellazione ricorsiva. Si cancella solo ciò che si è creato.
+
+---
+
+### Un argomento gonfiato non è più forte: è più fragile
+
+> La pagina su keyfile e X.509 citava la fonte per esteso — «The certificates match if their
+> subjects contain the same values for the Organization (`O`), Organizational Unit (`OU`), and
+> Domain Component (`DC`) attributes» — e tre paragrafi dopo ne traeva la conclusione opposta,
+> chiudendo il confronto con «Tre giri di riavvii, da programmare prima della scadenza, per ogni
+> cluster, per sempre». Se il confronto guarda quei tre attributi, un certificato rinnovato che li
+> conserva **corrisponde**: il rinnovo costa **un** giro di riavvii, non tre. I tre sono il prezzo di
+> un evento diverso e più raro, il cambio di `DN`.
+> Fonte: [S-063](Sources.md#s-063),
+> [`sicurezza-keyfile-x509.md`](03-amministrazione/sicurezza-keyfile-x509.md) §3.5.
+
+**Perché una slide:** perché **un argomento gonfiato non è più forte: è più fragile.** La frase
+sbagliata stava esattamente nel punto in cui la pagina tira la somma, cioè nell'unica riga che un
+lettore di fretta si porta via — e triplicava proprio la voce su cui il confronto si regge. Chi
+conosce X.509 la smonta in una domanda, e con essa smonta anche la parte vera, che c'era: il rinnovo
+è manutenzione periodica obbligatoria, un keyfile non scade, il divario di gestibilità è reale alla
+sua misura.
+
+**Perché una slide, secondo motivo:** perché nessuna misura è servita a scoprirlo. La fonte che
+smentiva la conclusione era **già nella pagina**, citata per esteso dall'autore stesso. È il modo più
+comune di sbagliare un documento ben documentato: la fonte è giusta, il riassunto no, e nessuno
+rilegge il riassunto contro la fonte perché la fonte l'ha scelta lui.
+
+---
+
+### Dipende dallo strumento, e il modo di saperlo è provarlo
+
+> `mongosh` 2.10.0 riscrive il proprio `argv`: dentro il container `ps` mostra
+> `mongodb://<credentials>@…` e zero occorrenze del segreto. `mongodump` e `mongorestore` 100.18.0
+> **no**: la riga esce intera. Sono binari della stessa distribuzione MongoDB, invocati allo stesso
+> modo, e si comportano in modo opposto. Quindi né «`-p` espone» né «`-p` è sicuro»: **dipende dallo
+> strumento, e il modo di saperlo è provarlo.**
+> Fonte: [ADR-0127](Decision.md#adr-0127), [V-096](Sources.md#v-096), [V-047](Sources.md#v-047),
+> [M-025](../app/docs/Sources.md#m-025).
+
+**Perché una slide:** perché è la forma di errore che una revisione attenta produce più spesso di una
+distratta. Il rilievo che ha aperto la questione citava una frase **vera** — «un `ps -eo args` dentro
+il container lo mostra a chiunque», scritta a proposito di `mongodump` — e la applicava a un esempio
+con `mongosh`, dove la stessa misura dice il contrario. Trasportare una misura da uno strumento a un
+altro sembra economia di pensiero; è il modo in cui una prova diventa un pregiudizio.
+
+**Il corollario operativo:** una pagina che mostra un comando con una credenziale fra gli argomenti
+deve dire **quale dei due casi è**, perché il lettore non può dedurlo. E la tabella va rimisurata a
+ogni cambio di immagine: il comportamento di `argv` non è una garanzia documentata.
+
+---
+
+### Non «potresti leggere dati incompleti», ma «sedici secondi alla volta»
+
+> Due sezioni della stessa pagina si contraddicevano sulla perdita di uno shard: una parlava di
+> risposte parziali restituite in silenzio, l'altra di query che falliscono. Nessuna delle due era
+> misurata, e la fonte citata diceva soltanto che «reads or writes directed at the available shards
+> can still succeed» — cioè niente sulle altre. Eseguita la scena: la query sullo shard sano
+> risponde in **1 s**; quella sullo shard perduto e il conteggio totale falliscono dopo **16 s**
+> con `FailedToSatisfyReadPreference: Could not find host matching read preference { mode:
+> "primary" } for set shard1rs`. Il client **viene** informato, e l'errore **nomina** lo shard.
+> Fonte: [ADR-0128](Decision.md#adr-0128), [V-097](Sources.md#v-097), [S-069](Sources.md#s-069).
+
+**Perché una slide:** perché la misura cambia il **destinatario** della lezione. «Attento, potresti
+leggere dati incompleti» mette in guardia da un pericolo che non esiste, e chi lo scopre smette di
+fidarsi del resto. «Attento, un ramo delle tue query smetterà di rispondere per sedici secondi alla
+volta» descrive ciò che un'applicazione sincrona subisce davvero, ed è azionabile: si cambia il
+timeout, si cambia il profilo, si cambia la chiamata.
+
+**Perché una slide, secondo motivo:** perché i sedici secondi non sono indecisione. Sono il router
+che cerca un primario per uno shard che ha un membro solo, e non c'è nessuno da eleggere. È la
+differenza fra la ridondanza **dentro** lo shard — che è il suo replica set — e la ridondanza **fra**
+shard, che non esiste: nessun altro nodo ha una copia di quello che teneva `shard1rs`.

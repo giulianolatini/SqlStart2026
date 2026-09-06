@@ -8079,3 +8079,190 @@ cronologia è una decisione diversa, con costi diversi, e spetta al Product Owne
   ma non è di questa scheda, e la decisione è del proprietario.
 
 **Fonti:** [V-094](Sources.md#v-094), [V-093](Sources.md#v-093), [ADR-0123](#adr-0123)
+
+---
+
+<a id="adr-0126"></a>
+## ADR-0126 — La precondizione di un comando distruttivo sta dentro il blocco che si copia, e si cancella solo ciò che si è creato
+
+**Data:** 2026-09-06 · **Stato:** Accettata · **Corregge:** [ADR-0047](#adr-0047)
+
+**Contesto:** [ADR-0047](#adr-0047) ha scritto la pagina del backup dopo averlo rotto davvero, e ne
+ha ricavato una regola operativa in due righe: se `mongodump` esce diverso da zero, si cancella la
+destinazione e si esce. La regola veniva da un guasto vero — [V-036](Sources.md#v-036), dove il dump
+si fermò **dopo** aver scritto 1,8 GB — e per quel modo di fallire è giusta: `rm -rf` toglie
+esattamente i file che il comando aveva creato.
+
+Una revisione esterna ha contestato due punti della pagina, e misurandoli
+([V-095](Sources.md#v-095)) sono risultati due difetti distinti con la stessa radice.
+
+Il primo: un `mongodump` che fallisce sull'autenticazione esce 1 **senza creare niente**, e la regola
+allora cancella una directory che il comando non ha mai toccato — nella prova, un backup
+preesistente. È un errore di quantificatore: una regola misurata su un caso, scritta come se valesse
+su una classe.
+
+Il secondo è più insidioso, perché la pagina lo sapeva. Il §5 stabilisce che un dump fallito lascia
+sul disco qualcosa che sembra un backup e che «l'unico segnale è il codice di uscita 1». Il §7 poi
+consegna al lettore un blocco unico da copiare in cui **nessuno legge quel codice**, e il secondo
+comando è un `dropDatabase()`. Una regola che non sta dentro il blocco che il lettore esegue non è
+una regola: è un'osservazione.
+
+**Decisione.** Tre punti, e il primo fonda gli altri due.
+
+1. **Si cancella ricorsivamente solo ciò di cui si è proprietari.** La destinazione di un dump si
+   crea con `mktemp -d` e si pubblica con `mv` **dopo** il controllo. Non è una complicazione della
+   regola di ADR-0047: è la riga che la rende lecita, perché la proprietà della directory è ciò che
+   autorizza `rm -rf`.
+
+2. **Ogni passo irreversibile porta la propria guardia dentro il blocco copiabile.** Nel §7 il
+   `dropDatabase()` è preceduto da `test -f "${DESTINAZIONE}/oplog.bson"` nella stessa riga logica.
+   Il controllo è a costo zero, non interroga il server, e distingue il dump completo da tutto il
+   resto, perché `--oplog` scrive `oplog.bson` per ultimo (V-095).
+
+3. **Una precondizione dichiarata in prosa altrove nella pagina non conta.** Vale se e solo se è
+   eseguibile da chi copia. Chi legge una procedura la esegue dal blocco, non dal paragrafo che sta
+   centoventi righe sopra.
+
+**Conseguenze.** La regola del §5 passa da due righe a quattro, e la quarta è un `mv`. Il §7 acquista
+due comandi: un `rm -rf` preventivo sulla destinazione — perché un residuo di un tentativo
+interrotto avrebbe superato la guardia — e la guardia stessa. Il blocco resta copiabile e la scena
+resta la stessa: si continua a cancellare il database vero e a ricostruirlo, che è ciò che la prova
+esiste per mostrare.
+
+**Alternative scartate.**
+
+- *Ripristinare in un database usa-e-getta invece di cancellare quello vero.* È il secondo rimedio
+  che il revisore proponeva, ed è più sicuro. Toglie però proprio ciò che la prova dimostra: che un
+  restore rimette in piedi il database che si è perso. Una demo che non rischia niente non prova
+  niente.
+- *Cancellare solo i file che il dump ha creato, elencandoli.* Servirebbe un manifesto, e il
+  manifesto è esattamente ciò che `mktemp -d` regala gratis: la directory è il manifesto.
+- *Lasciare la regola e aggiungere un avvertimento in prosa.* È già la situazione che ha prodotto il
+  difetto. Il §5 l'avvertimento ce l'aveva.
+
+**Fonti:** [V-095](Sources.md#v-095), [V-036](Sources.md#v-036), [ADR-0047](#adr-0047)
+
+---
+
+<a id="adr-0127"></a>
+## ADR-0127 — Dove si legge una credenziale dipende dallo strumento, e la pagina che la mostra lo dice
+
+**Data:** 2026-09-06 · **Stato:** Accettata — estende [ADR-0054](#adr-0054)
+
+**Contesto:** [ADR-0054](#adr-0054) ha stabilito che la password del lab sta sulla riga di comando
+dell'host, che chi la mostra deve dirlo, e che non si passa con `-e` al client `docker` — quel
+secondo passaggio era inutile e metteva una copia in più del segreto proprio sulla riga che perde.
+La regola era scritta per un commento in uno script, ed è lì che è stata applicata.
+
+Due rilievi di una revisione esterna hanno chiesto di togliere `-p` dagli esempi di documentazione,
+trattando l'esposizione come una proprietà uniforme dei comandi MongoDB. Misurandola, non lo è
+([V-096](Sources.md#v-096)):
+
+- `mongosh` 2.10.0 **riscrive il proprio `argv`**: dentro il container `ps` non mostra il segreto ma
+  `mongodb://<credentials>@…` ([V-047](Sources.md#v-047)).
+- `mongodump` 100.18.0 **no**: la riga esce intera, sentinella compresa.
+- `mongorestore` 100.18.0 **no**: 16 campioni su 16 ([M-025](../app/docs/Sources.md#m-025)), la cui
+  riserva dichiarata su `mongodump` V-096 chiude.
+
+Due binari della stessa distribuzione, invocati allo stesso modo, si comportano in modo opposto. Il
+rilievo che citava una frase vera su `mongodump` per condannare un esempio con `mongosh` trasportava
+una misura da uno strumento a un altro dove la stessa misura dice il contrario.
+
+**Decisione.** Quattro punti.
+
+1. **Ogni pagina che mostra un comando con una credenziale fra gli argomenti dichiara dove quella
+   credenziale è leggibile, e per quale strumento.** Non «`-p` espone» e non «`-p` è sicuro»:
+   **dipende dallo strumento, e il modo di saperlo è provarlo.**
+
+2. **La regola di ADR-0054 vale anche per la documentazione, non solo per i commenti degli script.**
+   Chi mostra il comando descrive l'esposizione reale: è l'estensione che questa scheda aggiunge, e
+   il difetto trovato è che quella regola non era mai stata applicata fuori dal codice.
+
+3. **La nota sta accanto al comando, non alla fine della pagina.** Il §7 di `backup-restore.md`
+   taceva ciò che il §8 diceva centoventi righe più in là, e chi copia il §7 al §8 non arriva. È lo
+   stesso principio di [ADR-0126](#adr-0126), applicato all'informazione invece che al controllo.
+
+4. **Il divieto di `-e` al client `docker` resta**, e la tabella per strumento di V-096 va
+   rimisurata quando il lab cambia immagine: il comportamento di `argv` non è una garanzia
+   documentata da MongoDB.
+
+**Conseguenze.** `backup-restore.md` §7 e `replica-set.md` §6 acquistano ciascuno un paragrafo che
+dice per il proprio comando dove il segreto si legge. Gli esempi restano quelli che sono: il §7
+mostra i comandi a mano apposta, perché il confronto con la forma dell'applicazione — che passa la
+credenziale per standard input — è ciò che i due blocchi accostati esistono per fare. La riserva di
+M-025 è chiusa.
+
+**Alternative scartate.**
+
+- *Togliere `-p` dagli esempi e usare il prompt interattivo.* Misurato nella forma che la pagina usa:
+  `docker exec` senza `-it` chiede «Enter password:» e poi fallisce l'autenticazione. Il rimedio non
+  funziona dove andrebbe applicato.
+- *Passare il segreto per variabile d'ambiente a `mongosh`.* Nella 2.10.0 non esiste: l'aiuto elenca
+  due sole opzioni che nominano una password, entrambe con un argomento (V-047). La realizzazione più
+  vicina, `docker exec -e`, è proprio ciò che ADR-0054 ha fatto togliere.
+- *Una nota unica in fondo alla pagina, valida per tutti gli esempi.* Costa meno e si legge dopo che
+  il comando è già stato copiato.
+
+**Fonti:** [V-096](Sources.md#v-096), [V-047](Sources.md#v-047),
+[M-025](../app/docs/Sources.md#m-025), [ADR-0054](#adr-0054)
+
+---
+
+<a id="adr-0128"></a>
+## ADR-0128 — La disponibilità di uno sharded cluster si misura in secondi, e due sezioni che si contraddicono non si allineano: si eseguono
+
+**Data:** 2026-09-06 · **Stato:** Accettata
+
+**Contesto:** `sharded-cluster.md` diceva due cose incompatibili sullo stesso comportamento. Il §1.2
+descriveva la perdita di uno shard come una risposta parziale restituita «senza dire al client che
+l'altra parte non c'è»; il §6.4 diceva che le query sullo shard perduto falliscono. Una revisione
+esterna ha chiesto di allineare la prima alla seconda.
+
+Allineare sarebbe stato sbagliato, perché **nessuna delle due era misurata**. Il §6.4 citava
+[S-069](Sources.md#s-069), che dice soltanto «reads or writes directed at the available shards can
+still succeed» — cioè afferma qualcosa sulle query che passano e **niente** su quelle che non
+passano. La sezione con cui il revisore chiedeva di allinearsi affermava a sua volta più di quanto
+la sua fonte sostenesse.
+
+Eseguita la scena che il repository ha già, `make guasto-03` ([V-097](Sources.md#v-097)), il §1.2 è
+risultato **falso su tutti e due i punti**: il client viene informato — riceve un errore, non dati
+mutilati — e l'errore **nomina** il replica set mancante. Quello che nessuna delle due sezioni
+diceva è il costo vero: **16 secondi** prima dell'errore, contro **1 secondo** per la query che
+passa.
+
+**Decisione.** Tre punti.
+
+1. **Le due sezioni dicono ciò che è stato misurato**, con i numeri: 1 s per la query che tocca solo
+   lo shard sano, 16 s prima del `FailedToSatisfyReadPreference` per quella che tocca lo shard
+   perduto e per il conteggio totale, 3 s per tornare a 20 000 dopo `start`. Il §6.4 porta l'errore
+   per esteso, perché il nome dello shard dentro il messaggio è metà della lezione.
+
+2. **Quando due sezioni della stessa pagina affermano cose incompatibili sullo stesso
+   comportamento, allinearle non basta: si esegue.** Una contraddizione è il segnale che almeno una
+   delle due è stata dedotta invece che vista, e la probabilità che sia proprio quella che sembra
+   giusta non è bassa.
+
+3. **Il sotto-caso non eseguito si dichiara come dedotto.** Una query in broadcast i cui documenti
+   stiano tutti sullo shard vivo deve fallire per costruzione — il router la manda a tutti proprio
+   perché non sa dove siano — ma il conteggio totale misurato li vuole entrambi e non discrimina il
+   caso. La frase resta, marcata come ragionata.
+
+**Conseguenze.** La lezione cambia destinatario, ed è il guadagno vero di questa scheda: non
+«attento, potresti leggere dati incompleti» — un pericolo che non esiste — ma «attento, un ramo
+delle tue query smetterà di rispondere per sedici secondi alla volta». La prima mette in guardia da
+qualcosa di immaginario; la seconda descrive ciò che un'applicazione sincrona subisce davvero. La
+misura è stata presa senza costruire niente di nuovo: la scena esisteva già, si ripara da sé e non
+distrugge dati ([ADR-0119](#adr-0119)).
+
+**Alternative scartate.**
+
+- *Allineare il §1.2 al §6.4, come chiedeva il rilievo.* Avrebbe propagato l'affermazione non
+  sostenuta invece di correggerla, e la pagina sarebbe rimasta coerente e sbagliata — che è lo stato
+  peggiore, perché non lo segnala più nessuno.
+- *Cancellare il §1.2 e rimandare al §6.4.* Il §1.2 è il punto in cui il lettore incontra l'idea che
+  la disponibilità qui è della singola query. Toglierlo sposta il costo cognitivo a valle.
+- *Misurare anche nel profilo `completo`, dove la scena finisce con un'elezione.* Vale, ed è già
+  registrata altrove come scena distinta; qui avrebbe confuso il caso che si voleva isolare — uno
+  shard **perso**, non uno shard che si ripara.
+
+**Fonti:** [V-097](Sources.md#v-097), [S-069](Sources.md#s-069), [ADR-0119](#adr-0119)

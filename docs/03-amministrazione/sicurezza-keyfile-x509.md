@@ -320,8 +320,8 @@ un certificato **anche dal client**.
 
 ### 3.5 La rotazione, che è il costo vero
 
-Un certificato scade. Quando arriva il momento di sostituirlo con uno che ha un `DN` diverso, i nodi
-smettono di riconoscersi, perché il riconoscimento è proprio un confronto fra `DN`
+Un certificato scade e va sostituito. Le sostituzioni però sono due, e costano in modo molto
+diverso: la differenza sta nel `DN`, perché il riconoscimento fra nodi è un confronto fra `DN`
 ([S-063](../Sources.md#s-063)):
 
 > «When a server node receives a connection request, it compares the Distinguished Name (DN)
@@ -329,8 +329,15 @@ smettono di riconoscersi, perché il riconoscimento è proprio un confronto fra 
 > its own certificates. The certificates match if their subjects contain the same values for the
 > Organization (`O`), Organizational Unit (`OU`), and Domain Component (`DC`) attributes.»
 
-La via d'uscita è un parametro-ponte, `tlsX509ClusterAuthDNOverride`, che fa accettare a un nodo
-anche i pari con l'altro `DN`. La procedura completa è di **sei passi** e comporta **tre giri di
+Il confronto guarda `O`, `OU` e `DC`: non la scadenza, non il numero di serie, non il `CN`. Un
+**rinnovo a identità invariata** — certificato nuovo, stessi tre attributi — lascia quindi i nodi che
+si riconoscono, e costa **un** giro di rolling restart, senza nessun parametro in più. È il caso
+ordinario, ed è quello che torna a ogni scadenza.
+
+Il caso caro è l'altro: quando il `DN` **cambia** — l'organizzazione si rinomina, la CA riorganizza
+le unità — i nodi smettono di riconoscersi, e la scadenza non c'entra. La via d'uscita è un
+parametro-ponte, `tlsX509ClusterAuthDNOverride`, che fa accettare a un nodo anche i pari con l'altro
+`DN`. La procedura completa è di **sei passi** e comporta **tre giri di
 riavvii** dell'intero cluster: si mette l'override sul `DN` nuovo ovunque e si riavvia; si
 sostituiscono i certificati mettendo l'override sul `DN` **vecchio** e si riavvia; si toglie
 l'override e si riavvia una terza volta. Ogni passo ripete lo stesso avviso — «This configuration
@@ -341,15 +348,18 @@ verificata con `rs.status()`, e `rs.stepDown()` sul primario prima di fermarlo.
 Sul fermo macchina la fonte è netta: «In a rolling update, member certificates are updated one at a
 time, and your deployment does not incur any downtime.»
 
-Questa procedura è il termine di paragone onesto con il keyfile, ed è la ragione per cui il §2 parla
-di gestibilità prima che di crittografia. Tre giri di riavvii, da programmare prima della scadenza,
-per ogni cluster, per sempre.
+È qui che si vede perché il §2 parla di gestibilità prima che di crittografia — ma il conto va fatto
+alla cifra giusta, o il paragone con il keyfile non vale niente. Il costo **ricorrente** è un giro di
+riavvii a ogni scadenza, per ogni cluster, per sempre: un keyfile non scade, e il divario è tutto lì.
+I **tre** giri sono il prezzo di un evento diverso e più raro — il cambio di identità — e metterli
+sulla scadenza triplicherebbe proprio la voce su cui il confronto si regge.
 
 > **Non eseguito.** La rotazione è riportata dalla fonte e non è stata provata. Da segnalare anche
 > un silenzio della fonte: la pagina non dice niente su **come accorgersi** che i certificati stanno
 > per scadere, né su che cosa succeda a un cluster i cui certificati scadono mentre è in esercizio.
-> La presenta come una scelta organizzativa — «such as if an organization changes its name» — non
-> come una manutenzione periodica obbligata, che è invece quello che è.
+> Sull'override, invece, la fonte ha ragione a parlare di scelta organizzativa — «such as if an
+> organization changes its name»: serve quando il `DN` cambia, non a ogni scadenza. La manutenzione
+> periodica obbligata è il rinnovo, e vale un giro di riavvii.
 
 ---
 

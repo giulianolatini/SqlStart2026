@@ -2293,7 +2293,7 @@ web:
   set da uno o tre membri, ma il perché non è stato verificato. La seconda: la pagina descrive
   anche zone, resharding, change stream e transazioni distribuite, che il laboratorio non usa e su
   cui questa fonte non è stata letta con attenzione.
-- **Usata da:** ADR-0068
+- **Usata da:** ADR-0068, ADR-0128
 
 <a id="s-070"></a>
 ### S-070 — MongoDB Manual 7.0: Sharded Cluster Balancer
@@ -4979,7 +4979,7 @@ USCITA=1
   rotolare via sotto il dump. Il limite è reale, il messaggio d'errore esiste nel programma, e la
   fonte primaria tace.
 - **Data:** 2026-09-01
-- **Usata da:** ADR-0047
+- **Usata da:** ADR-0047, ADR-0126
 
 ---
 
@@ -5786,7 +5786,7 @@ copie della password nella singola riga di comando di docker sull'host: 2
   il resto: è una password di laboratorio, e il file che la porta è fuori dal repository
   ([ADR-0014](Decision.md#adr-0014)).
 - **Data:** 2026-09-01
-- **Usata da:** ADR-0054
+- **Usata da:** ADR-0054, ADR-0127
 
 
 <a id="v-048"></a>
@@ -10028,3 +10028,179 @@ make docs-check
 
 - **Data:** 2026-09-06
 - **Usata da:** ADR-0125
+
+---
+
+<a id="v-095"></a>
+### V-095 — Un dump fallisce in due modi diversi, e la regola di pulizia ne conosceva uno solo
+
+- **Comandi:** una directory con dentro un backup finto, un `mongodump` che fallisce
+  sull'autenticazione, e i due controlli che il documento propone:
+
+```bash
+docker exec mongo-rs-1 mkdir -p /tmp/archivio-v095
+docker exec mongo-rs-1 touch /tmp/archivio-v095/backup-di-ieri.bson
+docker exec mongo-rs-1 mongodump --host rs0/localhost:27017 \
+  -u admin -p credenziale-sbagliata --authenticationDatabase admin \
+  --oplog --out /tmp/archivio-v095            # credenziale finta: mai la vera
+docker exec mongo-rs-1 ls -la /tmp/archivio-v095
+docker exec mongo-rs-1 rm -rf /tmp/archivio-v095   # la riga che il documento prescriveva
+docker exec mongo-rs-1 test -f /tmp/dump-v095/oplog.bson
+```
+
+- **Ambiente:** macOS 26.6.2 arm64 (build 25G83), Docker 29.7.2, immagine `mongo:7.0.40`,
+  `mongodump` **100.18.0**, stack 02 `mongo-rs-1/2/3` sani, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** un revisore esterno ha contestato la regola di pulizia scritta in
+  [`backup-restore.md`](03-amministrazione/backup-restore.md) §5 —
+  `mongodump … || { rm -rf "${DESTINAZIONE}"; exit 1; }` — sostenendo che cancella troppo. La
+  regola non era nata dal nulla: viene da [V-036](#v-036), dove un dump vero fallì **dopo** aver
+  scritto 1,8 GB, e in quel caso `rm -rf` toglie esattamente ciò che il comando aveva creato. La
+  domanda era se valesse anche quando il dump fallisce **prima** di scrivere.
+
+- **Esito, primo punto — un dump può fallire senza creare niente.** Con una credenziale sbagliata,
+  `mongodump` esce **1** e non tocca la destinazione:
+
+```
+Failed: can't create session: failed to connect to mongodb://localhost:27017/?replicaSet=rs0:
+connection() error occurred during connection handshake: auth error: unable to authenticate
+using mechanism "SCRAM-SHA-256": (AuthenticationFailed) Authentication failed.
+```
+
+  Il `ls` subito dopo mostra la directory **come prima**: `backup-di-ieri.bson`, e nient'altro.
+  L'errore arriva a livello di handshake, cioè prima che esista un solo byte da scrivere.
+
+- **Esito, secondo punto — la regola cancella allora ciò che non ha creato.** Applicato il
+  `rm -rf "${DESTINAZIONE}"` che il documento prescriveva, il backup preesistente sparisce con la
+  directory: `ls: cannot access '/tmp/archivio-v095': No such file or directory`. Il fallimento non
+  aveva prodotto niente da ripulire, e la pulizia ha preso l'unica cosa che c'era.
+
+- **Esito, terzo punto — la guardia proposta discrimina davvero.** Dopo lo stesso fallimento in una
+  destinazione nuova, `test -f /tmp/dump-v095/oplog.bson` esce **1**. È un controllo che non
+  interroga il server e non costa niente, e distingue il dump completo da tutto il resto: `--oplog`
+  scrive `oplog.bson` per ultimo, quindi la sua presenza è la firma della riuscita.
+
+- **Riserve:** provato **un solo** modo di fallire presto, l'autenticazione. Un disco pieno o una
+  connessione che cade a metà appartengono al caso di V-036 — creano file e poi si fermano — e per
+  quelli il `rm -rf` resta corretto: la correzione non toglie la pulizia, le mette davanti la
+  proprietà della directory (`mktemp -d`). Non è stato misurato il caso in cui `--out` punta a una
+  directory che il chiamante ha creato ma che contiene già un dump precedente della stessa data:
+  lì `mongodump` sovrascrive, e la perdita avviene prima di qualunque `rm`.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0126
+
+---
+
+<a id="v-096"></a>
+### V-096 — Chi si oscura e chi no: `mongosh`, `mongodump` e `mongorestore` a confronto su `argv`
+
+- **Comandi:** un `mongodump` verso un indirizzo irraggiungibile, tenuto vivo dal timeout di
+  selezione del server, e una fotografia della tabella dei processi mentre gira:
+
+```bash
+docker exec -d mongo-rs-1 mongodump --host 192.0.2.1:27017 \
+  -u admin -p SENTINELLA-NON-E-UNA-PASSWORD-VERA \
+  --authenticationDatabase admin --out /tmp/dump-v096
+docker exec mongo-rs-1 ps -eo args | grep mongodump | grep -v grep
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, immagine `mongo:7.0.40`, `mongodump`
+  **100.18.0**, 6 settembre 2026. `192.0.2.1` è di [RFC 5737](https://www.rfc-editor.org/rfc/rfc5737),
+  riservato alla documentazione: non risponde, e il processo resta in piedi il tempo di
+  fotografarlo. Il valore passato è una sentinella, non la credenziale vera.
+
+- **Che cosa si voleva sapere:** [M-025](../app/docs/Sources.md#m-025) aveva misurato
+  `mongorestore` — 16 campioni su 16 con la password in chiaro — e chiudeva dichiarando una
+  riserva: «Non è stato verificato se `mongodump` riscriva `argv` dopo l'avvio, come fanno alcuni
+  strumenti». [V-047](#v-047) intanto aveva misurato che `mongosh` 2.10.0 lo fa. Restava aperto
+  l'unico dei tre che nessuno aveva guardato, e con esso la domanda vera: se l'esposizione sia una
+  proprietà del protocollo o dello strumento.
+
+- **Esito — `mongodump` non si oscura.** La riga esce intera:
+
+```
+mongodump --host 192.0.2.1:27017 -u admin -p SENTINELLA-NON-E-UNA-PASSWORD-VERA
+  --authenticationDatabase admin --out /tmp/dump-v096
+```
+
+  Nessuna riscrittura, nessun `<credentials>`: il valore è leggibile da chiunque possa eseguire
+  `ps` dentro il container. La riserva di M-025 si chiude, e il quadro dei tre strumenti diventa:
+
+| strumento | versione | dentro il container | sull'host |
+|---|---|---|---|
+| `mongosh` | 2.10.0 | **oscurato** — `mongodb://<credentials>@…` ([V-047](#v-047)) | visibile nella riga del client `docker` |
+| `mongodump` | 100.18.0 | **in chiaro** (questa scheda) | visibile nella riga del client `docker` |
+| `mongorestore` | 100.18.0 | **in chiaro** — 16/16 ([M-025](../app/docs/Sources.md#m-025)) | visibile nella riga del client `docker` |
+
+- **Esito, secondo punto — la regola che se ne ricava.** Non «`-p` espone» e nemmeno «`-p` è
+  sicuro»: **dipende dallo strumento, e il modo di saperlo è provarlo.** Due binari della stessa
+  distribuzione MongoDB, invocati allo stesso modo, si comportano in modo opposto. Una pagina che
+  mostra un comando con `-p` deve dire quale dei due casi è, perché il lettore non può dedurlo.
+
+- **Riserve:** misurato su una sola versione di ciascuno strumento, e su Linux dentro il container.
+  Il comportamento di `argv` non è documentato da MongoDB come garanzia: può cambiare fra versioni
+  in entrambe le direzioni, e la tabella qui sopra va rimisurata quando il lab cambia immagine. Non
+  è stato provato se `mongodump` si oscuri in una fase più tarda della sua esecuzione: la
+  fotografia è stata presa durante la selezione del server, cioè prima della connessione. La colonna
+  «sull'host» non è stata rimisurata qui — viene da V-047, ed è una proprietà del client `docker`,
+  non dello strumento invocato.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0127
+
+---
+
+<a id="v-097"></a>
+### V-097 — Uno shard perduto: che cosa risponde ancora, con quale errore, e dopo quanti secondi
+
+- **Comandi:** la scena che il repository ha già, che ferma un membro e lo rialza da sé:
+
+```bash
+make guasto-03      # PROFILO=palco ./tools/demo-sharded.sh guasto
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, stack 03 nel profilo **palco** — un membro per
+  shard — immagine `mongo:7.0.40`, `lab.ordini` con 20 000 documenti, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** [`sharded-cluster.md`](02-architetture/sharded-cluster.md) diceva
+  due cose incompatibili. Il §1.2 parlava di risposte parziali restituite «senza dire al client che
+  l'altra parte non c'è»; il §6.4 diceva che le query sullo shard perduto falliscono. Nessuna delle
+  due era misurata, e la fonte citata dal §6.4 — [S-069](#s-069) — dice soltanto che «reads or
+  writes directed at the available shards can still succeed», cioè **non** dice niente sulle altre.
+
+- **Esito, primo punto — il client viene informato, e l'errore nomina lo shard.** Fermato
+  `shard1a`, il router risponde così:
+
+```
+• l'ordine su shard2rs: trovato: 3   [1 s]
+• l'ordine su shard1rs: ✗ FailedToSatisfyReadPreference: Could not find host matching
+    read preference { mode: "primary" } for set shard1rs   [16 s]
+• il conteggio totale:  ✗ FailedToSatisfyReadPreference: Could not find host matching
+    read preference { mode: "primary" } for set shard1rs   [16 s]
+```
+
+  Non c'è nessuna risposta mutilata e nessun silenzio: c'è un errore, e dentro c'è il nome del
+  replica set mancante. Il §1.2 era falso su tutti e due i punti che affermava.
+
+- **Esito, secondo punto — il costo vero è il tempo, non la silenziosità.** La query che passa
+  costa **1 s**; le due che non passano costano **16 s** ciascuna prima di dire che non passano. È
+  il router che cerca un primario per `shard1rs` finché la selezione del server non scade — e in
+  questo profilo non lo troverà mai, perché lo shard ha un membro solo e non c'è nessuno da
+  eleggere. Un'applicazione che chiama in sincrono se li prende tutti.
+
+- **Esito, terzo punto — il ritorno è rapido.** `docker compose start shard1a`, e il totale è di
+  nuovo 20 000 **3 s** dopo il comando. La scena si ripara da sé: ferma un container e lo rialza,
+  non distrugge dati (ADR-0119).
+
+- **Riserve:** un caso resta **ragionato e non provato** — una query in broadcast i cui documenti
+  stiano *tutti* sullo shard vivo. Deve fallire per costruzione, perché il router la manda a tutti
+  proprio in quanto non sa dove siano i documenti; ma il conteggio totale misurato qui li vuole
+  entrambi, quindi non discrimina il caso. I 16 secondi sono il valore predefinito di
+  `serverSelectionTimeoutMS` visto da `mongosh` in questo lab, non una costante: un client che lo
+  configuri diversamente vedrà un'attesa diversa. Infine, tutto questo è il profilo **palco**: con
+  tre membri per shard la stessa scena finisce con un'elezione invece che con un'attesa, ed è la
+  differenza che il profilo `completo` esiste per mostrare.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0128
