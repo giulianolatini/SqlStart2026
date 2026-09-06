@@ -55,6 +55,53 @@ errore() { printf '  %s✗%s %s\n' "${ROSSO}" "${NEUTRO}" "$1"; ERRORI=$((ERRORI
 nota()   { printf '    %s%s%s\n' "${GRIGIO}" "$1" "${NEUTRO}"; }
 titolo() { printf '\n%s\n' "$1"; }
 
+# Un ✓ si stampa dopo aver guardato l'esito, non dopo aver ricevuto una stringa, e la
+# distinzione non è formale: `set -o pipefail` è attivo, quindi quando
+# l'interrogazione fallisce lo stato della pipeline è 1 — ma la sostituzione di
+# comando restituisce una stringa VUOTA, e nessuno guardava né l'uno né l'altra. La
+# prima stesura stampava «✓ database rimosso: » con il nome vuoto e «✓ collezioni
+# rimosse: nessuna» per una pulizia mai avvenuta: misurato riproducendo le tre forme
+# con un container inesistente (V-101, ADR-0132).
+ha_risposto() {
+  local descrizione="$1" valore="$2"
+  if [[ -z "${valore}" ]]; then
+    errore "${descrizione}: l'interrogazione non ha risposto"
+    return 1
+  fi
+  return 0
+}
+
+# La pulizia dichiara che cosa ha tolto solo dopo aver riguardato: `via` è l'elenco di
+# ciò che si VOLEVA togliere, calcolato prima dei `drop()`, e un `drop()` che fallisce
+# non toglie la collezione dall'elenco. La seconda lettura sta nel JS e arriva qui con
+# il prefisso `RESIDUI:`.
+verdetto_pulizia() {
+  local descrizione="$1" risposta="$2"
+  ha_risposto "${descrizione}" "${risposta}" || return
+  if [[ "${risposta}" == RESIDUI:* ]]; then
+    errore "${descrizione}: sono rimaste in piedi — ${risposta#RESIDUI: }"
+  else
+    ok "${descrizione}: ${risposta}"
+  fi
+}
+
+# Stessa forma dei tre smoke. Il valore atteso stava in un COMMENTO, e un valore
+# atteso scritto in un commento non è una verifica: il ripristino poteva finire con un
+# dataset sbagliato e dichiararsi riuscito lo stesso.
+confronta() {
+  local descrizione="$1" atteso="$2" ottenuto="$3"
+  if [[ "${ottenuto}" == "${atteso}" ]]; then
+    ok "${descrizione}: ${ottenuto}"
+  else
+    errore "${descrizione}: attesa «${atteso}», ottenuta «${ottenuto}»"
+  fi
+}
+
+# Le due impronte del dataset: la terna dei due stack grandi (V-013) e quella dello
+# stack 03, che usa i primi 20 000 documenti dello stesso generatore (V-058).
+IMPRONTA_50K="50000 124861860.70 150281"
+IMPRONTA_20K="20000 50083417.93 60278"
+
 uso() {
   printf 'Uso: %s <stack>\n' "$(basename "$0")" >&2
   printf '  01  istanza singola\n' >&2
@@ -119,19 +166,22 @@ if [[ "${STACK}" == "01" ]]; then
     const superstiti = ["ordini"];
     const via = db.getCollectionNames().filter(n => !superstiti.includes(n));
     via.forEach(n => db.getCollection(n).drop());
-    print(via.length === 0 ? "nessuna" : via.join(", "));
+    const rimaste = db.getCollectionNames().filter(n => !superstiti.includes(n));
+    print(rimaste.length > 0 ? "RESIDUI: " + rimaste.join(", ")
+                             : (via.length === 0 ? "nessuna" : via.join(", ")));
   ' 2>/dev/null | tail -1 | tr -d '\r')"
-  ok "collezioni rimosse: ${tolte:-nessuna}"
+  verdetto_pulizia "collezioni rimosse" "${tolte}"
 
   titolo "Dataset"
   compose exec -T mongo-standalone \
     mongosh --quiet --file /docker-entrypoint-initdb.d/10-dati-demo.js > /dev/null 2>&1 \
     || errore "il seed non è andato a buon fine"
-  # La stessa terna che sorvegliano i due smoke: 50000 124861860.70 150281 (V-013).
+  # La stessa terna che sorvegliano i due smoke (V-013), e si CONFRONTA, non si
+  # stampa: il seed qui sopra può fallire in modi che non fermano lo script.
   impronta="$(compose exec -T mongo-standalone mongosh --quiet lab --eval \
     'const a = db.ordini.aggregate([{$group:{_id:null, n:{$sum:1}, tot:{$sum:"$importo"}, righe:{$sum:"$righe"}}}]).toArray()[0]; print(a ? a.n + " " + a.tot.toFixed(2) + " " + a.righe : "collezione vuota")' \
     2>/dev/null | tail -1 | tr -d '\r')"
-  ok "impronta di lab.ordini: ${impronta}"
+  confronta "impronta di lab.ordini" "${IMPRONTA_50K}" "${impronta}"
 
 # --- Stack 02 — replica set -----------------------------------------------------------
 elif [[ "${STACK}" == "02" ]]; then
@@ -212,9 +262,11 @@ elif [[ "${STACK}" == "02" ]]; then
     const superstiti = ["ordini"];
     const via = db.getCollectionNames().filter(n => !superstiti.includes(n));
     via.forEach(n => db.getCollection(n).drop({ writeConcern: { w: "majority", wtimeout: 10000 } }));
-    print(via.length === 0 ? "nessuna" : via.join(", "));
+    const rimaste = db.getCollectionNames().filter(n => !superstiti.includes(n));
+    print(rimaste.length > 0 ? "RESIDUI: " + rimaste.join(", ")
+                             : (via.length === 0 ? "nessuna" : via.join(", ")));
   ')"
-  ok "collezioni rimosse: ${tolte:-nessuna}"
+  verdetto_pulizia "collezioni rimosse" "${tolte}"
 
   titolo "Il database che il ripristino costruisce"
   # `demo restore` costruisce `lab_ripristinato`, e fino al 6 settembre non lo toglieva
@@ -245,7 +297,9 @@ elif [[ "${STACK}" == "02" ]]; then
     db.getSiblingDB(nome).dropDatabase({ writeConcern: { w: "majority", wtimeout: 10000 } });
     print(c_era ? nome : "nessuno");
   ')"
-  if [[ "${ripristino}" == "nessuno" ]]; then
+  if ! ha_risposto "il database del ripristino" "${ripristino}"; then
+    :
+  elif [[ "${ripristino}" == "nessuno" ]]; then
     ok "nessun database di ripristino da togliere"
   else
     ok "database rimosso: ${ripristino}"
@@ -286,9 +340,9 @@ elif [[ "${STACK}" == "02" ]]; then
   if ! compose run --rm -e RICARICA=1 rs-init > /dev/null 2>&1; then
     errore "il seed non è andato a buon fine — «make logs-02» per il motivo"
   fi
-  # La stessa terna che sorvegliano i due smoke: 50000 124861860.70 150281 (V-013).
+  # La stessa terna che sorvegliano i due smoke (V-013), confrontata e non stampata.
   impronta="$(sul_primario 'const a = db.ordini.aggregate([{$group:{_id:null, n:{$sum:1}, tot:{$sum:"$importo"}, righe:{$sum:"$righe"}}}]).toArray()[0]; print(a ? a.n + " " + a.tot.toFixed(2) + " " + a.righe : "collezione vuota")')"
-  ok "impronta di lab.ordini: ${impronta}"
+  confronta "impronta di lab.ordini" "${IMPRONTA_50K}" "${impronta}"
 
 # --- Stack 03 — sharded cluster -------------------------------------------------------
 #
@@ -383,9 +437,11 @@ elif [[ "${STACK}" == "03" ]]; then
     const superstiti = ["ordini"];
     const via = db.getCollectionNames().filter(n => !superstiti.includes(n));
     via.forEach(n => db.getCollection(n).drop({ writeConcern: { w: "majority", wtimeout: 10000 } }));
-    print(via.length === 0 ? "nessuna" : via.join(", "));
+    const rimaste = db.getCollectionNames().filter(n => !superstiti.includes(n));
+    print(rimaste.length > 0 ? "RESIDUI: " + rimaste.join(", ")
+                             : (via.length === 0 ? "nessuna" : via.join(", ")));
   ')"
-  ok "collezioni rimosse: ${tolte:-nessuna}"
+  verdetto_pulizia "collezioni rimosse" "${tolte}"
 
   # `ordini` sopravvive alla riga sopra, ma dal Task 15 non è più intatta: il Blocco 3 ci
   # scrive dentro perché è la collezione distribuita, ed è l'unico posto in cui il seed e
@@ -406,11 +462,15 @@ elif [[ "${STACK}" == "03" ]]; then
     errore "il seed non è andato a buon fine — «make logs-03» per il motivo"
   fi
   # Ventimila, non cinquantamila: lo stack 03 usa i primi 20 000 del dataset (ADR-0064),
-  # quindi l'impronta è diversa da quella di V-013 e deve esserlo.
+  # quindi l'impronta è diversa da quella di V-013 e deve esserlo (V-058).
   impronta="$(dal_router 'const a = db.ordini.aggregate([{$group:{_id:null, n:{$sum:1}, tot:{$sum:"$importo"}, righe:{$sum:"$righe"}}}]).toArray()[0]; print(a ? a.n + " " + a.tot.toFixed(2) + " " + a.righe : "collezione vuota")')"
-  ok "impronta di lab.ordini: ${impronta}"
+  confronta "impronta di lab.ordini" "${IMPRONTA_20K}" "${impronta}"
 
-  # L'unico controllo che distingue uno sharded cluster da un replica set travestito.
+  # L'unico controllo che distingue uno sharded cluster da un replica set travestito —
+  # e per farlo deve guardare i numeri, non la punteggiatura. La prima stesura
+  # cercava uno spazio nella risposta: `shard1rs=0 shard2rs=5` ne ha uno, e veniva
+  # dichiarato «documenti su entrambi gli shard». Il caso è stato costruito davvero,
+  # su un database usa-e-getta, spostando un chunk vuoto sul secondo shard (V-101).
   distribuzione="$(dal_router '
     const per = {};
     db.getSiblingDB("admin").aggregate([{$shardedDataDistribution: {}}])
@@ -420,11 +480,23 @@ elif [[ "${STACK}" == "03" ]]; then
     const nomi = Object.keys(per).sort();
     print(nomi.length === 0 ? "nessun dato" : nomi.map(n => n + "=" + per[n]).join(" "));
   ')"
-  if [[ "${distribuzione}" == *" "* ]]; then
-    ok "documenti su entrambi gli shard: ${distribuzione}"
-  else
-    errore "i documenti non risultano distribuiti: ${distribuzione:-nessuna risposta}"
-  fi
+  ha_risposto "la distribuzione" "${distribuzione}" && {
+    con_documenti=0
+    shard_letti=0
+    for coppia in ${distribuzione}; do
+      if [[ "${coppia}" != *=* || ! "${coppia#*=}" =~ ^[0-9]+$ ]]; then
+        shard_letti=0
+        break
+      fi
+      shard_letti=$((shard_letti + 1))
+      (( ${coppia#*=} > 0 )) && con_documenti=$((con_documenti + 1))
+    done
+    if (( shard_letti >= 2 && con_documenti == shard_letti )); then
+      ok "documenti su entrambi gli shard: ${distribuzione}"
+    else
+      errore "i documenti non sono distribuiti su due shard: ${distribuzione}"
+    fi
+  }
 
 else
   printf 'Stack sconosciuto: «%s».\n' "${STACK}" >&2

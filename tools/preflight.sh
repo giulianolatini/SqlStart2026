@@ -89,12 +89,30 @@ titolo "Porte del lab"
 if ! command -v lsof >/dev/null 2>&1; then
   avviso "lsof non disponibile: le porte non sono state controllate"
 else
-  porte_dei_container="$(docker ps --format '{{.Ports}}' 2>/dev/null || true)"
+  # Le porte dei container DEL LAB, non di tutti i container del demone, e la
+  # differenza non è teorica: un container estraneo che pubblicava la 27152 faceva
+  # contare nove porte «del lab» invece di otto, e il preflight usciva verde su una
+  # porta che `up-03 PROFILO=completo` avrebbe poi trovato occupata (V-100). Il
+  # progetto si legge dall'etichetta che Compose scrive su ogni container che avvia,
+  # ed è lo stesso che `-p` fissa nel Makefile (ADR-0129). L'elenco qui sotto e quello
+  # del Makefile li tiene allineati `test_il_preflight_conosce_i_progetti_del_makefile`.
+  PROGETTI_LAB=(sqlstart-01-standalone sqlstart-02-replicaset sqlstart-03-sharded)
+  porte_dei_container=''
+  while IFS='|' read -r progetto porte_del_container; do
+    for progetto_lab in "${PROGETTI_LAB[@]}"; do
+      if [[ "${progetto}" == "${progetto_lab}" ]]; then
+        porte_dei_container+="${porte_del_container}, "
+        break
+      fi
+    done
+  done < <(docker ps --format '{{.Label "com.docker.compose.project"}}|{{.Ports}}' \
+             2>/dev/null || true)
+
   estranee=()
   del_lab=0
   for porta in "${PORTE[@]}"; do
     lsof -nP -iTCP:"${porta}" -sTCP:LISTEN >/dev/null 2>&1 || continue
-    # Una porta tenuta da un container già in piedi non è un problema: è il lab stesso.
+    # Una porta tenuta da un container del lab già in piedi non è un problema.
     if [[ "${porte_dei_container}" == *":${porta}->"* ]]; then
       del_lab=$((del_lab + 1))
     else
@@ -130,8 +148,18 @@ if ! (( demone_vivo )); then
   errore "avvio dell'immagine non verificabile: il demone non risponde"
 elif [[ -z "${immagine_mongo}" ]]; then
   errore "MONGO_IMAGE non è definita in tools/images.env"
-elif esito_avvio="$(docker run --rm --entrypoint mongod "${immagine_mongo}" --version 2>&1)"; then
+# `--pull=never` non è una cintura in più: senza, questa sonda va in rete proprio nel
+# caso che deve diagnosticare. Misurato — con l'immagine assente, `docker run` prova a
+# risolverla su `docker.io` e ci mette 1,011 s con la rete; con la flag risponde «No
+# such image» in 0,023 s e non esce dalla macchina (V-100). In sala la rete non c'è, e
+# la differenza fra le due forme è un preflight che si pianta davanti al pubblico.
+elif esito_avvio="$(docker run --rm --pull=never --entrypoint mongod "${immagine_mongo}" --version 2>&1)"; then
   ok "l'immagine pinnata si avvia — $(printf '%s\n' "${esito_avvio}" | head -1)"
+elif [[ "${esito_avvio}" == *'No such image'* ]]; then
+  # «Assente» e «non eseguibile» sono due guasti diversi e vogliono due frasi diverse:
+  # il primo si ripara con `make images-pull` prima di partire, il secondo no.
+  errore "l'immagine pinnata non è nella cache locale, e il preflight non la scarica"
+  nota "ripararlo dove c'è rete: make images-pull"
 else
   errore "l'immagine pinnata non si avvia su questo kernel"
   nota "kernel della VM: $(docker info --format '{{.KernelVersion}}' 2>/dev/null || echo '?')"

@@ -15,7 +15,17 @@
 # `--env-file tools/images.env` porta MONGO_IMAGE, che nei file Compose è dichiarato
 # nella forma `${MONGO_IMAGE:?...}`: senza, Compose si ferma subito dicendo cosa manca
 # invece di avviare un container con un'immagine vuota.
-COMPOSE_01 := docker compose --env-file tools/images.env -f docker/01-standalone/compose.yaml
+# Il nome del progetto Compose si FISSA con `-p`, e non è la ripetizione inutile del
+# `name:` che i tre file dichiarano: è ciò che rende vere le righe di `reset-02` e
+# `reset-03`, che cancellano i volumi per nome. `COMPOSE_PROJECT_NAME` nell'ambiente di
+# chi lancia `make` ha la precedenza sul `name:` del file — misurato, V-098 — e senza
+# `-p` un `reset-02` fermerebbe il progetto dell'ambiente e cancellerebbe i volumi di
+# questo. `-p` sulla riga di comando ha la precedenza su tutti e due (ADR-0129).
+PROGETTO_01 := sqlstart-01-standalone
+PROGETTO_02 := sqlstart-02-replicaset
+PROGETTO_03 := sqlstart-03-sharded
+
+COMPOSE_01 := docker compose -p $(PROGETTO_01) --env-file tools/images.env -f docker/01-standalone/compose.yaml
 STACK_01   := docker/01-standalone/compose.yaml
 STACK_02   := docker/02-replicaset/compose.yaml
 STACK_03   := docker/03-sharded/compose.yaml
@@ -276,12 +286,12 @@ reset-demo-01: ## Riporta lo stack 01 allo stato di partenza senza ricostruirlo
 # DUE `--env-file`, e il secondo non è ridondante: la flag non aggiunge un file, prende
 # il posto del `.env` implicito. Passandone uno solo, il `.env` che sta accanto al file
 # indicato con `-f` NON viene letto benché sia lì accanto (S-056, misurato in V-025).
-COMPOSE_02 := docker compose --env-file tools/images.env --env-file docker/02-replicaset/.env -f docker/02-replicaset/compose.yaml
+COMPOSE_02 := docker compose -p $(PROGETTO_02) --env-file tools/images.env --env-file docker/02-replicaset/.env -f docker/02-replicaset/compose.yaml
 AMBIENTE_02 := docker/02-replicaset/.env
 
-# I volumi dei dati, uno per membro. Il nome vero è il nome del progetto Compose
-# (`name:` in cima al file) più quello dichiarato in `volumes:`.
-PROGETTO_02 := sqlstart-02-replicaset
+# I volumi dei dati, uno per membro. Il nome vero è il nome del progetto Compose più
+# quello dichiarato in `volumes:`, e il progetto è quello che `-p` impone in cima al
+# file, non quello che l'ambiente potrebbe suggerire (ADR-0129).
 DATI_02 := $(PROGETTO_02)_dati-1 $(PROGETTO_02)_dati-2 $(PROGETTO_02)_dati-3
 
 # Regola su un FILE, non su un target fittizio: se il file esiste, make la considera
@@ -378,10 +388,16 @@ failover-02-maggioranza: ## Demo: due membri su tre giù, il superstite va in so
 # vuole 12 GiB assegnati alla VM Docker (ADR-0025) e su un portatile da 8 non parte.
 PROFILO ?= palco
 
+# `export` non è un dettaglio: è ciò che permette alla guardia qui sotto di leggere il
+# valore dall'AMBIENTE invece di vederselo interpolare dentro il testo della shell.
+# Interpolato, un valore con un apice chiudeva la stringa e faceva eseguire ciò che
+# seguiva, e uno con uno spazio si spezzava in due parole (V-099, ADR-0130).
+export PROFILO
+
 # La forma senza `--profile`, che serve a due cose: comporre le altre due senza ripetere
 # tre righe identiche, e interrogare il file Compose su quali profili dichiari — domanda
 # che non ha senso porre già filtrando per uno di essi.
-COMPOSE_03_BASE := docker compose --env-file tools/images.env --env-file docker/03-sharded/.env \
+COMPOSE_03_BASE := docker compose -p $(PROGETTO_03) --env-file tools/images.env --env-file docker/03-sharded/.env \
               -f docker/03-sharded/compose.yaml
 
 COMPOSE_03 := $(COMPOSE_03_BASE) --profile $(PROFILO)
@@ -404,8 +420,8 @@ AMBIENTE_03 := docker/03-sharded/.env
 # qui la stessa ragione dello stack 02, cioè che rigenerarlo significa un segreto nuovo.
 # `addprefix` invece di nove nomi scritti a mano perché nove nomi scritti a mano sono
 # nove occasioni di scriverne uno sbagliato, e un volume mancato da `reset-03` non dà
-# errore: dà dati vecchi al giro dopo, che è molto peggio.
-PROGETTO_03 := sqlstart-03-sharded
+# errore: dà dati vecchi al giro dopo, che è molto peggio. Il progetto è quello che
+# `-p` impone in cima al file, non quello dell'ambiente (ADR-0129).
 DATI_03 := $(addprefix $(PROGETTO_03)_dati-, \
              cfg1 cfg2 cfg3 shard1a shard1b shard1c shard2a shard2b shard2c)
 
@@ -432,9 +448,9 @@ $(AMBIENTE_03):
 # valido qui senza che nessuno si ricordi di aggiornare il Makefile, ed è la stessa ragione
 # per cui `DATI_03` si costruisce con `addprefix` invece che con nove nomi a mano.
 profilo-03: $(AMBIENTE_03)
-	@$(COMPOSE_03_BASE) config --profiles | grep -qx '$(PROFILO)' || { \
+	@$(COMPOSE_03_BASE) config --profiles | grep -qxF -- "$$PROFILO" || { \
 		printf 'PROFILO=%s non è un profilo di docker/03-sharded/compose.yaml.\n' \
-			'$(PROFILO)' >&2; \
+			"$$PROFILO" >&2; \
 		printf 'Quelli dichiarati sono: %s\n' \
 			"$$($(COMPOSE_03_BASE) config --profiles | tr '\n' ' ')" >&2; \
 		printf 'Senza questo controllo Compose non protesta: sceglie i soli servizi senza\n' >&2; \

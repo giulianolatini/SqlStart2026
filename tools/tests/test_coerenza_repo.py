@@ -690,3 +690,43 @@ def test_il_verdetto_della_cartella_guarda_prima_di_togliere():
     assert comandi.index("ls ") < comandi.index("rm -rf"), (
         "la cartella si guarda **prima** di toglierla: dopo non c'è più niente da contare"
     )
+
+
+def progetti_del_makefile() -> list[str]:
+    """I tre `PROGETTO_0N :=` del Makefile, nell'ordine in cui sono dichiarati."""
+    trovati = re.findall(
+        r"^PROGETTO_0\d\s*:=\s*(\S+)\s*$", MAKEFILE.read_text(encoding="utf-8"), re.M
+    )
+    assert len(trovati) == 3, f"nel Makefile ci sono {len(trovati)} nomi di progetto, non 3"
+    return trovati
+
+
+def progetti_del_preflight() -> list[str]:
+    """L'array `PROGETTI_LAB` di `preflight.sh`, quello con cui il controllo delle porte
+    distingue un container del lab da un container qualsiasi del demone."""
+    corpo = re.search(
+        r"^\s*PROGETTI_LAB=\(([^)]*)\)", PREFLIGHT.read_text(encoding="utf-8"), re.M
+    )
+    assert corpo, "PROGETTI_LAB non si trova in preflight.sh"
+    return corpo.group(1).split()
+
+
+def test_il_preflight_conosce_i_progetti_del_makefile():
+    """Due elenchi degli stessi tre nomi, in due file che non si leggono a vicenda.
+
+    Il controllo delle porte perdona una porta occupata quando è un container **del lab**
+    a tenerla, e per sapere quali lo sono legge l'etichetta `com.docker.compose.project`
+    che Compose scrive su ogni container. Quei nomi sono gli stessi che il Makefile impone
+    con `-p`: se il Makefile ne cambia uno, il preflight smette di riconoscere i propri
+    container e chiama estranee otto porte che sono sue.
+
+    Nasce misurando il difetto opposto — prima della correzione il preflight guardava le
+    porte di **tutti** i container del demone, e uno estraneo che pubblicava la 27152 gli
+    faceva contare nove porte «del lab» invece di otto (V-100, ADR-0131). Il rimedio ha
+    creato questa seconda copia dell'elenco, e questo test è il prezzo che paga.
+    """
+    assert sorted(progetti_del_preflight()) == sorted(progetti_del_makefile()), (
+        f"preflight.sh conosce {progetti_del_preflight()}, il Makefile impone "
+        f"{progetti_del_makefile()}: il controllo delle porte scambierebbe per estranei "
+        f"i container del lab"
+    )
