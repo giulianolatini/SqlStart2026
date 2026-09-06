@@ -216,6 +216,33 @@ elif [[ "${STACK}" == "02" ]]; then
   ')"
   ok "collezioni rimosse: ${tolte:-nessuna}"
 
+  titolo "Il database che il ripristino costruisce"
+  # `demo restore` costruisce `lab_ripristinato`, e fino al 6 settembre non lo toglieva
+  # nessuno: la riga qui sopra pulisce le collezioni **dentro `lab`** e non guarda gli
+  # altri database, e `down`/`up` conservano i volumi. Alla corsa dopo `mongorestore`
+  # ritrova i documenti gia' li', li conta come falliti ed esce zero — 6 766 ripristinati
+  # e 55 740 persi, misurato — e l'Atto III muore con `RestoreIncompleto`. Cioe' la prova
+  # generale della vigilia rompeva la replica del giorno del talk.
+  #
+  # Solo qui, e non sugli stack 01 e 03: `demo restore` rifiuta un bersaglio che non sia
+  # un replica set, quindi la' quel database non puo' esistere e una riga che lo cercasse
+  # direbbe sempre «nessuno», cioe' aggiungerebbe rumore a un'uscita che si legge sotto
+  # pressione. Il nome sta scritto qui e in `cli.py`: a tenerli allineati e' la prova
+  # `test_reset_demo_toglie_anche_il_database_che_il_ripristino_costruisce`.
+  #
+  # `dropDatabase()` risponde `dropped` solo se c'era davvero: distinguere «tolto» da
+  # «non c'era» non costa una interrogazione in piu' e dice a chi prova se l'Atto III era
+  # gia' girato su questo stack.
+  ripristino="$(sul_primario '
+    const esito = db.getSiblingDB("lab_ripristinato").dropDatabase({ writeConcern: { w: "majority", wtimeout: 10000 } });
+    print(esito.dropped ? esito.dropped : "nessuno");
+  ')"
+  if [[ "${ripristino}" == "nessuno" ]]; then
+    ok "nessun database di ripristino da togliere"
+  else
+    ok "database rimosso: ${ripristino}"
+  fi
+
   titolo "Dataset"
   # Lo STESSO servizio che semina all'avvio, con RICARICA=1. Una sorgente sola.
   if ! compose run --rm -e RICARICA=1 rs-init > /dev/null 2>&1; then

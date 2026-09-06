@@ -452,6 +452,8 @@ def test_il_guardiano_del_target_accetta_esattamente_i_bersagli():
 # --- Le scene dell'applicazione e i bersagli che le girano ------------------------------
 
 CLI = RADICE / "app/src/mongolab/cli.py"
+BERSAGLI = RADICE / "app/src/mongolab/infrastructure/bersagli.py"
+RESET_DEMO = RADICE / "tools/reset-demo.sh"
 
 
 def scene_della_cli():
@@ -507,4 +509,80 @@ def test_ogni_scena_dell_applicazione_ha_un_bersaglio_nel_makefile():
     assert set(scene_del_makefile()) == scene_della_cli(), (
         f"il Makefile gira {sorted(scene_del_makefile())}; "
         f"la CLI dichiara {sorted(scene_della_cli())}"
+    )
+
+
+def valore_di(percorso, nome):
+    """Il valore di un'assegnazione a livello di modulo, letto con `ast`.
+
+    Legge `NOME = "..."` e `NOME: Final = "..."`, e risolve una f-string i cui pezzi sono
+    costanti o nomi già noti. Non importa niente: `tools/` è un progetto uv distinto e
+    `mongolab` non è fra le sue dipendenze, quindi un `import` qui non gira su un clone
+    appena fatto — che è la proprietà per cui questi controlli esistono.
+    """
+    noti = {}
+    for nodo in ast.walk(ast.parse(percorso.read_text(encoding="utf-8"))):
+        if isinstance(nodo, ast.Assign) and len(nodo.targets) == 1:
+            bersaglio, valore = nodo.targets[0], nodo.value
+        elif isinstance(nodo, ast.AnnAssign) and nodo.value is not None:
+            bersaglio, valore = nodo.target, nodo.value
+        else:
+            continue
+        if not isinstance(bersaglio, ast.Name):
+            continue
+        if isinstance(valore, ast.Constant) and isinstance(valore.value, str):
+            noti[bersaglio.id] = valore.value
+    if nome in noti:
+        return noti[nome]
+    for nodo in ast.walk(ast.parse(percorso.read_text(encoding="utf-8"))):
+        if isinstance(nodo, ast.AnnAssign) and isinstance(nodo.target, ast.Name):
+            if nodo.target.id == nome and isinstance(nodo.value, ast.JoinedStr):
+                return "".join(
+                    pezzo.value
+                    if isinstance(pezzo, ast.Constant)
+                    else noti[pezzo.value.id]
+                    for pezzo in nodo.value.values
+                )
+    raise AssertionError(f"{nome} non si trova in {percorso.name}")
+
+
+def database_del_ripristino():
+    """Il nome del database che `demo restore` costruisce: `lab_ripristinato`.
+
+    Composto da due file — `DATABASE` sta in `bersagli.py`, il suffisso in `cli.py` — e
+    per questo si risolve invece di scriverlo qui: una prova che ripetesse la stringa
+    passerebbe anche il giorno in cui il database cambia nome, cioè il giorno in cui
+    servirebbe.
+    """
+    noti = {"DATABASE": valore_di(BERSAGLI, "DATABASE")}
+    for nodo in ast.walk(ast.parse(CLI.read_text(encoding="utf-8"))):
+        if (
+            isinstance(nodo, ast.AnnAssign)
+            and isinstance(nodo.target, ast.Name)
+            and nodo.target.id == "DATABASE_RIPRISTINO"
+            and isinstance(nodo.value, ast.JoinedStr)
+        ):
+            return "".join(
+                pezzo.value if isinstance(pezzo, ast.Constant) else noti[pezzo.value.id]
+                for pezzo in nodo.value.values
+            )
+    raise AssertionError("DATABASE_RIPRISTINO non si trova in cli.py")
+
+
+def test_reset_demo_toglie_anche_il_database_che_il_ripristino_costruisce():
+    """Il difetto che questa prova toglie è costato una scena, e si vedeva solo alla
+    seconda corsa: `demo restore` costruisce `lab_ripristinato`, `reset-demo.sh` puliva le
+    collezioni di `lab` e non guardava gli altri database, e `down`/`up` conservano i
+    volumi. Alla corsa dopo `mongorestore` ritrova i documenti già lì, li conta come
+    falliti ed esce zero: 6 766 ripristinati e 55 740 persi, misurato il 6 settembre.
+    Cioè la prova generale rompeva la replica del giorno dopo.
+    """
+    nome = database_del_ripristino()
+    righe = RESET_DEMO.read_text(encoding="utf-8").splitlines()
+    tolto = [r for r in righe if nome in r and "dropDatabase" in r]
+
+    assert tolto, (
+        f"reset-demo.sh non toglie {nome}: nessuna riga lo nomina insieme a "
+        f"dropDatabase. Chi prova l'Atto III due volte senza azzerare i volumi vede la "
+        f"seconda corsa fallire con RestoreIncompleto."
     )
