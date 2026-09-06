@@ -7420,7 +7420,9 @@ due finestre confrontabili, confrontando la **coda** della fase di carico lunga 
 invece dei dieci secondi interi, è una modifica alla scena e la decisione è del PO.
 
 **Di passaggio, un quarto.** `/tmp/mongolab-backup` sta *dentro* `mongo-rs-1` e accumula un dump per
-corsa: nessuno lo svuota, né `reset-demo.sh` né `down`/`up`. Alla prima ripresa della scena 14 il
+corsa, e non lo svuota `reset-demo.sh`. (La prima stesura di questa riga aggiungeva «né
+`down`/`up`»: è falso, ed era un ragionamento e non una misura — `down` rimuove il container e
+`/tmp` non è un volume, misurato poche ore dopo in [V-091](Sources.md#v-091).) Alla prima ripresa della scena 14 il
 `mongorestore` ha rimesso in piedi **sei** collezioni di carico invece di una, e su uno schermo
 proiettato è rumore. Tolto a mano per registrare, scritto nel runbook, e se debba entrare in
 `reset-demo.sh` è la stessa domanda di stamattina su `lab_ripristinato`: la decide il PO.
@@ -7460,3 +7462,55 @@ Stato aggiornato: decisioni fino ad **ADR-0121**, verifiche fino a **V-090**, mi
 passo: le due decisioni che restano al PO — se rendere confrontabili le due finestre dell'Atto III,
 e se `reset-demo.sh` debba svuotare anche `/tmp/mongolab-backup` — e la discussione sulle priorità,
 che aspetta il suo giro con gli stack accesi.
+
+## 2026-09-06 — La cartella che nessuno nominava
+
+Il Product Owner ha risposto anche alla seconda domanda aperta: sì, `reset-demo.sh` deve svuotare
+anche `/tmp/mongolab-backup`. Fatto — [ADR-0122](Decision.md#adr-0122), verificato in
+[V-091](Sources.md#v-091) — e come le tre di prima ha lasciato per strada qualcosa che la domanda
+non conteneva, stavolta una frase scritta poche ore prima in questo stesso registro.
+
+**Il criterio di ADR-0088 si legge in avanti.** Quella decisione aveva dato la pulizia a
+`reset-demo` con un criterio scritto dentro un database: «spazza tutto ciò che non è `ordini`». Ha
+retto finché la demo lasciava in giro solo collezioni. La copia del backup non è una collezione e
+non è un volume: è una cartella nel livello scrivibile di `mongo-rs-1`, e per questo non la toglieva
+nessuno — non perché qualcuno avesse deciso di lasciarla, ma perché **nessuna delle regole scritte
+la nominava**. Adesso lo script la toglie, e il criterio dice ciò che vuol dire: `reset-demo`
+riporta allo stato da cui la scena comincia, e lo stato è tutto quello che una corsa lascia dietro.
+
+**Il verdetto guarda prima, di nuovo.** `rm -rf` esce zero tanto se la cartella c'era quanto se non
+c'era: è il difetto del `dropDatabase` di stamattina con un altro comando, e la prova
+`test_il_verdetto_della_cartella_guarda_prima_di_togliere` lo vieta chiedendo che il `ls` stia prima
+del `rm`. Il numero che lo script dice conta i `.bson` sotto `lab` e non i file del dump: nella
+copia ci sono anche `admin/` e `oplog.bson`, che il restore esclude con `--nsInclude lab.*`, e il
+numero da dire è quello che ricompare sullo schermo. Due rami, due corse dal vivo: «dump rimossi: 2
+collezioni che il restore avrebbe rimesso in piedi» e, subito dopo, «nessun dump da togliere».
+
+**E la frase sbagliata.** La voce di stamattina diceva che quella cartella «non la svuota nessuno,
+né `reset-demo.sh` né `down`/`up`». La prima metà era misurata, la seconda no: era un'inferenza
+detta con lo stesso tono. Misurata adesso — marcatore con `mkdir`, `make down-02`, `make up-02` — in
+`/tmp` resta solo `mongodb-27017.sock`. `mongo-rs-1` monta `keyfile` e `dati-1:/data/db` e
+nient'altro, quindi `/tmp` è il livello scrivibile del container e `docker compose down` il
+container lo rimuove. La riga è stata corretta sul posto, dicendo che era stata corretta: un
+registro che si riscrive in silenzio non è più un registro.
+
+### Note di metodo
+
+250. **Una frase che nasce da un ragionamento e una che nasce da una misura si scrivono uguali, e
+    per questo bisogna scriverle diverse.** «Non lo svuota né `reset-demo.sh` né `down`/`up`»: la
+    prima metà veniva da una corsa, la seconda da un'idea di come funzionano i container, e nel
+    periodo stavano fianco a fianco con lo stesso tono. La regola pratica: quando un elenco mette
+    insieme cose viste e cose dedotte, o si misura anche il resto o si spezza la frase — accanto a
+    ciò che è misurato ci sta il comando, accanto al resto ci sta «probabilmente».
+251. **Una prova che misura l'ordine dentro un file misura anche i commenti.** L'asserzione
+    «il `ls` viene prima del `rm`» è fallita sul blocco appena scritto, e il blocco era giusto: a
+    nominare `rm -rf` per primo era il commento che spiega perché `rm -rf` da solo non basta. La
+    prova accusava la spiegazione al posto del codice. La regola pratica: se la proprietà riguarda i
+    comandi, il testo su cui si misura sono i comandi — le righe di commento si tolgono prima, e la
+    prova lo dice nel proprio corpo perché nessuno le rimetta.
+
+Stato aggiornato: decisioni fino ad **ADR-0122**, verifiche fino a **V-091**, misure fino a
+**M-059**, note di metodo fino alla **251**. Controlli: `make docs-check` verde, `make tools-test`
+**180 passate**, `pytest` dell'applicazione **711 passate**. Resta aperta **una** decisione del PO:
+se rendere confrontabili le due finestre dell'Atto III. Poi la discussione sulle priorità, che
+aspetta il suo giro con gli stack accesi.

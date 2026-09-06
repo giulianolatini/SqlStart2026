@@ -7689,7 +7689,7 @@ Chi controlla lo stato atteso la sera prima del talk legge un guasto dove non c'
 
 Il caso limite l'ha dato lo stack 01, che porta i residui delle registrazioni del 4 settembre: la
 riga diceva **1 505 885**. Cinquantamila c'erano, e non c'era modo di saperlo dallo schermo
-([V-090](../docs/Sources.md#v-090)).
+([V-090](Sources.md#v-090)).
 
 **Decisione.** Tre punti.
 
@@ -7743,7 +7743,7 @@ migrazione non ripulita si vede.
   stato ripulito. La fotografia serve a far vedere lo stato, non a confermare un'attesa.
 - *Contare con `estimated_document_count`.* Un istante invece di una scansione, e un numero che può
   essere **zero su una collezione piena** — misurato, due volte, lo stesso giorno
-  ([V-090](../docs/Sources.md#v-090)).
+  ([V-090](Sources.md#v-090)).
 - *Escludere `system.views` per pulizia.* Toglie una riga dallo schermo e rompe la somma. Una
   fotografia in cui gli addendi non fanno il totale non si può controllare a mente, ed era l'unica
   cosa che questa decisione prometteva.
@@ -7751,4 +7751,68 @@ migrazione non ripulita si vede.
   risultato, perché è l'ordine in cui si legge; affidarlo all'ordine di inserimento di un `dict`
   vorrebbe dire affidarlo a `listCollections`, che non lo garantisce.
 
-**Fonti:** [ADR-0092](#adr-0092), [ADR-0106](#adr-0106), [V-090](../docs/Sources.md#v-090)
+**Fonti:** [ADR-0092](#adr-0092), [ADR-0106](#adr-0106), [V-090](Sources.md#v-090)
+
+---
+
+<a id="adr-0122"></a>
+## ADR-0122 — Lo stato della demo non sta solo nei database, e `reset-demo` toglie anche quello
+
+**Data:** 2026-09-06 · **Stato:** Accettata
+
+**Contesto:** [ADR-0088](#adr-0088) ha dato la pulizia a `reset-demo`, e le ha dato un criterio
+scritto dentro un database: «spazza tutto ciò che non è `ordini`». Il criterio ha retto finché la
+demo ha lasciato in giro soltanto collezioni. Poi il 6 settembre, alla prima ripresa della scena
+14, `mongorestore` ha rimesso in piedi **sei** collezioni invece di una: `demo backup-live` scrive
+in `/tmp/mongolab-backup` **dentro `mongo-rs-1`**, e `mongodump --out` non svuota la destinazione —
+ci aggiunge. Una prova generale ripetuta cinque volte lascia cinque dump, e il restore li ripristina
+tutti, elencati una riga per collezione davanti alla sala.
+
+Quella cartella era l'unico pezzo di stato della demo che non stava né in un database né in un
+volume: sta nel livello scrivibile del container ([V-091](Sources.md#v-091)). Per questo non la
+toglieva nessuno — non perché qualcuno avesse deciso di lasciarla, ma perché nessuna delle regole
+scritte la nominava.
+
+**Decisione.** Due punti.
+
+1. **`reset-demo.sh 02` svuota anche `/tmp/mongolab-backup` in `mongo-rs-1`.** Il criterio di
+   ADR-0088 si legge in avanti: `reset-demo` riporta lo stack allo stato da cui la scena comincia, e
+   quello stato comprende tutto ciò che una corsa lascia dietro, non solo ciò che finisce in un
+   database. Solo sullo stack 02, per la stessa ragione per cui solo lì si toglie
+   `lab_ripristinato`: `demo backup-live` pretende un primario e `demo restore` rifiuta un bersaglio
+   che non sia un replica set ([ADR-0102](#adr-0102)), quindi sugli stack 01 e 03 quella cartella non
+   può esistere e una riga che la cercasse direbbe sempre «niente».
+
+2. **Il verdetto guarda prima di togliere.** `rm -rf` esce zero tanto se la cartella c'era quanto se
+   non c'era: è lo stesso difetto di `dropDatabase()`, che risponde `dropped` anche per un database
+   mai esistito, con un altro comando. Il conteggio si fa con un `ls` **prima** del `rm`, e conta i
+   `.bson` sotto `lab` — cioè le collezioni che il restore avrebbe rimesso in piedi, non i file del
+   dump: `admin/` e `oplog.bson` ci sono ma il restore li esclude con `--nsInclude lab.*`.
+
+**Conseguenze.** Chi conduce non deve più ricordarsi un comando a mano fra una prova generale e
+l'altra, che è la forma di debito che ADR-0088 aveva già rifiutato una volta. Il numero che lo
+script dice non è una conferma, è un'informazione: «dump rimossi: 2 collezioni» racconta quante
+corse sono passate di lì senza che nessuno pulisse.
+
+La cartella non sopravvive a `down` (V-091), e questo va detto perché cambia il rimedio lento: chi
+vuole ripartire da zero sulla copia non ha bisogno di `make reset-02`, che cancella i volumi. Ma il
+rimedio lento adesso serve ancora meno, perché il rimedio veloce fa la stessa cosa.
+
+**Alternative scartate.**
+
+- *Lasciarlo al runbook, con il comando a mano.* È ciò che c'era, scritto in §1.4 il 6 settembre
+  mattina. Un passo che si legge sotto pressione è un passo che si salta, e infatti la prima ripresa
+  della scena 14 l'ha saltato: il difetto è stato scoperto dalla registrazione, non dalla lettura.
+- *Far svuotare la destinazione a `demo backup-live` prima di copiare.* Sposta la pulizia dentro la
+  scena che si proietta, e un comando che cancella prima di scrivere è un comando che, lanciato per
+  sbaglio, toglie l'unica copia esistente. `mongodump --out` non lo fa, e ha ragione a non farlo.
+- *Togliere solo i dump vecchi e tenere l'ultimo.* Chiede allo script di indovinare che cosa serva
+  alla scena successiva. `reset-demo` riporta allo stato di **partenza**, e alla partenza la copia
+  non c'è: è la scena a costruirla, in dieci secondi.
+- *Montare `/tmp` su un volume nominato, per poterlo cancellare con `down -v`.* Renderebbe
+  permanente ciò che deve essere effimero, e `down -v` qui è già vietato perché cancellerebbe il
+  volume del keyfile ([ADR-0014](#adr-0014)).
+- *Fidarsi del codice di uscita di `rm -rf`.* Misurato lo stesso giorno sul comando gemello: un
+  esito che vale in tutti e due i casi non è un verdetto, è una frase che sembra una risposta.
+
+**Fonti:** [ADR-0088](#adr-0088), [ADR-0102](#adr-0102), [V-091](Sources.md#v-091)

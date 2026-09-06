@@ -3329,3 +3329,22 @@ lettura che ne è uscita si porta via intera — **se le due righe litigano, ha 
 nessuna rilettura del codice l'avrebbe mostrato — solo la seconda corsa. È l'esempio più corto che
 esista del perché una prova che legge il **file** non sostituisce una corsa che legge il **server**:
 la prova rossa scritta quella mattina verificava che il nome fosse scritto nello script, ed era vero.
+
+---
+
+### Lo stato che nessuno nomina è quello che nessuno pulisce
+
+> `reset-demo.sh` toglieva le collezioni e i database, e li toglieva bene. La copia del backup non
+> era né una collezione né un database: era una cartella dentro il container,
+> `/tmp/mongolab-backup`, e `mongodump --out` non la svuota — ci aggiunge. Cinque prove generali,
+> cinque dump, e `mongorestore` li rimette in piedi tutti: il 6 settembre, **sei collezioni invece
+> di una**, elencate una per riga davanti alla sala.
+> Fonte: [ADR-0122](Decision.md#adr-0122), [V-091](Sources.md#v-091).
+
+**Perché una slide:** perché mostra che in uno stack containerizzato lo stato ha **tre** vite
+diverse e le procedure ne nominano due. Quello che sta in un database si toglie con un `drop`,
+quello che sta in un volume sopravvive a `down` e si toglie con `down -v`, e quello che sta nel
+livello scrivibile del container non lo nomina nessuno: muore quando muore il container e vive per
+sempre finché il container vive. È la terza vita a fare i danni, perché è l'unica che nessuna
+procedura elenca — e la platea che viene da SQL, dove lo stato sta in un posto solo e quel posto ha
+un nome, questa distinzione non l'ha mai dovuta fare.

@@ -144,11 +144,23 @@ Il database che il ripristino costruisce
   ✓ nessun database di ripristino da togliere # non c'era
 ```
 
-Resta una cosa che `reset-demo.sh` **non** pulisce: `/tmp/mongolab-backup`, che sta *dentro*
-`mongo-rs-1` e accumula un dump per corsa. Non rompe niente — `mongorestore` li rimette tutti in
-`lab_ripristinato`, che poi si butta — ma la scena 2 dell'Atto III elenca una riga per ogni dump
-vecchio, e su uno schermo proiettato è rumore. Si toglie con
-`docker exec mongo-rs-1 rm -rf /tmp/mongolab-backup`.
+Lo stesso comando svuota anche `/tmp/mongolab-backup`, che sta *dentro* `mongo-rs-1` e accumulava
+un dump per corsa: `mongodump --out` non svuota la destinazione, ci aggiunge. Non rompeva niente,
+ma la scena 2 dell'Atto III elencava una riga per ogni dump vecchio — alla prima ripresa della
+scena 14, il 6 settembre, il restore ha rimesso in piedi **sei** collezioni invece di una, e su uno
+schermo proiettato è rumore ([ADR-0122](../Decision.md#adr-0122)). Anche qui si leggono le due
+facce:
+
+```
+La cartella del dump, dentro il nodo
+  ✓ dump rimossi: 2 collezioni che il restore avrebbe rimesso in piedi  # c'era
+  ✓ nessun dump da togliere                                             # non c'era
+```
+
+Il numero conta le collezioni di `lab`, cioè quelle che il restore rimetterebbe in piedi: nel dump
+ci sono anche `admin/` e `oplog.bson`, che il restore esclude. Quella cartella non è un volume —
+vive nel container — quindi anche `make down-02` la porta via ([V-091](../Sources.md#v-091)), ma
+non serve più arrivarci.
 
 Se serve invece ripartire davvero da zero, il rimedio lento va dato la sera prima, non in sala:
 

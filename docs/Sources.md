@@ -9684,3 +9684,78 @@ dbStats.objects: 1513732
 - **Usata da:** ADR-0121
 
 ---
+
+<a id="v-091"></a>
+### V-091 — Il dump sta nel container e non in un volume: i due rami del verdetto, e una frase da correggere
+
+- **Comandi:** che cosa c'è davvero nella cartella dopo la registrazione 13, poi le due
+  corse che mostrano i due rami del blocco nuovo, poi la domanda che nessuno aveva fatto:
+
+```bash
+docker exec mongo-rs-1 ls -1R /tmp/mongolab-backup
+./tools/reset-demo.sh 02          # primo ramo: la cartella c'è
+./tools/reset-demo.sh 02          # secondo ramo: non c'è più
+docker exec mongo-rs-1 mkdir -p /tmp/mongolab-backup/lab
+make down-02
+make up-02
+docker exec mongo-rs-1 ls -1 /tmp
+```
+
+- **Ambiente:** MongoDB 7.0.40, stack 02 in piedi con i tre membri sani e `mongo-rs-1`
+  primario, portatile Apple Silicon, Docker Desktop. La cartella conteneva il dump della
+  registrazione 13 del 6 settembre, cioè una sola corsa di `demo backup-live`.
+
+- **Esito, primo punto — il dump non è solo `lab`, ma il restore sì.** L'albero, per
+  intero:
+
+```
+/tmp/mongolab-backup:        admin  lab  oplog.bson  prelude.json
+/tmp/mongolab-backup/admin:  system.users.bson   system.users.metadata.json
+                             system.version.bson system.version.metadata.json
+/tmp/mongolab-backup/lab:    carico-20260906-114646.bson   carico-20260906-114646.metadata.json
+                             ordini.bson                   ordini.metadata.json
+```
+
+  Cinque `.bson` in tutto, ma sullo schermo ne tornano due: `argomenti_restore` passa
+  `--nsInclude lab.*`, quindi `admin/` e `oplog.bson` restano dove sono. Il numero che
+  vale, per chi guarda la scena, è quello dei `.bson` sotto `lab`.
+
+- **Esito, secondo punto — i due rami, dal vivo.** Prima corsa, con la cartella piena:
+
+```
+La cartella del dump, dentro il nodo
+  ✓ dump rimossi: 2 collezioni che il restore avrebbe rimesso in piedi
+```
+
+  Seconda corsa, subito dopo, senza toccare niente:
+
+```
+La cartella del dump, dentro il nodo
+  ✓ nessun dump da togliere
+```
+
+- **Esito, terzo punto — `down` la porta via, e la voce del registro di poche ore prima
+  diceva il contrario.** Quella voce dice «nessuno lo svuota, né `reset-demo.sh` né
+  `down`/`up`», e la seconda metà è falsa: era un ragionamento, non una misura. Messo un
+  marcatore con `mkdir`, fatto `make down-02` e `make up-02`, dentro `/tmp` resta questo:
+
+```
+mongodb-27017.sock
+```
+
+  Il motivo sta scritto nel compose: `mongo-rs-1` monta `keyfile` e `dati-1:/data/db` e
+  nient'altro, quindi `/tmp` è il livello scrivibile del container e `docker compose down`
+  rimuove il container. La cartella sopravviveva a ogni corsa di `reset-demo.sh` e a ogni
+  `restart` — non a `down`.
+
+- **Riserve:** la corsa di `down`/`up` è una sola, e il marcatore era una cartella vuota,
+  non un dump vero. Il fatto misurato è che il livello scrivibile si ricrea, non che
+  qualcuno «pulisca» il dump: sparisce perché sparisce il container che lo teneva. Del
+  conteggio dei `.bson` sotto `lab` si è visto un caso solo, a due collezioni; il numero
+  che il difetto aveva prodotto — sei — non è stato riprodotto apposta, perché per farlo
+  servirebbero cinque prove generali di fila.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0122
+
+---
