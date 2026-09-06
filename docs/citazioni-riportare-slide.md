@@ -3255,3 +3255,24 @@ tracce nel posto in cui si guarda. `docker compose ps` mostra «Up» per un cont
 esattamente come per uno sano. E perché la correzione ha una forma che si porta via: il `try` si
 apre **dopo** ciò che rompe, non prima — un `finally` deve coprire ciò che è stato rotto, non ciò
 che non si è riusciti a rompere.
+
+
+---
+
+### Zero scritture perse, e tre che il database ha e il client non sa di avere
+
+> Nella scena del failover il bilancio dice **31 952 confermate contro 31 955 ritrovate**. Le tre
+> in più non sono un errore di conteggio: sono arrivate al database, e il loro `ack` non è mai
+> tornato indietro perché il primario è caduto in mezzo. L'applicazione le chiama **scritture non
+> confermate**, e le tiene in una colonna diversa dalle **scritture perse** — che restano a zero.
+> Con i tentativi automatici del driver spenti la perdita resta zero lo stesso, perché è
+> `w: "majority"` a garantirla; quello che cambia è l'altra colonna, che diventa **8** in una corsa
+> e **1** nell'altra.
+> Fonte: [V-076](Sources.md#v-076), registrazione [12](05-talk/registrazioni/README.md#registrazioni-di-terminale).
+
+**Perché una slide:** perché smonta la domanda sbagliata. Il pubblico chiede «quante ne perdo?» e
+la risposta è nessuna — ma la risposta utile è un'altra, ed è che **`retryWrites` non compra
+durabilità, compra sapere**. Senza, l'applicazione ha scritture di cui non conosce l'esito, e se le
+riprova a mano senza una chiave di idempotenza le duplica: il guasto non ha perso un dato, ne ha
+creato uno di troppo. È la distinzione che una platea abituata a una transazione SQL che o c'è o
+non c'è non ha mai dovuto fare, e sta in due colonne accostate.

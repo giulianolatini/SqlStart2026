@@ -95,7 +95,7 @@ sono state eseguite qui, perché qui non c'è né un Ubuntu né un Windows
 
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
-| `05-talk/runbook-demo.md` | documento unico del talk: scaletta, comandi, tempi, piani di ripiego, criteri di rinuncia in appendice ([ADR-0015](Decision.md#adr-0015)) | `release/1.0` |
+| [`05-talk/runbook-demo.md`](05-talk/runbook-demo.md) | documento unico del talk: preflight e stato atteso dei dati, copione minuto per minuto dei tre blocchi con i comandi esatti e l'output misurato che ci si aspetta, quando si passa alle registrazioni, tabella sintomo → azione; criteri di rinuncia di scena in appendice A e comandi di emergenza in appendice B ([ADR-0015](Decision.md#adr-0015)) | già nel repository |
 | [`05-talk/registrazioni/`](05-talk/registrazioni/README.md) | indice dei filmati di riserva e delle registrazioni di terminale. Quattordici scene di terminale sono nel repository — quattro del replica set, cinque dell'applicazione `mongolab` sullo stesso stack, cinque dello sharded cluster; i filmati stanno sul canale YouTube del relatore, con copia locale obbligatoria ([ADR-0016](Decision.md#adr-0016), [ADR-0050](Decision.md#adr-0050)) | già nel repository |
 
 ## 06-sviluppo — come è fatto il lab

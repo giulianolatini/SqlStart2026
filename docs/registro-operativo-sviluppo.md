@@ -7205,3 +7205,72 @@ Stato aggiornato: decisioni fino ad **ADR-0119**, verifiche fino a **V-089**, mi
 **647**, `make app-check` (mypy `--strict`, 66 file) e `make docs-check` verdi. I quattro rilievi
 della review di `codex` sono chiusi. Prossimo passo: la fusione della PR #5, che è del Product
 Owner.
+
+## 2026-09-06 — `release/1.0` aperta in anticipo, e il runbook scritto per essere usato prima di essere discusso
+
+Il Product Owner aveva lasciato aperta, la sera del 4, la scelta fra chiudere i punti rimasti e
+anticipare la release. Il 6 ha cambiato ordine alle due cose, e la ragione vale più della
+decisione: **prima il runbook, poi la discussione sui sospesi**, perché «preferisco vedere dal vero
+cosa funziona e cosa no e poi discutere cosa risolvere e come mettere le priorità». Il runbook non
+è il consuntivo del lavoro fatto: è lo strumento che misura che cosa manca davvero, e lo misura in
+sala invece che in tabella.
+
+`release/1.0` è aperta il **6 settembre**, dieci giorni prima della data del §10 del design, con lo
+stesso ordine di apertura dei branch di feature — worktree in `.claude/worktrees/release-1.0`,
+branch spinto subito su `origin` perché la PR sia un comando solo, i due `.env` degli stack
+raggiunti per symlink ([ADR-0083](Decision.md#adr-0083)). Il prefisso e il punto di partenza sono
+quelli che `.git/config` dichiara per `release/`: parte da `develop`, ha `main` per genitore.
+
+**Il runbook è `docs/05-talk/runbook-demo.md`, ed è l'unico documento del talk**
+([ADR-0015](Decision.md#adr-0015)). La struttura è quella promessa dal §9 del design — preflight e
+stato atteso dei dati, copione minuto per minuto, piano delle registrazioni, tabella sintomo →
+azione, criteri di rinuncia in appendice A, comandi di emergenza in appendice B — e la sola cosa
+che è stata aggiunta è una §1.5 sulla disposizione dei terminali. Non è decorazione: nell'Atto II
+l'applicazione gira **dentro** la rete Compose, perché la cronaca dell'elezione esiste solo da lì
+([M-019](../app/docs/Sources.md#m-019)), e da lì non ha il socket del demone. Allora annuncia il
+comando e aspetta un Invio. Sono due finestre, e chi non lo sa prima se ne accorge sul palco.
+
+**Ogni «output atteso» del copione è un numero misurato, non stimato.** Vengono dalle quattordici
+registrazioni e dalle verifiche che le hanno prodotte: `mongod 7.0.40` e tre membri per la
+fotografia, **10 019 ms** e **0 scritture perse** per il failover, **546/s → 539/s** cioè l'1,3 %
+per il backup a caldo, **5 886 contro 5 740** per il restore, **9 860 + 10 140 = 20 000** per la
+distribuzione. Il documento dice anche che cosa sono: un metro per capire se la scena sta andando
+come deve, non una promessa. Uno scarto del venti per cento non è un problema; un ordine di
+grandezza manda alla §4.
+
+**Una cosa scritta e poi tolta.** Nella prima stesura il punto 3 del Blocco 3 mostrava il comando
+sbagliato — `make app-demo TARGET=sharded` — annotato con un «NO, vedi sotto», e sotto quello
+giusto. È un espediente didattico che funziona in una pagina che si studia e non in una che si
+legge sotto pressione: chi copia una riga da un runbook copia la prima che vede. È rimasta la frase
+in prosa, che dice che `demo sharding` non ha un target nel Makefile e perché.
+
+**Due debiti dichiarati in coda al documento**, invece che taciuti. Il primo: i tempi della §2 sono
+quelli del design, coerenti con le durate delle registrazioni ma **mai cronometrati parlando
+sopra** — è ciò che la prova generale del 17 deve produrre. Il secondo: aprire la release in
+anticipo **non** sposta l'appuntamento di [ADR-0058](Decision.md#adr-0058) sulla 8.0.30, che è del
+16 settembre perché è l'ultimo momento utile per ripinnare e rigirare le registrazioni, non perché
+coincideva con la release.
+
+### Note di metodo
+
+243. **Un runbook si giudica da quanto poco lascia da decidere al momento.** Ogni volta che il
+    documento diceva «se serve», «a discrezione» o «valutare», la riga è stata riscritta con un
+    numero o con un ordine: trenta secondi prima di passare alla registrazione, T+18 come soglia
+    per aprire i criteri di rinuncia, la scala dei tagli in quattro gradini numerati. Il numero non
+    è preciso perché qualcuno l'abbia misurato — trenta secondi sono lunghi davanti a cento persone
+    e brevi per un container — è preciso perché così non lo si sceglie sul palco. La regola
+    pratica: in un documento operativo, un aggettivo di quantità è un lavoro rimandato al momento
+    peggiore.
+244. **Scrivere il documento che usa il lavoro è il modo più economico di sapere se il lavoro è
+    finito.** Mettere in fila i comandi dei tre blocchi ha fatto emergere in un pomeriggio cose che
+    nessuna lettura della tabella dei punti aperti aveva fatto emergere: che l'Atto II vuole due
+    finestre e l'Atto III una terza, che `demo sharding` è l'unico comando del copione senza un
+    target nel Makefile, che i tempi non sono mai stati presi parlando. Nessuna delle tre era in
+    tabella, e tutte e tre sono operative. La regola pratica: quando si deve decidere che cosa
+    chiudere di un lavoro quasi finito, il consuntivo più affidabile non è l'elenco dei debiti — è
+    provare a usarlo.
+
+Stato aggiornato: decisioni fino ad **ADR-0119**, verifiche fino a **V-089**, misure fino a
+**M-059**, note di metodo fino alla **244**. Controlli: `make docs-check` verde. Prossimo passo: il
+primo giro del Product Owner con il runbook in mano, e la discussione sui sospesi **dopo**, con in
+mano quello che il giro avrà trovato.
