@@ -11,6 +11,15 @@ __pycache__/
 .rtk/
 .serena/
 .claude/worktrees/
+# Le skill di progetto (`.claude/skills/`) invece si versionano: sono le convenzioni del
+# repository, e il loro senso e' viaggiare con esso. Qui sotto sta solo cio' che e' della
+# macchina e non del progetto.
+.claude/settings.local.json
+.claude/.headroom_*
+
+# Materiale di lavorazione della revisione esterna: dossier e risposte grezze dei due
+# revisori. Nel repository entra soltanto il foglio archiviato.
+.revisioni/
 
 # Spike: codice usa-e-getta, nel repository entra solo il verbale
 spike/

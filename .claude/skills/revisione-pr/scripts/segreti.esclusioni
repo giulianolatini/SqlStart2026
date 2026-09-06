@@ -1,0 +1,28 @@
+# Righe da NON considerare segreti, uno per riga, sintassi grep -E.
+# Le righe che cominciano con # e le righe vuote vengono scartate prima dell'uso.
+#
+# Sono i modi in cui questo repository parla di una credenziale senza scriverla.
+# Ogni riga qui e' un falso positivo gia' pagato: toglierla significa riaverlo.
+
+# segnaposto espliciti
+<[A-Za-z_ -]+>
+\.\.\.
+xxxx+
+XXXX+
+REDACTED
+ESEMPIO
+esempio
+placeholder
+PLACEHOLDER
+CHANGEME
+changeme
+your[_-]?(key|token|secret)
+
+# rimandi a un gestore di segreti o a una variabile d'ambiente
+op://
+\$\{?[A-Z_][A-Z0-9_]*\}?
+%[A-Z_][A-Z0-9_]*%
+\$env:
+
+# la riga sta descrivendo dove sta il segreto, non lo sta scrivendo
+(vive|sta|risiede|si trova|leggi|leggere|revoca|revocare|ruota|ruotare) (in|da|il|la)
