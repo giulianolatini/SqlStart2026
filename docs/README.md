@@ -111,6 +111,29 @@ sono state eseguite qui, perché qui non c'è né un Ubuntu né un Windows
 | [`06-sviluppo/concetti-generali/runbook-installazione-skill.md`](06-sviluppo/concetti-generali/runbook-installazione-skill.md) | come si installano e si collaudano le skill, installazione personale o di progetto; in coda «Il caso di SqlStart2026», che racconta l'installazione di qui e le 127 prove passate | già nel repository |
 | [`06-sviluppo/concetti-generali/esempio-adr-0001.md`](06-sviluppo/concetti-generali/esempio-adr-0001.md) | l'ADR di riferimento prodotto dal collaudo delle skill, verbatim: serve a vedere che forma deve avere il risultato. Il percorso che nomina, `docs/adr/0001-<slug>.md`, è quello del repository d'origine — qui le schede stanno tutte in [`Decision.md`](Decision.md) | già nel repository |
 
+## revisioni — le review esterne, arbitrate
+
+I sei fascicoli della revisione generale di `release/1.0`, uno per perimetro. **72 rilievi**
+sollevati da due revisori esterni indipendenti — Codex 45, Gemini Pro 27 — **50 accolti e 22
+respinti**. Un rilievo qui non si chiude leggendo il codice: si chiude **eseguendo**, e il verdetto
+riporta la misura che lo conferma o lo smentisce ([ADR-0135](Decision.md#adr-0135)).
+
+Il dato che vale più dei rilievi: **14 dei 22 respinti non parlavano del repository, ma delle
+istruzioni date ai revisori**. Undici sono lo stesso rilievo sull'«ambito obbligatorio» dei commit,
+sollevato da tutti e due i revisori in tutti e sei i fascicoli — che due revisori indipendenti
+concordino non aumenta la fondatezza di un rilievo, se leggono lo stesso prompt: l'accordo misura
+la fonte comune. Le righe che li producevano sono state corrette **prima** della revisione
+successiva.
+
+| Pagina | Contenuto | Disponibile da |
+|---|---|---|
+| [`revisioni/2026-09-06-talk.md`](revisioni/2026-09-06-talk.md) | il runbook della demo e l'indice delle registrazioni: 17 rilievi, 12 accolti e 5 respinti | già nel repository |
+| [`revisioni/2026-09-06-stack-docker.md`](revisioni/2026-09-06-stack-docker.md) | i tre stack Compose con i loro script di inizializzazione: 7 rilievi, 3 accolti e 4 respinti | già nel repository |
+| [`revisioni/2026-09-06-documentazione-tecnica.md`](revisioni/2026-09-06-documentazione-tecnica.md) | installazione, architetture, amministrazione e `mongosh`: 9 rilievi, 7 accolti e 2 respinti | già nel repository |
+| [`revisioni/2026-09-06-strumenti.md`](revisioni/2026-09-06-strumenti.md) | `tools/`, il `Makefile` e il `README.md` di radice: 18 rilievi, 12 accolti e 6 respinti — il fascicolo con i tre rilievi di gravità alta | già nel repository |
+| [`revisioni/2026-09-06-app-sorgenti.md`](revisioni/2026-09-06-app-sorgenti.md) | i sorgenti di `mongolab`: 12 rilievi, 10 accolti e 2 respinti | già nel repository |
+| [`revisioni/2026-09-06-app-prove.md`](revisioni/2026-09-06-app-prove.md) | le prove di `mongolab`: 9 rilievi, 6 accolti e 3 respinti — cinque prove erano verdi dentro il guasto che dichiaravano di sorvegliare | già nel repository |
+
 ## Dove sta il resto
 
 | Cartella | Contenuto |
