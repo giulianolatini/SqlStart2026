@@ -3541,3 +3541,93 @@ timeout, si cambia il profilo, si cambia la chiamata.
 che cerca un primario per uno shard che ha un membro solo, e non c'è nessuno da eleggere. È la
 differenza fra la ridondanza **dentro** lo shard — che è il suo replica set — e la ridondanza **fra**
 shard, che non esiste: nessun altro nodo ha una copia di quello che teneva `shard1rs`.
+
+---
+
+### Il ✓ verde che nessuno ha guardato
+
+> Uno strumento del lab puliva tre database e annunciava «collezioni rimosse» senza rileggere: se
+> una `drop` fosse fallita, avrebbe detto verde lo stesso. Confrontava l'impronta dei dati caricati
+> con i numeri attesi scritti **in un commento**, cioè con niente. E distingueva uno sharded
+> cluster da un replica set travestito cercando **uno spazio** nella risposta — ma
+> `shard1rs=0 shard2rs=5` uno spazio ce l'ha: un chunk vuoto su uno shard e cinque documenti
+> sull'altro passavano per «documenti su entrambi gli shard». Il caso non è stato immaginato: è
+> stato costruito su un database usa-e-getta spostando un chunk vuoto, e la prima stesura del
+> controllo l'ha dichiarato verde davanti alla misura.
+> Fonte: [ADR-0132](Decision.md#adr-0132), [V-101](Sources.md#v-101).
+
+**Perché una slide:** perché è la frase più corta che ho trovato per una cosa che tutti facciamo.
+**Un valore atteso scritto in un commento non è una verifica: è una speranza documentata.** Il
+commento sembra un controllo — sta accanto al codice, contiene il numero giusto, si legge come una
+promessa — e non lo è, perché nessuno lo confronta con niente. La distanza fra il commento e la
+costante è di tre righe di codice, ed è tutta la distanza fra sapere e sperare.
+
+**Perché una slide, secondo motivo:** perché il terzo caso è più insidioso dei primi due e riguarda
+chiunque scriva controlli. Lì il codice **guardava** l'esito: leggeva la risposta, la esaminava, e
+decideva. Solo che esaminava la proprietà sbagliata. Uno spazio è una traccia della distribuzione,
+non la distribuzione — e una traccia si può avere senza la cosa. Contare gli shard e guardare i
+numeri costa tre righe in più e non ha questo problema.
+
+**Il corollario operativo:** dopo aver modificato uno stato, rileggerlo. E le risposte possibili
+sono **tre**, non due: riuscito, residui con i nomi, e *nessuna risposta* — perché
+un'interrogazione muta non è una pulizia riuscita, ed è il caso che il codice originale non
+contemplava.
+
+---
+
+### L'eccezione localhost non si riapre quando togli l'ultimo utente
+
+> Un nodo MongoDB avviato con `--auth` e **zero utenti** lascia aperta l'eccezione localhost: chi
+> si collega da dentro può creare il primo amministratore senza presentare credenziali. La domanda
+> misurabile è che cosa succede quando quell'utente viene poi tolto. Costruito il caso su un
+> container usa-e-getta — creare l'unico utente, toglierlo, richiedere — la risposta è
+> `Unauthorized`, **con zero utenti nell'istanza**. Dopo un `docker restart`, la stessa domanda
+> risponde `CREATO`. L'eccezione localhost è un **fermo di processo**: si chiude alla creazione del
+> primo utente e resta chiusa per la vita di quel `mongod`, indipendentemente da quanti utenti
+> restino.
+> Fonte: [ADR-0133](Decision.md#adr-0133), [V-102](Sources.md#v-102).
+
+**Perché una slide:** perché ribalta l'intuizione, e l'intuizione sbagliata qui costa. Chi pensa
+«l'eccezione è aperta quando non ci sono utenti» conclude che un nodo rimasto senza amministratori
+è spalancato, e corre a spegnerlo. È il contrario: finché quel processo è acceso il nodo rifiuta
+tutti, e diventa spalancato **appena riparte**. Spegnerlo per metterlo in sicurezza è precisamente
+la mossa che lo apre.
+
+**Perché una slide, secondo motivo:** perché è una lezione sulla forma delle domande. «L'eccezione
+è aperta?» sembra una domanda sullo stato del database — quanti utenti ci sono — e invece è una
+domanda sullo stato di un processo. Due domande che si somigliano fino al momento in cui si riavvia
+qualcosa.
+
+**Il corollario operativo:** un amministratore residuo su un nodo va tolto **prima** del riavvio,
+non dopo. Dopo è tardi in un modo che non si vede.
+
+---
+
+### Un rilievo giusto può avere la causa sbagliata, e la causa cambia il rimedio
+
+> Una review esterna ha segnalato che una prova di smoke poteva lasciare su uno shard un `root` che
+> non doveva esistere: la prova verifica che l'eccezione localhost sia chiusa provando a creare un
+> utente, e se la porta è aperta l'utente viene creato davvero. Il rilievo era giusto. La causa che
+> proponeva — «il `dropUser` potrebbe fallire» — era sbagliata. Misurato: `dropUser` riesce. A
+> fallire era la **verifica**, con `Unauthorized`, perché togliendo l'utente con cui ci si è
+> autenticati si perdono nello stesso istante i privilegi per guardare se è andato via. Il rimedio
+> che discende dalla causa vera è un altro: non «riprovare il drop», ma «verificare da una
+> connessione nuova».
+> Fonte: [ADR-0133](Decision.md#adr-0133), [V-102](Sources.md#v-102).
+
+**Perché una slide:** perché è la ragione per cui i rilievi di un recensore — umano o modello — si
+arbitrano **eseguendo**. Accettare un rilievo giusto con la sua motivazione sbagliata produce un
+rimedio che sembra sensato, passa la revisione, e non ripara. Qui avrebbe prodotto un `dropUser`
+con un nuovo tentativo: codice in più che gira su un problema che non esiste, e il problema vero
+intatto.
+
+**Perché una slide, secondo motivo:** perché anche le mie due prime stesure sono state smentite
+dalla misura, non dal ragionamento. La prima verificava la rimozione nella stessa sessione; la
+seconda la confermava rilanciando la sonda, e misurava il fermo di processo invece dell'esistenza
+dell'utente. Entrambe mi sembravano corrette mentre le scrivevo. Il repository le registra invece
+di lasciarle cadere, perché un'ipotesi smentita è la cosa che più somiglia a una prova.
+
+**Il corollario operativo:** la prova che una credenziale non c'è più è che **non apre più**,
+chiesta da una connessione che non ha privilegi da perdere. Non «il documento non c'è nella
+collezione»: quella è una domanda che richiede proprio i privilegi che l'operazione ha appena
+tolto.

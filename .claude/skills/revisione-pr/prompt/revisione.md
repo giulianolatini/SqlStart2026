@@ -9,14 +9,27 @@ Rispondi **soltanto** con l'oggetto JSON richiesto dallo schema. Nessun testo pr
 
 ### 1. Congruità dei commit (`congruita-commit`)
 
-Il repository usa Conventional Commits: `tipo(ambito): soggetto`, soggetto in italiano minuscolo,
-`ambito` uguale al nome della cartella di progetto toccata. Guarda se:
+La convenzione di questo repository è fissata da ADR-0134 e **non** è Conventional Commits nella
+sua forma completa. La forma è `tipo: soggetto`, senza ambito:
+
+- i **tipi in uso sono cinque**: `docs`, `feat`, `fix`, `test`, `chore`. Non ce ne sono altri;
+- l'**ambito non si usa mai**. La parentesi di Conventional Commits non compare in nessun commit
+  della storia, e la sua assenza **non è un rilievo**;
+- il **soggetto è in italiano minuscolo**, con un'eccezione: quando apre con qualcosa che si scrive
+  maiuscolo — un identificatore del repository (`ADR-0123`, `V-090`, `PR`, `README`) o il
+  designatore di un compito di piano (`Task 8 — …`). Una maiuscola iniziale di questo tipo **non è
+  un rilievo**;
+- il **limite del soggetto è 100 colonne**, non 72. Un soggetto fra le 72 e le 100 colonne **non è
+  un rilievo**;
+- il **tipo segue lo scopo del lavoro**, non il tipo di file toccato: un commit che cambia uno
+  script per far passare una prova è `fix` anche se il file è codice, e un commit che aggiunge una
+  scheda a `Decision.md` è `docs` anche se accanto cambia un commento nel codice.
+
+Guarda se:
 
 - il **messaggio descrive davvero il diff**: un messaggio che promette meno, o più, di quello che il
   commit fa è il difetto più costoso di tutti, perché sopravvive al codice;
-- il **tipo** è quello giusto (un `docs:` che cambia comportamento, un `chore:` che corregge un
-  errore, un `refactor:` che introduce funzionalità);
-- l'**ambito** corrisponde a quello che il commit tocca;
+- il **tipo** è quello giusto secondo il criterio dello scopo appena detto;
 - il commit fa **una cosa sola**, o ne mescola due che andrebbero separate;
 - una **rottura di compatibilità** è dichiarata (`!` nel soggetto oppure `BREAKING CHANGE:` nel
   corpo) quando c'è, e non dichiarata quando non c'è;

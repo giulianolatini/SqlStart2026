@@ -28,6 +28,28 @@ description: Bootstrap a repository's working conventions — merge strategy, co
 > Restano davvero aperte la **4 (template di PR)** e la **6 (Definition of Done)**. E gli ADR si
 > scrivono in `Docs/Decision.md` con la skill `decision-md`, non in `docs/adr/`: un file per
 > decisione qui non esiste ([ADR-025](../../../Docs/Decision.md#adr-025)).
+
+> [!WARNING]
+> **La tabella qui sopra è del repository d'origine, e in SqlStart2026 tre delle quattro righe sono
+> false.** Non è un difetto della skill: è ciò che succede quando si importa una convenzione
+> insieme allo strumento che la applica. Le risposte valide **qui** stanno in
+> [ADR-0134](../../../docs/Decision.md#adr-0134), che le ha ricavate dai 164 commit di questo
+> repository invece di dichiararle:
+>
+> | Decisione | In SqlStart2026 è | Scheda |
+> |---|---|---|
+> | 1. Merge strategy | merge commit da PR, mai fast-forward, mai squash, mai rebase su `develop` | ADR-0134 |
+> | 2. Messaggi di commit | `tipo: soggetto`, **senza ambito**, cinque tipi (`docs feat fix test chore`), soggetto minuscolo salvo identificatori, 100 colonne | ADR-0134 |
+> | 3. Branch naming | `main` solo release, `develop` ramo di lavoro, `feature/NN-nome`, `release/N.M` | ADR-0134 |
+> | 5. Convenzioni di review | dossier per area, rilievi arbitrati **eseguendo**, verdetto scritto per ognuno | ADR-0125, ADR-0134 |
+>
+> Un ramo si chiude con la **pull request**, mai con `flow feature finish` di `git`: salta la
+> revisione, ed è già successo con la PR #1.
+>
+> Gli ADR di questo repository si scrivono in [`docs/Decision.md`](../../../docs/Decision.md), con
+> le fonti in [`docs/Sources.md`](../../../docs/Sources.md): minuscolo, non `Docs/`. I numeri
+> `ADR-010`, `ADR-018`, `ADR-025` e compagni citati sopra appartengono al repository d'origine e
+> **non** vanno cercati qui.
 >
 > La versione originale, non adattata, si ripesca con
 > `rtk git show fdd70c5:.claude/skills/workflow-conventions/SKILL.md`.
