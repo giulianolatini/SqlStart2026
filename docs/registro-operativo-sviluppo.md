@@ -7684,3 +7684,136 @@ metodo fino alla **256**. Controlli: `make tools-test` **181 passate** (una in p
 coerenza fra i tre nomi di progetto del `Makefile` e quelli che `preflight.sh` riconosce).
 Restano aperte le decisioni del PO già in coda, e la review sospesa a due dossier dalla
 fine.
+
+## 2026-09-06 — La review generale chiusa: 72 rilievi su 72, e cinque prove che non sorvegliavano niente
+
+La review ripresa dal punto in cui il limite di sessione l'aveva fermata, e portata in
+fondo. I 18 verdetti di `strumenti` scritti, il dossier `app-prove` aperto, misurato e
+chiuso, e i sei fascicoli archiviati in [`docs/revisioni/`](revisioni/2026-09-06-talk.md).
+**72 rilievi su 72 hanno un verdetto motivato**: 50 accolti, 22 respinti.
+
+L'ultimo dossier è quello che ha insegnato di più, e non per i difetti che ha trovato nel
+codice: per il modo in cui si dimostra che un difetto c'è. Nove rilievi dicevano tutti la
+stessa cosa in nove forme diverse — «questa prova non verifica ciò che il suo nome
+dichiara». Non c'è modo di stabilirlo leggendola. Si stabilisce **mettendo in produzione
+esattamente il difetto che la prova dichiara di impedire**, e guardando se la suite se ne
+accorge. Tre volte su tre non se n'è accorta.
+
+### Deciso
+
+Che un rilievo su una prova si arbitra **mutando la produzione**, e che una prova verde
+sotto il proprio difetto non si rattoppa asserendo di più: si riscrive perché guardi
+un'altra cosa ([ADR-0135](Decision.md#adr-0135)). Le tre forme sono poche e ricorrenti — si
+registra ciò che il codice *chiede* a un collaboratore invece di ricalcolarlo; si dà al
+doppio l'effetto collaterale vero, quando la promessa è un **ordine** fra due passi; si
+mette nel sistema una traccia che il guasto, e solo lui, fa riapparire. Il sorgente mutato
+si rimette a posto nella stessa sessione, ma la misura resta: è l'unica prova che la prova
+serva. Fra le alternative scartate stanno `mutmut` e `cosmic-ray`, che questo lavoro
+farebbero in automatico — **da portare al PO**, non da adottare in silenzio.
+
+Che ciò su cui un meccanismo automatico deve decidere va scritto **dove quel meccanismo
+legge** ([ADR-0136](Decision.md#adr-0136)). Due rilievi di argomento diverso — un marcatore
+di `pytest` e la pulizia dei database di prova — misurati si sono rivelati lo stesso
+errore: l'informazione esisteva, ma stava dove chi decide non guarda. La selezione legge
+`fixturenames`; la spazzata legge il **nome** del database. Una dichiarazione fuori da lì è
+un promemoria per umani, e nessuno la esegue.
+
+Che due delle nove accuse non riguardavano il codice ma **le istruzioni che avevo dato ai
+revisori**, e che una regola che produce rilievi falsi si corregge prima della revisione
+successiva, non dopo. La riga sui segreti accusava una sentinella — un valore che non apre
+niente e lo dichiara nel proprio nome — che esiste per servire la guardia secondo cui la
+credenziale vera non compare mai: segnalarla spinge a togliere la guardia. La riga sui
+percorsi temporanei chiedeva la prevedibilità e non chiedeva **chi vince la corsa**.
+
+### Misurato
+
+Le cinque riparazioni, ognuna provata sotto il mutante che l'aveva rivelata:
+
+- **Il lettore ciclico** ([M-060](../app/docs/Sources.md#m-060)). Tolto `% PAGINE_LETTE`
+  dalla produzione, il lettore cammina in avanti per sempre: **650 prove su 650 restano
+  verdi**, compresa quella che porta il difetto nel nome. La prova ricalcolava dentro di sé
+  la formula della produzione, e una copia non si accorge che l'originale è cambiato.
+- **«Restaura, poi conta»** ([M-061](../app/docs/Sources.md#m-061)). Invertito l'ordine in
+  produzione: 650 su 650 verdi. Il doppio non riempiva mai la destinazione, quindi contare
+  prima o dopo dava lo stesso numero.
+- **Il marcatore che nessuno scrive** ([M-062](../app/docs/Sources.md#m-062)).
+  `-m "not stack03"` selezionava **12 prove su 18**; dopo la riparazione **11 su 18**. La
+  prova esclusa si collegava allo sharded cluster dentro il comando che dichiara di
+  escluderlo. E chiedere la fixture non le toglie l'oggetto: con `_scopri()` rimosso
+  fallisce ancora, perché la scoperta della topologia è per `MongoClient`, non per stack.
+- **Due sessioni sullo stesso stack** ([M-063](../app/docs/Sources.md#m-063)). Due `pytest`
+  genuinamente separati: prima, il secondo ha rimosso **1 database** del primo e i cinque
+  documenti su cui stava lavorando sono diventati **zero**, senza un errore, dentro una
+  prova che parlava d'altro. Dopo: **0 database rimossi**, niente perso.
+- **Il conteggio del seed** ([M-064](../app/docs/Sources.md#m-064)). Il caso più chiaro,
+  perché è successo dentro una sola corsa: mentre la prova falliva dimostrando che il
+  database della demo era stato riscritto, l'asserzione sul suo conteggio — **due righe più
+  su, nella stessa esecuzione** — passava. `mongorestore` inserisce e non aggiorna:
+  cinquantamila chiavi duplicate lasciano il numero dov'era, con uscita 0. I conti tornano
+  tutti: 100 001 documenti ripristinati sono 100 000 del laboratorio più la sentinella,
+  l'unica chiave libera; 101 680 persi sono 50 000 più 50 000 più i 1 680 del carico. Sul
+  fronte utenti, misurato con una sonda a sé: `True / False / True`.
+
+I 72 rilievi, per provenienza ed esito: Codex 45, Gemini Pro 27; **50 accolti, 22
+respinti**. E il numero che vale più di tutti: **14 dei 22 respinti non parlavano del
+repository ma del prompt** che avevo scritto io. Undici sono lo stesso rilievo
+sull'«ambito obbligatorio» dei commit, sollevato da entrambi i revisori in tutti e sei i
+fascicoli.
+
+Controlli alla chiusura: **650 unitarie**, **66 di integrazione**, **183 sugli strumenti**,
+`mypy` verde su **67 file**, `make docs-check` verde con i sei fascicoli dentro `docs/`.
+
+### Note di metodo
+
+257. **La copertura misura le righe eseguite, non le promesse verificate.** Tutte e tre le
+     prove cieche di oggi erano «coperte»: le righe che il mutante ha cambiato venivano
+     eseguite da ciascuna. Eseguire una riga e verificarne l'effetto sono due cose diverse,
+     e la distanza fra loro è esattamente lo spazio in cui vive una prova inutile. La
+     regola pratica: finché non è stata vista fallire, una prova è una speranza.
+
+258. **Un'asserzione può passare nella stessa corsa in cui la prova fallisce, e la cosa va
+     guardata.** Nel caso del restore, la prova era rossa — ma sulla sentinella nuova,
+     mentre il conteggio che il rilievo accusava passava due righe più su. Se non avessi
+     letto *quale* asserzione era scattata avrei archiviato «la prova coglie il difetto» e
+     lasciato in piedi quella cieca. La regola pratica: quando una prova ha più
+     asserzioni, sotto il mutante non basta che sia rossa; bisogna sapere **quale** riga
+     l'ha resa rossa.
+
+259. **Prima di arbitrare un rilievo, guarda se la regola che cita esiste nel repository o
+     solo nelle istruzioni che hai dato tu.** Quattordici rilievi su 72 — e 14 dei 22
+     respinti — nascevano dal prompt di revisione, non dal codice. Che due revisori
+     indipendenti concordino non è una controprova: se leggono lo stesso prompt, l'accordo
+     misura la fonte comune. La regola pratica: la convergenza fra revisori vale come
+     indizio solo se le loro istruzioni differiscono.
+
+260. **Un collegamento relativo è valido rispetto a dove il file finirà, non a dove è stato
+     scritto.** `archivia` appiattisce sei cartelle in una sola, e quattro collegamenti che
+     funzionavano nella cartella di lavoro si sono rotti al primo `docs-check` dopo
+     l'archiviazione: un rimando fra fascicoli e tre ancore interne in forma corta, che
+     GitHub non genera. Le ancore giuste le ho calcolate con la `slug` di
+     `tools/check_links.py` — cioè con la stessa funzione che poi giudica — invece di
+     indovinarle. La regola pratica: quando un passo di pubblicazione sposta i file, si
+     archivia **prima** e si lascia parlare il controllore, invece di ragionare sui percorsi
+     a mente.
+
+### Prossimo passo
+
+Il rapporto al PO su ciò che va **segnalato e non riparato**: il falso allarme di
+WiredTiger nello smoke degli stack accesi da molte ore — `mongod` fa scorrere la riga
+`cache_size` fuori da un log `json-file 10m 3` in circa nove ore, quindi il controllo non
+la trova più ed è un difetto d'ambiente, non dello stack; i difetti della skill importata
+che meritano di risalire a monte; le due proposte registrate come alternative scartate ma
+che valgono una decisione sua — adottare `mutmut`/`cosmic-ray`, e spostare la spazzata dei
+database orfani su un bersaglio `make` esplicito; e il fatto che il guasto sorvegliato da
+C-6 è intercettato **anche** dal contatore dell'adattatore, ma come errore di fixture e con
+un messaggio che non nomina mai `lab`.
+
+Restano aperte, in attesa del PO: se rendere confrontabili le finestre dell'Atto III; la
+scelta a due vie di `talk` G-7 e `stack-docker` C-2; e se riscrivere la storia dei commit
+per togliere il nome del repository d'origine. La discussione sulle priorità resta ferma
+per sua richiesta, fino alla sua passata a mano con il runbook. Nota a margine non ancora
+inseguita: l'appuntamento di [ADR-0058](Decision.md#adr-0058) riguarda MongoDB 8.0.30 e
+resta il **16 settembre**; i tre stack oggi dicono tutti `mongod 7.0.40`.
+
+Stato aggiornato: decisioni fino ad **ADR-0136**, verifiche fino a **V-104**, misure
+dell'applicazione fino a **M-064**, note di metodo fino alla **260**.
