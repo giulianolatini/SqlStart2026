@@ -9951,4 +9951,80 @@ Error: --json-schema can only be used when --output-format is 'json' or 'stream-
   busta, e allora saranno le prove della sezione 19 a dirlo.
 
 - **Data:** 2026-09-06
-- **Usata da:** ADR-0124
+- **Usata da:** ADR-0124, ADR-0125
+
+---
+
+<a id="v-094"></a>
+### V-094 — Censimento dei riferimenti esterni prima della pubblicazione, e la giustezza dei documenti misurata invece che supposta
+
+- **Comandi:** il censimento, la sostituzione, il riavvolgimento e la riverifica:
+
+```bash
+git grep -c -i <nome del repository d'origine> -- .              # quante e dove, fra i tracciati
+grep -ril <nome del repository d'origine> . --exclude-dir=.git   # anche fra i non tracciati
+git grep -ohE "github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+" -- '*.md' | sort | uniq -c
+git grep -n "/Users/giulianolatini" -- .          # percorsi assoluti della macchina
+python3 anonimizza3.py --scrivi                   # frasi intere, poi regole a confine di parola
+python3 riavvolgi.py da-riavvolgere.txt --scrivi  # gli a capo rimessi al loro posto
+make docs-check
+```
+
+- **Ambiente:** portatile Apple Silicon, macOS 25.6, 6 settembre 2026. Ramo `release/1.0`,
+  albero pulito prima di cominciare. Repository ancora **privato**; la pubblicazione è
+  prevista al talk del 18 settembre, ed è irreversibile.
+
+- **Esito, primo punto — il censimento.** Il nome di un repository privato compare **84
+  volte in 28 file tracciati**: 21 file sotto `.claude/skills/` e 7 documenti sotto `docs/`.
+  Una di queste è un **URL di clonazione** completo, nel comando che riproduce il confronto
+  di [V-093](#v-093). Fuori dai tracciati ce ne sono altre **6**, in due fascicoli sotto
+  `.revisioni/`: quella cartella è gitignorata, ma `revisione.sh archivia --scrivi` **copia**
+  i fascicoli in `docs/revisioni/`, che si pubblica — quindi contano.
+
+- **Esito, secondo punto — che altro è esterno.** Nessun'altra sorpresa:
+
+| Che cosa | Dove | Quante | Verdetto |
+|---|---|---|---|
+| `github.com/giulianolatini/SqlStart2026` | README e tre documenti | 6 | è questo repository, resta |
+| altri `github.com/...` | citazioni bibliografiche | 15 | progetti pubblici di terzi, restano |
+| percorso assoluto della macchina | [`registro-operativo-sviluppo.md`](registro-operativo-sviluppo.md) | 1 | nomina `SqlStart2026-registrazioni`, cartella locale; l'utente è già pubblico nell'URL del repo |
+| nome del ramo d'origine | cinque documenti | 5 | nomina un ramo, non un repository: senza il nome del repo non è risolvibile |
+| indirizzi di posta | tre piani di feature | 3 | `noreply@anthropic.com`, la firma dei commit |
+
+- **Esito, terzo punto — la giustezza vera dei documenti.** La supposizione era 95 colonne.
+  Misurata, è **100**: su quattro documenti la moda sta fra 97 e 99, e le righe oltre 100
+  sono una minoranza dichiarata (144 su 6409 in `Decision.md`, 153 su 8129 in `Sources.md`,
+  172 su 6488 nel registro, 63 su 2443 nelle citazioni). La differenza non è accademica:
+  con la soglia sbagliata sarebbero stati riavvolti 28 paragrafi in più, senza motivo.
+
+- **Esito, quarto punto — tre passaggi automatici buttati, e perché.** Nessuno dei tre è
+  stato scoperto dalle prove: sono stati scoperti **rileggendo il diff**.
+
+  1. Sostituzioni di **sottostringa**: mordono dentro le parole. «chi nomina X» è diventato
+     «chi nominal…», perché la regola cercava «a X» e l'ha trovata dentro «nomina X».
+  2. Regole a confine di parola, ma con `\s+` fra preposizione e nome: `\s` comprende l'a
+     capo, e dove il nome cadeva a inizio riga la sostituzione ha **unito due righe**, da 85
+     a 183 colonne. Grammatica giusta, impaginazione rotta.
+  3. Lo stesso `\s+` dove l'a capo portava con sé il capo di una citazione (`> `), che
+     whitespace non è: lì la regola **non è scattata affatto**, e restava «In il repository
+     d'origine» spezzato su due righe — invisibile a qualunque `grep` di una riga sola.
+
+  La stesura buona ha un separatore che accetta sia spazi sia un a capo col suo capo di
+  riga, e lo **riscrive identico**: nessun file cambia numero di righe, e la preposizione si
+  articola comunque. Il controllo di quella proprietà è dentro lo script.
+
+- **Esito, quinto punto — dopo.** 84 → 0 nei tracciati, 6 → 0 nei fascicoli, 28 file
+  modificati, 146 righe aggiunte e 138 tolte. Nessun apice inverso orfano, nessuna
+  preposizione non articolata, nessuna riga portata oltre le 100 colonne che non ci fosse
+  già. `make docs-check` verde: citazioni e collegamenti coerenti.
+
+- **Riserve:** il censimento è **testuale**, e cerca un nome noto. Non trova ciò che allude
+  senza nominare, e non trova un nome scritto diversamente. Cerca inoltre solo dentro i file
+  di testo: la cronologia dei commit non è stata toccata, e chi cloni il repository troverà
+  il nome nei messaggi e nei diff precedenti a questa scheda — riscriverla è una decisione
+  diversa, con costi diversi, e non è stata presa qui. Infine: il comando di riproduzione di
+  [V-093](#v-093) ora contiene un segnaposto al posto dell'URL, quindi **non è più
+  eseguibile da fuori**; resta eseguibile da chi conosce il repository d'origine.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0125

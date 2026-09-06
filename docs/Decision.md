@@ -8008,3 +8008,74 @@ Non è un difetto noto, è una verifica che non è mai stata fatta. Sta fra i pu
   sposta di un carattere e l'esclusione non trova più niente, in silenzio.
 
 **Fonti:** [V-093](Sources.md#v-093), [ADR-0123](#adr-0123)
+
+---
+
+<a id="adr-0125"></a>
+## ADR-0125 — Il nome del repository d'origine non sopravvive alla pubblicazione, e al suo posto va una perifrasi, non un altro nome
+
+**Data:** 2026-09-06 · **Stato:** Accettata
+
+**Contesto:** questo repository è privato oggi e diventa **pubblico al talk**, il 18 settembre.
+Il 6 settembre sono state importate dodici skill e tre documenti da un altro repository, privato
+e destinato a restare tale ([ADR-0123](#adr-0123)). L'importazione è stata fatta *verbatim* e
+documentata con cura, e la cura ha lasciato una traccia: il nome di quel repository compariva
+**84 volte in 28 file tracciati**, più un URL di clonazione completo e sei occorrenze nei
+fascicoli di revisione ([V-094](Sources.md#v-094)). Il Product Owner ha chiesto che quel nome non
+esca con la pubblicazione.
+
+La strada ovvia — sostituire un nome con l'altro — **produce frasi false**. Metà di quelle
+occorrenze non parla di questo repository: parla dell'altro, per contrasto. «Nove descrizioni
+nominano *quel* repository come condizione e qui non si sarebbero accese mai» diventa, sostituendo,
+«nove descrizioni nominano SqlStart2026 come condizione e qui non si sarebbero accese mai», che
+dice il contrario del vero. Una redazione che rende falso il testo è peggio del nome che toglie:
+il nome costa riservatezza una volta, una frase falsa costa credibilità per sempre.
+
+**Decisione.** Quattro punti.
+
+1. **Il nome sparisce, e la sostituzione dipende da chi è il soggetto della frase.** Dove la
+   frase parla di **questo** repository, il nome diventa `SqlStart2026`. Dove parla dell'**altro**,
+   diventa la perifrasi **«il repository d'origine»**, che descrive la relazione senza identificare
+   nessuno. La regola si applica a occhio, frase per frase; l'automatismo serve solo a non
+   dimenticarne nessuna.
+
+2. **Le frasi in cui il nome è un dato, non un riferimento, si riscrivono per intero.** Sono
+   quelle in cui il nome era la *stringa cercata* da una misura, o il *soggetto di una condizione*.
+   Lì la perifrasi non basta e va cambiata la frase. Sono state trattate come confronti letterali:
+   se il testo cambia, la riscrittura non scatta e l'occorrenza ricompare nel conto finale invece
+   di essere corrotta in silenzio.
+
+3. **L'URL di clonazione diventa un segnaposto, e lo si dichiara.** Il comando che riproduce
+   [V-093](Sources.md#v-093) non è più eseguibile da fuori. È una perdita reale di
+   riproducibilità, ed è scritta dentro la verifica invece di essere lasciata scoprire a chi ci
+   prova. Chi conosce il repository d'origine lo esegue lo stesso.
+
+4. **Resta ciò che non identifica.** Il nome del **ramo** d'origine resta nominato cinque volte:
+   nomina un ramo, non un repository, e senza il nome del repo non è risolvibile — mentre toglierlo
+   indebolirebbe la tracciabilità di che cosa è stato importato e da dove. Restano i riferimenti a
+   `github.com/giulianolatini/SqlStart2026`, che è questo, e quelli ai progetti pubblici di terzi.
+
+**Conseguenze.** La redazione **precede** l'archiviazione dei fascicoli di revisione: `revisione.sh
+archivia --scrivi` copia `.revisioni/` dentro `docs/revisioni/`, che si pubblica, quindi da ora
+nessun verdetto può nominare il repository d'origine. La cronologia dei commit **non** è stata
+toccata: chi cloni troverà il nome nei messaggi e nei diff anteriori a questa scheda. Riscrivere la
+cronologia è una decisione diversa, con costi diversi, e spetta al Product Owner.
+
+**Alternative scartate.**
+
+- *Sostituire il nome con `SqlStart2026` ovunque.* Un comando solo, e metà del testo diventa falso.
+  È il caso in cui la soluzione più rapida è anche l'unica che non si può correggere leggendo:
+  le frasi restano grammaticali, e sbagliate.
+- *Cancellare le frasi che nominano l'altro repository.* Toglie il nome e con esso il motivo per
+  cui dodici skill importate sono state adattate una per una. Il documento resterebbe vero e
+  diventerebbe incomprensibile.
+- *Una perifrasi più corta, per non dover riavvolgere i paragrafi.* «Il repo d'origine» sarebbe
+  costato cinque colonne invece di undici. Riavvolgere 28 paragrafi è lavoro di una macchina; una
+  perifrasi sciatta la legge una sala.
+- *Rimandare la redazione a ridosso del 18 settembre.* È esattamente il momento in cui non si fa
+  una modifica che tocca 28 file, e in cui un errore non verrebbe più riletto da nessuno.
+- *Riscrivere anche la cronologia dei commit.* Toglie il nome davvero, e costa la riscrittura di un
+  ramo già spinto, con tutti gli SHA citati nei documenti che diventano bugie. Il guadagno è reale
+  ma non è di questa scheda, e la decisione è del proprietario.
+
+**Fonti:** [V-094](Sources.md#v-094), [V-093](Sources.md#v-093), [ADR-0123](#adr-0123)
