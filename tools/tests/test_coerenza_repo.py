@@ -569,6 +569,20 @@ def database_del_ripristino():
     raise AssertionError("DATABASE_RIPRISTINO non si trova in cli.py")
 
 
+def blocco_del_ripristino() -> str:
+    """Il pezzo di `reset-demo.sh` che toglie il database costruito dal ripristino.
+
+    Si guarda un blocco e non le singole righe perché il nome, il `dropDatabase` e il
+    verdetto stanno su righe diverse: cercarli sulla stessa riga legava la prova a una
+    stesura invece che al comportamento, e infatti si è rotta appena il verdetto ha
+    smesso di fidarsi di `dropped`.
+    """
+    testo = RESET_DEMO.read_text(encoding="utf-8")
+    apertura = 'titolo "Il database che il ripristino costruisce"'
+    assert apertura in testo, "il blocco del ripristino non c'è più in reset-demo.sh"
+    return testo.split(apertura)[1].split('titolo "Dataset"')[0]
+
+
 def test_reset_demo_toglie_anche_il_database_che_il_ripristino_costruisce():
     """Il difetto che questa prova toglie è costato una scena, e si vedeva solo alla
     seconda corsa: `demo restore` costruisce `lab_ripristinato`, `reset-demo.sh` puliva le
@@ -578,11 +592,32 @@ def test_reset_demo_toglie_anche_il_database_che_il_ripristino_costruisce():
     Cioè la prova generale rompeva la replica del giorno dopo.
     """
     nome = database_del_ripristino()
-    righe = RESET_DEMO.read_text(encoding="utf-8").splitlines()
-    tolto = [r for r in righe if nome in r and "dropDatabase" in r]
+    blocco = blocco_del_ripristino()
 
-    assert tolto, (
-        f"reset-demo.sh non toglie {nome}: nessuna riga lo nomina insieme a "
-        f"dropDatabase. Chi prova l'Atto III due volte senza azzerare i volumi vede la "
-        f"seconda corsa fallire con RestoreIncompleto."
+    assert nome in blocco and "dropDatabase" in blocco, (
+        f"reset-demo.sh non toglie {nome}: il blocco che dovrebbe farlo non lo nomina "
+        f"insieme a dropDatabase. Chi prova l'Atto III due volte senza azzerare i volumi "
+        f"vede la seconda corsa fallire con RestoreIncompleto."
+    )
+
+
+def test_il_verdetto_del_drop_non_si_fida_del_campo_dropped():
+    """`dropDatabase` risponde `dropped` anche per un database che non e' mai esistito.
+
+    Misurato sullo stack 02 il 6 settembre, mongod 7.0.40, dal primario:
+    `db.getSiblingDB("lab_inesistente_0906").dropDatabase()` risponde
+    `{"ok":1,"dropped":"lab_inesistente_0906"}` esattamente come per un database pieno.
+    La prima stesura di questo blocco leggeva quel campo per decidere fra «rimosso» e
+    «non c'era», e diceva sempre «rimosso»: un'uscita che si legge sotto pressione la
+    sera prima del talk, e che avrebbe raccontato una pulizia mai avvenuta.
+
+    Chi c'era davvero lo sa solo l'elenco dei database, chiesto **prima** del drop.
+    """
+    blocco = blocco_del_ripristino()
+    assert ".dropped" not in blocco, (
+        "il verdetto legge `esito.dropped`, che e' presente anche quando il database "
+        "non c'era: misurato, risponde `dropped` per un nome inventato"
+    )
+    assert "getDBNames" in blocco, (
+        "per dire se il database c'era serve l'elenco, chiesto prima del drop"
     )

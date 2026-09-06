@@ -230,12 +230,20 @@ elif [[ "${STACK}" == "02" ]]; then
   # pressione. Il nome sta scritto qui e in `cli.py`: a tenerli allineati e' la prova
   # `test_reset_demo_toglie_anche_il_database_che_il_ripristino_costruisce`.
   #
-  # `dropDatabase()` risponde `dropped` solo se c'era davvero: distinguere «tolto» da
-  # «non c'era» non costa una interrogazione in piu' e dice a chi prova se l'Atto III era
-  # gia' girato su questo stack.
+  # Distinguere «tolto» da «non c'era» dice a chi prova la vigilia se l'Atto III era
+  # gia' girato su questo stack, e costa una interrogazione in piu'. Deve costarla:
+  # `dropDatabase()` risponde `dropped` **anche per un database che non e' mai
+  # esistito** — misurato il 6 settembre su mongod 7.0.40, un nome inventato risponde
+  # `{"ok":1,"dropped":"lab_inesistente_0906"}` come uno pieno. La prima stesura si
+  # fidava di quel campo e diceva sempre «rimosso»: una pulizia mai avvenuta,
+  # raccontata a chi la legge sotto pressione. Chi c'era lo sa solo l'elenco, chiesto
+  # **prima**. La regressione la vieta
+  # `test_il_verdetto_del_drop_non_si_fida_del_campo_dropped`.
   ripristino="$(sul_primario '
-    const esito = db.getSiblingDB("lab_ripristinato").dropDatabase({ writeConcern: { w: "majority", wtimeout: 10000 } });
-    print(esito.dropped ? esito.dropped : "nessuno");
+    const nome = "lab_ripristinato";
+    const c_era = db.getMongo().getDBNames().includes(nome);
+    db.getSiblingDB(nome).dropDatabase({ writeConcern: { w: "majority", wtimeout: 10000 } });
+    print(c_era ? nome : "nessuno");
   ')"
   if [[ "${ripristino}" == "nessuno" ]]; then
     ok "nessun database di ripristino da togliere"
