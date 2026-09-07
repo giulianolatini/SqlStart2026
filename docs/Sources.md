@@ -10764,14 +10764,15 @@ uv run --directory app pytest -q && uv run --directory tools pytest -q && make d
   esistono ancora e chiedere «esiste?» risponde di sì anche per uno SHA che nessun ramo raggiunge
   più: la domanda giusta è «è raggiungibile?», ed è quella che le misure qui sopra pongono — ma la
   risposta di GitHub non coincide con quella di `git`, ed è il dodicesimo punto. Che cosa farne è
-  stato deciso lo stesso giorno da [ADR-0138](Decision.md#adr-0138) — si chiede la garbage
-  collection all'assistenza e la si verifica — ma **decidere non è aver fatto**: finché la
-  rimozione non è confermata richiedendo uno di quegli SHA, la redazione è completa nella storia
-  che si clona e aggirabile da chi conosce quaranta caratteri, o sette, che però il repository non
-  scrive più da nessuna parte. Questa scheda misura; la conferma sarà una misura nuova.
+  stato deciso lo stesso giorno, due volte: [ADR-0138](Decision.md#adr-0138) chiedeva la garbage
+  collection all'assistenza, [ADR-0139](Decision.md#adr-0139) l'ha ritirata perché il requisito era
+  «non visibile», non «non recuperabile». Resta quindi vero, e per scelta, che la redazione è
+  completa nella storia che si clona e aggirabile da chi conosce quaranta caratteri, o sette — che
+  però il repository non scrive più da nessuna parte, ed è la condizione che rende la scelta
+  sostenibile. Questa scheda misura; che cosa farne dei numeri è una decisione, e sta altrove.
 
 - **Data:** 2026-09-07
-- **Usata da:** ADR-0137, ADR-0138
+- **Usata da:** ADR-0137, ADR-0138, ADR-0139
 
 ---
 
@@ -10818,4 +10819,4 @@ uv run --directory app pytest -q && uv run --directory tools pytest -q && make d
   parole funzione, che non si può citare. I segnaposto Liquid del sorgente — `{% raw %}{% data
   variables.product.github %}{% endraw %}` — sono stati risolti in «GitHub».
 - **Data:** 2026-09-07
-- **Usata da:** ADR-0138
+- **Usata da:** ADR-0138, ADR-0139

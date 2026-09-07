@@ -3824,3 +3824,24 @@ l'altra parte. Il criterio con cui la valuta presuppone per giunta che il dato s
 — qualcosa che si può *ruotare* —, e un dato che non si ruota può cadere fuori da entrambi i lati
 della frase. Da qui la sola cosa che si controlla davvero: **chiedere presto**. Non per ottenere
 prima, ma per sapere prima, mentre un no è ancora rimediabile.
+
+---
+
+### Il requisito era «non visibile», non «non recuperabile»
+
+> «Il nome non deve essere visibile nel repo, ma non è un dato critico come una credenziale, e se
+> viene recuperato esaminando la storia va bene. Il repo originale è in ogni caso privato e
+> inaccessibile.»
+
+Fonte: la decisione del Product Owner del 7 settembre 2026, registrata in
+[ADR-0139](Decision.md#adr-0139).
+
+**Perché una slide:** chiude la sequenza, e la chiude **non facendo**. Il rimedio successivo —
+chiedere all'assistenza la garbage collection degli oggetti orfani — era disponibile, documentato e
+già deciso; è caduto quando si è riletto il requisito accanto al suo prezzo. La distinzione che lo
+ha fatto cadere vale ovunque: un dato che **è** il rischio (una credenziale, che vale finché non la
+si ruota) chiede «non recuperabile»; un dato che si preferisce non pubblicare chiede «non
+visibile». Sono due requisiti diversi, e trattare il secondo come il primo è il modo in cui la
+sicurezza diventa un rituale — si continua a pagare perché si è cominciato. Da notare, per onestà
+del racconto: ciò che ha reso visibile la sproporzione è stato **leggere la pagina del rimedio**.
+Una fonte può servire a non fare una cosa, e vale quanto una che la giustifica.

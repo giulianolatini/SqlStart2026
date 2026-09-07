@@ -8883,8 +8883,9 @@ SHA di `release/1.0`, di cui **7** orfani, tutti ancora serviti, e **2** con il 
 redazione è quindi completa per chi clona, e aggirabile da chi un SHA ce l'ha. **Prima del 18
 settembre va deciso** se chiedere all'assistenza di GitHub la garbage collection su questo
 repository — e verificarla richiedendo uno di quegli SHA, invece di fidarsi della risposta — oppure
-accettare il rischio residuo. Il Product Owner ha deciso lo stesso giorno, e la decisione
-ha una scheda sua: [ADR-0138](#adr-0138).
+accettare il rischio residuo. Il Product Owner ha deciso lo stesso giorno con
+[ADR-0138](#adr-0138), e l'ha ritirata poche ore dopo con [ADR-0139](#adr-0139): la scelta finale
+è la terza.
 
 **E le schede che raccontano la redazione stavano pubblicando le chiavi.** Questa scheda,
 [V-105](Sources.md#v-105) e le citazioni per le slide nominavano cinque commit con l'SHA che
@@ -8924,8 +8925,9 @@ commit si nomina la cosa invece del commit, perché l'SHA nuovo lì direbbe il f
 <a id="adr-0138"></a>
 ## ADR-0138 — La rimozione degli oggetti orfani si chiede subito, perché può essere respinta
 
-**Data:** 2026-09-07 · **Stato:** Accettata — chiude l'esposizione residua aperta da
-[ADR-0137](#adr-0137)
+**Data:** 2026-09-07 · **Stato:** **Superata da [ADR-0139](#adr-0139)** — ritirata dal Product
+Owner lo stesso giorno, prima di essere eseguita. Il testo resta com'era: il registro non riscrive
+le decisioni superate.
 
 **Contesto:** la riscrittura di [ADR-0137](#adr-0137) è stata pubblicata il 7 settembre, e ha fatto
 il suo lavoro: chi clona `release/1.0` non trova il nome del repository d'origine da nessuna parte,
@@ -9000,5 +9002,77 @@ ragione non va pubblicato né condiviso. Dopo il 18 va rimosso.
   favorevole non misurata, cioè la specie di premessa che questa vicenda ha già smentito tre volte.
 - *Chiedere il 17, quando si sa se serve.* Confonde «quando serve il risultato» con «quando serve
   la domanda». La risposta non arriva a comando, e un rifiuto tardivo non lascia alternative.
+
+**Fonti:** [V-105](Sources.md#v-105), [S-078](Sources.md#s-078)
+
+---
+
+<a id="adr-0139"></a>
+## ADR-0139 — Il requisito era «non visibile», non «non recuperabile»: il residuo si accetta
+
+**Data:** 2026-09-07 · **Stato:** Accettata — **sostituisce** [ADR-0138](#adr-0138)
+
+**Contesto:** [ADR-0138](#adr-0138) aveva deciso di chiedere all'assistenza di GitHub la garbage
+collection degli oggetti orfani, e di chiederla subito. Scriverla ha richiesto di leggere la pagina
+su cui si appoggiava invece di ricordarla, ed è lì che è comparsa la condizione che l'assistenza
+pone: «won't remove non-sensitive data», con il rischio valutato «by rotating affected
+credentials» ([S-078](Sources.md#s-078)). Messo davanti a quella frase, il Product Owner ha
+riesaminato la proporzione fra rimedio ed esigenza e ha ritirato la decisione, poche ore dopo
+averla presa e prima che fosse eseguita.
+
+**Decisione.** Quattro punti.
+
+1. *Non si apre il ticket, e il residuo si accetta.* Il rimedio costa un'interazione con
+   l'assistenza su un dato che, per il criterio dell'assistenza stessa, non è sensibile; e compra
+   una differenza — fra «recuperabile da chi sa già che cosa chiedere» e «non recuperabile» — che
+   il requisito non chiedeva.
+
+2. *Il criterio è la proporzione, ed è la parte riutilizzabile.* Il requisito di
+   [ADR-0125](#adr-0125) è **«il nome non è visibile nel repository»**, non «il nome non è
+   recuperabile». Il primo è soddisfatto e misurato: 990 blob e 174 messaggi puliti a occhi chiusi
+   sul caso, e nessun file che scriva un SHA pre-riscrittura ([V-105](Sources.md#v-105)). Il
+   secondo è un requisito da **credenziale**, e questo dato non lo è. Confondere i due è il modo in
+   cui una misura di sicurezza diventa un rituale: si continua a pagare perché si è cominciato, non
+   perché serve.
+
+3. *Il dato non apre niente.* Il repository d'origine è privato e inaccessibile: chi recuperasse il
+   nome dagli oggetti orfani otterrebbe un identificatore che non dà accesso a nulla. È la
+   differenza fra un dato che **è** il rischio — una credenziale, che vale finché non la si ruota —
+   e un dato che è solo un'informazione che si preferisce non pubblicare.
+
+4. *Il punto di controllo del 16 settembre decade*, e con esso il piano di riserva del repository
+   nuovo. Il 18 il repository si apre come previsto, con le sue cinque PR e il suo URL.
+
+**Conseguenze.**
+
+**Le due regole nate da questa vicenda restano, perché non dipendono da questa decisione.** Nessun
+file del repository scrive il nome del repository d'origine, in nessuna variante di maiuscole; e
+nessun file scrive l'SHA di un commit pre-riscrittura. La prima è il requisito; la seconda è ciò
+che impedisce al repository di consegnare da sé la chiave per aggirarlo. Entrambe si controllano
+**senza guardare il caso**.
+
+**La riscrittura non diventa lavoro sprecato: diventa la ragione per cui questa decisione è
+sostenibile.** Prima, il nome si incontrava leggendo la storia; adesso lo si trova solo andandolo a
+cercare, sapendo già che cosa chiedere e a chi. Accettare il secondo rischio è ragionevole proprio
+perché il primo è stato tolto — la proporzione che questa scheda invoca esiste grazie ad
+[ADR-0137](#adr-0137), non malgrado.
+
+**Aver letto [S-078](Sources.md#s-078) resta il passo che ha fatto la differenza**, anche se la
+decisione che l'aveva richiesta è caduta. È la condizione trovata nella pagina — il metro della
+credenziale ruotabile — ad aver reso visibile che il dato non era della specie per cui il rimedio
+esiste. Una fonte letta può servire a **non** fare una cosa, e vale quanto una che la giustifica.
+
+**Alternative scartate.**
+
+- *Aprire il ticket comunque, «tanto costa poco».* Costa poco a chi lo scrive e non a chi lo
+  legge, e chiede a un'assistenza di trattare come sensibile un dato che la sua stessa policy dice
+  di non trattare. L'esito probabile è un no motivato, cioè il punto in cui si è adesso, dopo
+  un'attesa.
+- *Rimandare la decisione al 16 settembre, tenendo aperto il piano di riserva.* Tenere aperta
+  un'opzione ha un costo: la si ricontrolla, la si documenta, e occupa attenzione negli undici
+  giorni che restano prima del talk. Qui il criterio è già chiaro oggi, e ciò che si guadagna
+  rimandando è solo l'illusione di poter cambiare idea con più informazioni — che non arriverebbero.
+- *Aprire un repository pubblico nuovo.* Certo al 100%, e paga con le cinque PR e con l'URL una
+  certezza che il requisito non chiede.
 
 **Fonti:** [V-105](Sources.md#v-105), [S-078](Sources.md#s-078)
