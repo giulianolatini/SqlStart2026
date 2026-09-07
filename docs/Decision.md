@@ -8794,19 +8794,19 @@ operazione riscriverebbe il ramo che il pubblico legge. **La finestra non si chi
 termine: si chiude perché il 16 quel ramo smette di essere privato.**
 
 Misurata, l'esposizione è piccola e delimitata ([V-105](Sources.md#v-105)): **5 messaggi di commit**
-per 14 righe e **8 commit il cui diff contiene il nome**, tutti fra `65385ec` e la scheda che li
+per 14 righe e **8 commit il cui diff contiene il nome**, tutti fra `3f22d6f` e la scheda che li
 racconta. E — questa la scoperta che ha allargato il lavoro — **due occorrenze nell'albero di
 oggi**, che ADR-0125 dava a zero.
 
 **Decisione.** Sette punti.
 
-1. *La redazione non si reinventa: si applica all'indietro quella che esiste già.* Il commit
-   `6a7fa71` **è** la redazione, scritta a mano: contestuale, grammaticale, riavvolta a 100
+1. *La redazione non si reinventa: si applica all'indietro quella che esiste già.* La redazione
+   sta in **un commit solo**, scritta a mano: contestuale, grammaticale, riavvolta a 100
    colonne. Rifarla con un elenco di sostituzioni darebbe un testo diverso da quello che il
    repository pubblica oggi, e la differenza si vedrebbe nel diff di ogni commit successivo. I blob
    sporchi sono stati trattati con tre regole, in ordine di forza: dove il blob storico coincide con
    la versione pre-redazione si prende la versione post-redazione così com'è (**28 blob**); dove
-   esiste la toppa di `6a7fa71` per quel percorso, la si applica (**5**); il resto si redige a mano
+   esiste la sua toppa per quel percorso, la si applica (**5**); il resto si redige a mano
    (**15 blob, 44 occorrenze**). E anche lì, dove il **paragrafo** di partenza è identico a quello
    che la mano umana aveva davanti, si prende la sua resa *verbatim*, a capo compresi (**27
    paragrafi**).
@@ -8826,7 +8826,7 @@ oggi**, che ADR-0125 dava a zero.
    non lo contengono nemmeno. La riscrittura parte quindi da `5ce4e5b`: **23 commit riscritti su
    172**, 149 intatti con le loro firme.
 
-4. *`6a7fa71` diventa vuoto, e resta.* Se la redazione è già applicata a monte, il commit che la
+4. *Il commit vuoto resta.* Se la redazione è già applicata a monte, il commit che la
    applicava non ha più niente da applicare: da 28 file passa a zero. Quel vuoto è la **prova** che
    era pura redazione e non portava altro con sé. Resta in cronologia perché il suo messaggio è la
    sede in cui si spiega la perifrasi, e perché segna il giorno in cui la decisione è stata presa.
@@ -8870,6 +8870,31 @@ degli stack `02` e `03` non sono tracciati e non si rigenerano da soli.
 **Il 16 settembre la strada si chiude.** Se la riscrittura non è pubblicata prima della fusione, la
 clausola di ADR-0125 torna a valere per sempre, e il nome resta nella storia che il pubblico clona.
 
+**Eseguita il 7 settembre, e la finestra si è chiusa in tempo.** Il Product Owner ha fatto il
+force-push il giorno stesso della decisione: `release/1.0` remota a `7916b29`, `develop` e `main`
+fermi dov'erano, il checkout e il worktree riallineati con un `reset`, che i file ignorati non li
+tocca. Rifatti sulla storia pubblicata, gli invarianti reggono: **990 blob distinti e 0 sporchi,
+174 commit e 0 messaggi sporchi**, sempre a occhi chiusi sul caso.
+
+**Il force-push non cancella, e da qui nasce l'ultima decisione.** Rendere un commit irraggiungibile
+non lo toglie dal server: GitHub continua a servirlo per SHA finché non passa la garbage collection,
+e accetta anche il prefisso di sette caratteri. Il feed degli eventi del repository espone **10**
+SHA di `release/1.0`, di cui **7** orfani, tutti ancora serviti, e **2** con il nome dentro. La
+redazione è quindi completa per chi clona, e aggirabile da chi un SHA ce l'ha. **Prima del 18
+settembre va deciso** se chiedere all'assistenza di GitHub la garbage collection su questo
+repository — e verificarla richiedendo uno di quegli SHA, invece di fidarsi della risposta — oppure
+accettare il rischio residuo. Il Product Owner ha deciso lo stesso giorno, e la decisione
+ha una scheda sua: [ADR-0138](#adr-0138).
+
+**E le schede che raccontano la redazione stavano pubblicando le chiavi.** Questa scheda,
+[V-105](Sources.md#v-105) e le citazioni per le slide nominavano cinque commit con l'SHA che
+avevano **prima** della riscrittura, in **15 punti**: citazioni rotte, perché quei commit nella
+storia pubblicata non esistono più, e insieme chiavi funzionanti verso la storia non redatta,
+perché a GitHub il prefisso di sette basta. Riparate a zero il giorno stesso. La regola vale da qui
+in avanti: **nessun file del repository scrive l'SHA di un commit pre-riscrittura**; dove il
+riferimento serve a identificare si mette l'SHA nuovo, e dove la frase descriveva com'era quel
+commit si nomina la cosa invece del commit, perché l'SHA nuovo lì direbbe il falso.
+
 **Alternative scartate.**
 
 - *Lasciare la cronologia com'è*, che è la posizione di ADR-0125. Regge finché il ramo è privato, e
@@ -8893,3 +8918,87 @@ clausola di ADR-0125 torna a valere per sempre, e il nome resta nella storia che
   repository è pubblico e la storia è già stata clonata.
 
 **Fonti:** [V-105](Sources.md#v-105)
+
+---
+
+<a id="adr-0138"></a>
+## ADR-0138 — La rimozione degli oggetti orfani si chiede subito, perché può essere respinta
+
+**Data:** 2026-09-07 · **Stato:** Accettata — chiude l'esposizione residua aperta da
+[ADR-0137](#adr-0137)
+
+**Contesto:** la riscrittura di [ADR-0137](#adr-0137) è stata pubblicata il 7 settembre, e ha fatto
+il suo lavoro: chi clona `release/1.0` non trova il nome del repository d'origine da nessuna parte,
+in nessuna versione storica dei file, in nessun messaggio. Ma un force-push **non cancella**: rende
+gli oggetti irraggiungibili dai rami, non assenti dal server. GitHub continua a servirli a chi li
+chiede per SHA, e accetta anche il prefisso di sette caratteri; il feed degli eventi del repository
+ne espone **sette** così, e **due** portano il nome ([V-105](Sources.md#v-105), dodicesimo punto).
+La documentazione di GitHub dice la stessa cosa in apertura — «the commits with sensitive data may
+still be accessible elsewhere», fra cui «Directly via their SHA-1 hashes in cached views» — e
+indica una sola via per chiuderla: chiedere all'assistenza, che «run a garbage collection on the
+server» ([S-078](Sources.md#s-078)).
+
+Il calendario non è quello di ADR-0137. Lì il termine era la **fusione** del 16, perché dopo non si
+riscrive più; qui il termine è l'**apertura al pubblico** del 18, perché finché il repository è
+privato quegli SHA li può chiedere solo chi vi ha già accesso.
+
+**Decisione.** Cinque punti.
+
+1. *Si chiede la garbage collection all'assistenza, e la si chiede **subito**.* Non perché il
+   rischio sia grave — è basso, e circoscritto a chi già entra — ma perché la coda dell'assistenza
+   non la governiamo, e perché la risposta può essere **no**. Un no il 7 lascia undici giorni per
+   cambiare strada; un no il 17 non lascia niente. **Chiedere presto non serve ad ottenere prima:
+   serve a sapere prima.**
+
+2. *Il ticket non scrive il dato.* [S-078](Sources.md#s-078) elenca che cosa l'assistenza chiede —
+   il nome del repository e il numero di PR coinvolte — e nessuno dei due campi è il dato da
+   rimuovere. Se lo chiederanno, che cosa rispondere è una decisione ulteriore del Product Owner:
+   la perifrasi di [ADR-0125](#adr-0125) vale nei documenti, non necessariamente in un canale
+   privato con l'hosting.
+
+3. *Le precondizioni si dichiarano perché sono state misurate.* La pagina le pone entrambe: nessun
+   fork, e nessuna PR che riferisca i commit. Sono soddisfatte: **0 fork**, e **0 PR coinvolte** —
+   i cinque `refs/pull/*/head` sono tutti antenati di `develop`, mentre i 23 commit riscritti
+   stanno tutti dopo. È una fortuna della topologia, non una precauzione presa: se `release/1.0`
+   fosse mai stata testa di una PR, quel riferimento sarebbe di sola lettura e nessun force-push
+   l'avrebbe potuto spostare.
+
+4. *La rimozione si verifica, non si crede.* Quando l'assistenza risponde che è fatto, si richiede
+   uno degli SHA orfani e si guarda che cosa torna. È la stessa regola che ha retto tutta questa
+   vicenda: chi dichiara e chi controlla non possono essere la stessa persona, e «fatto» detto da
+   qualcun altro è un'ipotesi finché non la si misura. L'esito diventa una scheda di
+   [`Sources.md`](Sources.md), e questa decisione si chiude lì.
+
+5. *Il 16 settembre è il punto di controllo.* Se a quella data la rimozione non è confermata, la
+   scelta torna aperta fra le due alternative scartate qui sotto, e va presa prima del 18. La
+   fusione in `main` **non** dipende da questo e procede comunque: riguarda la storia che si clona,
+   che è già pulita.
+
+**Conseguenze.**
+
+**Il rimedio ha una condizione, e questo caso potrebbe non soddisfarla.** [S-078](Sources.md#s-078)
+lo scrive due volte: «GitHub Support won't remove non-sensitive data, and will only assist in the
+removal of sensitive data in cases where we determine that the risk can't be mitigated by rotating
+affected credentials.» Chi giudica è GitHub. La pagina è pensata per le credenziali, e il criterio
+presuppone un dato **ruotabile**; qui il dato è il nome di un altro repository, che non è una
+credenziale e non si ruota. Può cadere fuori dal criterio da entrambi i lati. È il rischio che
+questa decisione assume, ed è la ragione per cui il punto 1 dice «subito» invece di «entro il 18».
+
+**Il clone di lavoro resta l'unico posto dove la storia non redatta esiste per intero**, nei suoi
+riferimenti `origin/*`. Serve come rete di sicurezza finché la fusione non è fatta, e per la stessa
+ragione non va pubblicato né condiviso. Dopo il 18 va rimosso.
+
+**Alternative scartate.**
+
+- *Aprire un repository pubblico nuovo, con dentro solo la storia riscritta.* È l'unica opzione
+  **certa**: nessun oggetto orfano perché nessun force-push. Costa le cinque PR — che sono
+  materiale didattico, con le review esterne arbitrate dentro — e l'URL di clonazione, che il
+  README cita e che finirebbe sulle slide in due versioni. Resta la strada di riserva se
+  l'assistenza dice di no, e per questo la si tiene percorribile invece di scartarla del tutto.
+- *Non fare niente.* La ritenzione del feed eventi copre il 18 settembre, e **non è verificato** se
+  gli eventi dell'epoca privata diventino visibili quando il repository si apre: è un'ipotesi
+  favorevole non misurata, cioè la specie di premessa che questa vicenda ha già smentito tre volte.
+- *Chiedere il 17, quando si sa se serve.* Confonde «quando serve il risultato» con «quando serve
+  la domanda». La risposta non arriva a comando, e un rifiuto tardivo non lascia alternative.
+
+**Fonti:** [V-105](Sources.md#v-105), [S-078](Sources.md#s-078)

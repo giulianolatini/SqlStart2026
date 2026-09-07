@@ -10617,7 +10617,7 @@ git log --oneline -3 main
 git log --format=%B                                          # 5 messaggi, per 14 righe
 git log -p -U0 | grep -ci <nome del repository d'origine>    # 8 commit col diff sporco
 git grep -c -i <nome del repository d'origine> release/1.0   # e 2 nell'albero di oggi
-git show --numstat --format= 6a7fa71                         # 28 file, +146/-138: pura redazione
+git show --numstat --format= <il commit della redazione>     # 28 file, +146/-138: pura redazione
 
 git clone --no-local .claude/worktrees/release-1.0 ../SqlStart2026-riscrittura
 git-filter-repo --refs 5ce4e5b..release/1.0 --prune-empty never \
@@ -10643,20 +10643,21 @@ uv run --directory app pytest -q && uv run --directory tools pytest -q && make d
 
 - **Esito, primo punto — l'esposizione, e dov'è confinata.** Cinque messaggi di commit nominano il
   repository d'origine, per **14 righe**; otto commit hanno il **diff** sporco; tutti stanno fra
-  `65385ec` e la scheda che li racconta, dentro `release/1.0`. `develop` e `main` sono puliti, il
+  `3f22d6f` e la scheda che li racconta, dentro `release/1.0`. `develop` e `main` sono puliti, il
   che è la ragione per cui l'operazione è possibile oggi e non dopo il 16 settembre. Il nome compare
   in due forme e in due misure diverse: **218 volte** con le maiuscole al loro posto, **6** tutto
   minuscolo.
 
-- **Esito, secondo punto — `6a7fa71` è pura redazione, e il conto lo dimostra.** Il commit che
-  applicò la redazione tocca 28 file e in ognuno aggiunge quasi esattamente quanto toglie:
+- **Esito, secondo punto — la redazione era pura, e il conto lo dimostra.** Il commit che
+  l'applicò — `69321fd` nella storia riscritta, dove ormai è vuoto — toccava 28 file, e in
+  ognuno aggiungeva quasi esattamente quanto toglieva:
   **+146 / −138**, otto righe di scarto in tutto, che sono i paragrafi allungati dalla perifrasi e
   riavvolti. Non porta ADR-0125 con sé — quella scheda entra col commit dopo. È questo a rendere
   lecito applicare la sua redazione **all'indietro**: quel commit non fa altro.
 
 - **Esito, terzo punto — tre regole, e 27 paragrafi presi verbatim.** I 48 blob che portano il nome
   nella forma esatta si risolvono così: **28** coincidono con la versione pre-redazione, e prendono
-  la post-redazione così com'è; **5** accettano la toppa di `6a7fa71` per il loro percorso; **15**
+  la post-redazione così com'è; **5** accettano quella toppa per il loro percorso; **15**
   vanno redatti a mano, per **44 occorrenze**. Dentro questi ultimi, dove il **paragrafo** di
   partenza è identico a quello che la mano umana aveva davanti, si prende la sua resa letterale, a
   capo compresi: **27 paragrafi su 40**. Riavvolgerli da capo avrebbe dato le stesse parole spezzate
@@ -10684,7 +10685,7 @@ uv run --directory app pytest -q && uv run --directory tools pytest -q && make d
   nome **con le maiuscole al loro posto**, come faceva la redazione di ADR-0125. Il blocco comandi
   di [V-094](#v-094) lo scrive **tutto minuscolo**, perché lì è l'argomento di una ricerca che il
   caso non lo distingue. Nessuna delle due passate l'ha visto, e le due righe sono arrivate
-  **nell'albero di oggi**. L'ordine dei fatti è la parte che vale: `6a7fa71` ripulisce il testo, e
+  **nell'albero di oggi**. L'ordine dei fatti è ciò che vale: la redazione ripulisce il testo, e
   il commit **immediatamente successivo** — quello che scrive la scheda per raccontare la pulizia —
   rimette dentro il nome, nel comando che l'aveva cercato. La clausola «84 → 0 nei tracciati» era
   vera quando è stata misurata e falsa nel momento in cui è stata scritta. Le riserve di V-094 lo
@@ -10704,10 +10705,10 @@ uv run --directory app pytest -q && uv run --directory tools pytest -q && make d
   non basta: un albero giusto raggiunto da diff sbagliati resta sbagliato per chi legge la storia.
   Il confronto vero è il **diffstat di ogni commit, prima contro dopo**: file, righe aggiunte,
   righe tolte, insieme dei percorsi. Su 23 commit ne differiscono **4**, e le differenze si sommano
-  esattamente alle otto righe che la perifrasi aggiunge: **+6** su `65385ec` (le sei skill),
-  **+1** su `0227abf`, **+1** su `5716862`, e `6a7fa71` che passa da 28 file a **zero**. È questo
+  esattamente alle otto righe che la perifrasi aggiunge: **+6** su `3f22d6f` (le sei skill),
+  **+1** su `e7fb19d`, **+1** su `72cd01b`, e la redazione che passa da 28 file a **zero**. È questo
   controllo, e non il confronto degli alberi, ad aver scoperto il difetto del quarto punto: il
-  diffstat di `25b5df6` era passato da un uniforme +9/−1 su 12 file a +35/−22.
+  diffstat di `71f4e00` era passato da un uniforme +9/−1 su 12 file a +35/−22.
 
 - **Esito, nono punto — gli invarianti, misurati sull'esito.** L'albero del tip è identico
   all'originale **tranne le due righe del sesto punto** — un file, due righe, ed è la correzione,
@@ -10732,6 +10733,27 @@ uv run --directory app pytest -q && uv run --directory tools pytest -q && make d
   dei nodi è vuoto, e Click emette l'errore d'uso prima che il messaggio dell'applicazione possa
   nominare `mongo-rs-9`. È ambientale, non una regressione della riscrittura.
 
+- **Esito, dodicesimo punto — pubblicata, e che cosa resta sui server di GitHub.** Il Product Owner
+  ha eseguito la push il 7 settembre: `release/1.0` remota a `7916b29`, `develop` e `main` fermi, il
+  worktree riallineato. Rifatte sulla storia pubblicata, le misure tengono: **990 blob distinti e 0
+  sporchi, 174 commit e 0 messaggi sporchi**, sempre senza guardare il caso. Ma il force-push **non
+  cancella**: rende gli oggetti irraggiungibili dai rami, e GitHub continua a servirli per SHA
+  finché non passa la garbage collection — anche col prefisso di sette, verificato chiedendoli. Il
+  feed degli eventi del repository espone **10** SHA di `release/1.0`, **7** dei quali nessun ramo
+  raggiunge più; tutti e sette rispondono ancora, e **due portano il nome**: 3 occorrenze nel
+  messaggio e 21 nel diff restituito per uno, 3 e 4 per l'altro. E da un orfano si cammina ai
+  genitori: quei sette sono porte, non l'inventario di ciò che c'è dietro.
+
+- **Esito, tredicesimo punto — le schede che spiegano la redazione stavano pubblicando le chiavi.**
+  [ADR-0137](Decision.md#adr-0137), questa scheda e le citazioni nominavano cinque commit con l'SHA
+  che avevano **prima** della riscrittura, in **15 punti**. Sono due difetti nello stesso posto:
+  citazioni rotte, perché quei commit nella storia pubblicata non esistono più; e chiavi
+  funzionanti verso la storia non redatta, perché a GitHub il prefisso di sette basta. Riparati a
+  **0**. La regola che li ripara non è una sola: dove il riferimento serve a identificare un commit
+  si scrive l'SHA nuovo, che è anche l'unico vero; dove la frase descrive com'era il commit *prima*
+  della riscrittura si nomina la cosa invece del commit, perché un SHA nuovo lì direbbe il falso —
+  quel commit, oggi, è vuoto.
+
 - **Riserve:** le prove d'integrazione **non sono state misurate**, perché avrebbero richiesto di
   accendere gli stack, e lo stack `01` non va ripulito ([V-090](#v-090)) né lo `03` azzerato. Finché
   restano non misurate, l'invariante «le suite verdi» vale per due terzi. Il censimento è
@@ -10740,10 +10762,60 @@ uv run --directory app pytest -q && uv run --directory tools pytest -q && make d
   spezzato da un a capo dentro una parola, né un'allusione che non nomina. In modalità parziale i
   riferimenti `origin/*` del clone puntano ancora alla storia vecchia, quindi gli oggetti vecchi
   esistono ancora e chiedere «esiste?» risponde di sì anche per uno SHA che nessun ramo raggiunge
-  più: la domanda giusta è «è raggiungibile?», ed è quella che le misure qui sopra pongono. Infine:
-  **la riscrittura non è pubblicata**. Vive in un clone, e il force-push spetta al Product Owner;
-  fino ad allora il repository è quello di prima, e questi numeri descrivono ciò che succederà, non
-  ciò che è già successo.
+  più: la domanda giusta è «è raggiungibile?», ed è quella che le misure qui sopra pongono — ma la
+  risposta di GitHub non coincide con quella di `git`, ed è il dodicesimo punto. Che cosa farne è
+  stato deciso lo stesso giorno da [ADR-0138](Decision.md#adr-0138) — si chiede la garbage
+  collection all'assistenza e la si verifica — ma **decidere non è aver fatto**: finché la
+  rimozione non è confermata richiedendo uno di quegli SHA, la redazione è completa nella storia
+  che si clona e aggirabile da chi conosce quaranta caratteri, o sette, che però il repository non
+  scrive più da nessuna parte. Questa scheda misura; la conferma sarà una misura nuova.
 
 - **Data:** 2026-09-07
-- **Usata da:** ADR-0137
+- **Usata da:** ADR-0137, ADR-0138
+
+---
+
+<a id="s-078"></a>
+### S-078 — GitHub Docs: Removing sensitive data from a repository
+
+- **URL:** https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository
+- **Editore:** GitHub, Inc. — GitHub Docs
+- **Versione documentata:** free-pro-team / GitHub Enterprise Cloud (corrente)
+- **Consultata:** 2026-09-07
+- **Verdetto:** conferma il meccanismo su cui si appoggia [ADR-0138](Decision.md#adr-0138), e vi
+  aggiunge una condizione che questo caso potrebbe non soddisfare
+- **Perché è stata cercata.** Dopo il force-push del 7 settembre gli oggetti orfani erano ancora
+  serviti per SHA ([V-105](#v-105), dodicesimo punto). La strada scelta — chiedere all'assistenza
+  la garbage collection — poggiava su una convinzione diffusa e mai verificata da questo
+  repository. Andava letta la pagina, non ricordata.
+- **Cosa afferma, primo punto — riscrivere e spingere non basta, e la pagina lo dice per prima
+  cosa.** «If you only rewrite your history and force push it, the commits with sensitive data may
+  still be accessible elsewhere:» e ne elenca tre: «In any clones or forks of your repository»,
+  «Directly via their SHA-1 hashes in cached views on GitHub», «Through any pull requests that
+  reference them». È la conferma indipendente della misura del dodicesimo punto di V-105.
+- **Cosa afferma, secondo punto — che cosa fa l'assistenza, e a quali condizioni.** «If you have
+  successfully cleaned up all references other than PRs, and no forks have references to the
+  sensitive data, Support will then:» — «Dereference or delete any affected PRs on GitHub.», «Run a
+  garbage collection on the server to expunge the sensitive data from storage.», «Remove cached
+  views.» Le due precondizioni qui sono soddisfatte: **0 fork** e **0 PR coinvolte** (i cinque
+  `refs/pull/*/head` sono tutti antenati di `develop`, e i commit riscritti stanno tutti dopo).
+- **Cosa afferma, terzo punto — la condizione che può fermare tutto.** «GitHub Support won't remove
+  non-sensitive data, and will only assist in the removal of sensitive data in cases where we
+  determine that the risk can't be mitigated by rotating affected credentials.» La frase compare
+  **due volte** nella pagina, e non è una postilla: è il criterio con cui l'assistenza decide se
+  aiutare. Chi giudica è GitHub, non chi chiede.
+- **Cosa afferma, quarto punto — che cosa chiede il ticket.** «The owner and repository name in
+  question» e «The number of affected pull requests, found in the previous step. This is used by
+  Support to verify you understand how much will be affected.» Nessuno dei due campi chiede di
+  scrivere il dato da rimuovere.
+- **Riserve:** la pagina è scritta per le **credenziali** — la sua prima raccomandazione è
+  revocarle e ruotarle, e il criterio del terzo punto presuppone che il dato sia ruotabile. Il dato
+  di questo caso è il nome di un altro repository: non è una credenziale, e non si ruota. Può
+  quindi cadere fuori dal criterio da entrambi i lati, ed è il rischio che
+  [ADR-0138](Decision.md#adr-0138) assume esplicitamente. Le citazioni qui sopra vengono dal
+  **sorgente Markdown** della pagina (`github/docs`, `main`), non dalla resa HTML: la lettura
+  mediata restituiva un testo mutilo delle
+  parole funzione, che non si può citare. I segnaposto Liquid del sorgente — `{% raw %}{% data
+  variables.product.github %}{% endraw %}` — sono stati risolti in «GitHub».
+- **Data:** 2026-09-07
+- **Usata da:** ADR-0138

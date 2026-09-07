@@ -3704,7 +3704,7 @@ riga: `spazza` non tocca niente che appartenga a una sessione viva.
 
 ### La redazione ha ripulito il testo, e il commit dopo l'ha risporcato
 
-> Il commit `6a7fa71` toglie il nome del repository d'origine da 28 file. Il commit
+> Il commit della redazione toglie il nome del repository d'origine da 28 file. Il commit
 > **immediatamente successivo** è quello che scrive la scheda per raccontare la pulizia — e
 > rimette dentro il nome, **nel comando che l'aveva cercato**.
 
@@ -3770,3 +3770,57 @@ ragione per restringerlo non era la prudenza generica: riscrivere tutto avrebbe 
 `develop`, che avrebbe smesso di essere antenato di `release/1.0`, e la fusione del 16 settembre
 avrebbe **duplicato** la storia invece di unirla. Due effetti collaterali, nessuno dei due visibile
 nel comando che li produce.
+
+---
+
+### Un force-push non cancella: rende irraggiungibile, che è un'altra cosa
+
+> Dopo la riscrittura i vecchi commit non sono raggiungibili da nessun ramo. Ma sono ancora **sul
+> server**, e GitHub continua a servirli a chi li chiede per SHA — accettando anche il prefisso di
+> **sette caratteri**. Il feed degli eventi del repository ne espone sette così, e due portano
+> dentro il nome che la riscrittura aveva tolto.
+
+Fonte: [V-105](Sources.md#v-105), dodicesimo punto; [ADR-0137](Decision.md#adr-0137), Conseguenze.
+
+**Perché una slide:** perché è il punto in cui «l'ho fatto» e «è fatto» si separano, e la platea
+scoprirà di aver creduto il contrario. `git` risponde a «è raggiungibile?»; l'hosting risponde a
+«esiste?», e sono domande diverse. La riscrittura è completa per chiunque cloni — e aggirabile da
+chiunque conservi quaranta caratteri, o sette. Il rimedio non è un altro comando: è una richiesta
+all'assistenza, con un'attesa che non si controlla, e va **verificata richiedendo uno di quegli
+SHA** invece di credere alla risposta.
+
+---
+
+### Le schede che spiegavano la redazione ne pubblicavano le chiavi
+
+> Per raccontare la riscrittura, ADR-0137 e V-105 nominavano i commit ripuliti con l'SHA che
+> avevano **prima**: quindici volte, cinque commit. Erano insieme citazioni rotte — quei commit
+> nella storia pubblicata non esistono più — e chiavi funzionanti verso la storia non redatta.
+
+Fonte: [V-105](Sources.md#v-105), tredicesimo punto.
+
+**Perché una slide:** è la terza volta, nella stessa vicenda, che il guasto nasce dal **documento
+che spiega la difesa** e non dalla difesa: prima il comando che cercava il nome e ce lo rimetteva
+dentro, poi la verifica che condivideva l'assunzione con ciò che sorvegliava, adesso la scheda che
+pubblica gli identificatori di ciò che ha nascosto. Documentare una misura di sicurezza è **parte**
+di quella misura, e va controllata con lo stesso controllo. Qui la riparazione ha due regole, non
+una: dove il riferimento identifica si scrive l'SHA nuovo; dove la frase descrive com'era il commit
+*prima*, si nomina la cosa invece del commit — perché quel commit, oggi, è vuoto, e l'SHA nuovo lì
+direbbe il falso.
+
+---
+
+### L'uscita di sicurezza ha una condizione, e va letta prima di contarci
+
+> «GitHub Support won't remove non-sensitive data, and will only assist in the removal of sensitive
+> data in cases where we determine that the risk can't be mitigated by rotating affected
+> credentials.»
+
+Fonte: [S-078](Sources.md#s-078) — GitHub Docs, Removing sensitive data from a repository.
+
+**Perché una slide:** il consiglio che circola è «riscrivi la storia e chiedi a GitHub di fare la
+garbage collection», e suona come una procedura. Non lo è: è una **richiesta**, e chi la valuta è
+l'altra parte. Il criterio con cui la valuta presuppone per giunta che il dato sia una credenziale
+— qualcosa che si può *ruotare* —, e un dato che non si ruota può cadere fuori da entrambi i lati
+della frase. Da qui la sola cosa che si controlla davvero: **chiedere presto**. Non per ottenere
+prima, ma per sapere prima, mentre un no è ancora rimediabile.
