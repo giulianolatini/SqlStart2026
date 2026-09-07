@@ -20,7 +20,7 @@ di [`06-sviluppo`](../../README.md#06-sviluppo--come-è-fatto-il-lab): non «che
 | **Origine dei documenti** | `Docs/Concetti-Generali/` |
 | **Origine delle skill** | `.claude/skills/` |
 | **Ripreso il** | 6 settembre 2026 |
-| **Entrato con** | `65385ec` (skill, verbatim), `25b5df6` (adattamento delle skill) |
+| **Entrato con** | `3f22d6f` (skill, verbatim), `71f4e00` (adattamento delle skill) |
 
 Sono arrivate due cose insieme, e vanno tenute distinte perché hanno statuto diverso.
 

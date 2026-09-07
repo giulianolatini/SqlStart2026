@@ -7853,9 +7853,9 @@ differisce solo nella chiusura — è la somiglianza a rendere efficace la trapp
    revisione esterna: nel repository entra soltanto il foglio archiviato.
 
 2. **Verbatim prima, adattamento dopo, in due commit distinti.** Il pacchetto entra byte per byte
-   come sta a monte ([`65385ec`](https://github.com/giulianolatini/SqlStart2026/commit/65385ec)),
+   come sta a monte ([`3f22d6f`](https://github.com/giulianolatini/SqlStart2026/commit/3f22d6f)),
    verificato con `diff -r` contro il clone; l'adattamento è il commit successivo
-   ([`25b5df6`](https://github.com/giulianolatini/SqlStart2026/commit/25b5df6)). Così ciò che
+   ([`71f4e00`](https://github.com/giulianolatini/SqlStart2026/commit/71f4e00)). Così ciò che
    abbiamo cambiato **è un diff**, leggibile e discutibile, invece di un'affermazione. È la stessa
    sequenza che il repository d'origine usò per sé.
 

@@ -7542,10 +7542,10 @@ di Git Flow — `main`, `develop`, `feature/NN-nome`, `release/1.0` — e differ
 chiusura. Una skill che si accende da sola e propone quel comando non è un testo di riferimento
 sbagliato di poco: è una trappola che somiglia alla verità.
 
-**Verbatim prima, adattamento dopo.** Il pacchetto è entrato byte per byte in `65385ec`, verificato
+**Verbatim prima, adattamento dopo.** Il pacchetto è entrato byte per byte in `3f22d6f`, verificato
 con `diff -r` contro il clone e passato al setaccio dei segreti — una segnalazione, una fixture,
 esclusa confrontando i prefissi SHA-256 senza stampare né l'una né l'altra. L'adattamento è il
-commit successivo, `25b5df6`: dieci righe per file, 108 in tutto, la `description` e un blocco in
+commit successivo, `71f4e00`: dieci righe per file, 108 in tutto, la `description` e un blocco in
 testa. **I corpi restano quelli del repository d'origine**, e non per pigrizia: con i corpi
 intatti un miglioramento fatto a monte si riporta con un diff, con i corpi riscritti si riporta
 con una fusione a mano. È il prezzo che il runbook d'origine dichiara, e conviene tenerlo basso.
@@ -7614,7 +7614,7 @@ sessione si ferma qui per esaurimento del limite, non per un ostacolo tecnico.
 
 Che i rilievi di un recensore esterno si arbitrano **eseguendo**, e che un rilievo respinto
 si motiva con la stessa cura di uno accolto. Sette dei diciotto rilievi di `strumenti`
-toccavano codice e sono corretti nel commit `096bdbd`; uno — C-5 — è respinto, e la
+toccavano codice e sono corretti nel commit `b2677a9`; uno — C-5 — è respinto, e la
 motivazione è più utile della correzione che chiedeva: `reset-01` usa `down -v`, che segue
 la selezione del progetto ed è quindi **immune** al difetto di C-4. Applicare il rimedio
 proposto — nominare i volumi — avrebbe *introdotto* in `reset-01` il difetto che C-4
@@ -7818,7 +7818,7 @@ resta il **16 settembre**; i tre stack oggi dicono tutti `mongod 7.0.40`.
 
 **La sessione si sospende qui, su richiesta del PO** — «sono troppo stanco per decidere,
 riprendiamo domani». Non c'è lavoro a metà: albero pulito, `release/1.0` allineata a
-`origin` su `7f50e66`, 650 unitarie, 66 di integrazione, 183 sugli strumenti, `mypy` e
+`origin` su `d4134fe`, 650 unitarie, 66 di integrazione, 183 sugli strumenti, `mypy` e
 `docs-check` verdi. **Si riprende dalle decisioni**, che sono tutte sue e nessuna urgente
 tranne una: il repository diventa pubblico fra dodici giorni, quindi la scelta se
 riscrivere la storia dei commit per togliere il nome del repository d'origine ha una

@@ -9770,14 +9770,14 @@ mongodb-27017.sock
 git clone --branch step/azure-policy/allineamento-e-fase-1 --depth 1 \
   <URL del repository d'origine, privato> /tmp/origine
 diff -r /tmp/origine/.claude/skills .claude/skills
-python3 rimisura.py                       # legge da `git show 65385ec:<file>`
+python3 rimisura.py                       # legge da `git show 3f22d6f:<file>`
 bash .claude/skills/revisione-pr/tests/test-revisione.sh
 bash .claude/skills/changelog-di-chiusura/tests/test-changelog.sh
 bash .claude/skills/worktree-di-step/tests/test-step.sh
 ```
 
 - **Ambiente:** portatile Apple Silicon, macOS 25.6, `git` di sistema, Python 3.13, nessuna
-  rete durante le prove. Il pacchetto misurato è quello del commit `65385ec` di
+  rete durante le prove. Il pacchetto misurato è quello del commit `3f22d6f` di
   `release/1.0`, cioè la copia **prima** dell'adattamento: 33 file, 272 KB, 12 skill.
   Il confronto `diff -r` contro il clone non ha prodotto alcuna riga: le due copie sono
   identiche byte per byte.
