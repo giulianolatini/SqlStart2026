@@ -7826,3 +7826,86 @@ scadenza, le altre no.
 
 Stato aggiornato: decisioni fino ad **ADR-0136**, verifiche fino a **V-104**, misure
 dell'applicazione fino a **M-064**, note di metodo fino alla **260**.
+
+## 2026-09-07 — Tre lacune trovate leggendo il repository da estraneo, e un guasto che non c'era
+
+Il PO ha riletto il repository mettendosi nei panni di chi lo apre la prima volta, e ha
+segnalato tre cose che non si trovavano: come si avvia lo sharded cluster, come si lancia
+l'applicazione contro le tre architetture vedendone i risultati da terminale, e con quale
+comando si registrano i filmati `.mp4` da tenere in `~/SqlStart2026-registrazioni`. Le prime
+due **c'erano già** — nel runbook, in `make help`, nelle pagine di architettura: mancava il
+punto d'ingresso, non il contenuto. La terza non esisteva affatto.
+
+### Deciso
+
+Che lo schermo si registra con uno strumento del repository, e che **la passata muta è la
+prima delle due** ([ADR-0140](Decision.md#adr-0140)). `tools/registra-schermo.sh` più
+`make filmato NOME=… [AUDIO=no] [DURATA=…]`: gli indici dei dispositivi AVFoundation si
+scoprono a ogni corsa perché cambiano quando si installa o si toglie un'applicazione, il
+codificatore è quello hardware perché le scene di questo talk **si misurano mentre si
+girano** e un encoder software falserebbe il numero, e a fine corsa lo strumento rilegge il
+file e si ferma con un errore se la voce era richiesta e la traccia non c'è. Fra le
+alternative scartate, OBS — installato, ma la sua configurazione vive nelle preferenze
+dell'operatore e non in un file che si possa rivedere in una PR — e `screencapture -v`, che
+il microfono non lo prende affatto.
+
+Che le tre lacune si chiudono con un **punto d'ingresso**, non con una copia:
+[`docs/guida-rapida.md`](guida-rapida.md) sta fra il README e il runbook, e rimanda invece di
+duplicare. L'«Avvio rapido» del README arriva ora allo sharded cluster con le sue due taglie
+e all'applicazione lanciata contro tutte e tre.
+
+### Misurato
+
+[V-106](Sources.md#v-106), sette punti su questa macchina, e il quinto è il risultato che
+vale la sessione. Lo strumento annunciava «2,0 s» per un filmato da tre secondi, e la prima
+spiegazione plausibile incolpava `-framerate 30`. Misurata, quell'opzione è **inerte**: con e
+senza, `-t 3` dà 2,966667 e 2,966668 secondi e in tutti e due i casi 30 fps. Il guasto stava
+nella riga che *stampava* la durata: `ffprobe` scrive `duration=2.966668` col punto, sempre,
+perché è un formato dati, e `awk` in locale italiana legge quel punto come fine del numero.
+In isolamento, `echo 2.966668 | awk '{printf "%.1f", $1}'` dà **2,0** in italiano e **3.0**
+con `LC_ALL=C`. Il file era giusto; sbagliato era il numero che lo raccontava. La stessa
+causa è stata cercata in `preflight.sh`, che usa l'identico idioma: là il valore in ingresso è
+un intero puro e le soglie confrontano interi, quindi non si presenta.
+
+La correzione è stata provata dal vero a fine sessione, con il PO presente: cinque secondi
+muti, annunciati **5,0 s** dallo strumento e misurati `4.966668` da `ffprobe`, 147 fotogrammi
+a 30 fps, **zero** tracce audio con `AUDIO=no`, 3 757 432 byte. Prima della correzione quella
+stessa riga avrebbe scritto «4,0 s».
+
+### Note di metodo
+
+261. **Lo strumento che misura è sospetto quanto l'oggetto misurato.** L'ipotesi
+     sull'acquisizione era ragionevole, citava un'opzione vera e spiegava il sintomo; ha
+     retto finché non si è guardato **il file** invece del suo resoconto. Il punto e la
+     virgola non sono un dettaglio tipografico: `2.966668` è un dato, «2,966668» è una
+     frase, e una locale che le confonde falsa i numeri senza sbagliare una riga di codice.
+     La regola pratica: si legge alla maniera dei dati e si scrive alla maniera di chi
+     legge, e quando un numero sorprende si verifica prima chi lo ha stampato.
+
+262. **«È già documentato» non chiude un rilievo di visibilità.** Due lacune su tre erano
+     coperte da pagine esistenti e ben scritte, e restavano lacune. Un repository esaustivo
+     per scelta paga questo prezzo: più cresce, più è facile che una cosa scritta bene
+     diventi introvabile. La regola pratica: quando manca qualcosa, cercarla prima di
+     riscriverla — se esiste, la consegna è un punto d'ingresso che rimanda, così la fonte
+     resta una sola e non nascono due versioni che divergono.
+
+### Prossimo passo
+
+**Domani si esegue il runbook del talk**, per volontà del PO. È la passata a mano che era
+rimasta in sospeso, e adesso ha accanto due strumenti che prima non c'erano: la guida rapida,
+che dice cosa accendere e cosa aspettarsi, e `make filmato`, che permette di girare la
+passata muta di ogni scena prima di raccontarla. Da tenere presente durante l'esecuzione: il
+falso allarme di WiredTiger sugli stack accesi da molte ore, e l'appuntamento di
+[ADR-0058](Decision.md#adr-0058) sul **16 settembre** per MongoDB 8.0.30.
+
+Restano aperte, e sono tutte del PO: `stack-docker` G-1, C-2 e C-4; `talk` G-7; la riserva di
+[ADR-0098](Decision.md#adr-0098) sull'Atto III; l'adozione di `mutmut`/`cosmic-ray`
+([ADR-0135](Decision.md#adr-0135)) e il bersaglio `make` per la spazzata dei database orfani
+([ADR-0136](Decision.md#adr-0136)); la segnalazione a monte dei due difetti della skill
+importata ([ADR-0124](Decision.md#adr-0124)); e la fusione del 16 settembre con il tag `v1.0`.
+
+**La sessione si chiude qui, su richiesta del PO.** Non c'è lavoro a metà: albero pulito,
+`release/1.0` allineata a `origin`, `docs-check` verde e 196 prove sugli strumenti.
+
+Stato aggiornato: decisioni fino ad **ADR-0140**, verifiche fino a **V-106**, fonti fino a
+**S-079**, misure dell'applicazione fino a **M-064**, note di metodo fino alla **262**.
