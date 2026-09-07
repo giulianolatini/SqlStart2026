@@ -11,6 +11,14 @@ l'applicazione `mongolab` **accanto al suo codice**, perché sono pagine che si 
 sorgenti aperti nella finestra di fianco. Quelle pagine citano queste e non le duplicano; il
 controllo dei collegamenti percorre entrambe le cartelle.
 
+## Da dove si comincia
+
+**[`guida-rapida.md`](guida-rapida.md) — da clone a tutto acceso.** I tre stack con le loro prove
+end-to-end, `mongolab` lanciato contro tutte e tre le architetture, le scene, e il comando per
+registrare un filmato. Comandi e output atteso, niente teoria: è la pagina per chi vuole vedere
+qualcosa girare prima di leggere perché funziona. Il [runbook](05-talk/runbook-demo.md) è il
+gradino dopo, ed è quello che si tiene aperto il giorno del talk.
+
 ## Come si legge
 
 Il repository è più esteso di quanto entri in sessanta minuti, e lo è per scelta: i criteri
