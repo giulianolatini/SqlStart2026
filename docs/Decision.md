@@ -8769,3 +8769,127 @@ locale. Due macchine diverse contro lo stesso MongoDB si scambierebbero i numeri
 
 **Fonti:** [M-062](../app/docs/Sources.md#m-062), [M-063](../app/docs/Sources.md#m-063),
 [M-053](../app/docs/Sources.md#m-053)
+
+---
+
+<a id="adr-0137"></a>
+## ADR-0137 — La cronologia di `release/1.0` si riscrive prima della fusione, perché la finestra si chiude lì
+
+**Data:** 2026-09-07 · **Stato:** Accettata — modifica la clausola finale di [ADR-0125](#adr-0125)
+
+**Contesto:** [ADR-0125](#adr-0125) ha tolto il nome del repository d'origine dall'albero di lavoro
+e ha chiuso lasciando aperto ciò che non poteva chiudere da sola: «La cronologia dei commit
+**non** è stata toccata: chi cloni troverà il nome nei messaggi e nei diff anteriori a questa
+scheda. Riscrivere la cronologia è una decisione diversa, con costi diversi, e spetta al Product
+Owner.» Il 7 settembre il Product Owner ha deciso, e fra le tre forme proposte — non fare niente,
+riscrivere i soli messaggi, riscrivere messaggi e contenuti — ha scelto la terza.
+
+Ciò che rende la decisione urgente non è la gravità dell'esposizione: è il calendario. Il **16
+settembre** è «il giorno della `release/1.0`» ([ADR-0058](#adr-0058), [ADR-0080](#adr-0080)), e il
+Product Owner ha fissato lì la fusione in `main`, perché il 18 chi clona il repository pubblico
+deve trovarci una `v1.0`. Oggi la storia che porta il nome vive su un ramo solo, mai fuso, che
+nessuno ha ancora clonato: `develop` e `main` ne sono puliti. Riscriverlo costa un force-push su un
+ramo di lavoro. Dopo la fusione gli stessi commit sarebbero antenati di `main`, e la stessa
+operazione riscriverebbe il ramo che il pubblico legge. **La finestra non si chiude perché scade un
+termine: si chiude perché il 16 quel ramo smette di essere privato.**
+
+Misurata, l'esposizione è piccola e delimitata ([V-105](Sources.md#v-105)): **5 messaggi di commit**
+per 14 righe e **8 commit il cui diff contiene il nome**, tutti fra `65385ec` e la scheda che li
+racconta. E — questa la scoperta che ha allargato il lavoro — **due occorrenze nell'albero di
+oggi**, che ADR-0125 dava a zero.
+
+**Decisione.** Sette punti.
+
+1. *La redazione non si reinventa: si applica all'indietro quella che esiste già.* Il commit
+   `6a7fa71` **è** la redazione, scritta a mano: contestuale, grammaticale, riavvolta a 100
+   colonne. Rifarla con un elenco di sostituzioni darebbe un testo diverso da quello che il
+   repository pubblica oggi, e la differenza si vedrebbe nel diff di ogni commit successivo. I blob
+   sporchi sono stati trattati con tre regole, in ordine di forza: dove il blob storico coincide con
+   la versione pre-redazione si prende la versione post-redazione così com'è (**28 blob**); dove
+   esiste la toppa di `6a7fa71` per quel percorso, la si applica (**5**); il resto si redige a mano
+   (**15 blob, 44 occorrenze**). E anche lì, dove il **paragrafo** di partenza è identico a quello
+   che la mano umana aveva davanti, si prende la sua resa *verbatim*, a capo compresi (**27
+   paragrafi**).
+
+2. *La quarta regola, che è nata da un difetto.* Le tre regole sopra cercano il nome **con le
+   maiuscole al loro posto**, come faceva la redazione di ADR-0125. Il blocco comandi di
+   [V-094](Sources.md#v-094) il nome lo scrive **tutto minuscolo**, perché lì è l'argomento di una
+   ricerca che il caso non lo distingue — e nessuna delle due passate l'ha visto. Due righe sono
+   arrivate fino all'albero di oggi. La quarta regola sostituisce quelle due righe con il
+   segnaposto `<nome del repository d'origine>`, nella forma che [V-092](Sources.md#v-092) usa già
+   per l'URL di clonazione, su **3 blob** in più. Da qui in avanti ogni controllo di questa faccenda
+   si fa **senza guardare il caso**.
+
+3. *Il taglio è parziale, e la ragione sono le firme.* La riscrittura non conserva le firme GPG. Il
+   commit iniziale di `main` e il merge di testa di `develop` sono firmati dall'interfaccia web di
+   GitHub: riscrivere tutta la storia le toglierebbe in silenzio, per ripulire commit che il nome
+   non lo contengono nemmeno. La riscrittura parte quindi da `5ce4e5b`: **23 commit riscritti su
+   172**, 149 intatti con le loro firme.
+
+4. *`6a7fa71` diventa vuoto, e resta.* Se la redazione è già applicata a monte, il commit che la
+   applicava non ha più niente da applicare: da 28 file passa a zero. Quel vuoto è la **prova** che
+   era pura redazione e non portava altro con sé. Resta in cronologia perché il suo messaggio è la
+   sede in cui si spiega la perifrasi, e perché segna il giorno in cui la decisione è stata presa.
+   Toglierlo è un flag di distanza, se il Product Owner preferisce così.
+
+5. *Gli invarianti si misurano, non si dichiarano.* Sono sei, tutti verificati prima di consegnare:
+   l'albero del tip identico all'originale **tranne le due righe che erano il difetto**; zero blob e
+   zero messaggi sporchi su tutti i rami locali, a occhi chiusi sul caso; `develop` ancora antenato
+   di `release/1.0`; le suite verdi; le citazioni di SHA riparate; `develop` e `main` fermi allo
+   stesso commit di prima.
+
+6. *Il diffstat per commit è l'invariante che conta davvero.* Confrontare il tip non basta: un
+   albero giusto raggiunto da diff sbagliati resta sbagliato per chiunque legga la storia invece
+   dell'ultima versione. Prima e dopo, commit per commit, devono coincidere il numero di file, le
+   righe aggiunte, le righe tolte e l'insieme dei percorsi — tranne dove la redazione aggiunge
+   righe, e lì il conto deve tornare **esatto**. È questo controllo, e nessun altro, che ha scoperto
+   il difetto raccontato in [V-105](Sources.md#v-105).
+
+7. *Il force-push lo fa il Product Owner.* La riscrittura vive in un clone di lavoro, fuori dal
+   repository; da qui esce una riga sola, misurata, e chi ha titolo a riscrivere un ramo condiviso
+   la esegue. È la stessa regola delle PR: chi decide preme il tasto.
+
+**Conseguenze.**
+
+**L'albero di oggi cambia di due righe, e il cambiamento è il punto.** La clausola «84 → 0 nei
+tracciati» di [V-094](Sources.md#v-094) era vera quando è stata misurata e falsa nel momento in cui
+è stata scritta: il commit che racconta la redazione ha rimesso il nome dentro il comando che
+l'aveva cercato. Il blocco comandi di quella verifica ora porta un segnaposto, e come per
+[V-093](Sources.md#v-093) **non è più eseguibile da fuori** — resta eseguibile da chi il repository
+d'origine lo conosce.
+
+**Gli SHA cambiano, e la documentazione li cita.** Ventitré commit hanno un identificatore nuovo, e
+tredici citazioni in cinque file li nominavano — alcune due volte sulla stessa riga, una nei
+backtick e una dentro l'URL di GitHub, che è il modo più facile di ripararne metà credendo di aver
+finito. Sono state riparate nello stesso clone, con un commit separato, e ricontate a zero.
+
+**Il checkout principale e il worktree `release-1.0` restano appesi alla vecchia storia.** Dopo il
+force-push vanno riallineati, e vanno riallineati con la cura di [ADR-0056](#adr-0056): i `.env`
+degli stack `02` e `03` non sono tracciati e non si rigenerano da soli.
+
+**Il 16 settembre la strada si chiude.** Se la riscrittura non è pubblicata prima della fusione, la
+clausola di ADR-0125 torna a valere per sempre, e il nome resta nella storia che il pubblico clona.
+
+**Alternative scartate.**
+
+- *Lasciare la cronologia com'è*, che è la posizione di ADR-0125. Regge finché il ramo è privato, e
+  cade il 16 settembre. Tenerla costa un nome che nessuno cerca e che chiunque trova con una
+  ricerca nei diff; cambiarla costa un force-push su un ramo che non ha altri lettori. Oggi il
+  secondo prezzo è più basso; dopo la fusione non lo sarà più.
+- *Riscrivere i soli messaggi.* Ripulisce 5 messaggi su 5 e lascia 8 diff con il nome dentro. È la
+  redazione che **sembra** fatta: chi guarda i soggetti non trova niente, chi guarda i contenuti
+  trova tutto. Scartata dal Product Owner, che ha scelto la forma larga.
+- *Un elenco di sostituzioni meccaniche sul testo di tutta la storia.* È lo strumento che gli
+  attrezzi di riscrittura offrono proprio per questo, ed è il modo più rapido di ottenere il testo
+  sbagliato: la redazione umana cambia la reggenza delle frasi, e un sostitutore che non sa la
+  grammatica produce esattamente le frasi false che [ADR-0125](#adr-0125) aveva scartato in
+  partenza.
+- *Riscrivere tutta la storia, per non dover scegliere la base.* Un argomento in meno da passare, e
+  due firme GPG in meno nel repository — di commit che con questa faccenda non c'entrano niente.
+- *Correggere le due righe minuscole con un commit in cima, invece di riscrivere.* Ripulisce
+  l'albero che si legge e lascia il nome in tre versioni storiche dello stesso file: esattamente la
+  metà di lavoro che questa scheda esiste per non fare.
+- *Rimandare a dopo il talk.* È l'alternativa che si sceglie da sé, se non si sceglie: dopo il 18 il
+  repository è pubblico e la storia è già stata clonata.
+
+**Fonti:** [V-105](Sources.md#v-105)

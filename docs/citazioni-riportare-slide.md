@@ -3699,3 +3699,74 @@ creazione delle fixture che nessuno verifica. La prova scritta per fissare il ri
 rossa alla prima corsa. **Un'assunzione tacita sull'ordine costa un modo silenzioso di cancellare
 lavoro vivo; un residuo di troppo costa una corsa.** L'invariante che è rimasto si dice in una
 riga: `spazza` non tocca niente che appartenga a una sessione viva.
+
+---
+
+### La redazione ha ripulito il testo, e il commit dopo l'ha risporcato
+
+> Il commit `6a7fa71` toglie il nome del repository d'origine da 28 file. Il commit
+> **immediatamente successivo** è quello che scrive la scheda per raccontare la pulizia — e
+> rimette dentro il nome, **nel comando che l'aveva cercato**.
+
+Fonte: [ADR-0137](Decision.md#adr-0137), misurato in [V-105](Sources.md#v-105).
+
+**Perché una slide:** perché la clausola «84 occorrenze → 0 nei tracciati» di
+[V-094](Sources.md#v-094) era **vera quando è stata misurata e falsa nel momento in cui è stata
+scritta**. La misura è arrivata prima del testo che la riporta, e il testo che la riporta contiene
+l'oggetto misurato. È il caso limite che nessuna disciplina di verifica prevede: non «ho misurato
+male», non «è cambiato dopo», ma «l'atto di documentare la misura l'ha invalidata». Si racconta in
+trenta secondi e resta addosso.
+
+---
+
+### Una guardia che condivide un'assunzione con ciò che sorveglia non la può violare
+
+> La redazione cercava il nome con le maiuscole al loro posto. La verifica che controllava la
+> redazione cercava il nome con le maiuscole al loro posto. Il nome, in due righe, era scritto
+> tutto minuscolo — perché lì era l'argomento di una ricerca che il caso non lo distingue.
+
+Fonte: [V-105](Sources.md#v-105) — il sesto punto per il caso delle maiuscole, il quarto per lo
+stesso guasto in un'altra forma: la guardia sulle tabelle cercava le righe che cominciano con `|`,
+e dentro un `> [!IMPORTANT]` le righe di tabella cominciano con `> |`.
+
+**Perché una slide:** è la lezione generale, e vale ben oltre questo repository. Due controlli
+indipendenti non sono indipendenti se poggiano sulla stessa assunzione: contarli come due dà una
+falsa sicurezza esattamente dove non ce n'è. In questo repository è capitato **due volte in due
+giorni**, su due assunzioni diverse — «il nome si scrive così» e «una riga di tabella comincia
+con `|`» — e nessuna delle due volte l'ha trovato una prova automatica: la prima l'ha trovata il
+diff, la seconda l'ha trovata **il caso, leggendo un blocco di comandi per tutt'altro motivo**.
+
+---
+
+### Un albero giusto raggiunto da diff sbagliati resta sbagliato
+
+> Confrontare la versione finale non basta. Il confronto che conta è il **diffstat di ogni
+> commit, prima contro dopo**: file, righe aggiunte, righe tolte, insieme dei percorsi. Su 23
+> commit riscritti ne differiscono 4, e le differenze si sommano **esattamente** alle otto righe
+> che la perifrasi aggiunge.
+
+Fonte: [ADR-0137](Decision.md#adr-0137), sesto punto della decisione.
+
+**Perché una slide:** perché è l'invariante che ha fatto il lavoro. Il confronto ovvio — l'albero
+del tip — era verde mentre la riscrittura schiacciava una tabella dentro il paragrafo che la
+precede: quel guasto stava in un commit di mezzo, e l'ultima versione non lo mostrava. Chi riscrive
+una storia sta consegnando **la storia**, non l'ultima versione, e la sola verifica onesta è quella
+che guarda ciò che consegna. Vale identica per i database: uno stato finale corretto non dice
+niente sulla correttezza delle transazioni che l'hanno prodotto.
+
+---
+
+### Riscrivere la storia toglie le firme, comprese quelle dei commit che non c'entrano
+
+> Il commit iniziale di `main` e il merge di testa di `develop` sono firmati dall'interfaccia web
+> di GitHub. Una riscrittura completa le avrebbe tolte **in silenzio**, per ripulire commit che
+> il nome non lo contengono nemmeno.
+
+Fonte: [ADR-0137](Decision.md#adr-0137), terzo punto; misurato in [V-105](Sources.md#v-105).
+
+**Perché una slide:** il costo di una riscrittura non si paga solo dove si riscrive. Qui la cura è
+stata restringere il taglio — **23 commit su 172**, gli altri 149 intatti con le loro firme — e la
+ragione per restringerlo non era la prudenza generica: riscrivere tutto avrebbe cambiato l'SHA di
+`develop`, che avrebbe smesso di essere antenato di `release/1.0`, e la fusione del 16 settembre
+avrebbe **duplicato** la storia invece di unirla. Due effetti collaterali, nessuno dei due visibile
+nel comando che li produce.

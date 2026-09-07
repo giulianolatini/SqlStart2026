@@ -10603,3 +10603,147 @@ git log --oneline -3 main
 
 - **Data:** 2026-09-06
 - **Usata da:** ADR-0134
+
+---
+
+<a id="v-105"></a>
+### V-105 — La cronologia di `release/1.0` riscritta: gli invarianti che tengono, e le due righe che due passate di redazione non avevano visto
+
+- **Comandi:** la misura dell'esposizione, la riscrittura in un clone di lavoro, e gli invarianti
+  dopo. Il nome cercato è scritto col segnaposto di [V-094](#v-094): metterlo per esteso qui
+  rimetterebbe nel repository proprio ciò che questa verifica racconta di aver tolto.
+
+```bash
+git log --format=%B                                          # 5 messaggi, per 14 righe
+git log -p -U0 | grep -ci <nome del repository d'origine>    # 8 commit col diff sporco
+git grep -c -i <nome del repository d'origine> release/1.0   # e 2 nell'albero di oggi
+git show --numstat --format= 6a7fa71                         # 28 file, +146/-138: pura redazione
+
+git clone --no-local .claude/worktrees/release-1.0 ../SqlStart2026-riscrittura
+git-filter-repo --refs 5ce4e5b..release/1.0 --prune-empty never \
+    --prune-degenerate never --blob-callback "$CB_BLOB" --commit-callback "$CB_COMMIT"
+
+git diff --numstat <vecchio>^ <vecchio>      # 23 volte, contro il gemello riscritto
+git merge-base --is-ancestor develop release/1.0
+uv run --directory app pytest -q && uv run --directory tools pytest -q && make docs-check
+```
+
+- **Ambiente:** portatile Apple Silicon, macOS 26.6, 7 settembre 2026. `git` di sistema e
+  `git-filter-repo` da Homebrew. Il lavoro si è svolto **in un clone**, mai nel repository:
+  `~/Sviluppo/GITHUB/SqlStart2026-riscrittura`, con i due `.env` raggiunti per collegamento
+  ([ADR-0083](Decision.md#adr-0083)). Repository ancora **privato**. Demone Docker **spento**:
+  le prove d'integrazione non erano misurabili, ed è dichiarato invece che aggirato.
+
+- **Che cosa si voleva sapere:** [ADR-0125](Decision.md#adr-0125) ha ripulito l'albero e ha lasciato
+  la cronologia com'era, dichiarando che riscriverla è una decisione del Product Owner. Il Product
+  Owner l'ha presa. Prima di eseguirla servivano tre risposte: **quanto** nome c'è davvero e dove;
+  **che cosa** deve restare identico perché la riscrittura sia una redazione e non un rifacimento;
+  e **come accorgersi** che qualcosa è cambiato per sbaglio, dato che il confronto ovvio —
+  l'albero finale — è proprio quello che una riscrittura sbagliata può lasciare intatto.
+
+- **Esito, primo punto — l'esposizione, e dov'è confinata.** Cinque messaggi di commit nominano il
+  repository d'origine, per **14 righe**; otto commit hanno il **diff** sporco; tutti stanno fra
+  `65385ec` e la scheda che li racconta, dentro `release/1.0`. `develop` e `main` sono puliti, il
+  che è la ragione per cui l'operazione è possibile oggi e non dopo il 16 settembre. Il nome compare
+  in due forme e in due misure diverse: **218 volte** con le maiuscole al loro posto, **6** tutto
+  minuscolo.
+
+- **Esito, secondo punto — `6a7fa71` è pura redazione, e il conto lo dimostra.** Il commit che
+  applicò la redazione tocca 28 file e in ognuno aggiunge quasi esattamente quanto toglie:
+  **+146 / −138**, otto righe di scarto in tutto, che sono i paragrafi allungati dalla perifrasi e
+  riavvolti. Non porta ADR-0125 con sé — quella scheda entra col commit dopo. È questo a rendere
+  lecito applicare la sua redazione **all'indietro**: quel commit non fa altro.
+
+- **Esito, terzo punto — tre regole, e 27 paragrafi presi verbatim.** I 48 blob che portano il nome
+  nella forma esatta si risolvono così: **28** coincidono con la versione pre-redazione, e prendono
+  la post-redazione così com'è; **5** accettano la toppa di `6a7fa71` per il loro percorso; **15**
+  vanno redatti a mano, per **44 occorrenze**. Dentro questi ultimi, dove il **paragrafo** di
+  partenza è identico a quello che la mano umana aveva davanti, si prende la sua resa letterale, a
+  capo compresi: **27 paragrafi su 40**. Riavvolgerli da capo avrebbe dato le stesse parole spezzate
+  in punti diversi, e ogni differenza di quel genere diventa rumore nel diff dei commit successivi.
+
+- **Esito, quarto punto — un paragrafo che si è mangiato una tabella.** La prima stesura della
+  redazione a mano ha prodotto, in `.claude/skills/workflow-conventions/SKILL.md`, una riga così:
+  `conflitto vince la scheda. | Decisione | Qui è già | Scheda | |---|---|---| | 1. Merge strategy`.
+  Il riavvolgimento aveva schiacciato una tabella dentro il paragrafo che la precede. La causa è di
+  una riga: la guardia che protegge le righe di struttura cercava le tabelle fra quelle che
+  cominciano con `|`, e **dentro un `> [!IMPORTANT]` le righe di tabella cominciano con `> |`**.
+  Nessuna prova l'ha trovato: è saltato fuori **guardando il diff**. Il rimedio ha due metà — la
+  guardia spoglia la riga dei capi di citazione prima di giudicarla, e un controllo nuovo pretende
+  che l'elenco delle righe di struttura sia identico prima e dopo.
+
+- **Esito, quinto punto — la verifica che non poteva vedere il difetto.** Il controllo che
+  confrontava la mia redazione con quella umana lavorava su paragrafi **normalizzati**, e la
+  normalizzazione butta via gli a capo: una tabella inghiottita gli passava davanti senza far
+  rumore. Rifatto anche sul testo letterale, ha subito segnalato **11 paragrafi** con le parole
+  giuste e gli a capo in punti diversi. Non sono stati corretti aggiustando il riavvolgitore, ma
+  togliendogli il lavoro: dove il paragrafo di partenza è identico, si copia la resa umana. Da
+  allora: 0 discordanze di parole, 0 di a capo.
+
+- **Esito, sesto punto — due righe minuscole, e chi ce le ha rimesse.** Le tre regole cercano il
+  nome **con le maiuscole al loro posto**, come faceva la redazione di ADR-0125. Il blocco comandi
+  di [V-094](#v-094) lo scrive **tutto minuscolo**, perché lì è l'argomento di una ricerca che il
+  caso non lo distingue. Nessuna delle due passate l'ha visto, e le due righe sono arrivate
+  **nell'albero di oggi**. L'ordine dei fatti è la parte che vale: `6a7fa71` ripulisce il testo, e
+  il commit **immediatamente successivo** — quello che scrive la scheda per raccontare la pulizia —
+  rimette dentro il nome, nel comando che l'aveva cercato. La clausola «84 → 0 nei tracciati» era
+  vera quando è stata misurata e falsa nel momento in cui è stata scritta. Le riserve di V-094 lo
+  avevano perfino previsto: «non trova un nome scritto diversamente». Cinque versioni storiche di
+  `docs/Sources.md` portano quelle righe, per **10 occorrenze**; tre di quelle versioni non erano
+  sporche in nessun altro modo, e nessuna delle tre regole le avrebbe mai toccate. Da qui la quarta
+  regola, e la decisione che ogni controllo di questa faccenda si faccia **senza guardare il caso**.
+
+- **Esito, settimo punto — le firme, e perché il taglio è parziale.** La riscrittura **non conserva
+  le firme GPG**. Il commit iniziale di `main` e il merge di testa di `develop` sono firmati
+  dall'interfaccia web di GitHub. Riscrivere tutta la storia le avrebbe tolte in silenzio, e avrebbe
+  cambiato l'SHA di `develop`, che smetterebbe di essere antenato: la fusione del 16 duplicherebbe
+  la storia invece di unirla. La base del taglio è quindi `5ce4e5b`, e i commit riscritti sono
+  **23 su 172**.
+
+- **Esito, ottavo punto — il conto che chiude, commit per commit.** Confrontare solo l'albero finale
+  non basta: un albero giusto raggiunto da diff sbagliati resta sbagliato per chi legge la storia.
+  Il confronto vero è il **diffstat di ogni commit, prima contro dopo**: file, righe aggiunte,
+  righe tolte, insieme dei percorsi. Su 23 commit ne differiscono **4**, e le differenze si sommano
+  esattamente alle otto righe che la perifrasi aggiunge: **+6** su `65385ec` (le sei skill),
+  **+1** su `0227abf`, **+1** su `5716862`, e `6a7fa71` che passa da 28 file a **zero**. È questo
+  controllo, e non il confronto degli alberi, ad aver scoperto il difetto del quarto punto: il
+  diffstat di `25b5df6` era passato da un uniforme +9/−1 su 12 file a +35/−22.
+
+- **Esito, nono punto — gli invarianti, misurati sull'esito.** L'albero del tip è identico
+  all'originale **tranne le due righe del sesto punto** — un file, due righe, ed è la correzione,
+  non un effetto collaterale. Sui rami locali: **982 blob distinti, 0 sporchi**; **172 commit, 0
+  messaggi sporchi**, e stavolta la domanda è posta senza guardare il caso. `develop` è ancora
+  antenato di `release/1.0`; `develop` resta a `b854e5f7db3c` e `main` a `1523ebfed54e`. I due
+  soggetti riscritti restano dentro le colonne d'uso: 90 e 57.
+
+- **Esito, decimo punto — le citazioni di SHA, e la trappola dei due per riga.** Ventitré commit
+  hanno un identificatore nuovo, e **13 siti in 5 file** li citavano. Due righe di
+  `docs/Decision.md` portano lo stesso SHA **due volte**: una dentro i backtick e una dentro l'URL
+  di GitHub. Una ricerca sulla sola forma con i backtick ne trova 10 e ne ripara metà, lasciando
+  l'altra rotta e l'impressione di aver finito. Riparati tutti, ricontati a **0**. I 22 candidati
+  che la forma pesca e la mappa non conosce sono estranei: 18 sono sole cifre — codici di log di
+  MongoDB, conteggi di byte, la data del talk — e 4 sono identificatori altrui, fra cui un commit
+  di `mongodb/mongo` e l'identificatore di un'immagine Docker.
+
+- **Esito, undicesimo punto — le suite.** `649/650` prove unitarie, `183/183` sugli strumenti,
+  `mypy` pulito su 67 sorgenti, `make docs-check` verde. L'unica rossa è
+  `test_un_nodo_scritto_a_mano_che_non_esiste_si_ferma_prima_del_carico`, e **fallisce allo stesso
+  modo nel worktree originale**: con il demone Docker spento lo stack `02` non è in piedi, l'elenco
+  dei nodi è vuoto, e Click emette l'errore d'uso prima che il messaggio dell'applicazione possa
+  nominare `mongo-rs-9`. È ambientale, non una regressione della riscrittura.
+
+- **Riserve:** le prove d'integrazione **non sono state misurate**, perché avrebbero richiesto di
+  accendere gli stack, e lo stack `01` non va ripulito ([V-090](#v-090)) né lo `03` azzerato. Finché
+  restano non misurate, l'invariante «le suite verdi» vale per due terzi. Il censimento è
+  **testuale** come quello di V-094, e la lezione del sesto punto è che «testuale» ha più modi di
+  fallire di quanti se ne prevedano: adesso guarda anche il minuscolo, ma non troverebbe il nome
+  spezzato da un a capo dentro una parola, né un'allusione che non nomina. In modalità parziale i
+  riferimenti `origin/*` del clone puntano ancora alla storia vecchia, quindi gli oggetti vecchi
+  esistono ancora e chiedere «esiste?» risponde di sì anche per uno SHA che nessun ramo raggiunge
+  più: la domanda giusta è «è raggiungibile?», ed è quella che le misure qui sopra pongono. Infine:
+  **la riscrittura non è pubblicata**. Vive in un clone, e il force-push spetta al Product Owner;
+  fino ad allora il repository è quello di prima, e questi numeri descrivono ciò che succederà, non
+  ciò che è già successo.
+
+- **Data:** 2026-09-07
+- **Usata da:** ADR-0137
