@@ -10820,3 +10820,139 @@ uv run --directory app pytest -q && uv run --directory tools pytest -q && make d
   variables.product.github %}{% endraw %}` — sono stati risolti in «GitHub».
 - **Data:** 2026-09-07
 - **Usata da:** ADR-0138, ADR-0139
+
+---
+
+<a id="v-106"></a>
+### V-106 — Registrare lo schermo di questo portatile: i dispositivi, le opzioni che il dispositivo accetta davvero, e un guasto che non c'era
+
+- **Comandi:** l'enumerazione dei dispositivi, sei acquisizioni brevi con opzioni diverse, e la
+  rilettura di ciò che ne è uscito.
+
+```bash
+ffmpeg -f avfoundation -list_devices true -i ""
+ffmpeg -f avfoundation -pixel_format uyvy422 -capture_cursor 1 -i "3:0" -t 3 \
+  -c:v h264_videotoolbox -b:v 6M -pix_fmt yuv420p -color_range mpeg -c:a aac -b:a 128k prova.mp4
+ffprobe -show_entries format=duration,size -show_entries stream=codec_type,nb_frames prova.mp4
+ffmpeg -i prova.mp4 -af volumedetect -f null -
+```
+
+- **Ambiente:** MacBook Pro Apple Silicon, macOS 26.6.2, 7 settembre 2026. `ffmpeg` e `ffprobe`
+  6.x da Homebrew (`/opt/homebrew/bin`), terminale iTerm, schermo interno. Demone Docker spento:
+  nessuno stack era acceso, e le acquisizioni hanno ripreso una finestra di terminale qualunque.
+- **Che cosa si voleva sapere:** la procedura dei filmati diceva «si registra lo schermo» e non
+  diceva con che cosa ([ADR-0016](Decision.md#adr-0016) chiede i `.mp4`,
+  [`preflight.sh`](../tools/preflight.sh) già li conta, e la cartella era vuota). Prima di
+  scrivere uno strumento servivano quattro risposte: quali dispositivi ci sono e come si nominano;
+  quali opzioni AVFoundation accetta davvero; quanto costa registrare mentre una scena misura sé
+  stessa; e come accorgersi che il microfono non ha inciso.
+
+- **Esito, primo punto — gli indici esistono, e si spostano.** `-list_devices true` elenca oggi
+  quattro ingressi video — `[0]` FaceTime HD Camera, `[1]` OBS Virtual Camera, `[2]` OBSBOT
+  Virtual Camera, `[3]` Capture screen 0 — e due audio: `[0]` MacBook Pro Microphone, `[1]`
+  Microsoft Teams Audio. L'indice dello schermo è `3` **su questa macchina oggi**: l'ordine è
+  quello di scoperta, e installare o togliere un'applicazione che espone una fotocamera virtuale
+  lo cambia. Uno strumento che scrivesse `3` nel comando un giorno registrerebbe la webcam del
+  relatore invece dello schermo, e lo scoprirebbe riguardando il filmato.
+
+- **Esito, secondo punto — i permessi sono un costo di prima corsa, e uno riavvia il terminale.**
+  Il primo tentativo di acquisizione **non è terminato**: è rimasto appeso oltre novanta secondi
+  in attesa della finestra di dialogo TCC, e i due processi sono stati uccisi a mano. Concedere
+  «Registrazione schermo» sblocca il video; concedere «Microfono» **ha fatto ripartire iTerm**,
+  riferito dall'operatore. Non è un difetto dello strumento e non si può eliminare: si può solo
+  pagare in anticipo. È la ragione per cui la pagina delle registrazioni lo dice in un riquadro.
+
+- **Esito, terzo punto — il formato d'ingresso si dichiara, o si ricevono cinque righe.** Lo
+  schermo offre `uyvy422, yuyv422, nv12, 0rgb, bgr0`. Senza `-pixel_format` prima di `-i`, ffmpeg
+  chiede `yuv420p` — che è il formato d'**uscita** — e stampa a ogni corsa cinque righe che
+  elencano i formati e annunciano `Overriding selected pixel format to use uyvy422 instead`, per
+  poi produrre lo stesso file. Il comportamento è quello documentato in [S-079](#s-079); la
+  scelta di dichiararlo è per chi legge l'output, non per il file.
+
+- **Esito, quarto punto — `-framerate 30` è inerte, e la sua assenza non cambia niente.** Con e
+  senza, `-t 3` produce **2,966667** e **2,966668** secondi, 87 e 88 fotogrammi, e in tutti e due
+  i casi `r_frame_rate=30/1`. AVFoundation lo dichiara da sé nella riga
+  `Configuration of video device failed, falling back to default.`, che compare **anche senza
+  nessuna opzione d'ingresso** — provato. Da notare che il predefinito documentato di `-framerate`
+  è `ntsc`, cioè 30000/1001 ([S-079](#s-079)): chiedere «30» e ottenere 30/1 non è l'opzione
+  che funziona, è il dispositivo che ignora la richiesta e impone la propria cadenza.
+
+- **Esito, quinto punto — il guasto che non c'era, ed è il risultato più utile della sessione.**
+  Lo strumento annunciava **1,0 s** per una registrazione da 2 e **2,0 s** per una da 3, e la
+  prima spiegazione plausibile era che `-framerate 30` falsasse i tempi. Non era così: `ffprobe`
+  sul file diceva `duration=2.966668` e `nb_frames=88`. Il file era giusto; sbagliato era il
+  numero che lo raccontava. `ffprobe` scrive la durata **col punto**, sempre, perché è un formato
+  dati; `awk` con `LC_NUMERIC=it_IT.UTF-8` legge quel punto come fine del numero e ne ricava `2`.
+  Misurato in isolamento: `echo 2.966668 | awk '{printf "%.1f", $1}'` dà **2,0** in locale
+  italiana e **3.0** con `LC_ALL=C`. La correzione è leggere alla maniera dei dati e scrivere alla
+  maniera di chi legge, che sono due cose diverse. Controllato per la stessa causa anche
+  [`preflight.sh`](../tools/preflight.sh), che formatta la memoria della VM: lì il valore in
+  ingresso è un intero puro e le soglie confrontano interi, quindi il punto decimale non compare
+  mai e il difetto non si presenta.
+
+- **Esito, sesto punto — quanto costa comprimere, e perché si sceglie il chip.**
+  `libx264 -crf 23` produce circa **107 KB/s** e `h264_videotoolbox -b:v 6M` circa **920 KB/s**
+  alla stessa scena e alla stessa risoluzione, cioè un filmato di quattro minuti da ~25 MB contro
+  uno da ~220 MB. Il fattore otto va a favore del software, e la scelta è comunque l'hardware: le
+  scene di questo talk **si misurano mentre si girano** — un failover dichiara la propria
+  interruzione in millisecondi — e un encoder software che occupa i core durante la ripresa falsa
+  il numero che la scena esiste per mostrare. Duecento megabyte su un disco costano meno di una
+  cifra sbagliata su uno schermo. Resta comunque vero che **i tempi di un filmato non sono la
+  misura**: le mediane stanno in [V-029](#v-029) e [V-031](#v-031), e un filmato le illustra.
+
+- **Esito, settimo punto — che il microfono abbia inciso si verifica, non si spera.** Con la voce:
+  una traccia `aac`, 48 000 Hz, mono; `volumedetect` dà **mean −49,5 dB / max −35,7 dB** su una
+  stanza silenziosa e **mean −46,2 dB / max −27,6 dB** su una in cui si parlava. Il silenzio
+  digitale sarebbe −91 dB: fra «ha inciso l'ambiente» e «non ha inciso niente» la differenza si
+  legge a colpo d'occhio. Con `AUDIO=no`: `ffprobe -select_streams a` non restituisce **nessuna**
+  traccia. Sono i due esiti che lo strumento controlla da sé alla fine di ogni corsa, e su cui
+  esce con errore se non corrispondono a quello che gli era stato chiesto.
+
+- **Riserve:** tutto questo è misurato su **una** macchina, e gli indici dei dispositivi sono la
+  parte che scade per prima — è il motivo per cui lo strumento li cerca a ogni corsa invece di
+  ricordarli. Le acquisizioni sono di due o tre secondi: dicono che il meccanismo funziona, non
+  come si comporta su una ripresa di quattro minuti, che nessuno ha ancora girato. Il costo dei
+  permessi è stato osservato una volta sola, e per costruzione non è ripetibile.
+- **Data:** 2026-09-07
+- **Usata da:** ADR-0140
+
+---
+
+<a id="s-079"></a>
+### S-079 — FFmpeg Devices Documentation: il dispositivo d'ingresso AVFoundation
+
+- **URL:** https://ffmpeg.org/ffmpeg-devices.html
+- **Editore:** FFmpeg Project
+- **Versione documentata:** documentazione corrente del ramo `master`
+- **Consultata:** 2026-09-07
+- **Verdetto:** conferma parziale — descrive le opzioni usate dallo strumento e il modo di
+  nominare i dispositivi, ma non copre la cattura dello schermo né l'ordine degli argomenti
+- **Perché è stata cercata.** Lo strumento di registrazione mette nel comando cinque opzioni
+  d'ingresso, e ognuna andava sostenuta da qualcosa di più della corsa che l'aveva vista
+  funzionare ([V-106](#v-106)).
+- **Cosa afferma, primo punto — i dispositivi si nominano per nome o per indice.** «All available
+  devices can be enumerated using `-list_devices true`, listing all device names and
+  corresponding indices», e uno stream «can be specified by device name or device index shown by
+  the device list». La sintassi del nome di ingresso è `-i "[[VIDEO]:[AUDIO]]"`, dove «the first
+  entry selects the video input while the latter selects the audio input».
+- **Cosa afferma, secondo punto — `-pixel_format` è una richiesta, non un obbligo.** L'opzione
+  «Request the video device to use a specific pixel format», e se «the specified format is not
+  supported, a list of available formats is given and the first one in this list is used
+  instead». È esattamente il comportamento osservato: cinque righe di elenco e un
+  `Overriding selected pixel format to use uyvy422 instead`.
+- **Cosa afferma, terzo punto — i due predefiniti che vanno cambiati o conosciuti.**
+  `-capture_cursor`: «Capture the mouse pointer. Default is 0» — il puntatore va quindi chiesto,
+  e per una registrazione didattica serve. `-framerate`: «Set the grabbing frame rate. Default is
+  `ntsc`, corresponding to a frame rate of `30000/1001`» — cioè il predefinito **non** è 30, e
+  ottenere `30/1` senza chiederlo è il segno che a decidere è stato il dispositivo.
+- **Riserve, due, e contano.** *Primo:* la pagina **non enuncia** la regola per cui le opzioni
+  d'ingresso devono precedere `-i`; la mostra in ogni esempio senza dichiararla, e la regola vera
+  appartiene alla sintassi generale di `ffmpeg`, dove ogni opzione si applica al file che segue.
+  Lo strumento la rispetta, ma questa pagina non è la fonte che la stabilisce. *Secondo:* la
+  sezione **non nomina la cattura dello schermo**: «Capture screen 0» non compare, e che il
+  dispositivo dello schermo si presenti nell'elenco insieme alle fotocamere è un fatto osservato
+  qui ([V-106](#v-106)), non documentato lì. Anche la resa in testo della pagina è risultata
+  mutila in alcune righe d'esempio: le citazioni riportate sopra vengono tutte dalle
+  **descrizioni delle opzioni**, non dagli esempi.
+- **Data:** 2026-09-07
+- **Usata da:** ADR-0140

@@ -10,7 +10,8 @@
         up-02 down-02 reset-02 logs-02 seed-02 smoke-02 reset-demo-02 \
         failover-02 failover-02-termina failover-02-maggioranza \
         up-03 down-03 reset-03 logs-03 seed-03 smoke-03 reset-demo-03 profilo-03 \
-        stato-03 distribuzione-03 guasto-03
+        stato-03 distribuzione-03 guasto-03 \
+        filmato
 
 # `--env-file tools/images.env` porta MONGO_IMAGE, che nei file Compose è dichiarato
 # nella forma `${MONGO_IMAGE:?...}`: senza, Compose si ferma subito dicendo cosa manca
@@ -44,7 +45,10 @@ help: ## Elenca i target disponibili
 		DOVE    'da dove gira: rete (dentro la rete Compose, predefinito) | host (uv run)' \
 		ARGS    'opzioni girate alla CLI, per esempio ARGS="--step --sink plain"' \
 		PROFILO 'la taglia dello stack 03: palco (predefinito) | completo' \
-		NOMI    'quali immagini riscaricare: NOMI="PYTHON_IMAGE UV_IMAGE"'
+		NOMI    'quali immagini riscaricare: NOMI="PYTHON_IMAGE UV_IMAGE"' \
+		NOME    'come si chiama la scena da girare: il file esce come <NOME>.mp4' \
+		AUDIO   'la voce nel filmato: si (predefinito) | no, per la passata muta' \
+		DURATA  'quanti secondi dura il filmato; se manca, si ferma con «q»'
 
 tools-test: ## Esegue la suite degli strumenti di repository
 	uv run --directory tools pytest -q
@@ -522,3 +526,34 @@ distribuzione-03: profilo-03 ## Mostra dove stanno davvero i documenti di lab.or
 # un failover non può avvenire, e chiamarlo così prometterebbe quello che non fa.
 guasto-03: profilo-03 ## Ferma il primario di uno shard 03 e misura che cosa risponde ancora (~40 s)
 	PROFILO=$(PROFILO) ./tools/demo-sharded.sh guasto
+
+# --- Le registrazioni ------------------------------------------------------------------
+#
+# `registra-terminale.py` e `registra-schermo.sh` sono le due metà della stessa cosa, e
+# non si sostituiscono a vicenda: il primo conserva quello che il terminale ha fatto, in
+# un `.cast` che si rilegge riga per riga e si riesegue (ADR-0016, ADR-0050); il secondo
+# conserva quello che il pubblico avrebbe visto, in un `.mp4` che si carica su YouTube e
+# si allega alla presentazione. Un `.cast` non mostra la finestra di Compass né il
+# grafico che si muove mentre parla; un `.mp4` non si riesegue. Servono tutt'e due.
+#
+# LE DUE PASSATE, che sono il motivo per cui `AUDIO=no` esiste. Prima si gira il muto e
+# lo si guarda: una elezione dura i secondi che dura, non quelli che ci si ricorda, e
+# vedere la scena prima di commentarla è ciò che permette di commentarla. Poi si rigira
+# la stessa scena parlandoci sopra, sapendo già dove stanno le pause. Il muto non si
+# butta: è il filmato da mettere DENTRO la presentazione, dove una voce registrata che
+# si sovrappone a quella di chi parla dal vivo è un difetto, non un di più.
+#
+# La prima corsa chiede a macOS i permessi «Registrazione schermo» e «Microfono», e
+# concedere il secondo RIAVVIA il terminale. È un costo da pagare una volta, e si paga
+# adesso: la sera prima del talk è il momento sbagliato per scoprire una finestra di
+# dialogo. Dove finiscono i file lo decide `DEMO_VIDEOS_DIR`, lo stesso che legge
+# `preflight` per contarli (predefinito: `~/SqlStart2026-registrazioni`).
+
+CHIEDI_NOME = @case "$(NOME)" in \
+	"") echo "manca NOME: make filmato NOME=02-failover [AUDIO=no] [DURATA=20]" >&2; exit 2 ;; \
+	*/*) echo "NOME=«$(NOME)» contiene una barra: è il nome di una scena, non un percorso." >&2; exit 2 ;; \
+	esac
+
+filmato: ## Gira un .mp4 dello schermo: make filmato NOME=02-failover [AUDIO=no] [DURATA=20]
+	$(CHIEDI_NOME)
+	@AUDIO=$(AUDIO) ./tools/registra-schermo.sh $(NOME) $(DURATA)

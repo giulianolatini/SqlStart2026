@@ -9076,3 +9076,112 @@ esiste. Una fonte letta può servire a **non** fare una cosa, e vale quanto una 
   certezza che il requisito non chiede.
 
 **Fonti:** [V-105](Sources.md#v-105), [S-078](Sources.md#s-078)
+
+---
+
+<a id="adr-0140"></a>
+## ADR-0140 — Lo schermo si registra con uno strumento del repository, e la passata muta è la prima delle due
+
+**Data:** 2026-09-07 · **Stato:** Accettata
+
+**Contesto:** [ADR-0016](#adr-0016) stabilisce che la riserva del talk sta su YouTube **e** in una
+copia locale, e [`tools/preflight.sh`](../tools/preflight.sh) conta già i `.mp4` di
+`~/SqlStart2026-registrazioni` — con un avviso oggi e un errore bloccante dal giorno del talk. La
+cartella però non esiste, e la procedura scritta nella
+[pagina delle registrazioni](05-talk/registrazioni/README.md#filmati) diceva, al passo 2, «si
+registra lo schermo», senza dire con che cosa. Un repository che controlla un risultato e non
+insegna a produrlo mette l'operatore davanti a un controllo che non sa soddisfare; il Product
+Owner l'ha segnalato leggendo il repository con gli occhi di chi lo apre la prima volta.
+
+Alla richiesta si è aggiunta una seconda esigenza, che ha cambiato la forma della soluzione: servono
+anche filmati **senza voce**, da allegare alla presentazione e da guardare prima di rifare la stessa
+scena parlandoci sopra.
+
+**Decisione.** Cinque punti.
+
+1. *Si registra con `ffmpeg` e AVFoundation, da uno strumento che sta nel repository*
+   ([`tools/registra-schermo.sh`](../tools/registra-schermo.sh)), chiamato da `make filmato`. È il
+   gemello di `registra-terminale.py` e non lo sostituisce: quello conserva ciò che il terminale ha
+   fatto, in un `.cast` rieseguibile ([ADR-0050](#adr-0050)); questo conserva ciò che il pubblico
+   avrebbe visto, in un `.mp4` che si carica. Un `.cast` non mostra la finestra di Compass; un
+   `.mp4` non si riesegue.
+
+2. *Gli indici dei dispositivi si cercano a ogni corsa, mai scritti nel comando.* Sono assegnati
+   nell'ordine di scoperta e si spostano quando si installa o si toglie un'applicazione che espone
+   una fotocamera virtuale ([V-106](Sources.md#v-106)): un `3` scritto nel comando un giorno
+   registrerebbe la webcam del relatore, e lo si scoprirebbe riguardando il filmato.
+
+3. *Si comprime con l'encoder hardware* (`h264_videotoolbox`), che costa otto volte il disco di
+   `libx264` — circa 220 MB contro 25 per quattro minuti. Le scene di questo talk **si misurano
+   mentre si girano**: un failover dichiara la propria interruzione in millisecondi, e un encoder
+   software che occupa i core durante la ripresa falsa il numero che la scena esiste per mostrare.
+
+4. *Le passate sono due, e `AUDIO=no` è la prima, non un ripiego.* Si gira il muto, lo si guarda —
+   una elezione dura i secondi che dura, non quelli che ci si ricorda — e poi si rifà la stessa
+   scena sapendo dove stanno le pause. Il muto **si conserva**: è il filmato da mettere dentro la
+   presentazione, dove una voce registrata sovrapposta a quella di chi parla dal vivo è un difetto.
+   Le due passate producono due file con due nomi, perché lo strumento **rifiuta di sovrascrivere**
+   una registrazione esistente.
+
+5. *Alla fine di ogni corsa lo strumento rilegge il file e dichiara che cosa contiene davvero*,
+   tracce audio comprese, e **esce con errore** se si è chiesta la voce e la traccia non c'è. Un
+   `.mp4` muto girato credendo di parlarci sopra sembra riuscito fino al momento in cui lo si apre
+   davanti a qualcuno, ed è la stessa categoria di guasto di [ADR-0055](#adr-0055).
+
+**Conseguenze.**
+
+**`ffmpeg` diventa l'unica installazione che questo repository chiede**, e la sola eccezione al
+principio per cui il lab gira con quello che c'è. Lo strumento lo dice quando manca, e dice anche
+che va installato adesso: la sera prima del talk è il momento sbagliato.
+
+**I permessi di macOS sono un costo di prima corsa da pagare in anticipo.** La prima acquisizione
+resta appesa alla finestra di dialogo TCC finché non si risponde, e concedere il microfono **fa
+ripartire il terminale** ([V-106](Sources.md#v-106)). Nessuna delle due cose si può eliminare da
+uno script: si possono solo dichiarare, e si sono dichiarate nella pagina e nello strumento.
+
+**Tre righe di rumore a ogni corsa sono attese e non sono guasti** — il messaggio `objc[...]` di
+AVFoundation, `Configuration of video device failed` e `not enough frames to estimate rate`. Non si
+zittiscono con un `-loglevel error`, perché è il modo di non accorgersi della quarta riga, quella
+vera. Il posto dove sono spiegate è il commento dello strumento, accanto all'opzione che le causa.
+
+**I tempi di un filmato non sono la misura.** Le mediane del failover stanno in
+[V-029](Sources.md#v-029) e [V-031](Sources.md#v-031); un filmato le illustra e non le sostituisce,
+e la registrazione stessa, per quanto poco, è carico che gira sulla macchina misurata.
+
+**Due file per scena raddoppiano lo spazio, ed è accettato.** Sei scene in due passate, a ~220 MB
+per quattro minuti, stanno abbondantemente in un disco; ciò che comprano è che la scena si guardi
+prima di raccontarla.
+
+**Il legame fra chi scrive i filmati e chi li conta è verificato.** `tools/registra-schermo.sh` e
+`tools/preflight.sh` calcolano la cartella ognuno per conto proprio, e
+`tools/tests/test_registra_schermo.py` verifica che continuino a calcolare la stessa: il giorno in
+cui una delle due righe cambiasse da sola, il preflight dichiarerebbe zero filmati con la cartella
+piena — un allarme che si impara a ignorare, che è il modo in cui un controllo smette di
+controllare.
+
+**Alternative scartate.**
+
+- *OBS Studio*, che su questa macchina **è già installato**. Vince quando servono più sorgenti,
+  sovrapposizioni, una diretta: niente di ciò che questo talk chiede. Perde su una cosa che qui
+  conta più delle sue: scene, profili e impostazioni vivono nelle preferenze dell'operatore, non
+  nel repository. Non c'è niente da rivedere in una PR, niente che una prova possa controllare, e
+  rifare la stessa configurazione su un'altra macchina significa ripetere una sequenza di clic a
+  memoria. Uno strumento che non entra nel repository non può essere revisionato con il repository.
+- *`screencapture -v`*, che è in `/usr/sbin` e non chiede nessuna installazione — il che lo
+  renderebbe la scelta ovvia. **Non prende il microfono.** Coprirebbe la passata muta e non quella
+  parlata, cioè costringerebbe a girare le due passate della stessa scena con due strumenti
+  diversi, con due rese diverse: due file che dovrebbero mostrare la stessa cosa e non la mostrano
+  allo stesso modo.
+- *QuickTime Player.* Registra schermo e microfono, ed è sul portatile. Si comanda solo a mano: non
+  c'è una riga da scrivere in una procedura, quindi la procedura tornerebbe a dire «si registra lo
+  schermo» e a lasciare il come all'operatore. È esattamente il buco che questa scheda chiude.
+- *`asciinema` o il registratore di terminale al posto del filmato.* Sono già lì e fanno un altro
+  mestiere ([ADR-0016](#adr-0016), [ADR-0050](#adr-0050)): un `.cast` non mostra una finestra
+  grafica, e il piano B del talk ne prevede due specie proprio perché coprono guasti diversi.
+- *Registrare con uno strumento in rete — una riunione, un servizio di cattura.* Il lab è progettato
+  per funzionare **senza rete**, e la sala potrebbe non averla. Una riserva che si produce solo
+  online non è la riserva di una demo che deve girare offline.
+- *Zittire il rumore di `ffmpeg` con `-loglevel error`.* Toglie tre righe innocue e, insieme, la
+  riga che un giorno dirà che qualcosa è andato storto davvero.
+
+**Fonti:** [V-106](Sources.md#v-106), [S-079](Sources.md#s-079)

@@ -3845,3 +3845,23 @@ visibile». Sono due requisiti diversi, e trattare il secondo come il primo è i
 sicurezza diventa un rituale — si continua a pagare perché si è cominciato. Da notare, per onestà
 del racconto: ciò che ha reso visibile la sproporzione è stato **leggere la pagina del rimedio**.
 Una fonte può servire a non fare una cosa, e vale quanto una che la giustifica.
+
+---
+
+### Il file era giusto; sbagliato era il numero che lo raccontava
+
+> Lo strumento di registrazione annunciava «2,0 s» per un filmato di tre secondi. Sul file,
+> `ffprobe` leggeva `duration=2.966668` e 88 fotogrammi: c'era tutto. A sbagliare era la riga che
+> *stampava* la durata — `awk`, in locale italiana, prende il punto di `2.966668` per la fine del
+> numero e ne ricava `2`. Con `LC_ALL=C`, la stessa riga scrive `3.0`.
+
+Fonte: [V-106](Sources.md#v-106), quinto punto.
+
+**Perché una slide:** questo talk mostra numeri — un'elezione che costa dieci secondi col gesto
+brutale e mezzo secondo con quello educato — e chiede al pubblico di crederci. Qui il numero era
+falso mentre la cosa misurata era sana, e la prima ipotesi, plausibile, incolpava l'acquisizione
+(`-framerate 30`): ha retto finché non si è guardato il file invece del suo resoconto. La regola
+che ne esce è che **lo strumento di misura è sospetto quanto l'oggetto misurato**, e che il punto
+e la virgola non sono un dettaglio tipografico: `2.966668` è un dato, «2,966668» è una frase, e
+una locale che le confonde falsa i numeri senza sbagliare una riga di codice. Si legge alla
+maniera dei dati, si scrive alla maniera di chi legge — sono due cose diverse.

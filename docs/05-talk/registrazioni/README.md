@@ -339,15 +339,61 @@ importanza dentro ciascun blocco:
 | 5 | il guasto di uno shard nei due profili | scene 8 e 9 | ~3 min | è la scena del Blocco 3, e dal vivo costa due stack e uno scambio di `.env` |
 | 6 | il Blocco 3 per intero: avvio, `sh.status()`, distribuzione | scene 5, 6 e 7 | ~4 min | se il cluster non parte in sala non c'è modo di raccontarlo a voce |
 
-Procedura, quando si gira:
+### Il comando
+
+Lo strumento è [`tools/registra-schermo.sh`](../../../tools/registra-schermo.sh), e la riga da
+imparare è una sola:
+
+```bash
+make filmato NOME=02-failover-docker-kill-muto AUDIO=no   # la passata muta
+make filmato NOME=02-failover-docker-kill                 # la passata parlata
+```
+
+Il file esce come `<NOME>.mp4` in `~/SqlStart2026-registrazioni` — la stessa cartella che
+`make preflight` conta, e che si sposta con `DEMO_VIDEOS_DIR`. Senza `DURATA` si registra finché
+non si preme **`q`** nella finestra del terminale; con `DURATA=120` si ferma da sé dopo due minuti,
+che è comodo quando le mani servono altrove. Alla fine lo strumento rilegge il file e dichiara che
+cosa contiene davvero: dimensioni, secondi, byte e **quante tracce audio**. Se si è chiesta la voce
+e la traccia non c'è, esce con errore invece di dire «fatto».
+
+Due nomi e non uno, nell'esempio qui sopra, perché **una registrazione non si sovrascrive**: lo
+strumento rifiuta un nome già occupato, e la passata muta va conservata comunque (vedi sotto).
+
+> **La prima volta chiede due permessi, e uno riavvia il terminale.** macOS domanda
+> «Registrazione schermo» e «Microfono» alla prima corsa; concedere il secondo **fa ripartire
+> l'applicazione del terminale**, misurato su iTerm. È un costo da pagare una volta sola, e si paga
+> **adesso**: la sera prima del talk è il momento sbagliato per incontrare una finestra di dialogo.
+> Serve anche `ffmpeg` (`brew install ffmpeg`), l'unica installazione che questo repository chiede.
+
+### Le due passate, e perché la muta si tiene
+
+Si gira **prima il muto**, e lo si guarda. Una elezione dura i secondi che dura, non quelli che ci
+si ricorda: vedere la scena prima di commentarla è ciò che permette di raccontarla: si sa dove
+stanno le pause, che cosa compare mentre si parla, e quando conviene tacere. Poi si rigira la stessa
+scena parlandoci sopra.
+
+Il muto non è uno scarto della lavorazione: **è il filmato da mettere dentro la presentazione**,
+dove una voce registrata che si sovrappone a quella di chi parla dal vivo è un difetto e non un di
+più. Le due passate producono due file che servono a due cose diverse — quello parlato va su
+YouTube, quello muto va nelle slide — ed è il motivo per cui `AUDIO=no` esiste come opzione e non
+come ripiego.
+
+### Procedura, quando si gira
 
 1. `./tools/reset-demo.sh 02` — o `03`, secondo il blocco — e si aspetta l'impronta del dataset.
-2. Si registra lo schermo — un terminale a 100×30, come le registrazioni di terminale, così le due
-   specie di riserva mostrano la stessa cosa.
-3. Il file va sul canale YouTube del relatore **e** in `~/SqlStart2026-registrazioni`, con lo stesso
-   nome della scena corrispondente e l'estensione `.mp4`.
-4. `make preflight`: l'avviso sui filmati diventa `filmati locali disponibili: N`.
-5. Il collegamento a YouTube torna in questa pagina, nella colonna che oggi non c'è.
+2. Un terminale a 100×30, come le registrazioni di terminale, così le due specie di riserva
+   mostrano la stessa cosa.
+3. `make filmato NOME=<scena>-muto AUDIO=no`, si esegue la scena, si preme `q`. Si riguarda.
+4. `make filmato NOME=<scena>`, si rifà la stessa scena parlandoci sopra, si preme `q`.
+5. Il file parlato va sul canale YouTube del relatore **e** resta in `~/SqlStart2026-registrazioni`,
+   con lo stesso nome della scena corrispondente e l'estensione `.mp4`.
+6. `make preflight`: l'avviso sui filmati diventa `filmati locali disponibili: N`.
+7. Il collegamento a YouTube torna in questa pagina, nella colonna che oggi non c'è.
+
+Le tre righe di rumore che `ffmpeg` stampa a ogni corsa — `NSKVONotifying_AVCaptureScreenInput`,
+`Configuration of video device failed` e `not enough frames to estimate rate` — sono attese e non
+sono guasti: la ragione di ognuna sta nei commenti dello strumento, misurata in
+[V-106](../../Sources.md#v-106).
 
 ---
 
