@@ -1,0 +1,69 @@
+[project]
+name = "mongolab"
+version = "0.1.0"
+description = "L'applicazione dimostrativa del lab MongoDB di SqlStart 2026"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "pymongo>=4.10",
+    "typer>=0.15",
+    "rich>=13.9",
+]
+
+[project.scripts]
+# Il §6.4 scrive `mongolab stats --target rs`, non `python -m mongolab.cli`: questa riga è
+# ciò che rende letterale quella riga di comando. Punta a `app`, cioè all'oggetto
+# `typer.Typer`, che è chiamabile: invocarlo è ciò che Typer trasforma in un programma.
+mongolab = "mongolab.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "mypy>=1.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mongolab"]
+
+[tool.pytest.ini_options]
+# `tests/unit` e non `tests`: l'integrazione si chiede per nome. Con `tests` un `pytest`
+# nudo — quello che si digita distrattamente — accenderebbe Docker dal Task 8 in poi, e
+# la suite veloce smetterebbe di esserlo senza che nessuno l'abbia deciso.
+testpaths = ["tests/unit"]
+# `--strict-markers` trasforma un marcatore non dichiarato da avvertimento in **errore di
+# raccolta**: `@pytest.mark.stack3`, la lettera che manca, ferma pytest con «'stack3' not
+# found in `markers` configuration option» invece di applicare un marcatore che nessun
+# `-m` selezionerà mai. Verificato eseguendolo al Task 8.
+#
+# Quello che **non** copre, e va saputo: un errore di battitura nella riga di comando.
+# `pytest -m stack3` deseleziona tutto e esce zero — trentatré prove saltate, nessuna
+# protesta. Non c'è un'opzione che lo impedisca; l'unica difesa è che il numero di prove
+# raccolte si legge sempre, ed è per questo che sta scritto qui invece di essere scoperto
+# il giorno in cui una suite «verde» non aveva eseguito niente.
+addopts = ["--strict-markers"]
+markers = [
+  "stack01: richiede lo stack 01 (istanza singola). Si accende in pochi secondi.",
+  "stack02: richiede lo stack 02 (replica set). Chiede il .env, e ci mette qualche decina di secondi.",
+  "stack03: richiede lo stack 03 (sharded cluster). Il più lento: due shard, tre config server, un mongos.",
+]
+# Nessun `pythonpath = ["."]` qui, ed è voluto: `tools/` ne ha bisogno perché gli
+# strumenti stanno nella radice del progetto, mentre questo usa il layout `src/` e il
+# pacchetto arriva a pytest perché è **installato** nell'ambiente. Chi copia il file di
+# `tools/` per farne un altro si porta dietro quella riga senza accorgersene, e allora
+# `sys.path` contiene la radice: gli import continuano a funzionare, ma dall'albero dei
+# sorgenti invece che dal pacchetto installato — cioè la prova non verifica più ciò che
+# si distribuisce. Il layout `src/` esiste apposta per rendere impossibile quello sbaglio,
+# e aggiungere la riga lo rimetterebbe in piedi.
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+# Le porte sono `typing.Protocol` e la conformità di un doppio è **strutturale**: non c'è
+# un'ereditarietà che il lettore possa controllare a occhio, e a runtime un doppio che ha
+# sbagliato una firma si scopre solo quando la prova che lo usa fallisce per un motivo
+# che sembra un altro. Il controllo statico è l'unico posto in cui quella conformità è
+# verificabile prima, ed è la ragione per cui `strict` non è negoziabile in questo
+# progetto: senza, `Protocol` diventa documentazione.

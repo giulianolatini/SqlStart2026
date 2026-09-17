@@ -1,0 +1,15 @@
+[project]
+name = "sqlstart2026-tools"
+version = "0.1.0"
+description = "Strumenti di repository per il lab MongoDB di SqlStart 2026"
+requires-python = ">=3.13"
+dependencies = ["pyyaml>=6.0"]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Gli strumenti stanno nella radice di questo progetto, i test in `tests/`.
+# Senza questa riga pytest mette in `sys.path` solo `tests/` e l'import fallisce.
+pythonpath = ["."]

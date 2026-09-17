@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Strumenti locali di sviluppo (non fanno parte del materiale didattico)
+.tokensave/
+.rtk/
+.serena/
+.claude/worktrees/
+# Le skill di progetto (`.claude/skills/`) invece si versionano: sono le convenzioni del
+# repository, e il loro senso e' viaggiare con esso. Qui sotto sta solo cio' che e' della
+# macchina e non del progetto.
+.claude/settings.local.json
+.claude/.headroom_*
+
+# Materiale di lavorazione della revisione esterna: dossier e risposte grezze dei due
+# revisori. Nel repository entra soltanto il foglio archiviato.
+.revisioni/
+
+# Spike: codice usa-e-getta, nel repository entra solo il verbale
+spike/
+
+# Registrazioni: gli MP4 stanno su YouTube e sul disco del portatile, mai in git (ADR-0016)
+*.mp4
+*.mov
+docs/05-talk/registrazioni/locale/
+
+# Ambiente
+.env
+!.env.example
+!tools/images.env
+
+# Sistema
+.DS_Store

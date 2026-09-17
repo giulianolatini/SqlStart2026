@@ -1,0 +1,11127 @@
+# Fonti
+
+Registro delle fonti consultate. Ogni affermazione tecnica in `docs/` cita almeno una voce
+di questo file; ogni voce di questo file è citata da almeno un ADR di
+[`Decision.md`](Decision.md). Il vincolo è verificato da `tools/check_citations.py`.
+
+| Prefisso | Tipo |
+|---|---|
+| `S-NNN` | fonte ufficiale — URL, editore, versione documentata, data di consultazione |
+| `V-NNN` | verifica empirica su questo lab — comando eseguito, output osservato, data |
+| `C-NNN` | fonte comunitaria — indizio, mai unica base di una decisione |
+
+## Come sono state verificate
+
+Ogni URL è stato aperto e letto integralmente il **2026-08-25**, salvo le voci aggiunte in
+seguito, che portano la propria data nel campo **Consultata**. Per ciascuna fonte è
+registrato un **verdetto** su ciò che la pagina afferma davvero, confrontato con
+l'assunzione che avevamo dato per buona in fase di progettazione:
+
+| Verdetto | Significato |
+|---|---|
+| conferma | la pagina dice quello che assumevamo, alla lettera |
+| conferma parziale | una parte è confermata, il resto non è scritto o è scritto diversamente |
+| non trovato | la pagina non tratta l'argomento: l'assunzione non è né confermata né smentita |
+| contraddice | la pagina afferma qualcosa di incompatibile con l'assunzione |
+
+Il campo **Riserve** esiste perché una fonte serve a poco se non si sa dove smette di
+coprirci. Quando una riserva è presente, l'affermazione corrispondente non va portata sul
+palco come citazione: o si riformula, o si sostiene con una verifica empirica `V-NNN`.
+
+Due note di metodo utili a chi ripete la verifica:
+
+- **`mongodb.com/docs` serve una variante Markdown della stessa pagina**, allo stesso URL
+  con suffisso `.md` (per esempio `core/wiredtiger.md`). La resa HTML recuperata da
+  strumenti automatici risultava in più casi compressa, con parole funzione mancanti: non
+  utilizzabile per citare alla lettera. Tutte le citazioni qui sotto provengono dalla
+  variante Markdown quando indicato.
+- **`docs.docker.com` fa lo stesso**, ed è l'endpoint dietro il pulsante «View Markdown»
+  delle sue pagine.
+
+## Assunzioni di progetto non confermate dalle fonti
+
+Sintesi di ciò che la verifica ha smontato. Il dettaglio è nella voce indicata.
+
+| Assunzione iniziale | Esito | Voce |
+|---|---|---|
+| Cache WiredTiger a `0.25` GB | il minimo documentato è `0.256 GB` | [S-002](#s-002) |
+| In container mongod legge il limite del cgroup | la pagina corrente dice l'opposto, e due pagine ufficiali si contraddicono | [S-001](#s-001), [S-026](#s-026) |
+| `deploy.resources.limits` è ignorato fuori da Swarm | non documentato in nessuna direzione: la frase storica è stata ritirata | [S-004](#s-004) |
+| Il digest garantisce il funzionamento offline | il digest garantisce *quale* immagine, non *se* si va in rete | [S-019](#s-019) |
+| `testcontainers-python` copre i replica set | `MongoDbContainer` avvia solo istanze standalone | [S-013](#s-013) |
+| I listener pymongo girano su un thread separato | sono consegnati **sincronamente** e bloccano il chiamante | [S-010](#s-010) |
+| Rich documenta vincoli di thread su `Live` | la parola «thread» non compare nella documentazione | [S-018](#s-018) |
+| L'eccezione localhost vale solo da loopback | vero per convenzione, ma non enunciato da alcuna fonte primaria | [S-006](#s-006) |
+| Il keyfile ammette `600` | documentato solo `chmod 400` | [S-005](#s-005) |
+
+---
+
+## Fonti ufficiali
+
+<a id="s-001"></a>
+### S-001 — MongoDB Manual: WiredTiger Storage Engine
+
+- **URL:** https://www.mongodb.com/docs/manual/core/wiredtiger/ (citazioni dalla variante `core/wiredtiger.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Database Manual 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** la dimensione predefinita della cache interna è «the larger of either:
+  50% of (RAM - 1GB), or 0.256 GB», con estremi dichiarati «ensure the RAM does not exceed
+  the bounds of 0.256GB to 10000GB». Sui container prescrive di impostarla a mano: «If you
+  run `mongod` in a container (for example, `lxc`, `cgroups`, Docker, etc.) that does *not*
+  have access to all of the RAM available in a system, you **must** set
+  `--wiredTigerCacheSizeGB` or `--wiredTigerCacheSizePct` to a value less than the amount
+  of RAM available in the container».
+- **Riserve:** la pagina **non** afferma che mongod legga il limite del cgroup. Afferma il
+  contrario: «WiredTiger may not account for the memory limits of the specific container in
+  certain cases». Contraddice [S-026](#s-026), che è sullo stesso manuale. Il manuale
+  archiviato v5.0 era invece affermativo e scriveva `256 MB` anziché `0.256 GB`: la
+  formulazione è stata **indebolita** fra la 5.0 e la 8.3. Nessun marcatore di versione
+  («Starting in MongoDB 3.4/5.0») è associato alla formula: l'attribuzione di versione che
+  davamo per nota **non esiste** nel testo.
+- **Usata da:** ADR-0004, ADR-0025
+
+<a id="s-002"></a>
+### S-002 — MongoDB Manual: `mongod` Instances
+
+- **URL:** https://www.mongodb.com/docs/manual/reference/program/mongod/ (citazioni dalla variante `mongod.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** manuale 8.x (marcatori interni «Changed in version 6.1», «Starting in MongoDB 8.0»)
+- **Consultata:** 2026-08-25
+- **Verdetto:** contraddice
+- **Cosa afferma:** «Avoid increasing the WiredTiger internal cache size above its default
+  value. If your use case requires to do so, you can use `--wiredTigerCacheSizePct` to
+  specify a percentage of up to 80% of available memory. **Values can range from 0.256GB to
+  10000GB.**» La stessa pagina documenta inoltre, per l'autenticazione interna:
+  «`--keyFile` implies `--auth`».
+- **Riserve:** il valore `0.25` che il progetto aveva scelto per la cache **è sotto il
+  minimo dichiarato**. Onestà sulla forza della fonte: la frase compare dentro la voce
+  `--wiredTigerCacheSizeGB` ma in un periodo che parla di `--wiredTigerCacheSizePct`, quindi
+  non è sintatticamente certo che il minimo sia normativo per l'opzione in GB — ragione in
+  più per la verifica empirica. Il tipo dell'opzione (intero o frazionario) e il suo default
+  non sono pubblicati: la pagina `reference/configuration-options` viene servita troncata
+  prima delle Storage Options.
+- **Usata da:** ADR-0004, ADR-0005, ADR-0048
+
+<a id="s-003"></a>
+### S-003 — Docker Docs: Define services in Docker Compose
+
+- **URL:** https://docs.docker.com/reference/compose-file/services/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** Compose Specification (nessun numero di versione sulla pagina)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** «`mem_limit` configures a limit on the amount of memory a container can
+  allocate, set as a string expressing a byte value»; «`cpus` define the number of
+  (potentially virtual) CPUs to allocate to service containers. This is a fractional number.
+  `0.000` means no limit». Le unità ammesse sono `b`, `k`/`kb`, `m`/`mb`, `g`/`gb`. Sul
+  reperimento dell'immagine: «If the image does not exist on the platform, Compose attempts
+  to pull it based on the `pull_policy`». Il digest è una forma valida di riferimento:
+  «must follow the OCI addressable image format, as
+  `[<registry>/][<project>/]<image>[:<tag>|@<digest>]`».
+- **Riserve:** due punti che davamo per acquisiti non sono scritti. Primo, la pagina **non
+  dice** che questi attributi siano applicati da `docker compose` fuori da Swarm: la parola
+  «Swarm» compare una sola volta nell'intera pagina, a proposito di `ports.mode`. Secondo, e
+  controintuitivo, la documentazione **non** presenta la sintassi breve come alternativa a
+  `deploy`, ma ne impone la coerenza: «When set, `mem_limit` must be consistent with the
+  `limits.memory` attribute in the Deploy Specification». La narrazione «usa `mem_limit`
+  *invece di* `deploy`» non è sostenuta dalla fonte. Nota favorevole: nessun marcatore di
+  deprecazione su `mem_limit` o `cpus` — l'ipotesi che fossero attributi legacy è falsa.
+- **Usata da:** ADR-0004, ADR-0013, ADR-0018
+
+<a id="s-004"></a>
+### S-004 — Docker Docs: Compose Deploy Specification
+
+- **URL:** https://docs.docker.com/reference/compose-file/deploy/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** nessuna indicata
+- **Consultata:** 2026-08-25
+- **Verdetto:** non trovato
+- **Cosa afferma:** «Deploy is an optional part of the Compose Specification. It provides a
+  set of deployment specifications for managing the behavior of containers across different
+  environments.» I vincoli sono espressi in termini astratti di piattaforma: «`limits`: The
+  platform must prevent the container from allocating more resources.»
+- **Riserve:** è il risultato più importante della verifica su Docker. Nel corpo
+  dell'articolo (303 righe di sorgente Markdown) i termini «Swarm», «ignored», «not
+  supported» e «docker compose up» hanno **zero occorrenze**; le occorrenze di «swarm»
+  nell'HTML stanno tutte nella barra di navigazione. Non esiste alcun elenco di attributi
+  `deploy` ignorati fuori da Swarm. La frase storica che lo affermava apparteneva al
+  riferimento del formato v3, oggi ritirato: «The legacy versions of the Compose file
+  reference has moved to the V1 branch of the Compose repository. They are no longer being
+  actively maintained.» Conseguenza: **la documentazione odierna non conferma né smentisce**
+  che i limiti sotto `deploy` siano applicati da `docker compose up`. Qualunque affermazione
+  in merito va presentata come verifica empirica — `docker inspect` sui campi
+  `HostConfig.Memory` e `HostConfig.NanoCpus` — non come citazione.
+- **Usata da:** ADR-0013
+
+<a id="s-005"></a>
+### S-005 — MongoDB Manual: Deploy Self-Managed Replica Set With Keyfile Authentication
+
+- **URL:** https://www.mongodb.com/docs/manual/tutorial/deploy-replica-set-with-keyfile-access-control/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Self-Managed Deployments 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** «On UNIX systems, the keyfile must not have group or world permissions.
+  On Windows systems, keyfile permissions are not checked.» e «Ensure that the user running
+  the `mongod` instances is the owner of the file and can access the keyfile». Sulla chiave:
+  «A key's length must be between 6 and 1024 characters and may only contain characters in
+  the base64 set. All members of the replica set must share at least one common key»,
+  generata con `openssl rand -base64 756 > <path-to-keyfile>`. L'esecuzione con `--keyFile`
+  «enforces both Self-Managed Internal/Membership Authentication and Role-Based Access
+  Control».
+- **Riserve:** l'esempio ufficiale usa **solo** `chmod 400`; `600` non compare in nessun
+  punto. Dire «400 o 600» è una deduzione corretta ma non una citazione. Anche
+  l'affermazione «altrimenti mongod rifiuta di avviarsi» **non è scritta**: la pagina pone
+  il requisito ma non descrive il comportamento in caso di violazione, e su Windows dichiara
+  che i permessi non vengono controllati affatto. Avvertenza da anticipare al pubblico:
+  «Use keyfiles only for testing and development environments because of their limited
+  manageability and cryptographic strength. For production environments, use X.509
+  certificates».
+- **Usata da:** ADR-0005, ADR-0014, ADR-0037, ADR-0048
+
+<a id="s-006"></a>
+### S-006 — MongoDB Manual: Localhost Exception in Self-Managed Deployments
+
+- **URL:** https://www.mongodb.com/docs/manual/core/localhost-exception/ (citazioni dalla variante `localhost-exception.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Self-Managed Deployments 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** «On a `mongod` instance, the localhost exception only applies when there
+  are **no users or roles** created in the MongoDB instance», e decade con «Run the
+  `createUser` command or `db.createUser()` method. This ends the localhost exception». In
+  cluster sharded: «In a sharded cluster, the localhost exception applies to each shard
+  individually as well as to the cluster as a whole», con l'obbligo di impedire comunque
+  l'accesso non autorizzato ai singoli shard. Operazioni ammesse sotto eccezione:
+  `createUser`, `createRole`, `grantRole` verso sistemi esterni, `replSetInitiate`,
+  `replSetGetStatus`, `replSetReconfig`, e su mongos `addShard` «if the cluster is hosted on
+  `localhost`».
+- **Riserve:** il vincolo che tutti danno per ovvio — la connessione deve arrivare da
+  `127.0.0.1`/`::1` — **non è enunciato in nessuna fonte primaria trovata**. Le stringhe
+  `127.0.0.1`, `::1`, «loopback», «same host» non compaiono nella pagina letta
+  integralmente, né nella voce `enableLocalhostAuthBypass` di `reference/parameters`. Se lo
+  si afferma, va qualificato come comportamento noto, non come citazione. Correzione
+  all'assunzione di progetto: l'eccezione decade anche con `createRole`, e non si attiva
+  affatto se esiste già un ruolo — perimetro più stretto di quello che avevamo scritto. I
+  config server non sono menzionati.
+- **Usata da:** ADR-0005, ADR-0040, ADR-0048, ADR-0070
+
+<a id="s-007"></a>
+### S-007 — MongoDB Manual: Connection String Options
+
+- **URL:** https://www.mongodb.com/docs/manual/reference/connection-string-options/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Database Manual 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** su `directConnection` — «Specifies whether the client connects directly
+  to the `host[:port]` in the connection URI: `true`: The client sends operations only to
+  the specified host and does not attempt to discover other replica set members.; `false`:
+  The client attempts to discover all servers in the replica set, and sends operations to
+  the primary member. This is the default value.» Su `replicaSet`: «When connecting to a
+  replica set, provide a seed list of the replica set members in the `host[:port]`
+  component.» La pagina contiene un avviso specifico per Docker, che descrive esattamente la
+  trappola del nostro lab: «When a replica set runs in Docker, it might expose only one
+  MongoDB endpoint. In this case, the replica set is not discoverable, and specifying
+  `directConnection=false` can prevent your application from connecting to it. In a test or
+  development environment, you can connect to the replica set by specifying
+  `directConnection=true` in your connection URI. In a production environment, we recommend
+  configuring the cluster to make each MongoDB instance accessible outside of the Docker
+  virtual network.»
+- **Riserve:** l'URL che il progetto citava, `reference/connection-string/`, **non contiene
+  più** la descrizione delle opzioni: è diventato una pagina di ingresso con selettore. Chi
+  fosse andato a verificare non avrebbe trovato nulla. Inoltre la pagina dice «attempts to
+  discover all servers in the replica set» ma **non** dice che il driver usi i nomi host
+  memorizzati nella configurazione del replica set: il meccanismo — la risposta a `hello`
+  che restituisce `members[n].host` — non è enunciato qui.
+- **Usata da:** ADR-0012
+
+<a id="s-008"></a>
+### S-008 — MongoDB Manual: Sharded Cluster Components
+
+- **URL:** https://www.mongodb.com/docs/manual/core/sharded-cluster-components/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Database Manual 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** «shard: Each shard contains a subset of the sharded data. **Each shard
+  must be deployed as a replica set.**» e «config servers: Config servers store metadata and
+  configuration settings for the cluster. **Config servers must be deployed as a replica set
+  (CSRS).**» Sul numero minimo: «Sharding requires at least two shards to distribute sharded
+  data.» Novità 8.0 utile a un lab con poca RAM: «A cluster requires a config server, but it
+  can be a config shard instead of a dedicated config server. Using a config shard reduces
+  the number of nodes required and can simplify your deployment.» Avvertenza: «Use the test
+  cluster architecture for testing and development only.»
+- **Riserve:** questa pagina **non dice nulla** sui replica set a un solo membro — non
+  nomina mai «single-member». La sezione «Development Configuration» elenca «A single shard
+  replica set», dove «single shard» significa *un solo shard*, non *un solo membro*. La
+  risposta esiste ed è favorevole al lab, ma sta su [S-024](#s-024): è quella la fonte da
+  citare.
+- **Usata da:** ADR-0010
+
+<a id="s-009"></a>
+### S-009 — Docker Hub: immagine ufficiale `mongo`
+
+- **URL:** https://hub.docker.com/_/mongo (testo mantenuto in `docker-library/docs`, directory `mongo/`)
+- **Editore:** Docker, Inc. — Docker Official Images
+- **Versione documentata:** snapshot al 2026-08-25; tag `8.0.29`/`8.0` su base Ubuntu Noble
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** «These variables, used in conjunction, create a new user and set that
+  user's password. This user is created in the `admin` authentication database and given the
+  role of `root`, which is a "superuser" role.» Sull'inizializzazione: «Do note that none of
+  the variables below will have any effect if you start the container with a data directory
+  that already contains a database» e «When a container is started for the first time it
+  will execute files with extensions `.sh` and `.js` that are found in
+  `/docker-entrypoint-initdb.d`». Architetture dichiarate: «Supported architectures:
+  `amd64`, `arm64v8`, `windows-amd64`» — la presenza di `linux/arm64/v8` nel manifest del tag
+  `8.0` è stata confermata sull'API di Docker Hub.
+- **Riserve:** la pagina **non copre il punto che ci serve davvero**. Né `--replSet` né
+  `--keyFile` vi compaiono: la replicazione è liquidata con un rimando al manuale. Non
+  descrive la fase di mongod temporaneo — la parola «temporary» è assente — e non pubblica
+  UID e GID. Per questi tre punti si vedano [S-022](#s-022) e [S-023](#s-023), che sono
+  **codice sorgente, non prosa documentale**: vanno citati come tali.
+- **Usata da:** ADR-0008
+
+<a id="s-010"></a>
+### S-010 — PyMongo: `monitoring` — Tools for monitoring driver events
+
+- **URL:** https://pymongo.readthedocs.io/en/stable/api/pymongo/monitoring.html
+- **Editore:** MongoDB, Inc. — documentazione PyMongo su Read the Docs
+- **Versione documentata:** PyMongo 4.17.0
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** cinque classi astratte di listener — `CommandListener`, `ServerListener`,
+  `ServerHeartbeatListener`, `TopologyListener`, `ConnectionPoolListener` — registrabili
+  globalmente o per singolo client: «Use `register()` to register global listeners for
+  specific events», con la forma per client `MongoClient(event_listeners=[CommandLogger()])`.
+  Gli eventi che servono a cronometrare un failover: `ServerDescriptionChangedEvent`
+  («Published when server description changes»), `ServerHeartbeatFailedEvent` — il momento in
+  cui il client si accorge della caduta — e `TopologyDescriptionChangedEvent` («Published
+  when the topology description changes»). Tutte le classi sono «Added in version 3.3».
+- **Riserve:** la documentazione afferma **l'opposto** di quanto il progetto assumeva sui
+  thread: «Events are delivered synchronously. Application threads block waiting for event
+  handlers (e.g. `started()`) to return. Care must be taken to ensure that your event
+  handlers are efficient enough to not adversely affect overall application performance.» Un
+  handler lento non rallenta solo la UI: rallenta il driver, e falsa proprio le misure di
+  failover che la demo vuole mostrare. Ulteriore avvertenza se si registrano i comandi: «The
+  command documents published through this API are not copies.»
+- **Usata da:** ADR-0006, ADR-0019, ADR-0085, ADR-0089, ADR-0096
+
+<a id="s-011"></a>
+### S-011 — MongoDB Database Tools: `mongodump`
+
+- **URL:** https://www.mongodb.com/docs/database-tools/mongodump/
+- **Editore:** MongoDB, Inc. — MongoDB Database Tools (prodotto distinto dal server)
+- **Versione documentata:** Database Tools ≥ 100.18.0 (marcatori interni «New in version 100.3.0», «Starting in Database Tools 100.18.0»)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** `--oplog` «Creates a file named `oplog.bson` as part of the `mongodump`
+  output. The `oplog.bson` file, located in the top level of the output directory, contains
+  oplog entries that occur during the `mongodump` operation.» Ambito: «`--oplog` only works
+  against nodes that maintain an oplog. This includes all members of a replica set», e il
+  divieto netto «**You can't run `mongodump` with `--oplog` on a sharded cluster.**» Senza
+  l'opzione: «if there are write operations during the dump operation, the dump will not
+  reflect a single moment in time». `--readPreference=secondary` permette di scaricare da un
+  secondario, e «the command-line `--readPreference` overrides the read preference specified
+  in the URI string».
+- **Riserve:** limitazione operativa che condiziona il copione della demo: `--oplog`
+  **fallisce** se combinato con `--db`, `--collection`, `--dumpDbUsersAndRoles` o `--query`
+  — «To use `mongodump` with `--oplog`, you must create a full dump of a replica set
+  member» — e fallisce se durante il dump un client esegue `renameCollection`, `$out`,
+  `mapReduce`, operazioni su utenti o ruoli, o `setDefaultRWConcern`. Le espressioni «point
+  in time» e «does not guarantee» non compaiono: il paradosso dello standalone — senza oplog
+  `--oplog` non è utilizzabile, quindi il dump non può essere coerente a un istante — è vero
+  ma **non è scritto**.
+- **Usata da:** ADR-0022, ADR-0047, ADR-0070
+
+<a id="s-012"></a>
+### S-012 — Docker Docs: `depends_on`
+
+- **URL:** https://docs.docker.com/reference/compose-file/services/#depends_on
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** Compose Specification; i singoli attributi sono datati alle release Compose 2.17.0 e 2.20.0
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** la forma lunga ammette esattamente tre condizioni — `service_started`
+  («An equivalent of the short syntax described previously»), `service_healthy`
+  («Specifies that a dependency is expected to be "healthy" (as indicated by `healthcheck`)
+  before starting a dependent service») e `service_completed_successfully` («Specifies that
+  a dependency is expected to run to successful completion before starting a dependent
+  service»). Il contrasto fra le due forme è esplicito e citabile: «With short syntax,
+  Compose does not wait for dependency services to be "healthy" before starting a dependent
+  service» contro «Compose waits for healthchecks to pass on dependencies marked with
+  `service_healthy`». Esistono inoltre `restart` (booleano, Compose 2.17.0) e `required`
+  («When set to `false` Compose only warns you when the dependency service isn't started or
+  available», default `true`, Compose 2.20.0).
+- **Riserve:** nessuna. È l'unica fonte Docker confermata senza riserve.
+- **Usata da:** ADR-0023
+
+<a id="s-013"></a>
+### S-013 — testcontainers-python
+
+- **URL:** https://testcontainers-python.readthedocs.io/en/latest/ e https://testcontainers-python.readthedocs.io/en/latest/modules/mongodb/README.html
+- **Editore:** Sergey Pirogov e i contributori Testcontainers Python, su Read the Docs
+- **Versione documentata:** testcontainers 2.0.0
+- **Consultata:** 2026-08-25
+- **Verdetto:** contraddice
+- **Cosa afferma:** «class `MongoDbContainer`(image: str = 'mongo:latest', port: int = 27017,
+  username: str | None = None, password: str | None = None, dbname: str | None = None,
+  **kwargs) — Mongo document-based database container.» I parametri sono esattamente questi
+  cinque.
+- **Riserve:** il modulo **non supporta i replica set**. Le stringhe «replica», «replSet» e
+  «rs.initiate» non compaiono in nessun punto della pagina, e il sorgente
+  (`src/testcontainers/community/mongodb/__init__.py`) imposta solo
+  `MONGO_INITDB_ROOT_USERNAME`, `MONGO_INITDB_ROOT_PASSWORD` e `MONGO_DB`, attendendo la
+  stringa di log `waiting for connections`: **avvia un'istanza standalone**. Per una demo di
+  failover il componente non serve. L'alternativa interna alla libreria, la classe
+  `DockerCompose`, **esiste nel codice** (`src/testcontainers/compose/compose.py`) ma ha zero
+  occorrenze nell'indice, nella pagina Core e nel `genindex` della documentazione
+  pubblicata: costruirci sopra significa dipendere da un'API non documentata. Aggravante: il
+  sito Read the Docs descrive un layout di pacchetti superato rispetto al repository, che
+  punta a un nuovo sito `python.testcontainers.org` non ancora raggiungibile alla data di
+  consultazione. Il vecchio percorso `testcontainers.mongodb` è già uno shim che avverte
+  «testcontainers.mongodb is deprecated, use testcontainers.community.mongodb instead».
+- **Usata da:** ADR-0011, ADR-0020
+
+<a id="s-014"></a>
+### S-014 — MongoDB Resources: Come configurare un cluster MongoDB
+
+- **URL:** https://www.mongodb.com/it-it/resources/products/fundamentals/mongodb-cluster-setup
+- **Editore:** MongoDB, Inc. — sezione `/resources/products/fundamentals/`, **non** `/docs/`
+- **Versione documentata:** nessuna. Pagina senza numero di versione e senza data di pubblicazione o aggiornamento
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** «Un replica set di MongoDB è un gruppo di uno o più server che contiene
+  una copia esatta dei dati. Sebbene sia tecnicamente possibile avere uno o due nodi, il
+  minimo consigliato è tre.» Introduce i due significati di «cluster», poi passa quasi
+  interamente alla creazione di un cluster su MongoDB Atlas.
+- **Riserve:** **non è utilizzabile come riferimento normativo.** È materiale divulgativo:
+  nessun comando, nessun file di configurazione, nessun esempio di codice; l'unica procedura
+  è un percorso di clic a cinque passi nella interfaccia di Atlas, fra due inviti alla prova
+  gratuita. Senza versione e senza data, non può sostenere affermazioni versionate. Resta
+  utile come **raccolta di collegamenti** verso il manuale, dove risiedono le affermazioni
+  citabili. La frase sul minimo di tre nodi è coerente con [S-008](#s-008), ma se qualcuno
+  dal pubblico contesta il replica set a nodo singolo la difesa va costruita su
+  [S-024](#s-024), non su questa pagina.
+- **Usata da:** ADR-0024
+
+<a id="s-015"></a>
+### S-015 — Docker Docs: Using profiles with Compose
+
+- **URL:** https://docs.docker.com/compose/how-tos/profiles/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** nessuna indicata
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** «Services without a `profiles` attribute are always enabled.»
+  L'attivazione avviene con «the `--profile` command-line option or [...] the
+  `COMPOSE_PROFILES` environment variable»; «If you want to enable all profiles at the same
+  time, you can run `docker compose --profile "*"`». Un servizio con profilo può essere
+  avviato nominandolo esplicitamente: «When you explicitly target a service on the command
+  line that has one or more profiles assigned, you do not need to enable the profile manually
+  as Compose runs that service regardless of whether its profile is activated», e in tal caso
+  «Only the targeted service (and any of its declared dependencies via `depends_on`) is
+  started». I nomi dei profili seguono «the regex format of `[a-zA-Z0-9][a-zA-Z0-9_.-]+`».
+- **Riserve:** la documentazione copre **una sola direzione** della relazione con
+  `depends_on`: servizio con profilo → sue dipendenze. Il caso inverso — un servizio *senza*
+  profilo che dichiara `depends_on` verso un servizio *con* profilo non attivo — non è
+  trattato né qui né nella voce `profiles` del riferimento dei servizi. Se il lab vi si
+  appoggia, va verificato empiricamente e non citato come documentato.
+- **Usata da:** ADR-0010
+
+<a id="s-016"></a>
+### S-016 — Docker Docs: Version and name top-level elements
+
+- **URL:** https://docs.docker.com/reference/compose-file/version-and-name/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** Compose Specification
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** il titolo di sezione è «Version top-level element (**obsolete**)», e
+  l'avviso è esplicito: «The top-level `version` property is defined by the Compose
+  Specification for backward compatibility. It is only informative and you'll receive a
+  warning message that it is obsolete if used.» Inoltre: «Compose always uses the most recent
+  schema to validate the Compose file, regardless of the `version` field.»
+- **Riserve:** l'URL che il progetto citava, `reference/compose-file/`, è una pagina indice
+  di ventitré righe che **non nomina mai** la chiave `version`: l'assunzione non vi era
+  verificabile. Correzione terminologica per le slide: la documentazione dice «obsolete», non
+  «deprecated», e dice «only informative» più «warning message», non «ignored». La resa
+  fedele è «obsoleto, puramente informativo, produce un avviso; lo schema di validazione
+  usato è comunque il più recente».
+- **Usata da:** ADR-0001
+
+<a id="s-017"></a>
+### S-017 — Docker Docs: Specify a project name
+
+- **URL:** https://docs.docker.com/compose/how-tos/project-name/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** nessuna indicata
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** «Compose uses a project name to isolate environments from each other», e
+  fra i casi d'uso «On a shared or development host: Avoid interference between different
+  projects that might share the same service names». La precedenza è enumerata: «The
+  precedence order for each method, from highest to lowest, is as follows: 1. The `-p`
+  command line flag. 2. The COMPOSE_PROJECT_NAME environment variable. 3. The top-level
+  `name:` attribute in your Compose file [...] 4. The base name of the project directory
+  containing your Compose file [...] 5. The base name of the current directory if no Compose
+  file is specified.» Vincolo sui nomi: «Project names must contain only lowercase letters,
+  decimal digits, dashes, and underscores, and must begin with a lowercase letter or decimal
+  digit.»
+- **Riserve:** la pagina **non enumera mai** reti, volumi e container come le risorse
+  isolate: dice genericamente «isolate environments from each other». L'affermazione «isola
+  reti, volumi e container», che il progetto dava per acquisita, è più specifica di quanto la
+  fonte sostenga. Inoltre i livelli di precedenza sono **cinque**, non quattro.
+- **Usata da:** ADR-0003
+
+<a id="s-018"></a>
+### S-018 — Rich: Live Display
+
+- **URL:** https://rich.readthedocs.io/en/stable/live.html
+- **Editore:** Will McGugan / Textualize, su Read the Docs
+- **Versione documentata:** Rich 14.1.0
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** «By default, the live display will refresh 4 times a second. You can set
+  the refresh rate with the `refresh_per_second` argument on the Live constructor», con la
+  raccomandazione «You should set this to something lower than 4 if you know your updates
+  will not be that frequent or higher for a smoother feeling». Stampare mentre il display è
+  attivo è previsto, in due modi: «The Live class will create an internal Console object
+  which you can access via `live.console`. If you print or log to this console, the output
+  will be displayed above the live display», e «To avoid breaking the live display visuals,
+  Rich will redirect `stdout` and `stderr` so that you can use the builtin `print`
+  statement». Sul nidificare due display: «If you create a `Live` instance within the context
+  of an existing `Live` instance, then the content of the inner `Live` will be displayed
+  below the outer `Live`. Prior to version 14.0.0 this would have resulted in a `LiveError`
+  exception.»
+- **Riserve:** l'assunzione di progetto sui vincoli di thread è **infondata**: la parola
+  «thread» non compare **nemmeno una volta**, né in questa pagina né nell'API reference
+  `reference/live.html`; non compaiono neppure «concurrent» o «lock». Non esiste alcuna
+  avvertenza documentata sull'aggiornamento di `Live` da più thread, né in un senso né
+  nell'altro. Se la domanda arriva dal pubblico, la risposta onesta è che la documentazione
+  tace.
+- **Usata da:** ADR-0007, ADR-0019, ADR-0085, ADR-0098
+
+<a id="s-019"></a>
+### S-019 — Docker Docs: `docker compose up`
+
+- **URL:** https://docs.docker.com/reference/cli/docker/compose/up/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** riferimento CLI Compose v2
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** l'opzione `--pull` ha valore predefinito `policy` e accetta
+  `"always"|"missing"|"never"`. I valori di `pull_policy` documentati sul riferimento dei
+  servizi sono: `always` («Compose always pulls the image from the registry»), **`never`
+  («Compose doesn't pull the image from a registry and relies on the platform cached image.
+  If there is no cached image, a failure is reported»)**, `missing` («Compose pulls the image
+  only if it's not available in the platform cache», predefinito), `build`, `daily`,
+  `weekly`, `every_<duration>`.
+- **Riserve:** tre punti pesano su un lab che deve funzionare senza rete. Primo: **la parola
+  «offline» non compare** su nessuna delle pagine consultate — non esiste una modalità
+  offline globale documentata di Compose; il solo meccanismo con una frase esplicita sul non
+  contattare il registry è `pull_policy: never`. Secondo, la trappola: «The `latest` tag is
+  always pulled even when the `missing` pull policy is used». Terzo, la documentazione Docker
+  è internamente incoerente sui valori ammessi — `up` ne elenca tre, `create` ne elenca
+  quattro aggiungendo `build`, e `docker compose pull` usa una flag diversa, `--policy`, con
+  due soli valori. Infine: nessuna pagina ufficiale dice se `compose up` contatti il registry
+  per un'immagine **pinnata a digest e già presente in locale**. La deduzione è ragionevole
+  ma non è una citazione: **il digest garantisce *quale* immagine, non *se* si va in rete**.
+- **Usata da:** ADR-0009, ADR-0018, ADR-0039
+
+<a id="s-020"></a>
+### S-020 — MongoDB Manual: Change Hostnames in a Self-Managed Replica Set
+
+- **URL:** https://www.mongodb.com/docs/manual/tutorial/change-hostnames-in-a-replica-set/ (citazioni dalla variante `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Database Manual 8.3
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** i nomi host risiedono nella configurazione del replica set — «For most
+  replica sets, the hostnames in the `members[n].host` field never change» — e si cambiano
+  con `rs.reconfig()`, nella sequenza `cfg = rs.conf()` / `cfg.members[1].host =
+  "mongodb1.example.net:27017"` / `rs.reconfig(cfg)`. Raccomandazione esplicita: «Always use
+  resolvable hostnames for the value of the `members[n].host` field in the replica set
+  configuration to avoid confusion and complexity». Vincolo duro e versionato, decisivo per
+  un lab in Docker: «**Starting in MongoDB 5.0, nodes that are only configured with an IP
+  address fail startup validation and do not start.**»
+- **Riserve:** la pagina dimostra che gli host stanno in configurazione, ma **non enuncia**
+  né che siano i nomi con cui i membri si raggiungono fra loro, né che i client li usino per
+  connettersi. Su quest'ultimo punto esiste solo evidenza operativa indiretta: «you must
+  configure your applications to connect to the replica set at both the old and new
+  locations». Il nesso è deducibile, non citabile.
+- **Usata da:** ADR-0021
+
+<a id="s-021"></a>
+### S-021 — GitHub Docs: About large files on GitHub
+
+- **URL:** https://docs.github.com/en/repositories/working-with-files/managing-large-files/about-large-files-on-github
+- **Editore:** GitHub, Inc.
+- **Versione documentata:** GitHub.com, piani Free, Pro e Team
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** «We recommend repositories remain small, ideally less than 1 GB, and less
+  than 5 GB is strongly recommended. Smaller repositories are faster to clone and easier to
+  work with and maintain.» Sui singoli file: «If you attempt to add or update a file that is
+  larger than 50 MiB, you will receive a warning from Git» e «GitHub blocks files larger than
+  100 MiB. To track files beyond this limit, you must use Git Large File Storage (Git LFS).»
+  Limite ulteriore: «If you add a file to a repository via a browser, the file can be no
+  larger than 25 MiB.»
+- **Riserve:** le unità sono **MiB**, non MB: scrivere «100 MB» in slide è impreciso ed è
+  esattamente il dettaglio che viene fatto notare. I valori valgono per GitHub.com; su
+  GitHub Enterprise Server «a site administrator can configure a different limit».
+- **Usata da:** ADR-0016, ADR-0031, ADR-0050
+
+<a id="s-022"></a>
+### S-022 — `docker-library/mongo`: `8.0/docker-entrypoint.sh`
+
+- **URL:** https://github.com/docker-library/mongo/blob/7c24b37b8e53a41b56c450b653c582ff7c3f7fcb/8.0/docker-entrypoint.sh
+- **Editore:** Docker Official Images — repository `docker-library/mongo`
+- **Versione documentata:** branch `8.0`, commit `7c24b37b8e53a41b56c450b653c582ff7c3f7fcb`, lo stesso referenziato dal README per il tag `8.0.29-noble`
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** **è codice sorgente, non documentazione** — va citato come tale. Un
+  mongod temporaneo viene avviato con `--fork`, forzato su `--bind_ip 127.0.0.1 --port
+  27017`, e arrestato con `--shutdown` prima di `exec "$@"`. I commenti nel sorgente sono
+  espliciti: `# remove "--auth" and "--replSet" for our initial startup` e `# "keyFile
+  implies security.authorization"`. Il comportamento esatto sui tre flag: `--auth` e
+  `--keyFile` sono **sempre** rimossi dal mongod temporaneo; `--replSet` è rimosso **solo
+  se entrambe** le variabili root sono presenti. La condizione di inizializzazione non è
+  «directory vuota» ma la presenza di uno fra `$dbPath/WiredTiger`, `$dbPath/journal`,
+  `$dbPath/local.0`, `$dbPath/storage.bson`. Se manca una sola delle due variabili root,
+  l'entrypoint termina con `error: missing 'MONGO_INITDB_ROOT_USERNAME' or
+  'MONGO_INITDB_ROOT_PASSWORD'`.
+- **Riserve:** conseguenza pratica **non documentata da nessuna parte**: passando
+  `MONGO_INITDB_ROOT_USERNAME` insieme a `--replSet` e `--keyFile`, il mongod di
+  inizializzazione parte standalone, senza replica set e senza autenticazione; l'utente root
+  viene creato in quel contesto; poi il processo definitivo riparte con `--replSet` e
+  `--keyFile`. **`rs.initiate()` non viene mai eseguito dall'immagine: resta a nostro
+  carico.** Trattandosi di sorgente, l'API non ha garanzie di stabilità fra versioni: la
+  citazione deve indicare commit e riga.
+- **Usata da:** ADR-0005, ADR-0026, ADR-0040, ADR-0042, ADR-0043, ADR-0067
+
+<a id="s-023"></a>
+### S-023 — `docker-library/mongo`: `8.0/Dockerfile`
+
+- **URL:** https://github.com/docker-library/mongo/blob/7c24b37b8e53a41b56c450b653c582ff7c3f7fcb/8.0/Dockerfile
+- **Editore:** Docker Official Images — repository `docker-library/mongo`
+- **Versione documentata:** MongoDB 8.0 su base Ubuntu Noble, stesso commit di [S-022](#s-022)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** `groupadd --gid 999 --system mongodb;` e `useradd --uid 999 --system
+  --gid mongodb --home-dir /data/db mongodb;`. Utente e gruppo `mongodb` hanno entrambi
+  identificativo **999**; `/data/db` e `/data/configdb` appartengono a `mongodb:mongodb`. La
+  scelta è motivata nel sorgente: «add our user and group first to make sure their IDs get
+  assigned consistently, regardless of whatever dependencies get added».
+- **Riserve:** il valore **non è pubblicato su Docker Hub**: è vero, ma leggibile solo dal
+  Dockerfile. È il numero da usare per un eventuale `chown` su bind mount — ed è la ragione
+  per cui il keyfile sta in un volume nominato.
+- **Usata da:** ADR-0014, ADR-0026
+
+<a id="s-024"></a>
+### S-024 — MongoDB Manual: Deploy a Self-Managed Sharded Cluster
+
+- **URL:** https://www.mongodb.com/docs/manual/tutorial/deploy-shard-cluster/ (citazioni dalla variante `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Database Manual 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** è la fonte che autorizza esplicitamente il replica set a un solo membro,
+  e lo fa **due volte**. Per i config server: «For a production deployment, deploy a config
+  server replica set with at least three members. **For testing purposes, you can create a
+  single-member replica set.**» Per gli shard: «For a production deployment, use a replica
+  set with at least three members. **For testing purposes, you can create a single-member
+  replica set.**»
+- **Riserve:** l'autorizzazione è circoscritta agli scopi di test, e va presentata come tale.
+  Non è la pagina che si troverebbe cercando i componenti di uno sharded cluster: chi
+  verifica su [S-008](#s-008) non trova nulla in merito.
+- **Usata da:** ADR-0010
+
+<a id="s-025"></a>
+### S-025 — MongoDB Manual: Config Servers
+
+- **URL:** https://www.mongodb.com/docs/manual/core/sharded-cluster-config-servers/ (citazioni dalla variante `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Database Manual 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** vincoli sul replica set dei config server, da opporre a chi propone un
+  arbitro per risparmiare risorse: «Must have zero arbiters. / Must have no delayed members.
+  / Must build indexes (i.e. no member should have `members[n].buildIndexes` setting set to
+  false).» Vincolo sui nomi: «The config server replica set must not use the same name as any
+  of the shard replica sets.»
+- **Riserve:** nessuna.
+- **Usata da:** ADR-0010
+
+<a id="s-026"></a>
+### S-026 — MongoDB Manual: `hostInfo`
+
+- **URL:** https://www.mongodb.com/docs/manual/reference/command/hostInfo/ (citazioni dalla variante `hostInfo.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Database Manual 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** contraddice
+- **Cosa afferma:** «For example, running in a container may impose memory limits that are
+  lower than the total system memory. This memory limit, rather than the total system memory,
+  is used as the maximum RAM available to calculate WiredTiger internal cache.»
+- **Riserve:** questa frase è **incompatibile** con [S-001](#s-001), che sullo stesso manuale
+  e alla stessa versione afferma che WiredTiger «may not account for the memory limits of the
+  specific container in certain cases» e prescrive di impostare la cache a mano. Non è una
+  divergenza fra versioni: **le due pagine correnti si contraddicono**. Conseguenza pratica:
+  non affermare sul palco che il rilevamento del limite avviene automaticamente; mostrarlo
+  con `db.hostInfo()` in demo, e impostare comunque la cache in modo esplicito.
+- **Sciolta il 2026-08-25:** la contraddizione era apparente e la misura la spiega
+  [V-006](#v-006). Le due pagine parlano di campi diversi: `hostInfo.system.memSizeMB` riporta
+  la memoria della macchina — 11946 MiB, la VM — mentre `hostInfo.system.memLimitMB` riporta il
+  `mem_limit` del container, 640 MiB. È il secondo a guidare la cache: senza
+  `--wiredTigerCacheSizeGB`, un container limitato a 640 MiB sceglie 256 MiB e uno limitato a
+  4.096 MiB sceglie 1.536 MiB, cioè 0,5 × (limite − 1 GiB). La prescrizione qui sopra resta
+  valida — impostare la cache a mano — ma per rendere il valore esplicito e leggibile, non
+  perché il rilevamento non funzioni.
+- **Usata da:** ADR-0004
+
+<a id="s-027"></a>
+### S-027 — MongoDB Manual: MongoDB Versioning
+
+- **URL:** https://www.mongodb.com/docs/manual/reference/versioning/ (citazioni dalla variante `versioning.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** Database Manual 8.3 (Current)
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma, e cambia una premessa del progetto
+- **Cosa afferma:** dalla 8.2 lo schema di rilascio è cambiato. «Starting with MongoDB 8.2,
+  MongoDB adopts a new versioning and release strategy». Le *Major Releases* escono «every two
+  years and have a five-year lifecycle»; le *Minor Releases* «are as stable as major releases
+  and suitable for production workloads». La frase che decide, però, è sulle minor: «After a
+  new minor release becomes available, MongoDB does not continue patching the previous minor
+  release.»
+- **Riserve:** la pagina non nomina versioni specifiche oltre agli esempi (`7.0`, `8.0` per le
+  major, `8.2` per le minor), quindi la classificazione della 8.3 si deduce dallo schema e dal
+  fatto che l'indice delle release notes la elenchi come stabile corrente, non da
+  un'affermazione esplicita. La pagina non dice nulla sui vincoli di piattaforma né sui kernel.
+- **Usata da:** ADR-0028
+
+<a id="s-028"></a>
+### S-028 — MongoDB Manual: Release Notes for MongoDB 8.0 — Changelog
+
+- **URL:** https://www.mongodb.com/docs/manual/release-notes/8.0-changelog/ (consultata nella variante `8.0-changelog.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** serie 8.0
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma
+- **Cosa afferma:** sotto la voce **8.0.30**, sezione *Internals*, compare `SERVER-125742` —
+  il ticket che restringe l'uscita anticipata ai soli kernel dalla versione 7.0.14 in su. È la
+  correzione che renderebbe di nuovo avviabile la 8.0 sul kernel `7.0.12-linuxkit` della VM di
+  Docker Desktop.
+- **Riserve:** due, entrambe rilevanti. La pagina è servita in forma compressa e troncata:
+  molte voci perdono il testo descrittivo e restano il solo identificatore, `SERVER-125742`
+  compreso — il numero è confermato, il contenuto va letto sul ticket. E la presenza di una
+  voce nel changelog **non implica** che i binari siano pubblicati: al 2026-08-25 la 8.0.30 non
+  compare né in `downloads.mongodb.org/current.json`, né fra i tag di `library/mongo`, né fra
+  quelli di `mongodb/mongodb-community-server` [V-007](#v-007). Il changelog documenta il ramo
+  di rilascio, non la disponibilità.
+- **Riletta il 2026-09-02** ([V-074](#v-074)): la sezione `## 8.0.30 Changelog` è ancora la prima
+  del documento e contiene ancora `SERVER-125742`. La correzione non è slittata a una patch
+  successiva, quindi il numero da attendere è rimasto quello. La seconda riserva regge identica: la
+  documentazione della 8.0.30 c'è, i binari continuano a non esserci.
+- **Usata da:** ADR-0028, ADR-0080
+
+---
+
+<a id="s-029"></a>
+### S-029 — MongoDB Manual: Compatibility Changes in MongoDB 8.0
+
+- **URL:** https://www.mongodb.com/docs/manual/release-notes/8.0-compatibility/ (letta nella
+  variante `8.0-compatibility.md`, che restituisce il testo integrale)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** serie 8.0
+- **Consultata:** 2026-08-25
+- **Verdetto:** conferma una causa, e smentisce un'assunzione del progetto
+- **Cosa afferma, primo punto — la causa del blocco, finalmente documentata.** Sezione
+  *Upgraded TCMalloc*: «Starting in MongoDB 8.0, MongoDB uses an upgraded version of TCMalloc
+  that uses per-CPU caches, instead of per-thread caches, to reduce memory fragmentation and
+  make your database more resilient to high-stress workloads.» È **la 8.0** a introdurre la
+  cache per-CPU, cioè esattamente il meccanismo che sul kernel dal 6.19 in su viola l'ABI di
+  `rseq`. Spiega in una riga perché la 7.0 si avvia e la 8.0 no, senza passare dai ticket
+  Jira, e scioglie in parte la riserva di [V-007](#v-007).
+- **Cosa afferma, secondo punto — una differenza fra 7.0 e 8.0 che tocca la demo.** Sezione
+  *Cannot Connect Directly to Shard and Run Commands*, elencata fra le **Backward-Incompatible
+  Features**: «Starting in MongoDB 8.0, you can only run certain commands on nodes in sharded
+  clusters. If you attempt to connect directly to a node and run an unsupported command,
+  MongoDB returns an error» — e l'errore è «You are connecting to a sharded cluster improperly
+  by connecting directly to a shard. Please connect to the cluster via a router (mongos).»
+  Segue la via d'uscita: «you must either connect to `mongos` or have the maintenance-only
+  `directShardOperations` role», con la precisazione che il vincolo vale «once the cluster has
+  more than one shard».
+- **Cosa afferma, terzo punto — la semantica di `majority` cambia.** Sezione *Write Concern
+  Majority*: «Starting in MongoDB 8.0, write operations that use the `"majority"` write concern
+  return an acknowledgment when the majority of replica set members have written the oplog
+  entry for the change. […] In previous releases, these operations would wait and return an
+  acknowledgment after the majority of replica set members applied the change.» Scritto contro
+  applicato: è una differenza osservabile proprio nelle misure di latenza sotto failover.
+- **Cosa non afferma:** le stringhe `mongodump`, `mongorestore`, `rs.initiate`, `sh.addShard`,
+  `keyfile` e `config server` **non compaiono** nella pagina. Su quei punti la 8.0 non dichiara
+  incompatibilità.
+- **Riserve:** una pagina di *compatibility changes* elenca ciò che rompe, non ciò che resta
+  uguale. L'assenza di una voce è un indizio forte, non una prova di identità di comportamento:
+  non esiste una pagina che affermi «7.0 e 8.0 si comportano allo stesso modo». La lettura
+  copre inoltre la sola 8.0; per la 8.2 e la 8.3 esistono pagine analoghe non consultate.
+- **Usata da:** ADR-0028
+
+---
+
+<a id="s-030"></a>
+### S-030 — POSIX, Base Definitions capitolo 9: Regular Expressions
+
+- **URL:** https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap09.html
+- **Editore:** IEEE e The Open Group — The Open Group Base Specifications Issue 7, 2018 edition
+- **Versione documentata:** Issue 7, edizione 2018 (IEEE Std 1003.1-2017, revisione di IEEE
+  Std 1003.1-2008)
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — due quantificatori attaccati sono indefiniti.** Sezione
+  **9.4.6**, *EREs Matching Multiple Characters*, in chiusura di sottosezione: «The behavior of
+  multiple adjacent duplication symbols ( '+', '\*', '?', and intervals) produces undefined
+  results.» Una frase gemella sta in **9.3.6** per le BRE, con l'elenco ridotto a `*` e agli
+  intervalli. È la regola sotto cui cade `.*?`: negli ERE il non-greedy non esiste, quindi
+  quella `?` non è un modificatore ma un secondo quantificatore attaccato al primo.
+- **Cosa afferma, secondo punto — e qui «indefinito» viene definito.** Sezione **9.1**, voce
+  *invalid*: «When invalid is not used, violations of the specified syntax or semantics for REs
+  produce undefined results: this may entail an error, enabling an extended syntax for that RE,
+  or using the construct in error as literal characters to be matched.» Tre esiti, tutti
+  leciti: errore, estensione, oppure trattamento come caratteri letterali. Nessuno è
+  prescritto, e un programma portabile non può contare su nessuno dei tre.
+- **Cosa afferma, terzo punto — il permesso di estendere è esplicito.** Dopo l'elenco dei
+  costrutti che la grammatica ERE accetta ma lascia indefiniti: «Implementations are permitted
+  to extend the language to allow these. Strictly Conforming applications cannot use such
+  constructs.»
+- **Cosa non afferma:** che `*?` sia un errore, o che rompa qualcosa. Nel capitolo non compare
+  alcun quantificatore non-greedy, né la nozione di corrispondenza minima: la semantica
+  descritta è quella più a sinistra e più lunga.
+- **Riserve:** lo standard descrive gli ERE, non una particolare implementazione. Proprio le
+  frasi citate al secondo e al terzo punto rendono la pagina inservibile per **prevedere** cosa
+  faccia un `awk` reale: un'implementazione può definire `*?` come estensione e restare
+  conforme. Serve a stabilire cosa **non è garantito**, non cosa succede — quello va misurato.
+  Consultata l'edizione 2018; la pagina segnala l'esistenza di un'edizione più recente, non
+  aperta.
+- **Usata da:** ADR-0029
+
+---
+
+<a id="s-031"></a>
+### S-031 — POSIX, Shell and Utilities: `awk`
+
+- **URL:** https://pubs.opengroup.org/onlinepubs/9699919799/utilities/awk.html
+- **Editore:** IEEE e The Open Group — The Open Group Base Specifications Issue 7, 2018 edition
+- **Versione documentata:** Issue 7, edizione 2018 (IEEE Std 1003.1-2017)
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — quale dialetto parla `awk`.** «The `awk` utility shall make use
+  of the extended regular expression notation (see XBD *Extended Regular Expressions*)», con
+  un'eccezione dichiarata per le sequenze di escape in stile C. È il collegamento che porta il
+  capitolo 9 [S-030](#s-030) a valere anche dentro un `FS`.
+- **Cosa afferma, secondo punto — ma è un soprainsieme.** La *RATIONALE* dichiara l'intento di
+  «make them a pure superset of extended regular expressions, as defined by POSIX.1-2017»,
+  indicando nell'internazionalizzazione e nelle interval expressions le aggiunte principali.
+- **Cosa non afferma:** non nomina il non-greedy né `*?`, in nessuna sezione.
+- **Riserve:** «pure superset» è esattamente il motivo per cui il capitolo 9 non basta a
+  prevedere il comportamento di un `awk` installato: sopra gli ERE un'implementazione può
+  aggiungere ciò che vuole e restare conforme. La conseguenza pratica è quella registrata in
+  [ADR-0029](Decision.md#adr-0029): un costrutto indefinito non è rotto, è soltanto non
+  garantito, e la differenza fra le due cose si stabilisce eseguendo.
+- **Usata da:** ADR-0029
+
+---
+
+<a id="s-032"></a>
+### S-032 — MongoDB Manual: Configuration File Options — `systemLog`
+
+- **URL:** https://www.mongodb.com/docs/v7.0/reference/configuration-options/
+- **Editore:** MongoDB, Inc. — MongoDB Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** smentita — di un assunto del design, non di un'altra fonte
+- **Cosa afferma, primo punto — le destinazioni sono alternative, non cumulative.** «The
+  destination to which MongoDB sends all log output. Specify either `file` or `syslog`. If you
+  specify `file`, you must also specify `systemLog.path`.» *Either*: una, non due.
+- **Cosa afferma, secondo punto — stdout non è un canale, è il ripiego.** «If you do not specify
+  `systemLog.destination`, MongoDB sends all log output to standard output.» Standard output è
+  dove finisce il log quando non si è scelto niente, e smette di esserlo appena si sceglie.
+- **Cosa afferma, terzo punto — `systemLog.path` è definito per sottrazione.** «The path of the
+  log file to which `mongod` or `mongos` should send all diagnostic logging information,
+  **rather than the standard output** or the host's syslog.» `--logpath` è la forma da riga di
+  comando della stessa impostazione.
+- **Cosa non afferma:** non esiste, in nessun punto della pagina, un'opzione per scrivere su due
+  destinazioni contemporaneamente. Non è nascosta: non c'è.
+- **Riserve:** la pagina del riferimento di `mongod`, che è dove si arriva cercando `--logpath`,
+  dice la stessa cosa in modo molto meno netto. Chi parte da lì fatica a trovare la risposta —
+  ed è il motivo per cui l'assunto sbagliato è entrato nel design senza che nessuno lo notasse.
+  Il comportamento è comunque verificato eseguendo, [V-010](#v-010), e confermato dall'aiuto del
+  binario dentro l'immagine del lab.
+- **Usata da:** ADR-0030
+
+---
+
+<a id="s-033"></a>
+### S-033 — Docker Docs: JSON File logging driver
+
+- **URL:** https://docs.docker.com/engine/logging/drivers/json-file/
+- **Editore:** Docker, Inc. — Docker Docs
+- **Versione documentata:** pagina viva, consultata contro Docker Engine 29.7.2
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma parziale
+- **Cosa afferma, primo punto — `max-size` non ha limite.** «The maximum size of the log before
+  it is rolled», con valore predefinito dichiarato in tabella: «Defaults to -1 (unlimited)».
+- **Cosa afferma, secondo punto — `max-file` da solo non serve a niente.** «The maximum number
+  of log files that can be present. If rolling the logs creates excess files, the oldest file is
+  removed», predefinito `1`, e nella stessa tabella, in grassetto: «Only effective when
+  `max-size` is also set». Sono due opzioni che funzionano solo in coppia.
+- **Cosa afferma, terzo punto — la rotazione è una cosa da accendere.** L'esempio che imposta i
+  due parametri è introdotto come il modo «to enable automatic log-rotation».
+- **Cosa non afferma:** in nessun punto della pagina c'è una frase che dica che senza
+  configurazione la rotazione non avviene. Lo si ricava da un valore predefinito in una cella di
+  tabella e dal verbo «enable» in una didascalia. Non c'è nemmeno un avviso sullo spazio disco:
+  l'unico riquadro di avvertimento della pagina riguarda l'accesso ai file da parte di strumenti
+  esterni, non il disco che si riempie.
+- **Riserve:** «il predefinito è illimitato, quindi non ruota» è una deduzione, e qui una
+  deduzione non sostituisce una misura che costa un comando. Misurata in [V-011](#v-011).
+- **Usata da:** ADR-0030, ADR-0045
+
+---
+
+<a id="s-034"></a>
+### S-034 — `docker-library/mongo`: `7.0/docker-entrypoint.sh`
+
+- **URL:** https://github.com/docker-library/mongo/blob/master/7.0/docker-entrypoint.sh
+- **Editore:** docker-library — Docker Official Images
+- **Versione documentata:** la copia che sta in `/usr/local/bin/docker-entrypoint.sh` dentro
+  l'immagine `mongo` 7.0.40 pinnata per digest. Le righe citate sotto sono lette lì, dentro
+  l'immagine che il lab esegue davvero, non dal repository.
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — quando gli script di inizializzazione si saltano, e su quale
+  criterio.** Il commento è esplicito: «check for a few known paths (to determine whether we've
+  already initialized and should thus skip our initdb scripts)». Segue un ciclo su quattro
+  percorsi — `$dbPath/WiredTiger`, `$dbPath/journal`, `$dbPath/local.0`, `$dbPath/storage.bson` —
+  e se anche uno solo esiste, `shouldPerformInitdb` viene azzerato. La regola non è «se la
+  cartella è vuota»: è «se non trovo traccia di un'inizializzazione precedente», e le tracce sono
+  un elenco scritto a mano.
+- **Cosa afferma, secondo punto — il `mongod` temporaneo della fase di init forka.** L'ultima
+  riga della sua invocazione è `"${mongodHackedArgs[@]}" --fork`, e `--fork` obbliga a dichiarare
+  un `--logpath`.
+- **Cosa afferma, terzo punto — e per non perdere quei log, li manda su un descrittore.**
+  `if stat "/proc/$$/fd/1" > /dev/null && [ -w "/proc/$$/fd/1" ]; then` →
+  `--logpath "/proc/$$/fd/1"`, con ripiego su un file dentro `dbPath` e avviso esplicito:
+  «warning: initdb logs cannot write to '/proc/$$/fd/1', so they are in '$initdbLogPath'
+  instead». Chi ha scritto l'entrypoint sapeva perfettamente che `--logpath` porta via i log da
+  stdout, e ha dovuto aggirarlo — corrobora [S-032](#s-032) e [V-010](#v-010) dal lato di chi
+  costruisce l'immagine.
+- **Cosa non afferma:** quando decide di saltare gli script di init, **non stampa niente**. Il
+  ramo che azzera `shouldPerformInitdb` non ha un `echo`, non ha un `warning`, non lascia una
+  riga di log. Il salto è muto. Verificato in [V-014](#v-014).
+- **Riserve:** [S-022](#s-022) documenta lo stesso file per la 8.0. Il lab gira sulla 7.0
+  [ADR-0028](Decision.md#adr-0028), quindi per gli stack vale questa voce e non quella. I due
+  file si somigliano molto, ed è esattamente il motivo per cui citare quello sbagliato non si
+  noterebbe fino al giorno in cui cambia.
+- **Usata da:** ADR-0030, ADR-0031, ADR-0033
+
+---
+
+<a id="s-035"></a>
+### S-035 — MongoDB Manual 7.0: Write Concern
+
+- **URL:** https://www.mongodb.com/docs/v7.0/reference/write-concern/ (consultata nella variante
+  `write-concern.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0, cioè la versione che il lab esegue ([ADR-0028](Decision.md#adr-0028))
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — che cosa promette l'ack su un'istanza singola.** «A standalone
+  `mongod` acknowledges a write operation after applying the write in memory **or** after writing
+  to the on-disk journal.» Quale delle due lo decide la tabella che segue, ed è la riga che
+  riguarda il lab:
+
+  | | `j` non specificato | `j:true` | `j:false` |
+  |---|---|---|---|
+  | `w: 1` | In memory | On-disk journal | In memory |
+
+  Con `w: 1` e `j` non specificato — il caso predefinito, quello che scrive chiunque non abbia
+  letto questa tabella — **l'acknowledgement è la memoria**. Il disco non c'entra.
+- **Cosa afferma, secondo punto — il limite superiore su un nodo solo.** «`w` greater than 1
+  requires acknowledgment from the primary and as many data-bearing secondaries as needed to meet
+  the specified write concern». Su un'istanza singola i secondari non esistono, e il server
+  rifiuta: misurato in [V-015](#v-015).
+- **Cosa non afferma:** che `w: "majority"` su un'istanza singola sia un errore. Non lo è, e la
+  pagina non lo dice in nessuna direzione — la maggioranza di un nodo è quel nodo. Chiedere
+  «maggioranza» a uno standalone riesce, e riesce senza dare niente in più di `w: 1`. Misurato in
+  [V-015](#v-015).
+- **Riserve:** la tabella dello standalone descrive il momento dell'*acknowledgement*, non la
+  durabilità. Quanto dura la finestra fra l'ack in memoria e il disco non sta qui: sta in
+  [S-036](#s-036), ed è il numero che rende la finestra misurabile.
+- **Usata da:** ADR-0032, ADR-0043, ADR-0045, ADR-0046
+
+---
+
+<a id="s-036"></a>
+### S-036 — MongoDB Manual 7.0: Journaling
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/journaling/ (consultata nella variante
+  `journaling.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — il journal non si può spegnere.** «Starting in MongoDB 6.1,
+  journaling is always enabled. As a result, MongoDB removes the `storage.journal.enabled` option
+  and the corresponding `--journal` and `--nojournal` command-line options.» Sulla 7.0 la domanda
+  «e se lo disattivo?» non ha più risposta: l'opzione non esiste.
+- **Cosa afferma, secondo punto — ogni quanto il journal tocca il disco.** WiredTiger sincronizza
+  «At every 100 milliseconds (See `storage.journal.commitIntervalMs`)», oltre che a ogni scrittura
+  con `j: true` e quando crea un nuovo file di journal (limite di 100 MB per file).
+- **Cosa afferma, terzo punto — e quindi che cosa si perde.** In grassetto, come Importante:
+  «In between write operations, while the journal records remain in the WiredTiger buffers,
+  updates can be lost following a hard shutdown of `mongod`.» È la frase che autorizza a dire
+  «l'ack non è il disco» senza aggettivi: lo dice il manuale.
+- **Cosa afferma, quarto punto — a cosa serve il journal alla ripartenza.** «if MongoDB exits
+  unexpectedly in between checkpoints, journaling is required to recover information that occurred
+  after the last checkpoint».
+- **Riserve:** la pagina dà l'intervallo (100 ms) ma non dice **quanti** documenti stiano in quella
+  finestra, perché dipende dal ritmo delle scritture. Il numero per il lab è misurato in
+  [V-016](#v-016): cento documenti confermati e perduti, su un `SIGKILL` durante un inserimento
+  uno alla volta.
+- **Usata da:** ADR-0032
+
+---
+
+<a id="s-037"></a>
+### S-037 — MongoDB Manual 7.0: Replica Set Oplog
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/replica-set-oplog/ (consultata nella variante
+  `replica-set-oplog.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma:** «The oplog (operations log) is a special capped collection that keeps a rolling
+  record of all operations that modify the data stored in your databases»; e su dove vive: «All
+  replica set members contain a copy of the oplog, in the `local.oplog.rs` collection, which allows
+  them to maintain the current state of the database.»
+- **Cosa non afferma:** che un'istanza singola non abbia l'oplog. Non c'è una frase che lo dica —
+  c'è il titolo della pagina, «**Replica Set** Oplog», e il fatto che ogni frase parli di membri di
+  un replica set. La conferma diretta è nostra: su `mongo-standalone` il database `local` contiene
+  la sola `startup_log`, e `local.oplog.rs` non esiste ([V-015](#v-015)).
+- **Riserve:** questa è una fonte che si cita per ciò che *implica*, ed è il tipo di citazione da
+  maneggiare con cura. L'affermazione «un'istanza singola non ha oplog» qui non è scritta: è
+  dedotta dalla pagina e **verificata eseguendo**, come impone la gerarchia di
+  [ADR-0024](Decision.md#adr-0024). Chi ripete l'affermazione senza la verifica sta citando un
+  titolo.
+- **Usata da:** ADR-0032, ADR-0046
+
+---
+
+<a id="s-038"></a>
+### S-038 — MongoDB Manual 7.0: Change Streams
+
+- **URL:** https://www.mongodb.com/docs/v7.0/changeStreams/ (consultata nella variante
+  `changeStreams.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma:** in apertura della sezione *Availability*, senza giri di parole: «Change streams
+  are available for **replica sets** and **sharded clusters**». E sul perché uno se ne accorga solo
+  quando serve: «Change streams allow applications to access real-time data changes without the
+  prior complexity and risk of manually tailing the oplog» — cioè poggiano sull'oplog
+  ([S-037](#s-037)), che su un'istanza singola non c'è.
+- **Cosa non afferma:** con quale errore fallisce chi ci prova comunque. La pagina elenca dove i
+  change stream *sono* disponibili e tace su cosa succede altrove. Il messaggio esatto — `Location
+  40573`, «The $changeStream stage is only supported on replica sets» — è misurato in
+  [V-015](#v-015), ed è quello che si legge in produzione quando qualcuno sposta un'applicazione da
+  un replica set a un'istanza singola per «semplificare».
+- **Riserve:** la pagina è scritta per chi ha già un replica set. Non contiene una sezione
+  «migrazione da standalone», che è invece il percorso reale di chi incontra il limite.
+- **Usata da:** ADR-0032
+
+---
+
+<a id="s-039"></a>
+### S-039 — Docker Docs: Start containers automatically
+
+- **URL:** https://docs.docker.com/engine/containers/start-containers-automatically/
+- **Editore:** Docker, Inc. — Docker Docs
+- **Versione documentata:** pagina viva, consultata contro Docker Engine 29.7.2
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma parziale
+- **Cosa afferma, primo punto — che cosa significa `unless-stopped`.** Nella tabella delle
+  politiche: «Similar to `always`, except that when the container is stopped (manually or
+  otherwise), it isn't restarted even after Docker daemon restarts.» E poco sotto, in prosa:
+  «Docker restarts the container if it exits or if the daemon restarts, but not if you stopped
+  the container yourself.»
+- **Cosa afferma, secondo punto — la politica si disattiva dopo una fermata.** «If you manually
+  stop a container, the restart policy is ignored until the Docker daemon restarts or the
+  container is manually restarted. This prevents a restart loop.»
+- **Cosa afferma, terzo punto — e non copre chi non è mai partito.** «A restart policy only takes
+  effect after a container starts successfully. In this case, starting successfully means that
+  the container is up for at least 10 seconds and Docker has started monitoring it.»
+- **Cosa non afferma:** quali comandi contino come «stop». La pagina dice «manually or
+  otherwise» e «if you manually stop a container», e non elenca mai i sottocomandi. In
+  particolare `docker kill` non compare in nessun punto della pagina. Il lettore normale legge
+  «kill» come «il processo è morto» e «stop» come «`docker stop`»; il demone li mette nella
+  stessa casella. La differenza è misurata in [V-017](#v-017).
+- **Riserve:** «manually or otherwise» copre il caso solo perché è abbastanza vaga da coprire
+  tutto. Non è una frase da cui prevedere un comportamento, ed è la ragione per cui il
+  comportamento è stato misurato invece che dedotto ([ADR-0024](Decision.md#adr-0024)).
+- **Usata da:** ADR-0034
+
+---
+
+<a id="s-040"></a>
+### S-040 — Docker Docs: `docker container kill`
+
+- **URL:** https://docs.docker.com/reference/cli/docker/container/kill/
+- **Editore:** Docker, Inc. — Docker Docs / CLI reference
+- **Versione documentata:** pagina viva, consultata contro Docker Engine 29.7.2
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** «The `docker kill` subcommand kills one or more containers. The main process
+  inside the container is sent `SIGKILL` signal (default)». Il segnale arriva a **PID 1** del
+  container, ed è il demone a mandarlo — cioè un processo del namespace antenato, il che secondo
+  [S-041](#s-041) è esattamente il caso in cui `SIGKILL` viene consegnato per forza.
+- **Cosa non afferma:** la parola «restart» non compare da nessuna parte nella pagina. Nulla
+  avverte che un `docker kill` metta il container nello stato in cui la politica di riavvio non
+  si applica più. Chi cerca «come simulo la caduta di un nodo» arriva qui, legge «kills», e non
+  ha modo di sospettare che stia chiedendo una fermata invece di un guasto. Misurato in
+  [V-017](#v-017).
+- **Riserve:** l'assenza della parola «restart» è stata contata sulla pagina come resa il
+  2026-08-28. È una pagina viva: l'assenza di oggi non è una garanzia per domani, ed è il tipo
+  di affermazione che va ricontrollata prima di ripeterla dal palco.
+- **Usata da:** ADR-0034
+
+---
+
+<a id="s-041"></a>
+### S-041 — Linux man-pages: `pid_namespaces(7)`
+
+- **URL:** https://man7.org/linux/man-pages/man7/pid_namespaces.7.html
+- **Editore:** The Linux man-pages project
+- **Versione documentata:** `man-pages-6.18`, come dichiarato nel colophon della pagina resa
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — dall'interno, PID 1 è intoccabile.** «Only signals for which the
+  "init" process has established a signal handler can be sent to the "init" process by other
+  members of the PID namespace. This restriction applies even to privileged processes, and
+  prevents other members of the PID namespace from accidentally killing the "init" process.»
+  Poiché `SIGKILL` non è gestibile per definizione, `kill -9 1` eseguito **dentro** un container
+  non può funzionare — e infatti non funziona, senza però dare errore ([V-017](#v-017)).
+- **Cosa afferma, secondo punto — dall'esterno, sì.** «`SIGKILL` or `SIGSTOP` are treated
+  exceptionally: these signals are forcibly delivered when sent from an ancestor PID namespace.»
+  Il demone Docker sta in quel namespace antenato: `docker kill` arriva a destinazione.
+- **Cosa afferma, terzo punto — e se PID 1 muore, muoiono tutti.** «If the "init" process of a
+  PID namespace terminates, the kernel terminates all of the processes in the namespace via a
+  `SIGKILL` signal.» È il motivo per cui un container è vivo esattamente quanto il suo PID 1.
+- **Cosa non afferma:** non nomina Docker, né i container, né `mongod`. Il collegamento — «PID 1
+  del container è `mongod`, il demone Docker sta nel namespace antenato, quindi `docker kill`
+  passa e `kill -9 1` no» — è nostro, e vale quanto la verifica che lo sostiene
+  ([V-017](#v-017), [ADR-0024](Decision.md#adr-0024)).
+- **Riserve:** è la documentazione del kernel Linux, non del runtime. Descrive un comportamento
+  stabile da anni, ma la pagina è viva e la sua numerazione segue i rilasci di `man-pages`. Su
+  macOS il kernel in gioco è quello della VM di Docker Desktop, non quello del portatile.
+- **Usata da:** ADR-0034
+
+---
+
+<a id="s-042"></a>
+### S-042 — MongoDB Manual 7.0: Log Messages
+
+- **URL:** https://www.mongodb.com/docs/v7.0/reference/log-messages/ (consultata nella variante
+  `log-messages.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — il formato è JSON, ovunque.** «All log output is in JSON format
+  including output sent to: Log file · Syslog · Stdout (standard out)». Ogni voce è «a
+  self-contained JSON object which follows the Relaxed Extended JSON v2.0 specification», con
+  ordine dei campi fissato:
+
+  ```javascript
+  {
+    "t": <Datetime>, // timestamp
+    "s": <String>, // severity
+    "c": <String>, // component
+    "id": <Integer>, // unique identifier
+    "ctx": <String>, // context
+    "msg": <String>, // message body
+    "attr": <Object> // additional attributes (optional)
+    "tags": <Array of strings> // tags (optional)
+    "truncated": <Object> // truncation info (if truncated)
+    "size": <Object> // original size of entry (if truncated)
+  }
+  ```
+
+- **Cosa afferma, secondo punto — `id` è un identificatore univoco.** La tabella dei campi lo
+  descrive come «Unique identifier for the log statement», e la pagina dedica un esempio al
+  «Filtering by Known Log ID». È il campo su cui si filtra: il `msg` è testo, l'`id` è una
+  chiave.
+- **Cosa afferma, terzo punto — le severità.** «Severity levels range from "Fatal" (most severe)
+  to "Debug" (least severe)»: `F` Fatal, `E` Error, `W` Warning, `I` Informational (verbosità
+  `0`), `D1`–`D5` Debug (verbosità > `0`). E sulla verbosità: «Severity categories above these
+  levels are always shown.»
+- **Cosa afferma, quarto punto — i componenti hanno una gerarchia.** `REPL` è il componente
+  genitore di `ELECTION`, `INITSYNC`, `REPL_HB` e `ROLLBACK`; `STORAGE` lo è di `JOURNAL` e
+  `RECOVERY`. Se la verbosità del figlio non è impostata, MongoDB usa quella del genitore. Sui
+  due che servono al talk: `ELECTION` raccoglie i «messages related specifically to replica set
+  elections», `REPL_HB` quelli «related specifically to replica set heartbeats».
+- **Cosa afferma, quinto punto — c'è un tag per gli avvisi d'avvio.** Fra gli esempi di `tags`,
+  testuale: `["startupWarnings"]`.
+- **Cosa non afferma:** quali `id` compaiano in quale situazione. Non esiste nella pagina un
+  catalogo degli identificatori: si scoprono leggendo il log di un'installazione vera. Quelli di
+  questo stack sono censiti in [V-019](#v-019).
+- **Riserve:** la pagina descrive il formato, non il contenuto. Dice che `id` è univoco, e non
+  promette da nessuna parte che il testo di `msg` sia stabile fra versioni — che è esattamente
+  la ragione per cui in questo repository si cita l'`id` ([ADR-0035](Decision.md#adr-0035)).
+- **Usata da:** ADR-0035
+
+---
+
+<a id="s-043"></a>
+### S-043 — MongoDB Manual 7.0: `logRotate` (database command)
+
+- **URL:** https://www.mongodb.com/docs/v7.0/reference/command/logRotate/ (consultata nella
+  variante `logRotate.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma parziale
+- **Cosa afferma, primo punto — a cosa serve e come si invoca.** Il comando «allows you to rotate
+  the MongoDB server log and/or audit log to prevent a single logfile from consuming too much
+  disk space», e va emesso sul database `admin`. L'argomento `1` ruota entrambi i log,
+  `"server"` solo quello del server, `"audit"` solo quello di audit.
+- **Cosa afferma, secondo punto — c'è anche la via del segnale.** «You may also rotate the logs
+  by sending a `SIGUSR1` signal to the `mongod` process.»
+- **Cosa afferma, terzo punto — e questa è la riga che conta.** Sotto *Limitations*, testuale:
+  «Your `mongod` instance needs to be running with the `--logpath [file]` option in order to use
+  `logRotate`». Il limite **è documentato**.
+- **Cosa afferma, quarto punto — le due modalità.** Con `systemLog.logRotate` a `rename` il file
+  esistente viene rinominato aggiungendo un timestamp nella forma
+  `<YYYY>-<mm>-<DD>T<HH>-<MM>-<SS>` e ne viene creato uno nuovo; con `reopen` il file viene
+  chiuso e riaperto con lo stesso nome, lasciando a un altro processo il compito di rinominarlo.
+- **Cosa non afferma:** che cosa succeda se si invoca il comando **senza** `--logpath`. La
+  sezione *Limitations* dice che serve, e non dice che il comando fallisca. Non fallisce:
+  risponde `{ok: 1}` e non fa niente ([V-010](#v-010)). Fra «documentato come limite» e
+  «applicato dal server» c'è la distanza che rende utile questo repository.
+- **Riserve:** il limite riguarda il file di log, non il log in sé. In container, dove il log va
+  su stdout per scelta ([ADR-0030](Decision.md#adr-0030)), il comando non ha semplicemente
+  nulla su cui agire, e la rotazione è affare del runtime.
+- **Usata da:** ADR-0035
+
+---
+
+<a id="s-044"></a>
+### S-044 — MongoDB Manual 7.0: Replica Set Elections
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/replica-set-elections/ (consultata nella
+  variante `replica-set-elections.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — quando parte un'elezione.** Fra gli eventi elencati: l'aggiunta
+  di un nodo, `rs.initiate()`, la manutenzione con `rs.stepDown()` o `rs.reconfig()`, e «the
+  secondary members losing connectivity to the primary for more than the configured timeout (10
+  seconds by default)».
+- **Cosa afferma, secondo punto — i battiti e la soglia.** «Replica set members send heartbeats
+  (pings) to each other every two seconds. If a heartbeat does not return within 10 seconds, the
+  other members mark the delinquent member as inaccessible.»
+- **Cosa afferma, terzo punto — quanto dura, e cosa si ferma nel frattempo.** «The median time
+  before a cluster elects a new primary should not typically exceed 12 seconds, assuming default
+  replica configuration settings.» E, prima: «The replica set cannot process write operations
+  until the election completes successfully», mentre le letture possono continuare se sono
+  configurate per andare sui secondari.
+- **Cosa non afferma:** quali righe di log accompagnino un'elezione. La pagina descrive il
+  meccanismo, mai il suo tracciato nel log. I componenti in cui guardare si ricavano da
+  [S-042](#s-042) — `ELECTION` e `REPL_HB` — ma gli `id` delle righe si conoscono solo dopo
+  averne vista una.
+- **Riserve:** è la fonte su cui poggia la sezione «cosa cercare durante un'elezione» di
+  `docs/03-amministrazione/log.md`, che per questa ragione è **dichiarata non verificata** su
+  questo branch: qui non esiste un replica set. La verifica è dovuta a `feature/02`
+  ([ADR-0035](Decision.md#adr-0035)).
+- **Usata da:** ADR-0035, ADR-0036, ADR-0044, ADR-0045, ADR-0046
+
+---
+
+<a id="s-045"></a>
+### S-045 — MongoDB Shell: Connect to a Deployment
+
+- **URL:** https://www.mongodb.com/docs/mongodb-shell/connect/ (consultata nella variante
+  `connect.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / MongoDB Shell
+- **Versione documentata:** `mongosh` corrente alla consultazione; il lab usa la **2.10.0**
+  contenuta nell'immagine `mongo:7.0.40`
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — senza argomenti va su localhost.** «To connect to a MongoDB
+  deployment running on **localhost** with **default port** 27017, run `mongosh` without any
+  options». E per le opzioni separate: «The `--host` and `--port` command-line options. If you
+  omit the `--port` option, `mongosh` uses the default port 27017.»
+- **Cosa afferma, secondo punto — il database predefinito è `test`.** «To connect to a specific
+  default database, specify a database in your connection string URI path. If unspecified by the
+  connection string, the default database is the `test` database.» Da cui la forma
+  `mongosh "mongodb://localhost:27017/qa"`.
+- **Cosa afferma, terzo punto — la connessione diretta è implicita, e ha quattro eccezioni.**
+  «When you specify individual replica set members in the connection string, `mongosh`
+  automatically adds the `directConnection=true` parameter, unless at least one of the following
+  is true»: c'è il parametro `replicaSet`; la stringa usa il formato `mongodb+srv://`; la stringa
+  contiene una seed list con più host; la stringa contiene già `directConnection`. È la regola che
+  decide se si sta parlando con **un nodo** o con **un replica set**, e da `feature/02` in poi
+  fa la differenza fra leggere un secondario e leggere il primario.
+- **Cosa afferma, quarto punto — `+srv` implica TLS.** «When you use the `+srv` connection string
+  modifier, MongoDB automatically sets the `--tls` option to `true`.»
+- **Cosa non afferma:** il valore predefinito di `serverSelectionTimeoutMS`. La pagina non lo
+  nomina. `mongosh` 2.10.0 lo imposta a **2000 ms** e lo si scopre solo leggendo la stringa che
+  costruisce da sé ([V-020](#v-020)) — un dettaglio che conta quando il server dall'altra parte è
+  un replica set in mezzo a un'elezione, che [S-044](#s-044) dà per lunga fino a dodici secondi.
+- **Riserve:** la pagina è scritta pensando ad Atlas e a installazioni sull'host. Il caso di
+  questo lab — `mongosh` che vive **dentro** il container a cui si connette — non è contemplato,
+  e cambia il significato di «localhost» ([V-018](#v-018)).
+- **Usata da:** ADR-0036, ADR-0045, ADR-0049
+
+---
+
+<a id="s-046"></a>
+### S-046 — MongoDB Shell: Options (riferimento della riga di comando)
+
+- **URL:** https://www.mongodb.com/docs/mongodb-shell/reference/options/ (consultata nella
+  variante `options.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / MongoDB Shell
+- **Versione documentata:** `mongosh` corrente alla consultazione; misurata la 2.10.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — `--eval` si può ripetere, e stampa solo l'ultimo.** «Evaluates a
+  JavaScript expression. You can use a single `--eval` argument or multiple `--eval` arguments
+  together.» E poi la regola che sorprende: «After `mongosh` evaluates the `--eval` argument, it
+  prints the results to your command line. If you use multiple `--eval` statements, `mongosh`
+  only prints the results of the last `--eval`.»
+- **Cosa afferma, secondo punto — `--quiet` è già acceso quando non c'è un umano.** Sotto
+  `--no-quiet`: «Disables the default `--quiet` option mode for non-interactive shell sessions.
+  When specified, `mongosh` displays all messages during startup.» E, esplicitamente: «For
+  non-interactive shell sessions, MongoDB enables `--quiet` by default.» Di `--quiet` dice che
+  «Skips all messages during startup (such as welcome messages and startup warnings) and goes
+  directly to the prompt».
+- **Cosa afferma, terzo punto — `--json` e le sue due modalità.** «You can use the `--json` flag
+  with `--eval` to return `mongosh` results in Extended JSON format. `mongosh` supports both
+  `--json=canonical` and `--json=relaxed` modes. If you omit the mode, `mongosh` defaults to the
+  `canonical` mode. The `--json` flag is mutually exclusive with `--shell`.»
+- **Cosa afferma, quarto punto — due opzioni che rendono ripetibile uno script.**
+  `--norc`: «Prevents the shell from sourcing and evaluating `~/.mongoshrc.js` on startup.»
+  `--nodb`: avvia la shell senza collegarsi ad alcun server.
+- **Cosa non afferma:** **i codici di uscita.** In tutta la pagina non c'è una tabella, né una
+  frase, che dica con quale codice `mongosh` termini in caso di errore. Chi scrive uno script di
+  automazione deve misurarlo, ed è quello che fa [V-020](#v-020).
+- **Riserve:** il comportamento predefinito di `--quiet` dipende dal fatto che la sessione sia
+  «non interattiva», nozione che la pagina non definisce. Nel lab la stessa riga di comando può
+  finire in uno script o essere incollata in un terminale, e per questo `--quiet` si scrive
+  comunque ([ADR-0036](Decision.md#adr-0036)).
+- **Usata da:** ADR-0036
+
+---
+
+<a id="s-047"></a>
+### S-047 — MongoDB Shell: Write Scripts
+
+- **URL:** https://www.mongodb.com/docs/mongodb-shell/write-scripts/ (consultata nella variante
+  `write-scripts.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / MongoDB Shell
+- **Versione documentata:** `mongosh` corrente alla consultazione; misurata la 2.10.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — i file si passano con `--file`.** «To specify the filename, use
+  the `--file` or `-f` parameter to specify the filename», e più oltre, in grassetto nella
+  pagina: «To pass filenames always use `--file` or `-f`.» L'opzione si ripete:
+  `mongosh --file loadMovies.js --file queryMovies.js` esegue i due file in ordine.
+- **Cosa afferma, secondo punto — `load()` non cerca da nessuna parte.** «There is no search path
+  for the `load()` method. If the target script is not in the current working directory or the
+  full specified path, the MongoDB Shell cannot access the file.» Dentro un container, dove la
+  directory di lavoro non è quella da cui si è digitato il comando, è la differenza fra uno script
+  che parte e uno che non si trova.
+- **Cosa afferma, terzo punto — uscire è una scelta esplicita.** «It is often useful to terminate
+  a running script if an exception is thrown, or in the case of unexpected results.» Il modo è
+  uno: «To terminate a script, you can call the `exit(<code>)` method, where the `<code>` is any
+  user-specified value.» E la buona pratica: «As a best practice, wrap code in a `try - catch`,
+  calling the `exit` method in the `catch` block. Likewise, to check the results of a query or
+  any command, you can add an `if - else` statement and call the `exit` method if the results are
+  not what is expected.»
+- **Cosa non afferma:** che cosa succeda **senza** `exit()`. La pagina raccomanda di uscire
+  esplicitamente e tace su quale codice restituisca `mongosh` quando un'eccezione non viene
+  catturata, o quando la connessione fallisce. Sono i due casi che contano di più in
+  automazione, e sono misurati in [V-020](#v-020).
+- **Riserve:** «any user-specified value» va preso alla lettera solo fin dove arriva il sistema
+  operativo. Misurato: `exit(300)` fa uscire il processo con **44** (cioè 300 modulo 256) ed
+  `exit(-1)` con **255** ([V-020](#v-020)). Il valore che lo script sceglie e il valore che lo
+  script di chiamata legge non sono la stessa cosa, e la pagina non avvisa.
+- **Usata da:** ADR-0036
+
+---
+
+<a id="s-048"></a>
+### S-048 — MongoDB Manual: Install MongoDB Community Edition on Ubuntu
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/install-mongodb-on-ubuntu/
+- **Editore:** MongoDB, Inc. — MongoDB Manual v7.0
+- **Versione documentata:** MongoDB 7.0 Community Edition, la stessa riga di versione del lab
+  ([ADR-0028](Decision.md#adr-0028))
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — il pacchetto della distribuzione non va usato.** In evidenza:
+  «The `mongodb` package provided by Ubuntu is **not** maintained by MongoDB Inc. and conflicts
+  with the official `mongodb-org` package. If you already installed the `mongodb` package on your
+  Ubuntu system, you **must** first uninstall the `mongodb` package before proceeding with these
+  instructions.» Le piattaforme dichiarate per la 7.0 sono Ubuntu 22.04 LTS «Jammy» e 20.04 LTS
+  «Focal», solo a 64 bit.
+- **Cosa afferma, secondo punto — la procedura, in quattro passi.** Importare la chiave GPG
+  pubblica (`curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | sudo gpg -o
+  /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor`); creare il file di elenco
+  `/etc/apt/sources.list.d/mongodb-org-7.0.list`; `sudo apt-get update`; `sudo apt-get install -y
+  mongodb-org`.
+- **Cosa afferma, terzo punto — che cosa crea l'installazione.** «If you installed through the
+  package manager, the data directory `/var/lib/mongodb` and the log directory `/var/log/mongodb`
+  are created during the installation», e «By default, MongoDB runs using the `mongodb` user
+  account. If you change the user that runs the MongoDB process, you **must** also modify the
+  permission to the data and log directories to give this user access to these directories.» Il
+  file di configurazione è `/etc/mongod.conf`, e «if you change the configuration file while the
+  MongoDB instance is running, you must restart the instance for the changes to take effect».
+- **Cosa afferma, quarto punto — il servizio.** L'avvio passa dall'init system; per riconoscerlo,
+  `ps --no-headers -o comm 1`. Con `systemd`: `sudo systemctl start mongod`,
+  `sudo systemctl status mongod`, `sudo systemctl enable mongod` per l'avvio al riavvio,
+  `stop` e `restart`. «You can follow the state of the process for errors or important messages by
+  watching the output in the `/var/log/mongodb/mongod.log` file.»
+- **Cosa afferma, quinto punto — `ulimit` e il `bindIp`.** «If the `ulimit` value for number of
+  open files is under `64000`, MongoDB generates a startup warning.» E: «By default, MongoDB
+  launches with `bindIp` set to `127.0.0.1`, which binds to the localhost network interface. This
+  means that the `mongod` can only accept connections from clients that are running on the same
+  machine.» Da cui il fatto che un `mongod` appena installato **non** può nemmeno inizializzare un
+  replica set finché non gli si cambia quel valore.
+- **Cosa non afferma:** niente su come si mette in sicurezza l'istanza dopo l'installazione, se
+  non un rimando. La procedura si ferma a un server che parte, senza autenticazione, in ascolto
+  su localhost.
+- **Riserve:** **questa procedura non è stata eseguita.** La macchina di sviluppo è macOS con
+  Docker Desktop ([V-020](#v-020)); l'unico Ubuntu 22.04 disponibile qui è quello **dentro**
+  l'immagine `mongo:7.0.40`, che è installata dallo stesso repository apt ma senza `systemd`, senza
+  `/etc/mongod.conf` e con percorsi diversi ([V-021](#v-021)). La pagina di installazione dichiara
+  la riserva in testa ([ADR-0037](Decision.md#adr-0037)).
+- **Usata da:** ADR-0037
+
+---
+
+<a id="s-049"></a>
+### S-049 — MongoDB Manual: Install MongoDB Community Edition on Windows
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/install-mongodb-on-windows/
+- **Editore:** MongoDB, Inc. — MongoDB Manual v7.0
+- **Versione documentata:** MongoDB 7.0 Community Edition
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — la shell non è inclusa, e va detto due volte.** «The MongoDB Shell
+  (`mongosh`) is not installed with MongoDB Server. You need to follow the `mongosh` installation
+  instructions to download and install `mongosh` separately», e più avanti, per non lasciare
+  scampo: «The `.msi` installer does not include `mongosh`.»
+- **Cosa afferma, secondo punto — le piattaforme, e una esclusione netta.** Windows Server 2022,
+  Windows Server 2019 e Windows 11, solo a 64 bit su x86\_64. E: «MongoDB is not supported on
+  Windows Subsystem for Linux (WSL). To run MongoDB on Linux, use a supported Linux system.»
+- **Cosa afferma, terzo punto — l'installazione è una procedura guidata.** Il `.msi` installa
+  binari e file di configurazione predefinito; «The configuration file is located in the
+  installation directory at `bin\mongod.cfg`». Il tipo di installazione è *Complete* o *Custom*.
+  Nella schermata *Service Configuration* si sceglie se installare MongoDB come servizio di
+  Windows: nome del servizio (predefinito `MongoDB`), utente con cui gira, *Data Directory* che
+  corrisponde a `--dbpath` e *Log Directory* che corrisponde a `--logpath`; se le directory non
+  esistono, «the installer will create the directory and sets the directory access to the service
+  user».
+- **Cosa afferma, quarto punto — il servizio si governa dalla console dei servizi.** Avvio e
+  arresto passano da lì; per personalizzare la configurazione «you must stop the service» e poi
+  modificare `<install directory>\bin\mongod.cfg`. Fuori dal servizio si può lanciare a mano:
+  `"C:\Program Files\MongoDB\Server\7.0\bin\mongod.exe" --dbpath="c:\data\db"`, dopo aver creato
+  la directory dei dati, e con l'avvertenza «You must open the command interpreter as an
+  Administrator». Il segnale che tutto va bene è la riga `[initandlisten] waiting for
+  connections`.
+- **Cosa afferma, quinto punto — il firewall e gli aggiornamenti.** Windows Defender Firewall può
+  mostrare un avviso di sicurezza e bloccare «some features» di `mongod.exe`. E sugli
+  aggiornamenti: «If you installed MongoDB with the Windows installer (`.msi`), the `.msi`
+  automatically upgrades within its release series (e.g. 7.2.1 to 7.2.2). Upgrading a full release
+  series (e.g. 6.0 to 7.0) requires a new installation.»
+- **Cosa non afferma:** non contiene alcuna sezione `ulimit` — non esiste su Windows — né alcuna
+  raccomandazione su THP, che è un meccanismo del kernel Linux. Le due mezze pagine di messa a
+  punto che valgono su Ubuntu qui semplicemente non ci sono, e questo va detto invece di lasciarlo
+  intuire.
+- **Riserve:** **questa procedura non è stata eseguita.** Nessuna macchina Windows in questo
+  progetto. Ogni affermazione della pagina di installazione su Windows viene da qui e da
+  [S-005](#s-005), e la riserva è dichiarata in testa ([ADR-0037](Decision.md#adr-0037)).
+- **Usata da:** ADR-0037
+
+---
+
+<a id="s-050"></a>
+### S-050 — MongoDB Manual: Production Notes (Self-Managed Deployments)
+
+- **URL:** https://www.mongodb.com/docs/v7.0/administration/production-notes/
+- **Editore:** MongoDB, Inc. — MongoDB Manual v7.0
+- **Versione documentata:** MongoDB 7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — il filesystem.** «When running MongoDB in production on Linux, you
+  should use Linux kernel version 2.6.36 or later, with either the XFS or EXT4 filesystem. If
+  possible, use XFS as it generally performs better with MongoDB.» E con più forza: «With the
+  WiredTiger storage engine, using XFS is **strongly recommended** for data bearing nodes to avoid
+  performance issues that may occur when using EXT4 with WiredTiger.» È la raccomandazione che il
+  server ripete a ogni avvio con l'`id` 22297 ([V-019](#v-019)).
+- **Cosa afferma, secondo punto — RAM e CPU.** «At a minimum, ensure that each `mongod` or
+  `mongos` instance has access to two real cores or one multi-core physical CPU.» Su WiredTiger:
+  «Throughput *increases* as the number of concurrent active operations increases up to the number
+  of CPUs», e diminuisce oltre una soglia che dipende dall'applicazione.
+- **Cosa afferma, terzo punto — lo swap, con due strategie e nessuna terza.** «MongoDB performs
+  best where swapping can be avoided or kept to a minimum… However, if the system hosting MongoDB
+  runs out of RAM, swapping can prevent the Linux OOM Killer from terminating the `mongod`
+  process.» Le due strategie ammesse: assegnare spazio di swap e configurare il kernel perché lo
+  usi solo sotto forte pressione, oppure non assegnarne affatto e disabilitare del tutto lo
+  scambio.
+- **Cosa afferma, quarto punto — NUMA.** «Running MongoDB on a system with Non-Uniform Memory
+  Access (NUMA) can cause a number of operational problems, including slow performance for periods
+  of time and high system process usage.» Il rimedio è una politica di *memory interleave*: su
+  Linux `sudo sysctl -w vm.zone_reclaim_mode=0` e l'avvio tramite `numactl`, sotto `systemd` da
+  configurare nel file di servizio; su Windows «memory interleaving must be enabled through the
+  machine's BIOS». «MongoDB checks NUMA settings on start up… If the NUMA configuration may degrade
+  performance, MongoDB prints a warning.»
+- **Cosa afferma, quinto punto — la rete è la prima difesa.** «Always run MongoDB in a *trusted
+  environment*, with network rules that prevent access from *all* unknown computers, systems, and
+  networks», e in evidenza: «By default, authorization is not enabled.»
+- **Cosa non afferma:** non dà soglie numeriche per la maggior parte delle raccomandazioni — non
+  dice quanto swap, non dice quanta RAM oltre il minimo di due core. Sono indicazioni di direzione,
+  non un dimensionamento.
+- **Riserve:** nessuna di queste messe a punto è stata applicata **né misurata su una macchina di
+  produzione**. Ciò che è stato misurato è l'opposto ed è istruttivo: il container del lab viola
+  tre di queste raccomandazioni e il server lo dichiara all'avvio ([V-021](#v-021)).
+- **Usata da:** ADR-0037
+
+---
+
+<a id="s-051"></a>
+### S-051 — MongoDB Manual: Disable Transparent Huge Pages (THP)
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/transparent-huge-pages/
+- **Editore:** MongoDB, Inc. — MongoDB Manual v7.0
+- **Versione documentata:** MongoDB 7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — che cos'è e perché disturba.** «Transparent Huge Pages (THP) is a
+  Linux memory management system that reduces the overhead of Translation Lookaside Buffer (TLB)
+  lookups on machines with large amounts of memory by using larger memory pages.» E poi la
+  ragione: «However, database workloads often perform poorly with THP enabled, because they tend to
+  have sparse rather than contiguous memory access patterns. When running MongoDB on Linux, THP
+  should be disabled for best performance.»
+- **Cosa afferma, secondo punto — si disabilita prima che `mongod` parta.** Il modo raccomandato è
+  un servizio dell'init system. Sotto `systemd`, il file
+  `/etc/systemd/system/disable-transparent-huge-pages.service` con `Before=mongod.service`,
+  `Type=oneshot` e
+  `ExecStart=/bin/sh -c 'echo never | tee /sys/kernel/mm/transparent_hugepage/enabled > /dev/null
+  && echo never | tee /sys/kernel/mm/transparent_hugepage/defrag > /dev/null'`.
+- **Cosa afferma, terzo punto — il percorso non è sempre lo stesso.** «Some versions of Red Hat
+  Enterprise Linux, and potentially other Red Hat-based derivatives, use a different path for the
+  THP `enabled` file: `/sys/kernel/mm/redhat_transparent_hugepage/enabled`. Verify which path is in
+  use on your system and update the `disable-transparent-huge-pages.service` file accordingly.» Su
+  RHEL/CentOS con `tuned` o `ktune` serve in più un profilo personalizzato.
+- **Cosa non afferma:** quanto si perde tenendo THP acceso. Non c'è un numero, né un intervallo:
+  la pagina raccomanda e non quantifica, e questo è esattamente il motivo per cui in questo
+  repository la raccomandazione viene riportata e **non** trasformata in una promessa di
+  prestazioni.
+- **Riserve:** non applicabile a un container. Il valore di THP appartiene al kernel dell'host —
+  qui la macchina virtuale Linux di Docker Desktop, dove risulta `[always] madvise never`, cioè
+  acceso, e non modificabile da dentro il container ([V-021](#v-021)). È la ragione per cui il
+  `mongod` del lab emette l'avviso `9068900` a ogni avvio e non c'è niente da fare, se non saperlo.
+- **Usata da:** ADR-0037
+
+---
+
+<a id="s-052"></a>
+### S-052 — MongoDB Manual: UNIX `ulimit` Settings for Self-Managed Deployments
+
+- **URL:** https://www.mongodb.com/docs/v7.0/reference/ulimit/
+- **Editore:** MongoDB, Inc. — MongoDB Manual v7.0
+- **Versione documentata:** MongoDB 7.0
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — i sette valori raccomandati.** «The following settings are
+  particularly important for `mongod` and `mongos` deployments»: `-f` (file size) `unlimited`,
+  `-t` (cpu time) `unlimited`, `-v` (virtual memory) `unlimited`, `-l` (locked-in-memory size)
+  `unlimited`, `-n` (open files) **`64000`**, `-m` (memory size) `unlimited`, `-u`
+  (processes/threads) **`64000`**. E: «Restart your `mongod` and `mongos` instances after changing
+  the `ulimit` settings to apply the changes.»
+- **Cosa afferma, secondo punto — perché i descrittori si consumano a due a due.** «Incoming
+  connections to a `mongod` or `mongos` instance require **two** file descriptors.» Il numero da
+  reggere non è quello delle connessioni: è il doppio.
+- **Cosa afferma, terzo punto — sotto `systemd` non si usa `ulimit`.** «If you start a `mongod` or
+  `mongos` instance as a `systemd` service, you can specify limits within the `[Service]` section
+  of its service file», con `LimitFSIZE=infinity`, `LimitCPU=infinity`, `LimitAS=infinity`,
+  `LimitMEMLOCK=infinity`, `LimitNOFILE=64000`, `LimitNPROC=64000`. E l'avvertenza che evita un
+  errore comune: «Each `systemd` limit directive sets both the "hard" and "soft" limits to the
+  value specified.»
+- **Cosa afferma, quarto punto — macOS è un caso a parte.** «For the macOS platform, the
+  recommended process limit is `2500`, which is the maximum configurable value for this platform.»
+  Su RHEL/CentOS 7 il limite predefinito dei processi è 4096 e sta in
+  `/etc/security/limits.d/20-nproc.conf`.
+- **Cosa non afferma:** che cosa succede in un container. La pagina presuppone un sistema
+  operativo intero con il suo init system; sotto Docker i limiti li fissa il runtime, e nel lab
+  risultano già ampiamente oltre il raccomandato senza che nessuno li abbia scritti
+  ([V-021](#v-021)).
+- **Usata da:** ADR-0037
+
+---
+
+<a id="s-053"></a>
+### S-053 — GitHub Docs: Basic writing and formatting syntax — Section links
+
+- **URL:** https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax
+- **Editore:** GitHub, Inc. — GitHub Docs
+- **Versione documentata:** GitHub.com, versione corrente
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — le ancore le genera GitHub, non chi scrive.** «You can link
+  directly to any section that has a heading. To view the automatically generated anchor in a
+  rendered file, hover over the section heading to expose the icon and click the icon to display
+  the anchor in your browser.» Il rimando `#1-prima-di-cominciare` funziona senza che nessuno
+  abbia dichiarato quell'ancora: è il titolo a produrla.
+- **Cosa afferma, secondo punto — le cinque regole di trasformazione.** «If you need to determine
+  the anchor for a heading in a file you are editing, you can use the following basic rules:
+  Letters are converted to lower-case. Spaces are replaced by hyphens ( - ). Any other whitespace
+  or punctuation characters are removed. Leading and trailing whitespace are removed. Markup
+  formatting is removed, leaving only the contents (for example, `_italics_` becomes italics). If
+  the automatically generated anchor for a heading is identical to an earlier anchor in the same
+  document, a unique identifier is generated by appending a hyphen and an auto-incrementing
+  integer.»
+- **Cosa afferma, terzo punto — lo spazio e gli altri spazi bianchi non sono la stessa cosa.** La
+  seconda regola distingue: lo spazio **diventa** un trattino, ogni altro spazio bianco **sparisce**.
+  Ne segue che due spazi consecutivi producono due trattini, e che nessuno li accorpa: in
+  «S-001 — WiredTiger» il trattino lungo viene rimosso come punteggiatura e lascia due spazi, così
+  l'ancora è `s-001--wiredtiger` e non `s-001-wiredtiger`.
+- **Cosa afferma, quarto punto — le ancore esplicite sono un'altra cosa.** La sezione «Custom
+  anchors» documenta la forma `<a id="..."></a>` come alternativa dichiarata, che questo
+  repository usa per ADR e fonti perché un identificatore stabile non deve dipendere dal titolo.
+- **Cosa non afferma:** quale sia esattamente l'insieme dei caratteri considerati «punctuation».
+  La pagina dà la regola, non la classe di caratteri; per quella serve
+  [S-054](#s-054).
+- **Usata da:** ADR-0038
+
+---
+
+<a id="s-054"></a>
+### S-054 — `github-slugger` — l'algoritmo delle ancore, in codice
+
+- **URL:** https://github.com/Flet/github-slugger
+- **Editore:** Dave Fletcher e collaboratori (progetto indipendente)
+- **Versione documentata:** ramo `master`, file `index.js` e `regex.js`
+- **Consultata:** 2026-08-28
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — a che cosa serve.** «Generate a slug just like GitHub does for
+  markdown headings. It also ensures slugs are unique in the same way GitHub does it. The overall
+  goal of this package is to emulate the way GitHub handles generating markdown heading anchors as
+  close as possible.»
+- **Cosa afferma, secondo punto — l'algoritmo, in tre operazioni.** Il corpo della funzione è una
+  riga sola: `if (!maintainCase) value = value.toLowerCase()`, poi
+  `return value.replace(regex, '').replace(/ /g, '-')`. Minuscole, via la punteggiatura, e **ogni
+  singolo spazio** diventa un trattino — `/ /g`, non `/ +/g`. È la conferma eseguibile della terza
+  osservazione di [S-053](#s-053).
+- **Cosa afferma, terzo punto — la classe di caratteri rimossi comincia dai controlli.** La
+  costante di `regex.js` si apre con `[\0-\x1F!-,\.\/:-@\[-\^`\{-\xA9...`: il primo intervallo è
+  quello dei caratteri di controllo, che comprende il tabulatore (`\x09`), mentre lo spazio
+  (`\x20`) resta fuori da tutta la classe. Il tabulatore quindi sparisce e lo spazio sopravvive
+  fino alla sostituzione finale: esattamente la distinzione che [S-053](#s-053) enuncia a parole.
+- **Cosa afferma, quarto punto — non è un parser.** «This project is not a markdown or HTML
+  parser: passing `alpha *bravo* charlie` or `alpha <em>bravo</em> charlie` doesn't work.» La
+  rimozione della formattazione — quarta regola di [S-053](#s-053) — avviene **prima**, quando il
+  titolo viene reso; chi riproduce l'algoritmo deve toglierla per conto proprio.
+- **Cosa non afferma:** di essere la fonte normativa. È un'emulazione dichiarata, mantenuta da
+  terzi; qui vale come conferma di dettaglio su ciò che [S-053](#s-053) afferma in prosa, non come
+  sostituto della documentazione di GitHub.
+- **Usata da:** ADR-0038
+
+<a id="s-055"></a>
+### S-055 — MongoDB Manual v7.0: Localhost Exception (la variante della versione pinnata)
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/localhost-exception/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0 — la stessa serie dell'immagine che il lab pinna (`mongo:7.0.40`)
+- **Consultata:** 2026-08-31
+- **Verdetto:** conferma parziale
+- **Perché una voce separata da [S-006](#s-006):** S-006 è stata letta il 2026-08-25 sulla pagina
+  `manual/`, che serve la versione **8.3 (Current)**. Gli stack del lab girano su 7.0.40
+  ([ADR-0028](Decision.md#adr-0028)), e una regola di autenticazione è esattamente il genere di
+  cosa che può cambiare fra due major. La pagina è stata quindi riletta sulla variante `v7.0/`
+  prima di fondarci sopra la catena di inizializzazione del replica set.
+- **Cosa afferma:** la definizione è identica a quella di 8.3 — «On a `mongod` instance, the
+  localhost exception only applies when there are **no users or roles** created in the MongoDB
+  instance» — e così l'elenco delle operazioni ammesse, che comprende `createUser` e `createRole`
+  («This ends the localhost exception» per entrambi), `grantRole` verso sistemi esterni,
+  **`replSetInitiate` «to initiate a new replica set»**, `replSetGetStatus`, `replSetReconfig` sul
+  primario, e su `mongos` `addShard` «if the cluster is hosted on `localhost`». La frase di
+  apertura dichiara i due usi insieme: «The localhost exception allows you to create the first user
+  or role in the system after enabling access control. **You can also use it to initiate a replica
+  set.**»
+- **Cosa afferma in più rispetto a [S-006](#s-006), ed è operativamente decisivo:** «You can use
+  the localhost exception to initiate a replica set, following the steps in Deploy a Self-Managed
+  Replica Set. **You must wait until the replica set elects a primary before you can add the first
+  user.**» È l'ordine dei passi, enunciato dalla fonte: prima `rs.initiate()`, poi l'attesa
+  dell'elezione, poi `createUser` — e non un ordine qualsiasi. Il riquadro di avvertimento stringe
+  ancora: «Connections using the localhost exception have access to create *only* the **first user
+  OR role**. Only create a role first if you are authorizing users with LDAP.»
+- **Come si spegne:** «Disable the localhost exception at startup. To disable the localhost
+  exception, set the `enableLocalhostAuthBypass` parameter to `0`.» Il che dice, per complemento,
+  che a `1` — cioè acceso — ci sta di suo.
+- **Riserve:** la riserva che [S-006](#s-006) aveva dichiarato il 2026-08-25 **vale identica sulla
+  v7.0**. Le stringhe `127.0.0.1`, `::1`, «loopback» e «same host» non compaiono da nessuna parte
+  nella pagina; la formulazione più vicina al vincolo che tutti danno per ovvio è «connect to the
+  localhost interface», che nomina un'interfaccia senza dire quale sia né da dove debba arrivare la
+  connessione. La fonte, insomma, chiama l'eccezione «localhost» e non definisce «localhost». Non è
+  una lacuna accademica: è la differenza fra un sidecar che riesce a inizializzare il replica set e
+  uno che non ci riesce, e la misura sta in [V-023](#v-023).
+- **Usata da:** ADR-0040
+
+<a id="s-056"></a>
+### S-056 — Docker Docs: Environment variables — Interpolation (`--env-file`)
+
+- **URL:** https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** riferimento Compose v2
+- **Consultata:** 2026-08-31
+- **Verdetto:** conferma
+- **Cosa afferma:** che il `.env` accanto al progetto si legge da solo, ma solo finché non si
+  passa la flag: «If the `--env-file` is not used in the command line, the `.env` file is loaded
+  by default», e «Passing the `--env-file` argument **overrides** the default file path». La
+  stessa cosa detta dal lato opposto: «Your `.env` file can be overridden by another `.env` if it
+  is substituted with `--env-file`». Il rimedio è nella riga successiva: «You can use multiple
+  `--env-file` options to specify multiple environment files, and Docker Compose reads them in
+  order», con la regola di fusione esplicita — «Later files can override variables from earlier
+  files». Un percorso sbagliato non viene ignorato: «When an invalid file path is being passed as
+  an `--env-file` argument, Compose returns an error». I percorsi si risolvono «relative to the
+  current working directory where the Docker Compose command is executed». Sulla directory di
+  progetto — quella dove il `.env` implicito viene cercato — la pagina dà tre passi in ordine:
+  «`--project-directory` if set», altrimenti la «directory of the first Compose file specified
+  with `-f`/`--file`», altrimenti `PWD`. L'ordine di precedenza complessivo mette prima le
+  variabili di shell, poi i file passati con `--env-file`, poi il `.env` della directory di
+  progetto.
+- **Riserve:** la frase che conta **non sta sulla pagina che si andrebbe a leggere**. La pagina
+  intitolata «Environment variables precedence», che è quella dove uno cerca, non contiene mai
+  l'affermazione che `--env-file` sostituisce il `.env`: dice solo «When `--env-file` is not set,
+  Compose may load up to two `.env` files», e lascia dedurre il resto. L'affermazione esplicita è
+  su questa pagina, sotto un titolo — «Interpolation» — che non lascia sospettare di contenerla.
+  Seconda riserva: «overrides the default file path» va combinato con la regola dei tre passi per
+  arrivare alla conseguenza che serve qui, cioè che passando `--env-file` sparisce anche il `.env`
+  che sta **accanto al file indicato con `-f`**. Sono due frasi distanti sulla stessa pagina, e la
+  conclusione è una deduzione: la misura diretta è in [V-025](#v-025).
+- **Usata da:** ADR-0041, ADR-0042, ADR-0052
+
+<a id="s-057"></a>
+### S-057 — `docker compose wait` e `docker compose up --wait`: che cosa dichiarano di attendere
+
+- **URL:** https://docs.docker.com/reference/cli/docker/compose/wait/
+- **Editore:** Docker Inc. — Docker Docs, e la guida del comando installato
+- **Versione documentata:** Docker Compose v5.4.0
+- **Consultata:** 2026-08-31
+- **Verdetto:** conferma parziale
+- **Cosa afferma:** `docker compose wait --help` dà la definizione in una riga — «Block until
+  containers of all (or specified) services stop.» — con la forma d'uso `docker compose wait
+  SERVICE [SERVICE...] [OPTIONS]` e una sola opzione propria, `--down-project` («Drops project
+  when the first container stops»). Il riferimento in rete di `docker compose up` descrive
+  l'opzione omonima ma diversa: `--wait` è «Wait services be running|healthy. Implies detached
+  mode», e `--wait-timeout` è la «Maximum duration in seconds wait project to be running|healthy».
+  Le due formulazioni non dicono la stessa cosa: `up --wait` attende che i servizi **siano** in
+  esecuzione o sani, `compose wait` attende che i container **si fermino**.
+- **Riserve:** la pagina in rete di `docker compose wait` non è stata leggibile in forma
+  utilizzabile — la lettura ha restituito soltanto la tabella delle opzioni, senza il testo di
+  descrizione. La definizione citata qui viene quindi dalla guida del comando installato sulla
+  versione pinnata, che è una fonte primaria ma **locale**: su un'altra versione di Compose la
+  formulazione può cambiare, e chi rilegge queste righe dovrebbe rieseguire `docker compose wait
+  --help` prima di darle per attuali. La riserva che pesa davvero è però un'altra, ed è un
+  silenzio: **nessuno dei due testi dice che cosa faccia `--wait` con un servizio che finisce il
+  suo lavoro ed esce.** La distinzione fra un container che resta su e uno che muore per
+  progetto non compare da nessuna parte sulla pagina di `up`. Non è un dettaglio di lettura: è
+  esattamente il buco in cui cade lo stack di questo repository, misurato in [V-025](#v-025).
+- **Usata da:** ADR-0041, ADR-0052
+
+---
+
+<a id="s-058"></a>
+### S-058 — MongoDB Manual 7.0: Read Preference
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/read-preference/
+- **Editore:** MongoDB, Inc. — MongoDB Manual, versione v7.0 (la stessa dell'immagine pinnata)
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma:** definisce il read preference come il modo in cui «MongoDB clients route read
+  operations to the members of a replica set», ed elenca i cinque modi. Il predefinito è
+  esplicito: «By default, an application directs its read operations to the primary member in a
+  replica set (that is, read preference mode `primary`)», e per quel modo «All read operations use
+  only the current replica set primary. This is the default read mode. **If the primary is
+  unavailable, read operations produce an error or throw an exception.**» Gli altri quattro:
+  `primaryPreferred` — «In most situations, operations read from the primary but if it is
+  unavailable, operations read from secondary members»; `secondary` — «All operations read from the
+  secondary members of the replica set»; `secondaryPreferred` — «Operations typically read data from
+  secondary members of the replica set. If the replica set has only one single primary member and no
+  other members, operations read data from the primary member»; `nearest` — «Operations read from a
+  random eligible replica set member, irrespective of whether that member is a primary or secondary,
+  based on a specified latency threshold».
+
+  La frase che conta più di tutte sta nella sezione *Behavior*: «**All read preference modes except
+  `primary` may return stale data** because secondaries replicate operations from the primary in an
+  asynchronous process. Ensure that your application can tolerate stale data if you choose to use a
+  non-`primary` mode.» E subito dopo, un avvertimento che si legge di rado: «Read preference does
+  not affect the visibility of data. Clients can see the results of writes before they are
+  acknowledged or have propagated to a majority of replica set members.» Il rimedio nominato dalla
+  pagina, per ciascuno dei modi non predefiniti, è sempre lo stesso: «Use the `maxStalenessSeconds`
+  option to avoid reading from secondaries that the client estimates are overly stale.»
+- **Riserve:** la pagina descrive il **contratto**, non il costo: non dà nessun numero sul ritardo
+  di replica, che dipende dalla distribuzione e va misurato dove gira ([V-027](#v-027)). Le
+  descrizioni dei modi nominano più volte gli *hedged read*, che valgono sugli sharded cluster e
+  non su un replica set: non riguardano lo stack 02 e non sono stati provati. `maxStalenessSeconds`
+  è citato dalla pagina come rimedio ma **non è stato usato né misurato** in questo repository.
+- **Usata da:** ADR-0046
+
+---
+
+<a id="s-059"></a>
+### S-059 — MongoDB Database Tools: `mongorestore`
+
+- **URL:** https://www.mongodb.com/docs/database-tools/mongorestore/
+- **Editore:** MongoDB, Inc. — MongoDB Database Tools (prodotto distinto dal server)
+- **Versione documentata:** Database Tools 100.18.0 — la stessa versione dei binari dentro
+  l'immagine pinnata di questo repository ([V-035](#v-035))
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma:** `--oplogReplay` «After restoring the database dump, replays the oplog entries
+  from an `oplog.bson` file», e la coppia è dichiarata esplicitamente: «You can use `mongodump
+  --oplog` together with `mongorestore --oplogReplay` to ensure the data is current and has all the
+  writes that occurred during the dump operation.» Il vincolo è netto e sta in una nota: «When using
+  `mongorestore` with `--oplogReplay` to restore a replica set, you must restore a **full dump** of
+  a replica set member created using `mongodump --oplog`. `mongorestore` with `--oplogReplay` fails
+  if you use any of the following options to limit the data to be restored» — e l'elenco è `--db`,
+  `--collection`, `--nsInclude`, `--nsExclude`, `--nsFrom`, `--nsTo`.
+
+  Su `--drop`: «Before restoring the collections from the dumped backup, drops the collections from
+  the target database. `--drop` does not drop collections that are not in the backup.» E
+  l'avvertimento che riguarda chiunque ripristini un dump completo su uno stack autenticato: «When
+  the restore includes the `admin` database, `mongorestore` with `--drop` removes all user
+  credentials and replaces them with the users defined in the dump file. […] If `mongorestore` can't
+  authenticate to a user defined in the dump file, the restoration process will fail, leaving an
+  empty database.»
+
+  Su `--oplogLimit`: «Prevents `mongorestore` from applying oplog entries with timestamp newer than
+  or equal to `<timestamp>`», con l'obbligo «You must use `--oplogLimit` in conjunction with the
+  `--oplogReplay` option» e un avviso in riquadro: «Use `oplogLimit` with caution: manually
+  specifying the oplog entries to apply might cause corruption and inconsistencies in the restored
+  data.»
+
+  Sulla compatibilità di versione: «You can restore the BSON files generated from `mongodump` into
+  MongoDB deployments running the **same major version or feature compatibility version** as the
+  source deployment.»
+- **Riserve:** la frase «to ensure the data is current» è la più ottimista della pagina e non regge
+  alla misura. Il punto di ripristino non è «adesso»: è l'istante dell'**ultima voce di oplog
+  catturata**, che cade dentro l'esecuzione del comando e non alla sua ultima riga di log — sullo
+  stack di questo repository il restore si ferma a 740 documenti mentre alla fine del dump ce
+  n'erano 741 ([V-035](#v-035)). La pagina non dice che cosa succede se si passa `--oplogReplay` a
+  un dump privo di `oplog.bson`, e **non è stato provato**. `--oplogLimit` **non è stato provato**.
+  Il vincolo di versione **non è stato provato**: qui sorgente e destinazione sono lo stesso
+  processo.
+- **Usata da:** ADR-0047
+
+---
+
+<a id="s-060"></a>
+### S-060 — MongoDB Manual 7.0: Backup Methods for a Self-Managed Deployment
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/backups/
+- **Editore:** MongoDB, Inc. — MongoDB Manual, versione v7.0 (la stessa dell'immagine pinnata)
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma, ed è la fonte che dichiara i limiti che `mongodump` non dichiara
+- **Cosa afferma:** l'ambito è nella prima riga della sezione, e non è un dettaglio: «`mongodump`
+  and `mongorestore` are tools for backing up and restoring **small** MongoDB deployments.» La
+  tabella di confronto fra i metodi assegna alla coppia `mongodump`/`mongorestore` valori che vale
+  la pena riportare per intero: RTO **High**, RPO **High**, costo di archiviazione **High**, tempo
+  del personale **High**, ripristino continuo a un punto nel tempo **No**, complessità del ripristino
+  **Low**, backup di uno sharded cluster «**High, requires extra steps**», impatto sulla sorgente
+  «**High, requires write lock**», coerenza «**Not guaranteed**», incrementale **No**, possibilità
+  di scegliere l'ambito **Yes**.
+
+  Sulla copia dei file di dati, che è l'alternativa che viene sempre proposta: «Backups produced by
+  copying the underlying data do not support point in time recovery for replica sets and are
+  difficult to manage for larger sharded clusters. Additionally, these backups are larger because
+  they include the indexes and duplicate underlying storage padding and fragmentation. `mongodump`,
+  by contrast, creates smaller backups.»
+- **Riserve:** la tabella è qualitativa. «High» e «Low» non hanno soglie, e «small deployments» non
+  è quantificato da nessuna parte nella pagina: chi deve decidere se il proprio database è «small»
+  non trova qui il numero per farlo. La riga «impact on source: High, requires write lock» **non
+  corrisponde a ciò che si osserva** su questo stack: durante i 50 ms del dump le scritture sono
+  proseguite senza interruzione, e i documenti scritti in quella finestra sono nel database
+  ([V-035](#v-035)) — la voce della tabella resta citabile come dichiarazione dell'editore, non come
+  descrizione del comportamento misurato qui. Il resto della pagina descrive Atlas, Ops Manager e
+  gli snapshot di filesystem, che sono **fuori dall'ambito** di questo repository e non sono stati
+  provati.
+- **Usata da:** ADR-0047
+
+---
+
+<a id="s-061"></a>
+### S-061 — MongoDB Manual 7.0: Verify Cluster Membership with X.509 on Self-Managed MongoDB
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/configure-x509-member-authentication/
+  (citazioni dalla variante `configure-x509-member-authentication.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** 7.0 — la versione pinnata del lab ([ADR-0028](Decision.md#adr-0028))
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma:** l'alternativa al keyfile è dichiarata in apertura: «Sharded cluster members and
+  replica set members can use X.509 certificates to verify their membership to the cluster or the
+  replica set instead of using keyfiles. The membership authentication is an internal process.» La
+  conseguenza sul controllo degli accessi è **la stessa** del keyfile: «Enabling internal
+  authentication also enables Role-Based Access Control in Self-Managed Deployments. Clients must
+  authenticate as a user in order to connect and perform operations in the deployment.»
+
+  I requisiti dei certificati di membro, che sono la vera differenza di costo rispetto al keyfile:
+  «A single Certificate Authority (CA) must issue all X.509 certificates for the members of a
+  sharded cluster or a replica set»; il soggetto deve avere un valore non vuoto per almeno uno fra
+  Organization (`O`), Organizational Unit (`OU`) e Domain Component (`DC`), e «MongoDB verifies that
+  entries match exactly across all member certificates. If you list multiple `OU` values, all
+  certificates must use an identical list»; «At least one of the Subject Alternative Name (`SAN`)
+  entries must match the server hostname used by other cluster members. When comparing `SAN`s,
+  MongoDB can compare either DNS names or IP addresses», con la nota che in mancanza di
+  `subjectAltName` «MongoDB compares the Common Name (CN) instead. However, this usage of CN is
+  deprecated per RFC2818». Sugli usi estesi della chiave: il certificato di
+  `tlsCertificateKeyFile` deve includere `serverAuth`, quello di `tlsClusterFile` deve includere
+  `clientAuth`, e se `tlsClusterFile` è omesso il primo deve includerli entrambi — ma «If
+  `tlsCertificateKeyFile` or `tlsClusterFile` point to certificates that omit these extensions, no
+  restrictions apply».
+
+  L'avvio: `mongod --replSet <name> --tlsMode requireTLS --clusterAuthMode x509 --tlsClusterFile
+  <path to membership certificate and key PEM file> --tlsCertificateKeyFile <path to TLS/SSL
+  certificate and key file> --tlsCAFile <path to root CA file> --bind_ip localhost,<hostname(s)|ip
+  address(es)>`, con l'obbligo che «To use X.509 authentication, `--tlsCAFile` or `net.tls.CAFile`
+  must be specified unless you are using `--tlsCertificateSelector`». Sull'uniformità del
+  parametro: «Outside of rolling upgrade procedures, every component of a replica set or sharded
+  cluster should use the same `--clusterAuthMode` setting». Infine due avvertenze che valgono anche
+  per chi non usa X.509: «MongoDB disables support for TLS 1.0 encryption on systems where TLS 1.1+
+  is available» e «If you specify `--tlsAllowInvalidCertificates` or
+  `net.tls.allowInvalidCertificates: true`, an invalid certificate is sufficient only to establish
+  a TLS connection but it is *insufficient* for authentication».
+- **Riserve:** la pagina dichiara i propri limiti in modo esplicito, e vanno riportati: «A full
+  description of TLS/SSL, PKI (Public Key Infrastructure) certificates, in particular X.509
+  certificates, and Certificate Authority is beyond the scope of this document. This tutorial
+  assumes prior knowledge of TLS/SSL as well as access to valid X.509 certificates.» Cioè: la fonte
+  che questo repository cita per «come si passa a X.509» **non insegna a produrre i certificati**, e
+  questo repository nemmeno. La pagina inoltre **non contiene** né la sequenza di migrazione a
+  caldo né la rotazione dei certificati: rimanda a due pagine separate, registrate come
+  [S-062](#s-062) e [S-063](#s-063). Nota terminologica utile: gli alias `ssl` sono deprecati ma
+  non diversi — «The `tls` settings/options provide **identical** functionality as the `ssl`
+  options since MongoDB has always supported TLS 1.0 and later».
+- **Usata da:** ADR-0048
+
+<a id="s-062"></a>
+### S-062 — MongoDB Manual 7.0: Upgrade from Keyfile Authentication to X.509 Authentication
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/upgrade-keyfile-to-x509/
+  (citazioni dalla variante `upgrade-keyfile-to-x509.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** 7.0
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma:** la migrazione è una **procedura a caldo**, in due varianti a seconda che il
+  cluster usi già TLS. Per un cluster con keyfile e **senza** TLS — il caso dello stack di questo
+  repository — i passi sono quattro.
+
+  Primo, riavvio di ogni membro con `net.tls.mode: allowTLS` («This value allows the node to accept
+  both TLS/SSL and non-TLS/non-SSL incoming connections. Its outgoing connections do not use
+  TLS/SSL»), `net.tls.certificateKeyFile`, `net.tls.clusterFile` («Set to the appropriate path of
+  the node's certificate key file for membership authentication»), `net.tls.CAFile`, e
+  `security.clusterAuthMode: sendKeyFile` — «each node continues to send its keyfile to
+  authenticate itself as a member. However, each node can receive either a keyfile or an X.509
+  certificate from other members to authenticate those members». Il keyfile **resta al suo posto**
+  in questa fase.
+
+  Secondo, su ogni nodo, due `setParameter`:
+  `db.adminCommand( { setParameter: 1, tlsMode: "preferTLS" } )` e
+  `db.adminCommand( { setParameter: 1, clusterAuthMode: "sendX509" } )`. Con `preferTLS` «the node
+  accepts both TLS/SSL and non-TLS/non-SSL incoming connections, and its outgoing connections use
+  TLS/SSL»; con `sendX509` «each node sends its `net.tls.clusterFile` to authenticate itself as a
+  member. However, each node continues to accept either a keyfile or an X.509 certificate».
+  «Upgrade all nodes of the cluster to these settings before continuing.»
+
+  Terzo, riscrittura del file di configurazione perché il nuovo stato sopravviva ai riavvii. Quarto,
+  *«Optional but recommended»*: `net.tls.mode: requireTLS` e `security.clusterAuthMode: x509`, con
+  un avviso in grassetto sul fatto che il requisito TLS riguarda **anche i client** — «This TLS/SSL
+  connection requirement applies to all connections; that is, with the clients as well as with the
+  members of the cluster.»
+
+  Per il cluster che usa già TLS la procedura si accorcia a `sendKeyFile` → `sendX509` → `x509`,
+  senza toccare `tlsMode`. In coda, un'alternativa dichiarata: «As an alternative to using the
+  `setParameter` command, you can also restart the nodes with the appropriate TLS/SSL and x509
+  options and values.»
+- **Riserve:** la pagina **non dice** che le transizioni siano a senso unico, e non dice che
+  l'ordine dei due `setParameter` del secondo passo sia obbligatorio — li presenta insieme, nello
+  stesso blocco, senza spiegare perché quello su `tlsMode` viene prima. Entrambe le cose sono state
+  misurate: [V-039](#v-039). La parola «downtime» non compare nella pagina; l'assenza di fermo
+  macchina è implicita nella formula «rolling upgrade process», non dichiarata. Un refuso della
+  fonte, riportato per fedeltà: nel testo del secondo passo si legge «Update the `tlsMode` to
+  `preferSSL`» mentre il comando immediatamente sotto usa `preferTLS` — il valore giusto è quello
+  del comando.
+- **Usata da:** ADR-0048
+
+<a id="s-063"></a>
+### S-063 — MongoDB Manual 7.0: Rotate Certificates on Clusters without clusterAuthX509
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/rotate-x509-membership-certificates/
+  (citazioni dalla variante `rotate-x509-membership-certificates.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** 7.0
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma:** come un membro riconosce un altro membro, prima di tutto: «When a server node
+  receives a connection request, it compares the Distinguished Name (DN) attributes in the
+  `subject` field of the presented certificates to the subject DN attributes of its own
+  certificates. The certificates match if their subjects contain the same values for the
+  Organization (`O`), Organizational Unit (`OU`), and Domain Component (`DC`) attributes.» Da qui
+  discende il problema: cambiare il DN dei certificati significa che i nodi smettono di
+  riconoscersi. La via d'uscita è un parametro-ponte: «Clusters adopting new certificates can use
+  the `tlsX509ClusterAuthDNOverride` parameter to accept x.509 certificates with different subject
+  DN attributes during the certificate rotation procedure. Once all members use certificates with
+  the new value, remove the override to begin rejecting the now out of date certificates.»
+
+  La procedura è di **sei passi** e comporta **tre giri di riavvii** dell'intero cluster: si imposta
+  l'override al DN nuovo su tutti i nodi e si riavvia; si sostituiscono i certificati mettendo
+  l'override sul DN **vecchio** e si riavvia; si toglie l'override e si riavvia una terza volta. Il
+  giro di riavvii è descritto con precisione: «To perform a rolling restart of all members, restart
+  each secondary and then the primary», con `db.shutdownServer()` su ogni secondario, l'attesa che
+  torni in stato `SECONDARY` verificata con `rs.status()`, e `rs.stepDown()` sul primario prima di
+  fermarlo. Sull'assenza di fermo macchina la pagina è esplicita: «In a rolling update, member
+  certificates are updated one at a time, and your deployment does not incur any downtime.» Ogni
+  passo ripete lo stesso avviso: «This configuration will not be taken into consideration until you
+  restart each member.»
+- **Riserve:** la pagina copre **solo** i cluster che non usano `net.tls.clusterAuthX509`; per gli
+  altri rimanda a una procedura diversa, non consultata qui. Non dice niente sulla **scadenza** dei
+  certificati — né come accorgersene, né che cosa succede a un cluster i cui certificati scadono
+  mentre è in esercizio: la rotazione è descritta come una scelta organizzativa («such as if an
+  organization changes its name»), non come una manutenzione periodica obbligata. La procedura è
+  registrata qui per il suo **costo**, che è il termine di paragone onesto con il keyfile: non è
+  stata eseguita.
+- **Usata da:** ADR-0048
+
+<a id="s-064"></a>
+### S-064 — Compose file reference: Interpolation — il dollaro che Compose non deve mangiare
+
+- **URL:** https://docs.docker.com/reference/compose-file/interpolation/
+- **Editore:** Docker Inc. — Docker Docs, Compose file reference
+- **Versione documentata:** Compose Specification, riferimento corrente alla consultazione
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — come si scrive un dollaro che deve sopravvivere.** «You can use a
+  `$$` (double-dollar sign) when your configuration needs a literal dollar sign.» La pagina precisa
+  che il doppio dollaro serve anche a **impedire** l'interpolazione, e ne dà l'esempio:
+
+```yml
+web:
+  build: .
+  command: "$$VAR_NOT_INTERPOLATED_BY_COMPOSE"
+```
+
+- **Cosa afferma, secondo punto — le due forme e che cosa accettano.** «Compose files use a
+  Bash-like syntax `${VARIABLE}`. Both `$VARIABLE` and `${VARIABLE}` syntax is supported», ma solo
+  la forma con le graffe accetta i modificatori. Dopo il dollaro Compose interpola qualunque cosa
+  formi «a valid variable definition - either an alphanumeric name (`[_a-zA-Z][_a-zA-Z0-9]*`)»;
+  il resto lo lascia stare. Le sostituzioni di shell tipo `${VARIABLE/foo/bar}` «are not supported
+  by Compose», mentre l'annidamento `${VARIABLE:-${FOO:-default}}` funziona.
+- **Cosa afferma, terzo punto — i due punti cambiano la domanda.** `${VAR:-default}` dà «value of
+  `VAR` if set and non-empty, otherwise `default`»; `${VAR-default}` dà «value of `VAR` if set,
+  otherwise `default`». Lo stesso per il rifiuto: `${VAR:?error}` esce con errore se la variabile è
+  assente **o vuota**, `${VAR?error}` solo se è assente. È la differenza su cui poggia il
+  segnaposto vuoto di `.env.example`: senza i due punti, una password lasciata in bianco passerebbe.
+- **Cosa afferma, quarto punto — quando non c'è niente da sostituire.** «If Compose can't resolve a
+  substituted variable and no default value is defined, it displays a warning and substitutes» la
+  variabile con la stringa vuota. Un avviso, non un errore: il file resta valido e sbagliato.
+- **Cosa afferma, quinto punto — l'interpolazione tocca i valori, non le chiavi.** «Interpolation
+  applies only to YAML values, not to keys.» Per le mappe definite dall'utente — `labels`,
+  `environment` — serve la forma a lista con l'uguale perché la sostituzione avvenga.
+- **Cosa non afferma:** che l'interpolazione avvenga **prima** che il file arrivi al container. La
+  pagina colloca il momento rispetto alla fusione dei file — «interpolation is applied before a
+  merge on a per-file basis» — e non parla mai del container. Che il `$` di un comando `sh -c`
+  venga consumato da Compose e non arrivi alla shell è una **conseguenza** di questo, non una frase
+  della pagina.
+- **Riserve:** la frase sul `$$` non sta dove uno la cerca. La pagina «Environment variables —
+  Interpolation» ([S-056](#s-056)), che è quella raggiungibile dalla guida alle variabili
+  d'ambiente, non nomina mai il doppio dollaro: rimanda qui con un collegamento. Chi cerca l'escape
+  partendo da lì trova la regola delle virgolette singole nei file `.env`, che è un'altra cosa e
+  funziona in un altro modo.
+- **Usata da:** ADR-0052
+
+<a id="s-065"></a>
+### S-065 — MongoDB Manual 7.0: Adjust Priority for Replica Set Member
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/adjust-replica-set-member-priority/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — la priorità decide sia il quando sia il chi.** «The `priority`
+  settings of replica set members affect both the timing and the outcome of elections for primary.
+  Higher-priority members are more likely to call elections, and are more likely to win. Use this
+  setting to ensure that some members are more likely to become primary and that others can never
+  become primary.» E, sul numero: «The value of the member's `priority` setting determines the
+  member's `priority` in elections. The higher the number, the higher the priority.»
+- **Cosa afferma, secondo punto — l'intervallo e il valore predefinito.** «The value of `priority`
+  can be any floating point (i.e. decimal) number between `0` and `1000`. The default value for the
+  `priority` field is `1`.» Lo zero è un caso a sé: «To block a member from seeking election as
+  primary, assign it a priority of `0`.»
+- **Cosa afferma, terzo punto — cambiarla non è gratis.** «Adjust priority settings during a
+  scheduled maintenance window. Reconfiguring priority can force the current primary to step down,
+  leading to an election. Before an election, the primary closes all open client connections.» E
+  nell'avviso della procedura: «The `rs.reconfig()` shell method can force the current primary to
+  step down, which causes an election. When the primary steps down, the `mongod` closes all client
+  connections. While this typically takes 10-20 seconds, try to make these changes during scheduled
+  maintenance periods.»
+- **Cosa afferma, quarto punto — priorità e voti sono legati.** «Non-voting (i.e. `votes` is `0`)
+  members must have `priority` of 0», e «Members with `priority` greater than 0 cannot have 0
+  `votes`». Alzare la priorità di un membro non votante «*requires* setting `votes` to `1`».
+- **Cosa non afferma:** **quanto** un membro a priorità più alta sia più probabile, né dopo quanto
+  tempo si riprenda il posto quando rientra. La pagina descrive il meccanismo in termini di
+  probabilità e non dà nessun tempo. I dieci secondi con cui `mongo-rs-1` si riprende il ruolo nel
+  lab sono misurati ([V-042](#v-042)), non letti qui.
+- **Riserve:** la pagina è un tutorial di modifica a caldo, e il lab la priorità la scrive
+  **all'inizializzazione**, dove nessuna delle cautele sulla finestra di manutenzione si applica —
+  non c'è ancora un primario da far dimettere. Vale però al contrario, e vale per il talk: chi
+  volesse cambiare le priorità sullo stack acceso durante la demo provocherebbe un'elezione e la
+  chiusura di tutte le connessioni.
+- **Usata da:** ADR-0051
+
+<a id="s-066"></a>
+### S-066 — MongoDB Manual 7.0: Hashed Sharding
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/hashed-sharding/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — a che cosa serve una chiave hashed.** «Hashed keys are ideal for
+  shard keys with fields that change [monotonically] like [ObjectId] values or timestamps.» Il
+  meccanismo è che si partiziona sull'hash del valore e non sul valore: la pagina lo riassume nel
+  confronto con la partizione per intervalli.
+- **Cosa afferma, secondo punto — che cosa succede senza, e con parole sue.** «Since the value of
+  `X` is always increasing, the chunk with an upper bound of [`MaxKey`] receives the majority
+  incoming writes. This restricts insert operations to the single shard containing this chunk,
+  which reduces or removes the advantage of distributed writes in a sharded cluster.» È la frase
+  che giustifica l'intera scelta della demo, e va letta insieme a [S-067](#s-067), che sulla stessa
+  cosa è più esplicita.
+- **Cosa afferma, terzo punto — il prezzo, dichiarato.** «Post-hash, documents with "close" shard
+  key values are unlikely to be on the same chunk or shard - the `mongos` is more likely to perform
+  [Broadcast Operations] to fulfill a given ranged query. `mongos` can target queries with equality
+  matches to a single shard.» Distribuire le scritture e tenere vicine le letture contigue sono
+  due cose che non si ottengono insieme, e la pagina non finge il contrario.
+- **Cosa afferma, quarto punto — e qui c'è il numero che lo spike aveva misurato senza saperlo.**
+  Distribuendo una collezione **vuota**: «The sharding operation creates empty chunks to cover the
+  entire range of the shard key values and performs an initial chunk distribution. By default, the
+  operation creates 2 chunks per shard and migrates across the cluster. You can use
+  `numInitialChunks` option to specify a different number of initial chunks. This initial creation
+  and distribution of chunks allows for faster setup of sharding.» Due chunk per shard: con i due
+  shard del lab fanno **quattro**, che è esattamente il numero misurato dallo spike §5 e poi da
+  [V-058](#v-058). Non è un numero emergente, è un valore predefinito documentato.
+- **Cosa afferma, quinto punto — l'ordine inverso non è equivalente.** Distribuendo una collezione
+  **già piena**: «The sharding operation creates an initial chunk to cover all of the shard key
+  values», e «after the initial chunk creation, the balancer moves ranges of the initial chunk when
+  it needs to balance data». Un chunk solo, e poi si aspetta il balancer. È la ragione per cui nel
+  lab `sh.shardCollection()` viene prima dell'inserimento e non dopo.
+- **Cosa non afferma:** quanto uniforme sia la distribuzione risultante. La pagina descrive la
+  creazione dei chunk, non la ripartizione dei documenti fra di essi: il 49,3 % / 50,7 % del lab è
+  misurato ([V-058](#v-058)), non letto qui. E non dice niente sui tempi — quanto duri la
+  distribuzione iniziale, quanto costi la migrazione.
+- **Riserve:** due, tutte e due sui bordi del caso del lab. La prima è un avviso della pagina che
+  qui non morde ma altrove sì: «MongoDB `hashed` indexes truncate floating point numbers to 64-bit
+  integers before hashing. For example, a `hashed` index would store the same value for a field
+  that held a value of `2.3`, `2.2`, and `2.9`.» Gli `_id` del dataset sono interi, quindi il
+  problema non si presenta; su un campo `importo` si presenterebbe, e in silenzio. La seconda è che
+  l'indice `_id_hashed` che `shardCollection()` crea da sé si può togliere solo «starting in
+  MongoDB 7.0.3 (and 6.0.12 and 5.0.22)» — il lab è sulla 7.0.40 e quindi ci rientra, ma è un
+  dettaglio legato alla versione pinnata da [ADR-0028](Decision.md#adr-0028).
+- **Usata da:** ADR-0064, ADR-0068
+
+<a id="s-067"></a>
+### S-067 — MongoDB Manual 7.0: Choose a Shard Key
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/sharding-choose-a-shard-key/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-01
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — perché una chiave che cresce sempre concentra le scritture.** «A
+  shard key on a value that increases or decreases monotonically is more likely to distribute
+  inserts to a single chunk within the cluster.» E il perché, che è geometrico e non statistico:
+  «This occurs because every cluster has a chunk that captures a range with an upper bound of
+  `MaxKey`. `maxKey` always compares as higher than all other values.» Quindi: «If the shard key
+  value is always increasing, all new inserts are routed to the chunk with `maxKey` as the upper
+  bound. If the shard key value is always decreasing, all new inserts are routed to the chunk with
+  `minKey` as the lower bound. The shard containing that chunk becomes the bottleneck for write
+  operations.»
+- **Cosa afferma, secondo punto — la mitigazione, che è la parte che quasi tutte le spiegazioni in
+  giro omettono.** «To optimize data distribution, the chunks that contain the global `maxKey` (or
+  `minKey`) do not stay on the same shard. When a chunk is split, the new chunk with the `maxKey`
+  (or `minKey`) chunk is located on a different shard.» Il collo di bottiglia **cambia nodo** man
+  mano che i chunk si dividono; non sparisce, perché in ogni istante gli inserimenti vanno tutti in
+  un posto solo, e in più il cluster paga le migrazioni che servono a spostare quel posto. Senza
+  questa riga il difetto raccontato dal palco sarebbe una caricatura.
+- **Cosa afferma, terzo punto — la cardinalità è un tetto, non una preferenza.** «The cardinality
+  of a shard key determines the maximum number of chunks the balancer can create.» E l'esempio, che
+  è il conto da rifare su qualunque campo candidato: con un campo `continent` da sette valori, «a
+  cardinality of `7` means there can be no more than `7` chunks within the sharded cluster, each
+  storing one unique shard key value», e «this constrains the number of effective shards in the
+  cluster to `7` as well - adding more than seven shards would not provide any benefit».
+- **Cosa afferma, quarto punto — l'hash non è una garanzia.** «A shard key that does not change
+  monotonically does not, on its own, guarantee even distribution of data across the sharded
+  cluster. The cardinality and frequency of the shard key also contribute to the distribution of
+  the data.» Nel lab distribuisce perché gli `_id` sono ventimila valori distinti, uno per
+  documento: cardinalità massima e frequenza uniforme, cioè le due condizioni che la frase mette
+  accanto. Su un campo da dieci valori l'hash non salverebbe niente.
+- **Cosa afferma, quinto punto — il rimando esplicito.** «If your data model requires sharding on a
+  key that changes monotonically, consider using Hashed Sharding.» Le due pagine si mandano l'una
+  all'altra, ed è la ragione per cui qui sono due fonti e non una.
+- **Cosa non afferma:** che una chiave hashed sia la scelta giusta in generale. La pagina insiste
+  sul verso opposto — la chiave si sceglie sul modo in cui si interroga la collezione — e il lab
+  usa `_id` per un motivo che il manuale non avalla e che va detto per quello che è: tenere il
+  dataset identico agli altri due stack.
+- **Riserve:** la pagina descrive anche l'analizzatore di shard key introdotto nella 7.0
+  (`analyzeShardKey`), che il lab non usa e che sarebbe lo strumento giusto in un caso vero. Non è
+  entrato nel materiale perché richiede un campione di query reali, che una demo con dati generati
+  non ha.
+- **Usata da:** ADR-0064, ADR-0068, ADR-0110
+
+<a id="s-068"></a>
+### S-068 — Docker Docs: Use profiles with Compose
+
+- **URL:** https://docs.docker.com/compose/how-tos/profiles/
+- **Editore:** Docker Inc. — Docker Docs
+- **Versione documentata:** pagina senza numero di versione; nessun requisito minimo di Compose
+  dichiarato per le forme usate qui
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — un servizio senza `profiles` è sempre acceso.** «Services without
+  a `profiles` attribute are always enabled.» È la riga che rende sensato il disegno dello stack
+  03, dove `keyfile-init` non dichiara nessun profilo: il keyfile serve a tutti e due gli scenari,
+  e non doverlo elencare in entrambi è un posto in meno dove sbagliare.
+- **Cosa afferma, secondo punto — il jolly.** La pagina documenta `--profile "*"` come modo per
+  abilitare **tutti** i profili in un colpo solo, insieme alla variabile d'ambiente
+  `COMPOSE_PROFILES`. È la forma che [ADR-0066](Decision.md#adr-0066) adotta per `down`, `logs` e
+  `reset`, e la si è scelta perché è documentata: la stessa cosa si otterrebbe elencando i profili
+  a mano, cioè costruendo una lista che invecchia in silenzio al primo profilo nuovo.
+- **Cosa afferma, terzo punto — i comandi agiscono sui profili attivi.** La pagina è esplicita sul
+  fatto che l'attivazione di un profilo governa quali servizi i comandi considerano, e mostra
+  `docker compose --profile <nome> down` come il modo di fermare i servizi di quel profilo. Non
+  dice — e questo è il punto che è costato la misura di [V-059](#v-059) — che cosa succede a chi
+  spegne con un profilo diverso da quello con cui ha acceso.
+- **Riserve:** la pagina non dichiara da quale versione di Compose `--profile "*"` sia
+  disponibile. Qui è provata su v5.5.0 ([V-059](#v-059)); su una versione più vecchia il
+  comportamento va riverificato prima di fidarsene.
+- **Usata da:** ADR-0066
+
+<a id="s-069"></a>
+### S-069 — MongoDB Manual 7.0: Sharding (la pagina d'ingresso)
+
+- **URL:** https://www.mongodb.com/docs/v7.0/sharding/ (citazioni dalla variante `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — il problema, che è di capacità e non di disponibilità.** «Database
+  systems with large data sets or high throughput applications can challenge the capacity of a
+  single server. For example, high query rates can exhaust the CPU capacity of the server. Working
+  set sizes larger than the system's RAM stress the I/O capacity of disk drives.» Le due risposte
+  possibili sono nominate e messe una contro l'altra: «*Vertical Scaling* increases the capacity of
+  a single server by using a more powerful CPU, adding more RAM, or expanding storage. Available
+  technology and cloud provider hardware configurations impose a practical maximum for vertical
+  scaling.» contro «*Horizontal Scaling* involves dividing the system dataset and load over
+  multiple servers, adding more servers to increase capacity as required. Each machine handles a
+  subset of the overall workload, which can cost less than high-end hardware for a single machine.
+  **The trade-off is increased complexity in infrastructure and maintenance.**» L'ultima frase è
+  quella che il laboratorio mette in pratica: undici container contro uno.
+- **Cosa afferma, secondo punto — i tre componenti, e i loro vincoli.** «Each shard contains a
+  subset of the sharded data. Each shard must be deployed as a replica set.» · «The `mongos` acts
+  as a query router, providing an interface between client applications and the sharded cluster.» ·
+  «Config servers store metadata and configuration settings for the cluster. Config servers must be
+  deployed as a replica set (CSRS).» E la granularità: «MongoDB shards data at the collection
+  level, distributing the collection data across the shards in the cluster.»
+- **Cosa afferma, terzo punto — l'irreversibilità, che è la frase che apre la pagina del lab.**
+  Sotto il titolo «Considerations Before Sharding»: «Sharded cluster infrastructure requirements
+  and complexity require careful planning, execution, and maintenance.» e subito dopo, in una riga
+  sola: «**Once a collection has been sharded, MongoDB provides no method to unshard a sharded
+  collection.**» Con il temperamento che va riportato insieme: «While you can reshard your
+  collection later, carefully consider your shard key choice to avoid scalability and performance
+  issues.»
+- **Cosa afferma, quarto punto — le collezioni che non sono distribuite non spariscono.** «A
+  database can have a mixture of sharded and unsharded collections. Sharded collections are
+  partitioned and distributed across the shards in the cluster. **Unsharded collections are stored
+  on a primary shard. Each database has its own primary shard.**» È la spiegazione del settimo
+  esito di [V-058](#v-058), dove una collezione creata al volo attraverso il router risultava non
+  distribuita e viveva tutta su `shard2rs`.
+- **Cosa afferma, quinto punto — da dove si entra, e da dove non si entra.** «You must connect to a
+  mongos router to interact with any collection in the sharded cluster. This includes sharded *and*
+  unsharded collections. **Clients should *never* connect to a single shard to perform read or
+  write operations.**» Letta insieme al quarto esito di [V-058](#v-058) — le stesse credenziali che
+  entrano dal router falliscono su uno shard — questa riga cambia di segno: quello che sembrava un
+  limite scomodo del lab è la configurazione che rende difficile fare la cosa che il manuale
+  vieta.
+- **Cosa afferma, sesto punto — che cosa si guadagna, in tre voci.** Letture e scritture: «MongoDB
+  distributes the read and write workload across the shards in the sharded cluster, allowing each
+  shard to process a subset of cluster operations.» Capacità: «As the data set grows, additional
+  shards increase the storage capacity of the cluster.» E la disponibilità, che è **parziale** e va
+  detta così: «Even if one or more shard replica sets become completely unavailable, the sharded
+  cluster can continue to perform partial reads and writes. That is, while data on the unavailable
+  shard(s) cannot be accessed, reads or writes directed at the available shards can still succeed.»
+- **Cosa non afferma:** **quando lo sharding non serve.** La pagina non contiene una soglia, una
+  dimensione minima, un numero di documenti, né una frase del tipo «non distribuire se…». La
+  sezione che sembra promettere quel contenuto — «Considerations Before Sharding» — avverte sulla
+  complessità, sull'irreversibilità e sulla scelta della chiave, ma non sconsiglia mai lo sharding
+  in nessuna circostanza. Chi scrive «il manuale dice di non fare sharding sotto i N documenti» sta
+  citando qualcos'altro. Nella pagina del laboratorio quel giudizio è dichiarato per quello che è:
+  una conclusione tratta dai numeri dei tre stack, non una citazione.
+- **Riserve:** due. La prima riguarda una condizione che il lab non incontra mai e che quindi non è
+  stata indagata: «Starting in MongoDB 5.1, when starting, restarting or adding a shard server with
+  `sh.addShard()` the Cluster Wide Write Concern (CWWC) must be set», e «if the `CWWC` is not set
+  and the shard is configured such that the default write concern is `{ w : 1 }` the shard server
+  will fail to start or be added and returns an error». Lo stack 03 non imposta mai il CWWC e
+  `sh.addShard()` riesce ([V-055](#v-055)): la condizione descritta non si presenta con un replica
+  set da uno o tre membri, ma il perché non è stato verificato. La seconda: la pagina descrive
+  anche zone, resharding, change stream e transazioni distribuite, che il laboratorio non usa e su
+  cui questa fonte non è stata letta con attenzione.
+- **Usata da:** ADR-0068, ADR-0128
+
+<a id="s-070"></a>
+### S-070 — MongoDB Manual 7.0: Sharded Cluster Balancer
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/sharding-balancer-administration/ (citazioni dalla
+  variante `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — che cos'è e, soprattutto, dove gira.** «The MongoDB balancer is a
+  background process that monitors the amount of data on each shard for each sharded collection.»
+  E la riga che smentisce l'idea più diffusa: «**The balancer runs on the primary of the config
+  server replica set (CSRS).**» Non su `mongos`. Il router instrada; a spostare i dati è il
+  primario dei config server, che nel lab è un container che sembra non fare niente.
+- **Cosa afferma, secondo punto — è acceso da solo.** «By default, the balancer process is always
+  enabled.» Coerente con quanto `sh.status()` mostrava già a cluster vuoto in
+  [V-055](#v-055): `Currently enabled: yes` con zero shard registrati.
+- **Cosa afferma, terzo punto — la soglia, che è la ragione per cui nel lab non si muove mai.** «To
+  minimize the impact of balancing on the cluster, the balancer only begins balancing after the
+  distribution of data for a sharded collection has reached certain thresholds.» E il numero:
+  «**A collection is considered balanced if the difference in data between shards (for that
+  collection) is less than three times the configured range size for the collection. For the
+  default range size of `128MB`, two shards must have a data size difference for a given collection
+  of at least `384MB` for a migration to occur.**» La stessa regola detta in termini di chunk:
+  «When the collection data shared between two shards differs by three or more times the configured
+  `chunkSize` setting, the balancer migrates chunks between the shards.»
+- **Cosa afferma, quarto punto — non è gratis, e la pagina lo dice due volte.** «The balancing
+  procedure for sharded clusters is entirely transparent to the user and application layer, though
+  there may be some performance impact while the procedure takes place.» · «Range migrations carry
+  some overhead in terms of bandwidth and workload, both of which can impact database performance.»
+  Il momento più caro è nominato con precisione: «MongoDB briefly pauses all application reads and
+  writes to the collection being migrated to on the source shard before updating the config servers
+  with the range location. MongoDB resumes application reads and writes after the update.»
+- **Cosa afferma, quinto punto — quanto può fare in parallelo.** «Restricting a shard to at most
+  one migration at any given time.» e «For a sharded cluster with *n* shards, MongoDB can perform
+  at most *n/2* (rounded down) simultaneous migrations». Con i due shard del lab: **una** migrazione
+  alla volta, se mai ce ne fosse una.
+- **Cosa non afferma:** ogni quanto il balancer guardi. Non c'è una frequenza di sondaggio, non c'è
+  la durata tipica di una migrazione, e non c'è alcun modo di dedurre dalla pagina quanto tempo
+  passi fra il superamento della soglia e il primo spostamento. La pagina descrive **se** il
+  balancer si muove, non **quando**.
+- **Riserve:** i 128 MB sono il valore predefinito di `chunkSize`, non una costante: è
+  configurabile per collezione con `configureCollectionBalancing`. Nel lab il predefinito è quello
+  in vigore, letto e non supposto ([V-061](#v-061) riporta `chunkSize: 128` da
+  `sh.balancerCollectionStatus()`). E la soglia dei 384 MB **non è mai stata superata** in nessuna
+  misura di questo repository: quello che è provato è che sotto la soglia il balancer sta fermo,
+  non che sopra si muova.
+- **Usata da:** ADR-0068, ADR-0069
+
+<a id="s-071"></a>
+### S-071 — MongoDB Manual 7.0: Bulk Write Operations (l'ordine, e il collo di bottiglia monotono)
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/bulk-write-operations/ (citazioni dalla variante
+  `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — ordinato e non ordinato non sono la stessa operazione.** «Bulk
+  write operations execute either serially (*ordered*) or in any order (*unordered*). **By default,
+  operations are ordered and stop on the first error.** Unordered operations continue despite
+  errors and may execute in parallel, **making them typically faster for sharded collections.**»
+  Il predefinito è quello caro, ed è il predefinito.
+- **Cosa afferma, secondo punto — e per uno sharded cluster lo dice esplicitamente.** Sotto
+  «Strategies for Bulk Inserts to a Sharded Collection», la sezione «Unordered Writes to `mongos`»:
+  «To improve write performance to sharded clusters, perform an unordered bulk write by setting
+  `ordered` to `false` when you perform a bulk write. **`mongos` attempts to send the writes to
+  multiple shards simultaneously.**» Il meccanismo è tutto in quel *simultaneously*: con un lotto
+  ordinato non può, perché mantenere l'ordine fra shard diversi vuol dire aspettare.
+- **Cosa afferma, terzo punto — il collo di bottiglia monotono, detto più brutalmente che in
+  [S-067](#s-067).** «Avoid Monotonic Throttling»: «**If your shard key increases monotonically
+  during an insert, then all inserted data goes to the last chunk in the collection, which will
+  always end up on a single shard. Therefore, the insert capacity of the cluster will never exceed
+  the insert capacity of that single shard.**» È la terza fonte indipendente sullo stesso difetto,
+  e l'unica che lo formula come un tetto invece che come uno squilibrio.
+- **Cosa afferma, quarto punto — e spiega perché nel lab si distribuisce prima e si riempie poi.**
+  «If your sharded collection is empty and you are not using hashed sharding for the first key of
+  your shard key, then your collection has only one initial chunk, which resides on a single shard.
+  MongoDB must then take time to receive data and distribute chunks to the available shards.» Il
+  «one initial chunk» è esattamente quello che [V-061](#v-061) ha contato distribuendo una
+  collezione vuota con `{_id: 1}`.
+- **Cosa non afferma:** **quanto** costi l'ordine. «Typically faster» non è un numero, e la pagina
+  non ne dà nessuno: né un fattore, né un ordine di grandezza, né una dipendenza dal numero di
+  shard. Il rapporto di circa venticinque a uno misurato nel lab è in [V-061](#v-061) e non qui.
+  E non dice che cosa succeda con una chiave **hashed** in particolare: parla di sharded
+  collection in generale, mentre il caso peggiore è quello in cui lo shard di destinazione cambia
+  quasi a ogni documento.
+- **Riserve:** l'esempio di codice della sezione «Avoid Monotonic Throttling» è in C++ e lavora
+  sugli `ObjectId`, invertendo o scambiando parole di sedici bit per rompere la monotonia. Non è
+  applicabile al laboratorio, dove gli `_id` sono interi generati apposta, e non è stato provato.
+  La pagina è quella del ramo v7.0, cioè della versione pinnata; sul ramo 8.x la stessa materia è
+  riorganizzata sotto `bulkWrite`.
+- **Usata da:** ADR-0068
+
+<a id="s-072"></a>
+### S-072 — MongoDB Manual 7.0: The AutoMerger
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/automerger-concept/ (citazioni dalla variante
+  `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Perché è stata cercata.** Non per scrupolo: per spiegare una misura che non tornava. I quattro
+  chunk contati da [V-061](#v-061) erano diventati **due** dopo uno spegnimento e una riaccensione,
+  senza che nessuno avesse toccato niente ([V-062](#v-062)). La pagina del balancer
+  ([S-070](#s-070)) non nomina la fusione automatica; questa sì, ed è il pezzo di manuale che
+  mancava.
+- **Cosa afferma, primo punto — esiste, ed è nuova nella versione pinnata del lab.** «Starting in
+  MongoDB 7.0, the balancer can automatically merge chunks that meet the mergeability
+  requirements.» Il laboratorio gira su 7.0 ([ADR-0009](Decision.md#adr-0009)): è una funzione che
+  su una 6.x non ci sarebbe.
+- **Cosa afferma, secondo punto — che cosa fa quando gira.** «The AutoMerger runs in the background
+  as part of balancing operations.» E, senza mezzi termini: «When the AutoMerger runs, it squashes
+  together all sequences of mergeable chunks for each shard of each collection.» *Squashes
+  together*: non sposta dati fra shard, riduce il numero di intervalli in cui sono divisi quelli che
+  uno shard ha già.
+- **Cosa afferma, terzo punto — quando parte, che è la riga che spiega la misura.** «Unless
+  explicitly disabled, **the AutoMerger starts the first time the balancer is enabled** and pauses
+  for the next `autoMergerIntervalSecs` after the routine drains. When AutoMerger is enabled,
+  automerging happens every `autoMergerIntervalSecs` seconds.» La prima volta è all'accensione del
+  cluster, non dopo un'attesa: è il motivo per cui la fusione nel lab si vede pochi secondi dopo un
+  riavvio e **non** durante la sessione in cui la collezione è stata distribuita
+  ([V-062](#v-062)).
+- **Cosa afferma, quarto punto — che cosa è «fondibile».** «`mergeAllChunksOnShard` finds and merges
+  all mergeable chunks for a collection on the same shard. Two or more contiguous chunks in the same
+  collection are **mergeable** when they meet all of these conditions: They are owned by the same
+  shard. They are not jumbo chunks. […] Their history can be purged safely, without breaking
+  transactions and snapshot reads: The last migration involving the chunk happened at least as many
+  seconds ago as the value of `minSnapshotHistoryWindowInSeconds`. The last migration involving the
+  chunk happened at least as many seconds ago as the value of `transactionLifetimeLimitSeconds`.»
+  Contigui **e** dello stesso shard: la fusione non tocca il confine fra i due shard, e infatti nel
+  lab i due chunk che restano sono uno per shard.
+- **Cosa afferma, quinto punto — l'esempio, che è la forma esatta di ciò che è successo nel lab.**
+  Nove chunk su due shard diventano quattro: «This command merges the contiguous sequences of
+  chunks: A-B-C-D […] G-H», e su Shard1 «the contiguous sequences of chunks E-F». Con quattro chunk
+  e due shard, due sequenze contigue di due: due fusioni, due chunk finali. Che è esattamente il
+  conto di [V-062](#v-062).
+- **Cosa non afferma:** il **valore predefinito** di `autoMergerIntervalSecs`, che rimanda alla
+  pagina dei parametri e non riporta. La pagina non dice nemmeno se la fusione abbia un costo
+  misurabile per le operazioni in corso — dice solo che «runs in the background» — né che cosa
+  succeda se il cluster viene riavviato prima che l'intervallo scada.
+- **Riserve:** l'esempio del manuale usa una shard key per intervalli (`x`), non hashed; la forma
+  del ragionamento è la stessa ma i confini no. La precedenza fra impostazioni globali, per
+  collezione, del balancer e dell'AutoMerger è dichiarata in quattro punti e nel lab **non è mai
+  stata toccata**: tutto è predefinito, quindi nessuno dei quattro livelli è stato provato.
+- **Usata da:** ADR-0069
+
+<a id="s-073"></a>
+### S-073 — MongoDB Manual 7.0: Manage Sharded Cluster Balancer
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/manage-sharded-cluster-balancer/ (citazioni
+  dalla variante `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Cosa afferma, primo punto — il balancer si è spostato, e il manuale lo dice al passato.** «The
+  balancer process has moved from the `mongos` instances to the primary member of the config server
+  replica set.» È la stessa cosa di [S-070](#s-070) detta in forma di storia, e spiega perché
+  l'idea sbagliata — «il balancer gira sul router» — sia così diffusa: **è stata vera**, in una
+  versione precedente.
+- **Cosa afferma, secondo punto — spegnere il balancer spegne anche la fusione.** «Starting in
+  MongoDB 7.0, stopping the balancer also disables the AutoMerger for the sharded cluster.» E
+  simmetricamente: «Starting in MongoDB 7.0, starting the balancer also enables the AutoMerger for
+  the sharded cluster.» I due interruttori sono uno solo, ed è la riga che rende `sh.stopBalancer()`
+  più potente di quanto il nome prometta.
+- **Cosa afferma, terzo punto — `getBalancerState()` e `isBalancerRunning()` non rispondono alla
+  stessa domanda.** «`sh.getBalancerState()` checks if the balancer is enabled (i.e. that the
+  balancer is permitted to run). `sh.getBalancerState()` does **not** check if the balancer is
+  actively migrating data.» Il primo dice *può*, il secondo dice *sta*. Nel lab i due valgono
+  rispettivamente `true` e `"full"` ([V-063](#v-063)).
+- **Cosa afferma, quarto punto — come si verifica che sia davvero fermo.** «Before starting a backup
+  operation, confirm that the balancer is not active. You can use the following command to determine
+  if the balancer is active: `!sh.getBalancerState() && !sh.isBalancerRunning()`» Servono
+  **entrambi**, e il manuale lo scrive come una sola espressione perché è così che va usata.
+- **Cosa afferma, quinto punto — e il balancer va spento per i backup fatti a mano.** «Disabling the
+  balancer is only necessary when **manually** taking backups, either by calling `mongodump` or
+  scheduling a task that calls `mongodump` at a specific time.» E: «If MongoDB migrates a chunk
+  during a backup, you can end with an inconsistent snapshot of your sharded cluster. Never run a
+  backup while the balancer is active.» È la riga che governa il `--oplog` mancato di
+  [`backup-restore.md`](03-amministrazione/backup-restore.md).
+- **Cosa non afferma:** quanto tempo passi fra `sh.stopBalancer()` e l'effettiva quiete. Dice che
+  «if a migration is in progress, the system will complete the in-progress migration before
+  stopping», ma non dà una durata massima, e per questo propone l'attesa a polling invece di un
+  numero.
+- **Riserve:** la finestra di bilanciamento (`activeWindow`), la soglia per i chunk jumbo
+  (`attemptToBalanceJumboChunks`) e il `_secondaryThrottle` sono documentati qui e **non** sono
+  stati provati nel lab: la demo lascia tutto predefinito. Il consiglio sui backup è stato applicato
+  in [`backup-restore.md`](03-amministrazione/backup-restore.md) ma la sua **necessità** — cioè un
+  backup incoerente causato da una migrazione — non è dimostrabile su questo stack, dove nessuna
+  migrazione è mai avvenuta ([V-061](#v-061), [V-062](#v-062)).
+- **Usata da:** ADR-0069
+
+<a id="s-074"></a>
+### S-074 — MongoDB Manual 7.0: Localhost Exception in Self-Managed Deployments
+
+- **URL:** https://www.mongodb.com/docs/v7.0/core/localhost-exception/ (citazioni dalla variante
+  `.md`)
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma
+- **Perché è stata cercata.** [S-006](#s-006) è la stessa pagina, ma nella variante 8.3, ed è stata
+  letta quando il laboratorio non aveva shard. Il Task 9 doveva provare l'eccezione localhost su uno
+  sharded cluster **7.0**, che è la versione pinnata ([ADR-0009](Decision.md#adr-0009)): la fonte va
+  riletta nella versione che si sta misurando, non in quella corrente.
+- **Cosa afferma, primo punto — il testo sugli shard è identico a quello della 8.3.** «On a
+  `mongos`, the localhost exception only applies when there are no sharded cluster users or roles
+  created.» E: «In a sharded cluster, the localhost exception applies to each shard individually as
+  well as to the cluster as a whole.» Nessuna differenza fra le due versioni sui punti che
+  interessano qui.
+- **Cosa afferma, secondo punto — è un obbligo, e la pagina lo scrive in grassetto.** «Once you
+  create a sharded cluster and add a user administrator through the `mongos` instance, you **must**
+  still prevent unauthorized access to the individual shards.» I rimedi ammessi sono due, e sono
+  elencati come alternativa: «Create a user administrator on the shard's primary», oppure «Disable
+  the localhost exception at startup. To disable the localhost exception, set the
+  `enableLocalhostAuthBypass` parameter to `0`.»
+- **Cosa afferma, terzo punto — l'eccezione si spende una volta sola.** «Connections using the
+  localhost exception have access to create *only* the **first user OR role**.» E, nell'elenco dei
+  permessi: eseguire `createUser` «ends the localhost exception», eseguire `createRole` «ends the
+  localhost exception».
+- **Cosa afferma, quarto punto — che cosa dovrebbe essere il primo utente.** «After you enable
+  access control, connect to the localhost interface and create the first user in the `admin`
+  database. The first user must have privileges to create other users. The `userAdmin` or
+  `userAdminAnyDatabase` role both confer the privilege to create other users.»
+- **Cosa afferma, quinto punto — l'eccezione serve anche a formare un replica set.** «You can use
+  the localhost exception to initiate a replica set»; fra i permessi ci sono `replSetInitiate`,
+  `replSetGetStatus` e `replSetReconfig`. È la riga che spiega perché nel lab l'eccezione **non si
+  può** semplicemente disattivare: `11-shard-initiate.js` ci si appoggia per fare `rs.initiate()` su
+  un nodo che pretende autenticazione e non ha ancora nessun utente.
+- **Cosa non afferma:** che il primo utente venga **rifiutato** se chiede ruoli su un database
+  diverso da `admin` — la pagina raccomanda `userAdmin`, non dice che altri ruoli siano vietati, e
+  [V-064](#v-064) misura un rifiuto che la pagina non prevede. Non dice nemmeno che cosa succeda
+  **dopo** che gli utenti sono stati cancellati: la formulazione «only applies when there are no
+  users or roles created» si legge come una condizione di stato, e [V-064](#v-064) misura che è una
+  condizione del **processo**. E non dice che il primo utente possa essere creato senza alcun
+  ruolo, spendendo l'eccezione senza guadagnarci niente.
+- **Riserve:** resta aperta, esattamente come in [S-006](#s-006), la riserva bibliografica sul
+  loopback: la pagina 7.0 nomina «the localhost interface» e non enuncia da quale indirizzo la
+  connessione debba arrivare. Il comportamento è adesso misurato ([V-064](#v-064)), ma la fonte
+  continua a non dirlo. `enableLocalhostAuthBypass` è citato e non è stato provato: il lab non può
+  metterlo a `0` senza rompere `rs.initiate()`.
+- **Usata da:** ADR-0070, ADR-0071
+
+## Verifiche empiriche
+
+<a id="v-001"></a>
+### V-001 — Apple `container` non espone un subcomando `compose`
+
+- **Comando:** `container --help` · `container compose --help`
+- **Ambiente:** macOS 26.6.2, Apple `container` 1.2.2
+- **Esito:** nessun subcomando `compose`; il secondo comando termina con errore.
+- **Data:** 2026-08-24
+- **Usata da:** ADR-0002
+
+<a id="v-002"></a>
+### V-002 — Inventario dell'ambiente di sviluppo e di palco
+
+- **Comandi:** `docker version` · `docker info` · `sysctl hw.memsize`
+- **Esito:** host macOS 26.6.2 arm64, 8 CPU, 16 GiB; VM Docker 7,65 GiB e 8 CPU;
+  Docker 29.7.2 con Compose v5.4.0, contesto `desktop-linux`.
+- **Data:** 2026-08-24
+- **Usata da:** ADR-0008, ADR-0009, ADR-0010, ADR-0025
+
+<a id="v-003"></a>
+### V-003 — Digest dell'immagine `mongo:8.0` e verifica offline
+
+- **Comandi:** `tools/pull-images.sh --pull` · `tools/pull-images.sh --verify`
+- **Ambiente:** Docker 29.7.2, host macOS arm64
+- **Esito:** `mongo:8.0` risolve a
+  `mongo@sha256:02a0cc7939f5ed38f30f9bc714ef5f682d49baf9350c54acf302ce833087fe8a`;
+  immagine `linux/arm64/v8`, costruita il 2026-08-18, 302 MB. Con il digest presente in
+  cache `--verify` esce 0; guastando una cifra del digest esce 1 in 0,15 s — un tempo che
+  esclude qualsiasi tentativo di contattare il registro, perché `docker image inspect`
+  interroga solo il demone locale.
+- **Data:** 2026-08-25
+- **Usata da:** ADR-0008, ADR-0009
+
+<a id="v-004"></a>
+### V-004 — Memoria della VM Docker dopo l'aumento
+
+- **Comando:** `docker info --format '{{.MemTotal}}'`
+- **Ambiente:** Docker 29.7.2, host macOS arm64 da 16 GiB
+- **Esito:** 11,67 GiB e 8 CPU assegnati alla VM, contro i 7,65 GiB rilevati il giorno
+  prima [V-002](#v-002). L'aumento deciso in [ADR-0025](Decision.md#adr-0025) è applicato.
+  Resta non misurato se undici container ci stiano davvero: quello è lo spike sharded.
+- **Data:** 2026-08-25
+- **Usata da:** ADR-0025
+
+<a id="v-005"></a>
+### V-005 — Prima esecuzione del preflight
+
+- **Comando:** `make preflight`
+- **Ambiente:** Docker 29.7.2, host macOS arm64, 2026-08-25
+- **Esito:** sette controlli superati, un avviso, nessun errore. Demone attivo su contesto
+  `desktop-linux`, `docker` risolto a `/usr/local/bin/docker` e nessun residuo in `~/.rd`,
+  VM da 11,67 GiB e 8 CPU, quindici porte del lab libere, immagini pinnate presenti.
+  L'unico avviso è l'assenza della cartella dei filmati di riserva, che diventa errore
+  bloccante dal giorno del talk.
+- **Percorsi di fallimento provati:** porta 27017 tenuta da un processo estraneo → errore e
+  uscita 1; digest guastato in `images.env` → errore e uscita 1; demone irraggiungibile
+  (`DOCKER_HOST` inesistente) → tre errori e uscita 1, con gli altri controlli comunque
+  eseguiti; data del talk simulata al passato senza filmati → l'avviso diventa errore.
+- **Data:** 2026-08-25
+- **Usata da:** ADR-0009
+
+<a id="v-006"></a>
+### V-006 — Spike dello sharded cluster: topologia, memoria, profili
+
+- **Comandi:** `docker compose --profile completo up -d --wait` · `rs.initiate()` ·
+  `sh.addShard()` · `sh.status()` · `getShardDistribution()` · `docker stats --no-stream` ·
+  `db.adminCommand({hostInfo: 1})` · `db.serverStatus()`
+- **Ambiente:** Docker 29.7.2, Compose v5.4.0, VM `7.0.12-linuxkit` con 11.946 MiB e 8 CPU,
+  host macOS arm64. Immagine `mongo:7.0` (7.0.40) pinnata per digest — la 8.0 non parte su
+  questo kernel [V-007](#v-007).
+- **Esito:** la catena keyfile → `rs.initiate()` → `createUser()` → `mongos` → `sh.addShard()`
+  funziona su entrambi i profili. Undici container in esecuzione occupano **1.356 MiB reali
+  contro 6.144 MiB di `mem_limit` dichiarati**; nella VM restano 9.021 MiB disponibili.
+  Cinquantamila documenti con shard key `{_id: "hashed"}` si distribuiscono su entrambi gli
+  shard (a ventimila documenti: 4 chunk, 50,7 % / 49,3 %). Fermato il primario di uno shard,
+  un secondario è stato eletto e il cluster ha continuato a servire letture e scritture
+  attraverso mongos; riavviato il nodo, è rientrato come `SECONDARY` senza intervento.
+  `docker compose --profile palco config --services` elenca 5 servizi, `--profile completo` 12,
+  senza profilo 1.
+- **Misure collaterali:** `hostInfo.system.memSizeMB` riporta 11946 — la memoria della VM —
+  mentre `hostInfo.system.memLimitMB` riporta 640, cioè il `mem_limit` del container. Due
+  mongod avviati senza `--wiredTigerCacheSizeGB` scelgono da soli 256 MiB con limite 640 MiB e
+  1.536 MiB con limite 4.096 MiB: la formula `max(0,5 × (RAM − 1 GiB), pavimento)` si applica
+  alla memoria del **container**. Con `pull_policy: never`, un digest presente in cache avvia
+  in 0,674 s e uno inesistente fallisce in **0,110 s** con `No such image`, senza contattare
+  il registro.
+- **Fallimenti incontrati:** `MONGO_INITDB_ROOT_USERNAME`/`_PASSWORD` su un nodo `--configsvr`
+  lo fanno uscire con `BadValue: Cannot start a configsvr as a standalone server`, perché
+  l'entrypoint toglie `--replSet` per creare l'utente [S-022](#s-022) ma non `--configsvr`.
+  L'eccezione localhost non copre `hostInfo`: consente solo di creare il primo utente o ruolo.
+  Dopo `sh.addShard()`, una connessione diretta a uno shard con le credenziali del cluster
+  risponde `Authentication failed`: servono utenti locali allo shard.
+- **Riserve:** misurato su MongoDB 7.0.40, non sulla versione che finirà nel lab; i consumi di
+  memoria della 8.x possono differire. Il cluster era a riposo salvo gli inserimenti: sotto il
+  carico dell'applicazione del talk i numeri saliranno verso i tetti. Il profilo `palco` è
+  stato provato con un solo membro per componente, quindi non dimostra nulla sul failover in
+  quel profilo — dove infatti non ce n'è.
+- **Verbale completo:** [`00-progetto/2026-08-25-spike-sharded.md`](00-progetto/2026-08-25-spike-sharded.md)
+- **Data:** 2026-08-25
+- **Usata da:** ADR-0025, ADR-0026, ADR-0027, ADR-0033, ADR-0039
+
+<a id="v-007"></a>
+### V-007 — Quali versioni di MongoDB si avviano sul kernel della VM Docker
+
+- **Comandi:** `docker run --rm --entrypoint mongod mongo:<tag> --version` ·
+  `docker info --format '{{.KernelVersion}}'` · `curl downloads.mongodb.org/current.json` ·
+  interrogazione dei tag di `library/mongo` e `mongodb/mongodb-community-server`
+- **Ambiente:** VM Docker Desktop, kernel `7.0.12-linuxkit`, `aarch64`, 2026-08-25
+- **Esito:** `mongo:8.0` (8.0.29), `mongo:8.0.29` e `mongo:8.3` (8.3.8) escono con codice
+  diverso da zero e messaggio fatale `id: 12257600` — «Linux kernel versions 6.19 and newer has
+  a known incompatibility with this version of MongoDB». `mongo:8.2` (8.2.12) e `mongo:7.0`
+  (7.0.40) si avviano. Il controllo scatta in `ctx: main`, prima della lettura dei parametri.
+- **Tentativi di aggiramento, tutti falliti:** `GLIBC_TUNABLES=glibc.pthread.rseq=0`;
+  `--setParameter tcmallocEnablePerCPUCaches=false`. Nel binario compaiono i simboli
+  `isKernelVersionSafeForTCMallocPerCPUCache` e `validateRseqKernelCompat`, ma nessuna
+  variabile o parametro che li disattivi.
+- **Disponibilità della correzione:** `downloads.mongodb.org/current.json` elenca 8.3.8,
+  8.2.12, 8.0.29, 7.0.40, 6.0.29, 5.0.34, 4.4.31. La **8.0.30** — che contiene il ticket
+  correttivo [S-028](#s-028) — non compare, né lì né fra i tag delle due immagini. Fra i tag
+  correnti di `library/mongo` la 8.2 non è più pubblicata: restano 8.3.8, 8.0.29 e 7.0.40.
+- **Riserve:** la ricostruzione della causa — TCMalloc che usa `rseq` violando l'ABI del
+  kernel — poggia sui ticket `SERVER-121912` e `SERVER-121911`, linkati dal messaggio di errore
+  stesso. Sono tracce di lavoro, non documentazione: il primo è chiuso con risoluzione «Gone
+  away» e senza *Fix Version*. Che la 8.2.12 si avvii **non significa** che sia sana: si avvia
+  perché precede l'introduzione del controllo, e per la stessa famiglia è segnalato un ciclo di
+  crash con SIGSEGV sul kernel 6.19 (`SERVER-122741`). Non è stato verificato per quanto tempo
+  la 8.2.12 regga sotto carico, e non lo si è verificato di proposito: una versione che non
+  riceve più patch [S-027](#s-027) è comunque fuori scelta.
+- **Data:** 2026-08-25
+- **Usata da:** ADR-0027, ADR-0028, ADR-0033
+
+<a id="v-008"></a>
+### V-008 — Ripinnatura alla 7.0.40: digest, piattaforme, strumenti a bordo
+
+- **Comandi:** `make images-pull` · `docker manifest inspect mongo:7.0` ·
+  `docker run --rm --entrypoint {mongod,mongosh,mongodump} mongo:7.0 --version` ·
+  `make preflight`
+- **Ambiente:** Docker 29.7.2, host macOS 26.6.2 arm64, 2026-08-25
+- **Esito:** `mongo:7.0` risolve a
+  `mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b`. Il manifest
+  dichiara `linux/amd64`, `linux/arm64/v8` e `windows/amd64`: il requisito arm64 della macchina
+  di palco è soddisfatto anche sulla versione nuova. L'immagine porta a bordo `mongod` 7.0.40,
+  `mongosh` 2.10.0 e `mongodump` 100.18.0 — una sola immagine copre demone, shell e strumenti,
+  come nella 8.0. Con la ripinnatura `make preflight` torna verde: `Superati: 8 · Avvisi: 1 ·
+  Errori: 0`, dove l'unico avviso è l'assenza dei filmati di riserva, non ancora girati.
+- **Riserve:** verifica il ritorno alla normalità del preflight, non il comportamento del lab:
+  gli stack Compose non esistono ancora su questo branch. La versione degli strumenti a bordo
+  (`mongosh`, `mongodump`) non è pinnata separatamente e segue l'immagine.
+- **Data:** 2026-08-25
+- **Usata da:** ADR-0028
+
+<a id="v-009"></a>
+### V-009 — Limiti di risorsa in Compose: le due sintassi, la cache, l'OOM, la CPU
+
+- **Comandi:** `docker compose up -d` su tre servizi identici salvo i limiti ·
+  `docker inspect --format '{{.HostConfig.Memory}} {{.HostConfig.NanoCpus}}'` ·
+  `docker stats --no-stream` · `db.adminCommand({hostInfo: 1})` ·
+  `db.serverStatus().wiredTiger.cache` · `docker inspect --format '{{.State.OOMKilled}}'`
+- **Ambiente:** Docker 29.7.2, Compose v5.4.0, VM `7.0.12-linuxkit` con 11.946 MiB e 8 CPU,
+  host macOS 26.6.2 arm64, immagine `mongo:7.0` (7.0.40) pinnata per digest, 2026-08-25
+
+**1. `deploy.resources.limits` è applicato da `docker compose up`.** È la domanda che
+[S-004](#s-004) lascia senza risposta e che [ADR-0013](Decision.md#adr-0013) prometteva di
+risolvere con `docker inspect`. Tre servizi nello stesso file, stessa immagine, stesso comando:
+
+| Servizio | Come sono dichiarati i limiti | `HostConfig.Memory` | `HostConfig.NanoCpus` |
+|---|---|---|---|
+| `breve` | `mem_limit: 640m` + `cpus: 0.5` | `671088640` | `500000000` |
+| `deploy_solo` | `deploy.resources.limits` | `671088640` | `500000000` |
+| `nessun_limite` | niente | `0` | `0` |
+
+I due valori sono **identici byte per byte**. La convinzione diffusa secondo cui `deploy`
+sarebbe ignorato fuori da Swarm è falsa su questa versione di Compose: apparteneva al
+riferimento del formato v3, ritirato [S-004](#s-004). `671088640` è esattamente 640 × 1024²,
+cioè `640m` letto in **MiB**; `500000000` nanoCPU è mezza CPU.
+
+**2. La cache WiredTiger si dimensiona sul limite del container, e ha un pavimento.** Nessun
+`--wiredTigerCacheSizeGB`, solo `mem_limit` variabile, cache letta da `serverStatus()`:
+
+| `mem_limit` | `hostInfo.system.memLimitMB` | Cache scelta | `0,5 × (limite − 1 GiB)` |
+|---|---|---|---|
+| 640 MiB | 640 | **256 MiB** | negativo → pavimento |
+| 768 MiB | 768 | **256 MiB** | negativo → pavimento |
+| 1.024 MiB | 1024 | **256 MiB** | 0 → pavimento |
+| 2.048 MiB | 2048 | **512 MiB** | 512 MiB |
+| 4.096 MiB | 4096 | **1.536 MiB** | 1.536 MiB [V-006](#v-006) |
+| nessuno | 11946 | **5.461 MiB** | 5.461 MiB |
+
+`hostInfo.system.memSizeMB` riporta sempre 11946, cioè la VM. È `memLimitMB` a guidare il
+calcolo, e senza `mem_limit` i due campi coincidono. Il pavimento misurato è **256 MiB**, non
+«0.256 GB» = 244 MiB: l'unità dichiarata dal manuale è GB, quella applicata è GiB.
+
+**3. Il minimo accettato per `--wiredTigerCacheSizeGB` è `0.25`, non `0.256`.** Con `0.1`
+mongod esce prima di aprire il database: `BadValue: storage.wiredTiger.engineConfig.cacheSizeGB
+must be greater than or equal to 0.25`. Con `0.25` parte e configura `268435456` byte, cioè
+**esattamente 256 MiB** — lo stesso valore che sceglierebbe da solo. Con `0.256` configura
+`274726912` byte, 262 MiB. Il valore `0.25` scelto in [ADR-0004](Decision.md#adr-0004) era
+dunque legittimo: è il minimo, e coincide con il pavimento automatico.
+
+**4. Una cache più grande del container non impedisce l'avvio.** `mem_limit: 512m` con
+`--wiredTigerCacheSizeGB 4` parte senza errori e configura 4.096 MiB di cache in un container
+da 512. Nessun avviso mette in relazione le due cifre. Compare invece, e solo quando un limite
+c'è, l'avviso `id: 20720` — «Memory available to mongo process is less than total system
+memory», con `availableMemSizeMB: 512` e `systemMemSizeMB: 11946`. Nel container senza limite
+quell'avviso ha **zero occorrenze**: è il modo più diretto per mostrare dal vivo che mongod il
+limite lo vede.
+
+**5. L'OOM non lascia traccia nel log del container.** Un processo che alloca oltre
+`mem_limit` in un container da 256 MiB senza swap viene ucciso con `SIGKILL`: `docker logs`
+restituisce **zero righe**, e l'unico posto dove il fatto è registrato è
+`docker inspect`, che riporta `OOMKilled=true`, `ExitCode=137` ed `Error=""` — vuoto. 137 è
+128 + 9.
+
+**6. `cpus` strozza davvero, e nella proporzione dichiarata.** Un ciclo occupato in bash,
+tempo di CPU sul tempo di parete: senza limite 3,946 s su 3,947 s, rapporto **1,00**; con
+`--cpus 0.5` 1,541 s su 3,069 s, rapporto **0,502**. `docker stats` mostra la colonna
+`MEM USAGE / LIMIT` come `228.2MiB / 640MiB` nel container limitato e `78.48MiB / 11.67GiB` in
+quello libero: è la lettura più leggibile su un proiettore.
+
+- **Riserve:** il punto 1 vale per Compose v5.4.0; la documentazione continua a non affermarlo
+  [S-004](#s-004), quindi resta una misura, non una garanzia, e va rifatta se la versione di
+  Compose cambia. Il punto 5 è stato prodotto con un allocatore artificiale, non con un mongod
+  sotto carico: che l'OOM di un mongod reale si presenti allo stesso modo è plausibile ma non
+  misurato qui. Il punto 6 misura una CPU occupata in un ciclo, non un carico MongoDB, dove il
+  rapporto dipende anche dall'attesa su I/O. Tutto è misurato su MongoDB 7.0.40: il minimo
+  della cache e il pavimento potrebbero differire su altre versioni.
+- **Data:** 2026-08-25
+- **Usata da:** ADR-0004, ADR-0013, ADR-0025
+
+---
+
+<a id="v-010"></a>
+### V-010 — `--logpath` redirige, non duplica; e `logRotate` su stdout dice «ok» senza fare niente
+
+- **Comandi:** `docker run -d mongo@sha256:… mongod` · lo stesso con
+  `mongod --logpath /tmp/mongod.log` · `docker logs` · `docker exec … wc -l /tmp/mongod.log` ·
+  `mongod --help` · `db.adminCommand({logRotate: 1})` · `ls -la /tmp/`
+- **Ambiente:** Docker 29.7.2, immagine `mongo` 7.0.40 pinnata per digest, host macOS 26.6.2
+  arm64, 2026-08-28
+
+**1. Le stesse righe, in un posto o nell'altro, mai in tutti e due.** Due container dalla stessa
+immagine, avviati a un minuto di distanza, con una sola differenza nel comando:
+
+| Comando | righe in `docker logs` | righe nel file |
+|---|---|---|
+| `mongod` | **65** | nessun file |
+| `mongod --logpath /tmp/mongod.log` | **0** | **65** |
+
+Sessantacinque righe in entrambi i casi. La somma non cambia, cambia solo dove finiscono. Il
+container con `--logpath` è vivo e servente — risponde a `ping` e scrive nel file — ma
+`docker logs` su di lui non restituisce nemmeno una riga.
+
+**2. Lo dice il binario stesso, non solo il manuale.** `mongod --help` dentro l'immagine del lab:
+
+> `--logpath arg` — «Log file to send write to instead of stdout - has to be a file, not
+> directory»
+
+*Instead of*. È la stessa parola del manuale [S-032](#s-032), ma detta dall'eseguibile che
+gireremo davvero, alla versione che gireremo davvero: la fonte più difficile da contestare.
+
+**3. Quindi l'assunto del design è falso.** Il design §5.3 prevedeva un «doppio canale di log
+deliberato: stdout (per `docker compose logs`) **e** file `--logpath`». Quel canale doppio non
+esiste, e non si tratta di un'opzione da trovare: le destinazioni sono tre — stdout, file,
+syslog — e sono mutuamente esclusive. Deciso in [ADR-0030](Decision.md#adr-0030).
+
+**4. `logRotate` riporta successo anche quando non ha niente da ruotare.** Stesso comando sui due
+container:
+
+| Destinazione del log | Risposta | Nel log | Effetto sul filesystem |
+|---|---|---|---|
+| stdout | `{"ok":1}` | `"msg":"Log rotation initiated"`, `"logType":null` | **nessuno** |
+| file | `{"ok":1}` | idem | `mongod.log` rinominato in `mongod.log.2026-08-28T10-53-19`, nuovo `mongod.log` da 2.667 byte |
+
+Le due risposte sono indistinguibili. Un amministratore che ruota i log di un container e
+controlla il valore di ritorno riceve conferma di un'operazione che non è avvenuta. È il tipo di
+successo apparente che si scopre mesi dopo, quando serve il log vecchio e non c'è.
+
+- **Riserve:** misurato senza `--fork`, che nel container non si usa mai perché `mongod` deve
+  restare in primo piano come PID 1. Con `--fork` il manuale richiede `--logpath`, quindi il caso
+  «entrambi i canali» non si ripresenta nemmeno lì. Non è stato provato `--syslog`: nel container
+  non c'è un demone syslog a cui scrivere.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0030, ADR-0035
+
+---
+
+<a id="v-011"></a>
+### V-011 — Il driver `json-file` non ruota niente se non glielo si chiede
+
+- **Comandi:** `docker info --format '{{.LoggingDriver}}'` ·
+  `docker inspect --format '{{json .HostConfig.LogConfig}}'` · `docker logs … | wc -l` ·
+  `docker logs … | wc -c` · `docker logs … | grep -c 'Connection ended'`
+- **Ambiente:** Docker 29.7.2, host macOS 26.6.2 arm64, 2026-08-28
+
+**1. Il driver predefinito è `json-file` e nasce senza configurazione.**
+
+```
+docker info --format '{{.LoggingDriver}}'   →  json-file
+docker inspect … '{{json .HostConfig.LogConfig}}'  →  {"Type":"json-file","Config":{}}
+```
+
+`Config` vuoto significa nessun `max-size` e nessun `max-file`. Con `max-size` predefinito a
+`-1 (unlimited)` [S-033](#s-033), il file di log del container cresce finché c'è disco. Il
+manuale non lo dice in una frase: lo si mette insieme da una cella di tabella e da un oggetto
+JSON vuoto.
+
+**2. Un nodo che non fa niente scrive comunque, e non poco.** Lo stack 01 lasciato acceso senza
+alcun carico, misurato dopo 10 minuti e 33 secondi di funzionamento:
+
+| Grandezza | Valore |
+|---|---|
+| righe in `docker logs` | **1.498** |
+| byte in `docker logs` | **551.856** |
+| di cui `"Connection ended"` | **305** |
+| ritmo | ≈ 142 righe/minuto, ≈ 52 KiB/minuto |
+
+Non c'era nessun client collegato. Le 305 connessioni sono l'**healthcheck**: sessantatré
+esecuzioni di `mongosh` a dieci secondi l'una dall'altra, cinque connessioni per esecuzione. Il
+controllo che serve a sapere se il nodo sta bene è, a nodo fermo, la sorgente pressoché unica del
+suo log. Estrapolando: un'ora di talk con lo stack acceso e inoperoso fa circa 3 MiB.
+
+**3. E sotto carico è la demo stessa a scrivere.** `mongod` registra una riga all'apertura e una
+alla chiusura di ogni connessione. La demo sulle prestazioni apre e chiude connessioni a raffica,
+per definizione — è quello che misura. Il canale di log scelto in
+[ADR-0030](Decision.md#adr-0030) è stdout, e su stdout `logRotate` risponde `ok` senza fare
+niente [V-010](#v-010). Sommate le tre cose — nessun limite predefinito, un flusso che non si
+ferma nemmeno a vuoto, e il comando di rotazione che non morde — la demo che dimostra le
+prestazioni è anche quella che riempie il disco. Con `max-size: 10m` e `max-file: 3` il tetto è
+30 MiB e la questione non si pone.
+
+- **Riserve:** `docker info` riporta il driver predefinito di *questo* daemon. Su un host che ha
+  già configurato `log-driver` in `/etc/docker/daemon.json` il valore è un altro, e i due limiti
+  scritti nel file Compose potrebbero non applicarsi allo stesso modo. È il motivo per cui il
+  file Compose dichiara anche `driver: json-file` invece di limitarsi alle opzioni.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0030
+
+---
+
+<a id="v-012"></a>
+### V-012 — Lo stack 01 alla prima accensione: salute, cache, limiti, e un'opzione che non abbiamo scritto
+
+- **Comandi:** `docker compose --env-file tools/images.env -f docker/01-standalone/compose.yaml up -d` ·
+  `docker inspect --format '{{json .State.Health}}'` · `db.serverStatus()` · `db.hostInfo()` ·
+  `cat /proc/1/cmdline` · connessione TCP alla 27017 dall'host
+- **Ambiente:** Docker 29.7.2, Compose v5.4.0, immagine `mongo` 7.0.40 pinnata per digest, host
+  macOS 26.6.2 arm64, 2026-08-28
+
+**1. Sano in 5,46 secondi.** Container avviato alle `10:55:05.631`, primo controllo di salute
+concluso con esito `0` alle `10:55:11.093`. Il `start_period: 20s` dichiarato nel file non è
+stato consumato nemmeno per un terzo — ed è giusto così: serve al caso peggiore, non al caso
+normale.
+
+Un dettaglio inatteso: il primo controllo è partito a **+5,07 s**, non a +10 s come farebbe
+supporre `interval: 10s`. Il secondo è partito a +15,4 s, cioè dieci secondi dopo il primo. La
+spiegazione più probabile è che durante lo `start_period` Docker sondi a un ritmo più fitto, ma
+questo è un comportamento osservato e non una lettura del manuale: qui è registrato come
+osservazione, non come regola.
+
+**2. I limiti dichiarati sono quelli che `mongod` vede.** Conferma di [V-009](#v-009) sullo stack
+vero invece che su un banco di prova:
+
+| Grandezza | Dichiarato nel Compose | Letto da dentro |
+|---|---|---|
+| memoria | `mem_limit: 1024m` | `hostInfo().system.memLimitMB` = **1024** |
+| cache | `--wiredTigerCacheSizeGB 0.25` | `maximum bytes configured` = **268435456** = 256 MiB esatti |
+| versione | digest `sha256:b6421fd…` | `serverStatus().version` = **7.0.40** |
+
+`0.25` GiB fa 256 MiB tondi. È la cifra che [V-009](#v-009) aveva già isolato smontando il
+`0.256` del manuale, e che qui si conferma sul file che andrà in scena.
+
+**3. Il costo dell'healthcheck.** `mongosh --quiet --eval "db.adminCommand('ping').ok"`:
+
+| Condizione | Durata |
+|---|---|
+| container senza limiti di CPU | 317 ms |
+| dentro `cpus: 1.0` | 392 ms e 385 ms |
+
+Circa quattro decimi di secondo ogni dieci, cioè il 4% di una CPU che è tutta la CPU che il nodo
+ha. Non è gratis, ed è il motivo per cui `interval` resta a 10 secondi e non scende. `mongosh` è
+un processo Node: il costo è quasi tutto avvio dell'interprete, non lavoro del database.
+
+C'è un secondo costo, meno ovvio, che si vede solo guardando il log: ogni esecuzione apre cinque
+connessioni, e ciascuna lascia due righe. A nodo fermo l'healthcheck è la sorgente pressoché
+unica del log, 142 righe al minuto [V-011](#v-011). Il controllo che dice se il nodo sta bene è
+anche la cosa che scrive di più quando il nodo non fa nient'altro.
+
+**4. L'immagine aggiunge un'opzione che non abbiamo scritto.** Il comando dichiarato nel Compose
+è `mongod --wiredTigerCacheSizeGB 0.25`. Quello che gira è:
+
+```
+mongod --wiredTigerCacheSizeGB 0.25 --bind_ip_all
+```
+
+`--bind_ip_all` lo mette l'entrypoint ufficiale [S-022](#s-022), non noi. Fuori da un container
+sarebbe una decisione da prendere con attenzione: qui è ragionevole, perché l'unica strada verso
+il processo è la porta che `ports:` pubblica. Ma va detto ad alta voce, perché lo stack 01 gira
+**anche senza autenticazione**: le due cose insieme fanno un `mongod` che accetta chiunque
+raggiunga la porta, e il solo motivo per cui non è un problema è che la porta è mappata su
+`localhost`. Cambiare quella riga senza accorgersene apre il database alla rete.
+
+`mongod` è **PID 1**: riceve direttamente il `SIGTERM` di `docker stop`, quindi chiude in modo
+pulito senza bisogno di un init intermedio.
+
+**5. La porta risponde dall'host.** Connessione TCP a `127.0.0.1:27017` riuscita entro il timeout
+di 3 secondi, a container sano.
+
+- **Riserve:** il tempo di salute è misurato con l'immagine già in cache locale e con il volume
+  `dati` appena creato, cioè vuoto. Al primo avvio con dati dentro e cache WiredTiger da
+  ricostruire il numero sarà più alto; il `start_period` esiste per quello. Il costo di `mongosh`
+  è misurato su questo host arm64: su una macchina più lenta cresce, e con esso la pressione sul
+  `timeout: 5s`.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0030
+
+---
+
+<a id="v-013"></a>
+### V-013 — Il dataset di demo è deterministico; e il generatore che sembrava buono non lo era
+
+- **Comandi:** `docker compose … down -v` seguito da `up -d`, due volte ·
+  `db.ordini.aggregate([{$group:{_id:"$citta", n:{$sum:1}}}])` ·
+  `$group` su `null` con `$sum` di `importo` e `righe` · `db.ordini.findOne({_id: 0})`
+- **Ambiente:** stack `docker/01-standalone`, immagine `mongo` 7.0.40 pinnata per digest,
+  `mongosh` 2.10.0, host macOS 26.6.2 arm64, 2026-08-28
+
+**1. Il primo generatore distribuiva malissimo, e si vedeva solo contando.** La prima versione di
+`10-dati-demo.js` usava il congruenziale lineare che si scrive a memoria,
+`seme = (seme * 1103515245 + 12345) % 2147483648`, e sceglieva la città con `seme % 10`. Su
+50.000 ordini e dieci città:
+
+| Città | LCG, `% 10` | xorshift 32 bit |
+|---|---:|---:|
+| Ancona | 9.862 | 4.992 |
+| Bologna | **20** | 4.977 |
+| Cagliari | 9.956 | 5.068 |
+| Firenze | **57** | 4.899 |
+| Genova | 10.076 | 5.038 |
+| Milano | **28** | 5.090 |
+| Napoli | 9.592 | 5.045 |
+| Palermo | **49** | 4.904 |
+| Roma | 10.285 | 4.968 |
+| Torino | **75** | 5.019 |
+
+Cinque città con diecimila ordini e cinque con qualche decina. Sono due difetti sovrapposti. Il
+noto: in un LCG i **bit bassi hanno periodo cortissimo**, e `% 10` guarda proprio quelli. Il meno
+noto, e specifico di JavaScript: `seme * 1103515245` arriva a 2,4·10^18 e **sfonda i 2^53 interi
+rappresentabili in modo esatto** in un `Number`, quindi il modulo viene applicato a un valore già
+arrotondato. Il generatore non era quello che il codice sembrava dire.
+
+Lo xorshift a 32 bit usa solo operatori bit a bit, che JavaScript definisce su interi a 32 bit
+con segno: nessun arrotondamento è possibile, e i bit bassi valgono quanto gli altri. La
+distribuzione risultante sta fra 4.899 e 5.090 contro 5.000 attesi. Sui cinque stati, fra 9.882 e
+10.178 contro 10.000.
+
+Perché conta per una demo e non solo per l'eleganza: la demo confronta la stessa interrogazione
+con e senza indice. Con la prima distribuzione, `{citta: "Bologna"}` avrebbe restituito venti
+documenti e `{citta: "Roma"}` diecimila — la differenza fra le due misure sarebbe stata la
+selettività, non l'indice.
+
+**2. Due caricamenti da volume vuoto danno lo stesso dataset, byte per byte.** Ciclo completo
+`down -v` → `up -d` eseguito due volte di fila, e ogni volta:
+
+| Impronta | Valore |
+|---|---|
+| documenti | 50.000 |
+| somma di `importo` | 124.861.860,70 |
+| somma di `righe` | 150.281 |
+| `_id: 0` | `cliente-1279`, Torino, in lavorazione, 4121.44, 2026-05-24 |
+
+Identiche. È la proprietà che serve davvero: se la demo dal vivo va storta e si passa alla
+registrazione di riserva, i numeri sullo schermo devono essere gli stessi, altrimenti il pubblico
+vede il salto.
+
+**3. Il caricamento non pesa sull'avvio.** 50.000 documenti in **1.745 ms**, in dieci `insertMany`
+da 5.000. Lo `start_period: 20s` dell'healthcheck copre il caricamento con un margine ampio: la
+fase di init avviene prima che `mongod` accetti connessioni TCP, quindi un seed lento si
+presenterebbe come un nodo che tarda a diventare sano.
+
+- **Riserve:** l'uguaglianza è verificata su tre aggregati e un documento, non confrontando i
+  50.000 documenti uno per uno. Tre somme indipendenti che coincidono sono una prova forte, non
+  una dimostrazione. La riproducibilità è garantita dalla semantica di JavaScript sugli interi a
+  32 bit, che è specificata: non dipende dalla macchina, ma dipende dal fatto che il motore sia
+  conforme, e qui è stato provato solo su `mongosh` 2.10.0.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0031, ADR-0043
+
+---
+
+<a id="v-014"></a>
+### V-014 — L'entrypoint salta gli script di inizializzazione su un volume popolato, e non lo dice
+
+- **Comandi:** `db.ordini.deleteMany({})` · `docker compose … down` (**senza** `-v`) ·
+  `docker compose … up -d` · `db.ordini.countDocuments()` ·
+  `docker logs … | grep -ciE 'initdb|Carico|Caricati'`
+- **Ambiente:** stack `docker/01-standalone` con `./init` montata su
+  `/docker-entrypoint-initdb.d`, immagine `mongo` 7.0.40 pinnata per digest, 2026-08-28
+
+**1. La sequenza.** Volume popolato dai 50.000 ordini del seed. Si svuota la collezione, si ferma
+lo stack **conservando il volume**, si riavvia:
+
+| Momento | `lab.ordini.countDocuments()` |
+|---|---:|
+| dopo il seed iniziale | 50.000 |
+| dopo `deleteMany({})` | 0 |
+| dopo `down` e `up -d` | **0** |
+
+I dati non tornano. Lo script è nel container, montato, leggibile, e non viene eseguito.
+
+**2. E il log non ne parla.** Sul container riavviato:
+
+```
+docker logs mongo-standalone | grep -ciE 'initdb|Carico|Caricati'   →  0
+```
+
+Zero occorrenze. Non «script saltato», non un avviso: **niente**. Il container ha comunque
+prodotto 130 righe di log ed è arrivato a `healthy`, quindi il silenzio non è un log mancante: è
+un silenzio scelto. Il ramo dell'entrypoint che decide di saltare non stampa nulla
+[S-034](#s-034).
+
+**3. Il criterio non è «la cartella è vuota».** L'entrypoint cerca quattro percorsi noti dentro
+`dbPath` — `WiredTiger`, `journal`, `local.0`, `storage.bson` — e se ne trova uno considera il
+volume già inizializzato [S-034](#s-034). Il modo di riportare il volume allo stato iniziale è
+quindi `docker compose down -v`, che rimuove il volume, non `docker compose restart` e nemmeno
+cancellare le collezioni.
+
+Vale la pena dire perché la trappola morde forte proprio qui: chi lavora al lab modifica il file
+del seed, riavvia, e non vede cambiare niente. Il ciclo di lavoro naturale — modifica, riavvia,
+guarda — dà un esito che sembra dire «la mia modifica non funziona», mentre quello che sta
+succedendo è «la mia modifica non è stata nemmeno letta».
+
+- **Riserve:** provato sullo stack 01 con volume nominato. Con un bind mount di `/data/db` il
+  criterio è lo stesso — sono gli stessi quattro percorsi — ma `down -v` non basta a ripulire,
+  perché il volume non è di Docker: bisogna cancellare la cartella sull'host. Non provato qui,
+  perché il lab non usa bind mount per i dati.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0031, ADR-0033, ADR-0043
+
+---
+
+<a id="v-015"></a>
+### V-015 — Cosa un'istanza singola rifiuta, e cosa accetta senza dare niente in cambio
+
+- **Comandi:** `db.getSiblingDB("local").getCollectionNames()` · `db.ordini.watch()` ·
+  `rs.status()` · `insertOne(…, {writeConcern: {w: 2}})` ·
+  `insertOne(…, {writeConcern: {w: "majority"}})` · `mongodump --oplog --out=…`
+- **Ambiente:** stack `docker/01-standalone` avviato e `healthy`, `mongo` 7.0.40 pinnata per
+  digest, `mongodump` 100.18.0 (dentro l'immagine), 2026-08-28
+
+**1. L'oplog non c'è, e si vede da dentro.**
+
+```
+collezioni in local: startup_log
+```
+
+Una sola collezione. Nessuna `oplog.rs`. È la verifica diretta di ciò che [S-037](#s-037) lascia
+solo intendere.
+
+**2. Le quattro risposte, affiancate.** La colonna che conta è l'ultima.
+
+| Richiesta | Esito | Messaggio | Chi se ne accorge |
+|---|---|---|---|
+| `db.ordini.watch()` | errore | `Location40573` · «The $changeStream stage is only supported on replica sets» | subito, ed è chiarissimo |
+| `rs.status()` | errore | `NoReplicationEnabled` (76) · «not running with --replSet» | subito, ed è chiarissimo |
+| `w: 2` | errore | `BadValue` (2) · «cannot use 'w' > 1 when a host is not replicated» | subito, ed è chiarissimo |
+| `w: "majority"` | **riesce**, `acknowledged: true` | nessuno | **nessuno** |
+
+Le prime tre sono buone notizie: il server dice di no, dice perché, e lo dice al primo tentativo.
+La quarta è la sola che vale la pena raccontare dal palco. Un'applicazione scritta per un replica
+set, che chiede diligentemente `w: "majority"` a ogni scrittura importante, puntata su
+un'istanza singola **continua a funzionare**: nessun errore, nessun avviso, e una garanzia in meno
+di quella che il codice crede di avere. La maggioranza di un nodo è quel nodo.
+
+**3. `mongodump --oplog`, e il messaggio che manda fuori strada.** Due tentativi, due errori
+diversi, nessuno dei quali nomina il problema vero:
+
+```
+$ mongodump --oplog --db=lab --out=/tmp/dump-prova
+Failed: bad option: --oplog mode only supported on full dumps
+
+$ mongodump --oplog --out=/tmp/dump-prova
+Failed: error getting oplog start: error getting recent oplog entry: mongo: no documents in result
+```
+
+Il primo messaggio è corretto e utile. Il secondo è corretto e inutile: «no documents in result»
+descrive il sintomo — la collezione interrogata è vuota, perché non esiste — e non la causa, che è
+«questa istanza non è un membro di un replica set, quindi un backup a caldo coerente non è
+ottenibile qui». Chi legge quella riga alle due di notte cerca il documento mancante. Nessuna
+cartella viene creata: il comando fallisce prima di scrivere.
+
+- **Riserve:** provato su `mongodump` 100.18.0, quello che viaggia dentro l'immagine `mongo` 7.0.40.
+  Il testo dei messaggi appartiene ai Database Tools e ha una numerazione di versione propria
+  ([S-011](#s-011)): può cambiare senza che cambi MongoDB. Il comportamento — fallire — è la parte
+  stabile; le parole no.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0032
+
+---
+
+<a id="v-016"></a>
+### V-016 — Cento documenti confermati all'applicazione e persi: la finestra di `w: 1`, misurata
+
+- **Comandi:** `mongosh --eval 'for (let i = 1; i <= 500000; i++) { db.prova_durabilita.insertOne({_id: i}); print(i); }'`
+  (uscita rediretta su file) · `docker kill -s KILL mongo-standalone` · `docker inspect` ·
+  `docker compose up -d --wait` · `db.prova_durabilita.countDocuments()`
+- **Ambiente:** stack `docker/01-standalone`, `mongo` 7.0.40 pinnata per digest, collezione
+  `lab.prova_durabilita` separata dal dataset di demo, 2026-08-28
+
+**1. La misura.** Uno scrittore inserisce documenti **uno alla volta**, con la write concern
+predefinita (`w: 1`, `j` non specificato), e stampa l'`_id` di ogni inserimento **dopo** che il
+server lo ha confermato. A metà corsa, `SIGKILL` al container: nessuna chiusura pulita, nessun
+flush di cortesia.
+
+| Grandezza | Valore |
+|---|---:|
+| ultimo `_id` confermato al client | 41.558 |
+| documenti sopravvissuti al riavvio | 41.458 |
+| `_id` massimo sopravvissuto | 41.458 |
+| **documenti confermati e perduti** | **100** |
+
+Cento scritture per cui l'applicazione aveva ricevuto un `acknowledged: true` non esistono più.
+Non è un difetto di MongoDB: è esattamente ciò che [S-035](#s-035) descrive («In memory») e
+[S-036](#s-036) quantifica («At every 100 milliseconds»), letto su un'installazione vera invece
+che su una tabella.
+
+**La prova è a senso unico, ed è giusto dirlo.** L'uscita dello scrittore passa per una pipe, che
+può essere bufferizzata: il file potrebbe contenere **meno** ack di quanti il client ne abbia
+davvero ricevuti, mai di più. Quindi la perdita misurata è un **minimo**: sono almeno cento. Se il
+conteggio dei sopravvissuti fosse risultato maggiore dell'ultimo ack registrato, la prova sarebbe
+stata inconcludente e andava dichiarata tale.
+
+**2. Cosa dice il log alla ripartenza.** Il nodo riparte da solo, e la riga che denuncia la
+chiusura sporca è una sola, di severità `W`:
+
+```json
+{"t":{"$date":"2026-08-28T11:32:59.268+00:00"},"s":"W","c":"STORAGE","id":22302,
+ "ctx":"initandlisten","msg":"Recovering data from the last clean checkpoint."}
+```
+
+Seguono le righe del componente `WTRECOV`, fra cui «recovery log replay has successfully finished
+and ran for 173 milliseconds». Da `Recovering data…` a «Waiting for connections» (`id` 23016)
+passano **1,1 secondi**: il recovery di WiredTiger su questo dataset non è la parte lenta di
+niente.
+
+**3. Il dataset di demo attraversa il kill intatto.** Dopo la ripartenza, `make smoke-01` dà dodici
+controlli verdi e l'impronta invariata — `50000 124861860.70 150281`. I 50.000 ordini erano in un
+checkpoint da tempo; a cadere è solo ciò che stava nella finestra. La differenza fra i due esiti
+sulla stessa macchina, nello stesso istante, è tutta lì.
+
+**4. Lo stato del container dopo il kill.**
+
+```
+Status=exited OOMKilled=false ExitCode=137 RestartCount=0
+```
+
+`OOMKilled=false` con `ExitCode=137` è la conferma, arrivata per un'altra strada, di ciò che
+[V-009](#v-009) dichiarava già: il 137 da solo non dice chi ha ucciso il processo. Il
+`RestartCount=0` su un container con `restart: unless-stopped` è un fatto separato e più
+sorprendente, misurato nella stessa sessione e registrato dove gli compete, in
+[V-017](#v-017).
+
+- **Riserve:** un solo tentativo, su una sola macchina, con inserimenti uno alla volta. Il numero
+  «cento» non è una costante di MongoDB: è quanti inserimenti stavano nella finestra **su questo
+  hardware, a questo ritmo**. Con inserimenti in lotto, con `j: true`, o su un disco diverso il
+  numero cambia; quello che non cambia è che la finestra esista. Non è stato provato lo stesso
+  esperimento con `j: true`, che secondo [S-035](#s-035) dovrebbe azzerare la perdita al prezzo
+  della velocità: è la misura naturale da aggiungere quando l'applicazione Python
+  (`feature/04`) potrà farla sotto carico controllato.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0032, ADR-0046
+
+---
+
+<a id="v-017"></a>
+### V-017 — Tre modi di far morire `mongod`, e solo uno fa ripartire il container
+
+- **Comandi:** `docker inspect` (politica e `RestartCount`) · `docker kill -s KILL
+  mongo-standalone` · `docker exec mongo-standalone kill -9 1` · `docker exec … mongosh --eval
+  "db.adminCommand({shutdown: 1, force: true})"`
+- **Ambiente:** stack `docker/01-standalone` con `restart: unless-stopped`, Docker Engine 29.7.2
+  su Docker Desktop (macOS), `mongo` 7.0.40 pinnata per digest, 2026-08-28
+
+La politica dichiarata è la stessa in tutte e tre le prove:
+`{"Name": "unless-stopped", "MaximumRetryCount": 0}`. Cambia solo **chi manda il segnale**, e
+l'esito cambia con lui.
+
+| Come muore | Chi manda il segnale | Esito osservato | `RestartCount` |
+|---|---|---|---:|
+| `docker kill -s KILL` | il demone, dal namespace **antenato** | container `exited`, `ExitCode=137`, `OOMKilled=false`; ancora `exited` dopo 12 s | **0** |
+| `kill -9 1` **dentro** il container | un processo dello **stesso** namespace | **niente**: il comando esce con `rc=0`, il container resta `running` e `healthy` | 0 |
+| `shutdown` chiesto a `mongod` | il processo a se stesso | il container **riparte da solo**, `healthy` di nuovo in pochi secondi | **1** |
+
+**1. `docker kill` non fa ripartire niente, ed è il contrario di quello che quasi tutti si
+aspettano.** Il container resta `exited` a tempo indeterminato: dodici secondi dopo il segnale
+`RestartCount` è ancora `0`, cioè il demone non ha nemmeno *provato*. Ci vuole un `docker start`
+a mano, dopo il quale il nodo torna `healthy` in **6 secondi** e `RestartCount` resta `0`.
+
+La spiegazione sta in [S-039](#s-039): la politica «is ignored until the Docker daemon restarts
+or the container is manually restarted» dopo che il container «is stopped (manually or
+otherwise)». Un `docker kill` è, per il demone, una fermata chiesta da un umano — non un guasto.
+Nessuna delle due pagine ([S-039](#s-039), [S-040](#s-040)) lo scrive in modo che un lettore
+possa prevederlo: la prima dice «manually or otherwise», la seconda non nomina mai la parola
+«restart».
+
+**Conseguenza pratica, ed è quella che conta:** `docker kill` **non simula un guasto**. Simula
+uno spegnimento. Chi dimostra la resilienza di un cluster uccidendo un container sta mostrando
+uno scenario in cui l'infrastruttura ha deliberatamente scelto di non intervenire.
+
+**2. Dall'interno del container, `kill -9 1` non fa assolutamente niente — e non lo dice.** Il
+PID 1 visto da dentro è `mongod` (letto in `/proc/1/comm`). Il comando ritorna `rc=0`, senza
+stdout e senza stderr: sembra riuscito. Cinque secondi dopo il container è `running` e
+`healthy`, `RestartCount=0`.
+
+Non è una stranezza di Docker, è il kernel: [S-041](#s-041) dice che solo i segnali per cui il
+processo «init» ha installato un gestore possono essergli inviati dagli altri membri del suo
+namespace, «even to privileged processes». `SIGKILL` non è gestibile per definizione, quindi
+viene semplicemente scartato. Il successo apparente di `kill` è il fatto più insidioso della
+prova: nessun errore, nessun effetto.
+
+**3. Se `mongod` termina da sé, la politica funziona come ci si aspetta.** Chiesto lo `shutdown`
+al server, il container riparte **da solo**: entro tre secondi è già `running` con
+`RestartCount=1` e stato di salute `starting`; entro cinque è `healthy`. Nessun intervento
+manuale.
+
+Dettaglio da conoscere se si ripete la prova: il `mongosh` che manda lo `shutdown` esce con
+`rc=137`, perché il server chiude la connessione del client che gli ha appena chiesto di
+spegnersi. Non è un fallimento del comando.
+
+**4. Il dataset attraversa tutte e tre le prove.** `make smoke-01` dopo la sequenza completa:
+dodici controlli verdi, impronta invariata.
+
+- **Riserve:** una esecuzione per ciascuna delle tre prove, su una sola macchina, con Docker
+  Desktop su macOS — quindi il kernel in gioco è quello della VM. Non è stata isolata la regola
+  dei «at least 10 seconds» di [S-039](#s-039): il container era in piedi da molto più tempo in
+  tutte e tre le prove, quindi la politica era certamente attiva. Non è stato provato `docker
+  stop`, che [S-039](#s-039) copre esplicitamente ed è il caso non interessante. Il numero
+  `RestartCount` è cumulativo sulla vita del container: azzerarlo richiede ricrearlo.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0034, ADR-0044
+
+---
+
+<a id="v-018"></a>
+### V-018 — `localhost` non è un posto: è un punto di vista, e sbagliarlo dà due errori diversi
+
+- **Comandi:** `mongosh --host <nome> --eval "db.adminCommand('ping').ok"` da quattro posizioni
+  diverse · `nc -z <nome> 27017` dall'host
+- **Ambiente:** stack `docker/01-standalone` avviato e `healthy`, rete
+  `sqlstart-01-standalone_default` creata da Compose, `mongo` 7.0.40, macOS, 2026-08-28
+
+| Da dove | Nome chiesto | Esito |
+|---|---|---|
+| dentro `mongo-standalone` | `localhost` | `1` |
+| dentro `mongo-standalone` | `127.0.0.1` | `1` |
+| dentro `mongo-standalone` | `mongo-standalone` | `1` |
+| da un **altro** container sulla stessa rete | `localhost` | `MongoNetworkError: connect ECONNREFUSED 127.0.0.1:27017` |
+| da un **altro** container sulla stessa rete | `mongo-standalone` | `1` |
+| da un container **fuori** da quella rete | `mongo-standalone` | `MongoNetworkError: getaddrinfo ENOTFOUND mongo-standalone` |
+| dall'host | `localhost:27017` | connessione TCP riuscita |
+| dall'host | `mongo-standalone:27017` | `nc: getaddrinfo: nodename nor servname provided, or not known` |
+
+**I due errori non sono lo stesso errore, ed è tutta la lezione.**
+
+- `ECONNREFUSED` significa che il nome **ha risolto** — verso 127.0.0.1, che dal punto di vista
+  di quel container è quel container. Il client ha bussato alla porta giusta della macchina
+  sbagliata: se stesso. È l'errore di chi ha copiato una stringa di connessione da un contesto
+  all'altro.
+- `ENOTFOUND` significa che il nome **non ha risolto affatto**. Il DNS interno di Docker
+  risponde solo ai container attaccati a quella rete; da fuori, `mongo-standalone` non esiste.
+
+L'unico nome che funziona da tutte le posizioni interne alla rete è quello del servizio, ed è la
+ragione della regola di [ADR-0021](Decision.md#adr-0021). Su un'istanza singola la differenza è
+un fastidio di dieci secondi; su un replica set diventa un guasto vero, perché i membri si
+scambiano gli indirizzi con cui sono stati configurati e un client che riceve `localhost` dal
+`hello` prova a connettersi a se stesso ([S-020](#s-020)).
+
+- **Riserve:** dall'host la prova è a livello TCP (`nc`), non MongoDB, perché su questa macchina
+  `mongosh` non è installato fuori dai container: dimostra che la porta pubblicata è
+  raggiungibile, non che il server risponda — per quello valgono l'healthcheck e `make smoke-01`.
+  La risoluzione dei nomi **sull'host** non dipende da Docker ma dal sistema operativo: su una
+  macchina con una voce in `/etc/hosts`, o con un resolver aziendale che rispondesse a quel nome,
+  l'ultima riga della tabella cambierebbe. Rete singola creata da Compose; con reti multiple o
+  alias di rete il quadro si arricchisce e non è stato esplorato.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0033, ADR-0036
+
+---
+
+<a id="v-019"></a>
+### V-019 — Novemilanovecentotrentuno righe, e il 92 % dice «sto bene»
+
+- **Domanda:** che cosa c'è davvero nel log di un'istanza singola che non sta facendo niente, e
+  quanto ne cresce al minuto?
+- **Ambiente:** stack `01-standalone` di questo repository, immagine `mongo:7.0.40`, container
+  `mongo-standalone` avviato il 2026-08-28 alle 11:53:25 UTC con `RestartCount=1`. Scatto preso
+  alle **12:19:02 UTC**, dopo gli esperimenti di [V-017](#v-017) e [V-018](#v-018). Analisi con
+  uno script Python che legge `docker logs mongo-standalone` e conta.
+- **Comandi:** `docker logs mongo-standalone`, più `db.adminCommand({getLog: "startupWarnings"})`
+  attraverso `docker compose exec -T mongo-standalone mongosh --quiet --eval`.
+
+**Primo risultato — la composizione.** Nove­mila­nove­cento­trentuno righe: **9922 JSON e 9 non-JSON**.
+Centotredici `id` distinti. Nessuna severità oltre `I` e `W`:
+
+| severità | righe | quota |
+| --- | ---: | ---: |
+| `I` (informativa) | 9892 | 99,70 % |
+| `W` (avviso) | 30 | 0,30 % |
+| `E` (errore) | 0 | — |
+| `F` (fatale) | 0 | — |
+
+**Secondo risultato — i componenti, e chi domina.** `NETWORK` e `ACCESS` insieme fanno **9117
+righe, il 91,9 %** del log:
+
+| componente | righe | quota |
+| --- | ---: | ---: |
+| `NETWORK` | 7146 | 72,0 % |
+| `ACCESS` | 1971 | 19,9 % |
+| `STORAGE` | 388 | 3,9 % |
+| `CONTROL` | 89 | 0,9 % |
+| `EXECUTOR` | 88 | 0,9 % |
+| `WTCHKPT` | 61 | 0,6 % |
+
+**Terzo risultato — una connessione costa quattro righe, e `mongosh` ne apre cinque.** Gli `id`
+più frequenti sono sempre gli stessi quattro, nello stesso ordine, per ogni connessione:
+
+| `id` | componente | `msg` | occorrenze |
+| --- | --- | --- | ---: |
+| `22943` | `NETWORK` | `Connection accepted` | 1982 |
+| `51800` | `NETWORK` | `client metadata` | 1971 |
+| `10483900` | `ACCESS` | `Connection not authenticating` | 1971 |
+| `22944` | `NETWORK` | `Connection ended` | 1971 |
+| `6788700` | `NETWORK` | `Received first command on ingress connection since session start or auth handshake` | 1170 |
+
+Una singola invocazione di `mongosh --quiet --eval "db.adminCommand('ping').ok"` apre **cinque**
+connessioni, non una: `connectionId` da 804 a 808 in 99 millisecondi
+(`12:18:17.803` → `12:18:17.902`), tutte chiuse insieme all'uscita, `12:18:17.909`. Sono venti
+righe di connessione più tre `6788700`, ventitré righe per un `ping`.
+
+**Quarto risultato — la crescita a riposo.** Fra due letture distanti **60,1 secondi**, senza
+alcun carico applicativo, sono comparse **139 righe**. Scomposte per `id`:
+
+| `id` | righe nell'intervallo | origine |
+| --- | ---: | --- |
+| `22943`, `51800`, `10483900`, `22944` | 30 ciascuno = **120** | 6 healthcheck × 5 connessioni × 4 righe |
+| `6788700` | 18 | 3 per healthcheck |
+| `22430` (`WTCHKPT`) | 1 | checkpoint periodico di WiredTiger |
+
+L'aritmetica chiude: l'healthcheck del file Compose gira ogni dieci secondi
+([V-012](#v-012)), sei volte al minuto, e produce **138 delle 139 righe**. Il **99,3 %** di ciò
+che un'istanza a riposo scrive nel log è la risposta alla domanda «stai bene?».
+
+**Quinto risultato — le nove righe non-JSON sono tutte e sole quelle che non scrive `mongod`.**
+In un log che [S-042](#s-042) dichiara interamente JSON, le nove eccezioni sono l'entrypoint
+dell'immagine e lo script di inizializzazione di questo repository:
+
+```text
+about to fork child process, waiting until server is ready for connections.
+forked process: 28
+child process started successfully, parent exiting
+/usr/local/bin/docker-entrypoint.sh: running /docker-entrypoint-initdb.d/10-dati-demo.js
+Carico 50000 ordini in lab.ordini...
+Caricati 50000 ordini in 1711 ms.
+Nessun indice creato: il confronto con e senza indice è parte della demo.
+Killing process with pid: 28
+MongoDB init process complete; ready for start up.
+```
+
+Sono la ricevuta dell'inizializzazione: la loro assenza è il sintomo della
+[trappola 1](02-architetture/trappole-mongodb-in-docker.md#t-01).
+
+**Sesto risultato — cinque avvii nello stesso log, e quindici avvisi d'avvio.** L'`id` `4615611`
+(`MongoDB starting`) compare **cinque** volte: `docker logs` conserva l'intera vita del
+container, riavvii compresi, e il `mongod` temporaneo dell'entrypoint conta come uno. Le righe
+con `tags: ["startupWarnings"]` sono **quindici**: tre per avvio, sempre le stesse.
+`db.adminCommand({getLog: "startupWarnings"})` risponde `totalLinesWritten: 3` e restituisce
+solo quelle dell'avvio corrente:
+
+| severità | `id` | messaggio |
+| --- | --- | --- |
+| `I` | `22297` | `Using the XFS filesystem is strongly recommended with the WiredTiger storage engine.` |
+| `W` | `22120` | `Access control is not enabled for the database. Read and write access to data and configuration is unrestricted` |
+| `W` | `9068900` | `For customers running MongoDB 7.0, we suggest changing the contents of the following sysfsFile` |
+
+L'ultima porta in `attr` il dettaglio: `{"sysfsFile": "/sys/kernel/mm/transparent_hugepage",
+"currentValue": "always", "desiredValue": "never"}` — è la VM Linux di Docker Desktop, non il
+Mac. La seconda è la prova che il server **avvisa** di essere senza autenticazione
+([ADR-0005](Decision.md#adr-0005)): l'avviso c'è, in trentamila righe non lo legge nessuno.
+
+**Settimo risultato — `REPL` esiste anche su un'istanza singola.** Il componente compare 42
+volte pur non essendoci alcun replica set: sono le inizializzazioni dei sottosistemi di
+replicazione, che `mongod` costruisce comunque. La presenza di righe `REPL` non prova che il
+nodo replichi qualcosa.
+
+- **Interpretazione:** il log di MongoDB non è un diario degli eventi interessanti, è un
+  tracciato del traffico. Chi lo legge scorrendo dall'alto legge per il 92 % le connessioni di un
+  controllo di salute. Le trenta righe che contano — le `W` — sono lo 0,3 %, e nove volte su dieci
+  sono le stesse tre ripetute a ogni avvio. Le due domande che rendono il log leggibile sono
+  quindi: *quale componente* e *quale `id`*.
+- **Riserve:** i numeri assoluti dipendono da quanto è vissuto il container e da quanti
+  esperimenti ha subito; sono validi come proporzioni, non come costanti. La quota del 91,9 % è
+  quella di un'istanza **senza carico applicativo**: sotto carico `COMMAND` e `WRITE` crescono e
+  la proporzione cambia. Le 139 righe al minuto valgono per l'healthcheck di questo repository —
+  chi lo togliesse, o lo portasse a `interval: 60s`, otterrebbe un log molto più magro e una
+  diagnosi di guasto molto più lenta. L'assenza di `E` e `F` non è una proprietà di MongoDB: è il
+  resoconto di un'istanza che, in questa finestra, non ha mai sbagliato niente.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0035
+
+---
+
+<a id="v-020"></a>
+### V-020 — `mongosh` in automazione: ogni errore vale 1, e il silenzio vale 0
+
+- **Domanda:** che cosa può promettere uno script che chiama `mongosh`? Il codice di uscita
+  distingue un errore del server da un server irraggiungibile? E una ricerca che non trova
+  niente è un errore?
+- **Ambiente:** stack `01-standalone`, immagine `mongo:7.0.40`, `mongosh` **2.10.0** eseguito
+  dentro il container `mongo-standalone`. Macchina di sviluppo: macOS 26.6.2 (Darwin 25.6.0),
+  Docker Desktop. Data: 2026-08-28.
+- **Comandi:** una quarantina di invocazioni non interattive, ciascuna con il proprio codice
+  di uscita raccolto dal processo chiamante.
+
+**Primo risultato — sull'host `mongosh` non c'è, e non serve.**
+
+```console
+$ which mongosh
+mongosh not found
+$ which mongo
+mongo not found
+$ docker exec mongo-standalone sh -c 'command -v mongosh; command -v mongod; command -v mongodump'
+/usr/bin/mongosh
+/usr/bin/mongod
+/usr/bin/mongodump
+$ docker exec mongo-standalone mongosh --version
+2.10.0
+```
+
+L'immagine porta con sé la shell, il server e gli strumenti di backup. Nessuna installazione sul
+portatile, e una versione sola: quella misurata qui.
+
+**Secondo risultato — la stringa che `mongosh` costruisce da sé.** Invocato senza argomenti si
+collega a `localhost:27017` ([S-045](#s-045)); interrogato su dove sia andato, risponde:
+
+```text
+mongodb://127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&appName=mongosh+2.10.0
+```
+
+Tre valori impliciti che nessuno ha scritto: `directConnection=true`, `appName`, e soprattutto
+**`serverSelectionTimeoutMS=2000`**. Due secondi. [S-044](#s-044) dà un'elezione per lunga fino a
+dodici. Un `mongosh` invocato senza pensarci, contro un replica set che sta rieleggendo, si
+arrende **dieci secondi prima** che il cluster abbia finito — e l'errore che stampa somiglia a
+quello di un cluster morto. Nessuna delle pagine consultate nomina questo valore predefinito.
+
+Il database predefinito è `test`, come dichiarato:
+
+```console
+$ mongosh --quiet --eval "db.getName()"
+test
+$ mongosh --quiet "mongodb://localhost:27017/lab" --eval "db.getName()"
+lab
+```
+
+**Terzo risultato — `--quiet` è già acceso, quando non c'è un umano.**
+
+| invocazione | prima riga stampata |
+| --- | --- |
+| `mongosh --eval "1 + 1"` | `2` |
+| `mongosh --quiet --eval "1 + 1"` | `2` |
+| `mongosh --no-quiet --eval "1 + 1"` | `Current Mongosh Log ID:	6a91801e…` |
+
+Conferma di [S-046](#s-046): in sessione non interattiva il silenzio è il valore predefinito, e
+`--no-quiet` serve a **ri**accendere il preambolo. Con `--no-quiet` compaiono sei righe di
+intestazione — identificativo di sessione, stringa di connessione, versione del server, versione
+della shell — prima del risultato.
+
+**Quarto risultato — con più `--eval`, si stampa solo l'ultimo valore.**
+
+| comando | stampa |
+| --- | --- |
+| `--eval "1 + 1" --eval "2 + 2"` | `4` |
+| `--eval "print('uno')" --eval "print('due')" --eval "3 + 3"` | `uno`, `due`, `6` |
+| `--eval "use lab" --eval "db.getName()"` | `lab` |
+
+Il **valore** dell'espressione viene stampato solo per l'ultimo `--eval` ([S-046](#s-046)),
+mentre `print()` scrive sempre. E lo stato attraversa i frammenti: un `use lab` nel primo
+`--eval` vale ancora nel secondo. Chi vuole vedere i risultati intermedi deve chiedere `print()`;
+chi si limita a scrivere l'espressione ottiene silenzio, non un errore.
+
+**Quinto risultato — la tabella dei codici di uscita.** Nessuna delle pagine consultate la
+contiene. Misurata:
+
+| situazione | codice |
+| --- | ---: |
+| espressione valutata senza errori | **0** |
+| `countDocuments` che non trova nulla (restituisce `0`) | **0** |
+| `throw new Error("rotto")` non catturato | **1** |
+| `TypeError` — metodo che non esiste | **1** |
+| `ReferenceError` — identificatore non definito | **1** |
+| `MongoServerError` — `no such command` | **1** |
+| `MongoServerError` — `E11000 duplicate key error` | **1** |
+| `MongoServerError` — `cannot use 'w' > 1 when a host is not replicated` | **1** |
+| `MongoNetworkError` — `getaddrinfo ENOTFOUND` | **1** |
+| `MongoNetworkError` — `connect ECONNREFUSED` | **1** |
+| `--file` su un percorso che non esiste (`ENOENT`) | **1** |
+| `exit(3)` | **3** |
+| `quit(7)` | **7** |
+| `exit(300)` | **44** |
+| `exit(-1)` | **255** |
+
+Tre conclusioni, e sono tutte scomode.
+
+1. **Ogni errore vale `1`.** Dal codice di uscita non si distingue «il server ha risposto di no»
+   da «il server non l'ho trovato». Chi deve distinguere deve leggere `stderr`, oppure catturare
+   l'eccezione e uscire con un codice proprio, come raccomanda [S-047](#s-047).
+2. **Il silenzio vale `0`.** Una ricerca che non trova niente termina con successo. Uno script di
+   verifica che si limiti a interrogare, e che giudichi dal codice di uscita, **dichiara sano un
+   database vuoto**. È lo stesso genere di trappola di `logRotate` che risponde `ok: 1`
+   ([V-010](#v-010)): l'operazione riesce, il fatto non è avvenuto.
+3. **Il codice scelto non è sempre il codice consegnato.** `exit(300)` diventa 44 (300 modulo
+   256) ed `exit(-1)` diventa 255. Restare fra 1 e 125 evita anche la sovrapposizione con i
+   codici che le shell si riservano.
+
+**Sesto risultato — `load()` non cerca da nessuna parte, e `--file` neanche.** Con lo script in
+`/tmp/controllo.js` e la directory di lavoro in `/etc`:
+
+```console
+$ mongosh --quiet --eval 'load("controllo.js")'
+Error: ENOENT: no such file or directory, open '/etc/controllo.js'
+    rc = 1
+$ mongosh --quiet --eval 'load("/tmp/controllo.js")'
+ordini: 50000
+true
+    rc = 0
+```
+
+Conferma letterale di [S-047](#s-047). Dentro un container la directory di lavoro non è quella da
+cui si è digitato il comando: i percorsi vanno assoluti, sempre.
+
+**Settimo risultato — non si passa uno script per pipe.** `mongosh` legge lo standard input come
+una sessione interattiva e ci stampa sopra i suoi prompt:
+
+```console
+$ echo 'print("dallo standard input: " + …)' | docker compose exec -T mongo-standalone mongosh --quiet
+test> dallo standard input: 50000
+
+test>     rc = 0
+```
+
+Il risultato c'è, ma è annegato fra due `test>`. E `--file -` non è una scorciatoia: `mongosh`
+cerca un file che si chiama `-` (`ENOENT: … open '/-'`, codice 1). Gli unici due modi puliti
+restano `--eval` e `--file <percorso assoluto>`.
+
+**Ottavo risultato — `-T` non è il colpevole che si crede.** Le prove:
+
+| comando | stdin | esito |
+| --- | --- | --- |
+| `docker compose exec mongo-standalone mongosh …` | `/dev/null` | `2`, codice 0 |
+| `docker compose exec mongo-standalone mongosh …` | **chiuso** | `2`, codice 0 |
+| `docker compose exec -T mongo-standalone mongosh …` | chiuso | `2`, codice 0 |
+| `docker exec -it mongo-standalone mongosh …` | `/dev/null` | **fallisce**, codice 1 |
+
+L'ultima riga stampa `cannot attach stdin to a TTY-enabled container because stdin is not a
+terminal`. Non è l'assenza di `-T` a rompere gli script: è la **presenza di `-it`**, l'abitudine
+copiata da mille esempi interattivi. `docker compose exec` da solo si arrangia; `-T` è esplicito
+e non costa niente.
+
+- **Interpretazione:** `mongosh` è un ottimo strumento interattivo e un pessimo oracolo
+  automatico, se lo si interroga solo con il codice di uscita. Uno script che deve **verificare**
+  qualcosa deve dirlo: controllare il risultato e chiamare `exit()` con un codice scelto da chi
+  scrive. Questa è la ragione per cui gli strumenti di verifica di questo repository non si
+  limitano a lanciare comandi e guardare se tornano zero.
+- **Riserve:** tutti i codici valgono per `mongosh` 2.10.0; la documentazione non li dichiara, il
+  che significa che non sono un contratto e possono cambiare senza preavviso — motivo in più per
+  uscire esplicitamente. I codici `3`, `7`, `44` e `255` sono stati scelti per la prova e non
+  hanno alcun significato convenzionale. Il comportamento di `-T` è stato misurato su Docker
+  Desktop per macOS e su `docker compose` v2: su altre versioni del client, e nelle CI dove lo
+  standard input è chiuso in modi diversi, l'esito potrebbe non essere lo stesso.
+- **Nota di percorso.** Durante queste prove un `insertOne({_id: 1})` ha incontrato un `_id`
+  che nel dataset di demo esisteva già, e la pulizia successiva ha cancellato il documento
+  originale: l'impronta di `lab.ordini` è scesa a 49999. `make seed-01` ha ricaricato il dataset e
+  l'impronta è tornata **`50000 124861860.70 150281`**, identica. È la prima volta che il dataset
+  deterministico di [ADR-0031](Decision.md#adr-0031) ha ripagato il proprio costo.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0036
+
+---
+
+<a id="v-021"></a>
+### V-021 — Il container del lab è un'installazione Ubuntu con tre note di produzione disattese, e il server lo dice all'avvio
+
+- **Domanda:** le pagine di installazione e le note di produzione descrivono un `mongod` installato
+  su un sistema operativo. Quanto di quel mondo sopravvive dentro un container, e dove il lab si
+  discosta da quello che il manuale raccomanda?
+- **Ambiente:** stack `01-standalone`, immagine `mongo:7.0.40`, macchina di sviluppo macOS 26.6.2
+  (Darwin 25.6.0) con Docker Desktop. Data: 2026-08-28.
+- **Comandi:** ispezione del container con `sh -c`, più
+  `db.adminCommand({getLog: "startupWarnings"})`.
+
+**Primo risultato — l'immagine *è* l'installazione descritta da [S-048](#s-048).**
+
+```console
+$ cat /etc/os-release | head -2
+PRETTY_NAME="Ubuntu 22.04.5 LTS"
+NAME="Ubuntu"
+$ cat /etc/apt/sources.list.d/mongodb-org.list
+deb [ signed-by=/etc/apt/keyrings/mongodb.asc ] http://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse
+```
+
+Ubuntu 22.04 «Jammy», e il file di elenco `apt` che punta allo stesso repository ufficiale del
+tutorial — solo con il portachiavi in `/etc/apt/keyrings/mongodb.asc` invece che in
+`/usr/share/keyrings/`. Chi impara la procedura di [S-048](#s-048) sta imparando come è stata
+costruita l'immagine che usa.
+
+**Secondo risultato — quello che l'immagine ha buttato via.**
+
+| elemento di [S-048](#s-048) | nel container |
+| --- | --- |
+| `/etc/mongod.conf` | **assente**: `ls: cannot access '/etc/mongod.conf': No such file or directory` |
+| `systemd` e `systemctl` | assenti: il processo 1 **è** `mongod` |
+| `/var/lib/mongodb`, `/var/log/mongodb` | sostituiti da `/data/db` e da `stdout` ([ADR-0030](Decision.md#adr-0030)) |
+| utente `mongodb` | **conservato**: `ps -o user,pid,comm -p 1` risponde `mongodb 1 mongod` |
+
+L'ultima riga merita attenzione perché è controintuitiva: `docker compose exec` entra come `root`
+(`uid=0(root)`), ma il **server** gira come `mongodb`, esattamente come dopo un
+`apt-get install mongodb-org`. La shell che si apre non ha i privilegi del processo che osserva, e
+viceversa.
+
+**Terzo risultato — tre note di produzione disattese, tutte dichiarate dal server.**
+
+```console
+$ mongosh --quiet --eval 'db.adminCommand({getLog: "startupWarnings"}).log
+    .forEach(r => { const o = JSON.parse(r); print(o.id + "  " + o.msg.substring(0, 78)) })'
+22297   Using the XFS filesystem is strongly recommended with the WiredTiger storage
+22120   Access control is not enabled for the database. Read and write access to dat
+9068900 For customers running MongoDB 7.0, we suggest changing the contents of the f
+```
+
+Tre avvisi, tre raccomandazioni, e per ognuna la misura che la conferma:
+
+| avviso | raccomandazione | misurato qui |
+| --- | --- | --- |
+| `22297` | XFS «strongly recommended» ([S-050](#s-050)) | `/data/db` sta su **ext4**: `/dev/vda1 /data/db ext4` |
+| `9068900` | THP disabilitato ([S-051](#s-051)) | `/sys/kernel/mm/transparent_hugepage/enabled` → `[always] madvise never` |
+| `22120` | autorizzazione abilitata ([S-050](#s-050)) | scelta deliberata del lab ([ADR-0005](Decision.md#adr-0005)) |
+
+Le prime due **non si possono correggere da dentro il container**. Il filesystem è quello del
+volume creato da Docker Desktop; THP appartiene al kernel della macchina virtuale Linux, non al
+container e tantomeno al Mac. È la differenza fra un avviso da risolvere e un avviso da
+riconoscere, e sapere in quale dei due casi ci si trova vale più che saperlo far sparire.
+
+**Quarto risultato — i `ulimit` sono già oltre il raccomandato, senza che nessuno li abbia
+scritti.**
+
+```console
+$ grep -E 'Max open files|Max processes' /proc/1/limits
+Max processes             unlimited            unlimited            processes
+Max open files            1048576              1048576              files
+```
+
+[S-052](#s-052) raccomanda `-n 64000` e `-u 64000`; qui i descrittori aperti sono **1 048 576**,
+sedici volte tanto, e i processi sono illimitati. È il runtime dei container a fissarli, e per
+questo il `mongod` del lab non emette l'avviso d'avvio sui file aperti che [S-048](#s-048)
+promette sotto i 64000. Una prova che avesse voluto mostrare quell'avviso avrebbe dovuto
+abbassarli apposta.
+
+**Quinto risultato — lo swap c'è, e non è quello del Mac.**
+
+```console
+$ free -m | tail -2
+Mem:           11946        1001       10126           0         818       10775
+Swap:           2047           0        2047
+```
+
+Due gigabyte di swap, zero usati: sono della macchina virtuale Linux, come gli 11 946 MiB di
+memoria che `hostInfo` riporta ([V-020](#v-020)). Delle due strategie di [S-050](#s-050) — swap
+assegnato e usato solo sotto pressione, oppure nessuno swap — Docker Desktop ha scelto la prima
+per conto nostro.
+
+- **Interpretazione:** un container non è una scorciatoia per saltare le note di produzione: è un
+  posto dove **metà** di quelle note non si applicano e l'altra metà si applica a un livello
+  diverso — l'host, o la macchina virtuale, o il runtime. La conseguenza pratica per il talk è che
+  gli avvisi d'avvio non vanno nascosti né «risolti»: vanno letti, e per ciascuno si deve saper
+  dire se è un difetto del lab o una proprietà del posto in cui il lab gira. Delle tre righe qui
+  sopra, due sono proprietà del posto e una sola è una scelta nostra.
+- **Riserve:** i valori dei `ulimit`, la dimensione dello swap e il tipo di filesystem dipendono da
+  Docker Desktop per macOS e dalla sua macchina virtuale; su Docker Engine nativo su Linux
+  cambiano, e su un `mongod` installato con `apt` cambiano ancora. Nessuna delle procedure di
+  [S-048](#s-048), [S-049](#s-049), [S-051](#s-051) e [S-052](#s-052) è stata eseguita: questa
+  verifica misura il **contrasto** con quelle pagine, non le pagine stesse.
+- **Data:** 2026-08-28
+- **Usata da:** ADR-0037
+
+---
+
+<a id="v-022"></a>
+### V-022 — La politica di pull scritta nel file: lo stack parte, e senza cache fallisce in un decimo di secondo
+
+- **Domanda:** tre domande, nate da una review esterna della PR #2. Che cosa fa Compose quando una
+  variabile è dichiarata ma **vuota**? Con `pull_policy: never` scritto fisso, lo stack del lab si
+  avvia ancora? E quando l'immagine non è in cache, il fallimento è immediato o passa dalla rete?
+- **Ambiente:** macchina di sviluppo macOS 26.6.2 (Darwin 25.6.0), Docker Desktop, server Docker
+  29.7.2, `docker compose version` **v5.4.0**. Stack `01-standalone`, immagine `mongo:7.0.40`
+  pinnata per digest. Data: 2026-08-31.
+
+**Primo risultato — nelle forme con i due punti, una variabile vuota vale quanto una assente.**
+
+```console
+$ cat vuota.env
+PULL_POLICY=
+$ docker compose -f prova.yaml --env-file vuota.env config
+services:
+  prova:
+    image: busybox
+    pull_policy: missing
+
+$ MONGO_IMAGE= docker compose -f obbligatoria.yaml config
+error while interpolating services.prova.image: required variable MONGO_IMAGE is missing a value:
+assente — eseguire «make images-pull»
+```
+
+`${PULL_POLICY:-missing}` con `PULL_POLICY=` non dà la stringa vuota: dà `missing`. E
+`${MONGO_IMAGE:?…}` con `MONGO_IMAGE=` non passa: fallisce come se la variabile non ci fosse. Sono
+le due forme che i file Compose del lab usano, ed è la ragione per cui `tools/check_stack.py` le
+modella così e non altrimenti.
+
+**Secondo risultato — con `never` fisso lo stack si avvia e la prova di fumo passa intera.**
+
+```console
+$ make up-01
+ Container mongo-standalone  Healthy
+$ make smoke-01
+Superati: 12 · Errori: 0
+Lo stack 01 fa quello che il file Compose promette.
+```
+
+**Terzo risultato — senza l'immagine in cache il fallimento è immediato.**
+
+```console
+$ time docker compose --env-file finta.env -f docker/01-standalone/compose.yaml up -d
+ Container mongo-standalone  Creating
+Error response from daemon: No such image:
+mongo@sha256:0000000000000000000000000000000000000000000000000000000000000000
+docker compose ... up -d  0,06s user  0,03s system  82% cpu  0,113 total
+```
+
+Centotredici millesimi di secondo. Non è un tentativo di rete andato male: è un tentativo mai
+iniziato, e conferma su questo file quello che [V-006](#v-006) aveva misurato sullo spike.
+
+- **Conseguenza:** la politica di pull smette di dipendere da una variabile d'ambiente che si può
+  dimenticare di passare e diventa una proprietà del file Compose, leggibile da chi lo apre. Il
+  costo — `make images-pull` obbligatorio prima del primo avvio — è pagato a casa, con la rete, non
+  in sala.
+- **Riserve:** le misure di tempo vengono da una macchina sola e da una sola esecuzione; servono a
+  distinguere un ordine di grandezza (decimi di secondo) da un altro (secondi di attesa di rete),
+  non a essere confrontate fra loro. La prova con la rete fisicamente staccata resta da fare.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0039
+
+---
+
+<a id="v-023"></a>
+### V-023 — Chi inizializza il replica set: tre strade provate, e una terza che non era scritta da nessuna parte
+
+> **Nota di precisione, 2026-08-31 (Task 3).** Nella «misura di contorno» qui sotto il blocco di
+> console riporta `isWritablePrimary=false secondary=true` attribuendolo a un membro «non ancora
+> inizializzato». La *conclusione* tratta lì è giusta e oggi è confermata sullo stack vero — un
+> controllo «sei primario o secondario?» resterebbe rosso fino a `rs.initiate()` — ma quei due
+> valori vengono da un membro che l'inizializzazione l'aveva già ricevuta. Su un membro davvero
+> vergine i tre `mongod` dello stack rispondono `isWritablePrimary=false secondary=false
+> **isreplicaset=true**`, e `isreplicaset` è il marcatore che il Task 5 può usare. Il corpo non
+> viene toccato: si legge com'era, con questa nota davanti.
+
+- **Domanda:** il design (§5.4) e [ADR-0026](Decision.md#adr-0026) dicono due cose diverse su chi
+  crea l'utente amministratore di uno stack a replica set sotto keyfile. Il design mette
+  `MONGO_INITDB_ROOT_USERNAME`/`_PASSWORD` sul primo membro e fa inizializzare il set a un sidecar
+  già autenticato; ADR-0026 vuole i `mongod` **senza** variabili di root e l'utente creato sotto
+  eccezione localhost. Non è una sfumatura: cambia se nel repository finisce una password. Il
+  Task 1 del piano di `feature/02` ha rifiutato di scegliere a tavolino e ha montato entrambe le
+  strade. Tre domande: la strada di ADR-0026 funziona su un replica set (e non solo su uno sharded
+  cluster)? La strada del design funziona, cioè l'entrypoint crea davvero l'utente anche con
+  `--replSet` e `--keyFile` addosso? E l'affermazione del design secondo cui «l'eccezione localhost
+  non copre un container sidecar» è vera?
+- **Ambiente:** macchina di sviluppo macOS 26.6.2 (Darwin 25.6.0), Docker Desktop, server Docker
+  29.7.2, `docker compose version` v5.4.0. Immagine `mongo:7.0.40` pinnata per digest
+  `sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b`. Tre stack usa-e-getta
+  (`spike-rs-a`, `spike-rs-b`, `spike-rs-c`) montati **fuori dal repository**, nella cartella
+  temporanea della sessione, e smontati con `down -v` a misura presa. Nessuna porta pubblicata.
+  Data: 2026-08-31.
+
+**Prima strada — ADR-0026: nessuna variabile di root, `rs.initiate()` dentro il container.**
+
+Tre `mongod` con `--replSet rs0 --keyFile /keyfile/mongo-keyfile --bind_ip_all`, il keyfile
+generato da un servizio one-shot, e l'inizializzazione eseguita con `docker exec` **dentro** il
+membro 1, senza passare credenziali:
+
+```console
+$ docker exec spike-a-rs-1 mongosh --quiet --eval 'rs.initiate({_id:"rs0", members:[...]})'
+{"ok":1}
+$ docker exec spike-a-rs-1 mongosh --quiet --eval 'db.getSiblingDB("admin").createUser({user:"lab-admin", pwd:"...", roles:["root"]})'
+{ ok: 1 }
+$ docker exec spike-a-rs-1 mongosh --quiet --eval 'db.getSiblingDB("prova").c.insertOne({x:1})'
+MongoServerError[Unauthorized]: command insert requires authentication
+```
+
+Funziona, e funziona nell'ordine che [S-055](#s-055) prescrive: `replSetInitiate` passa,
+`createUser` passa, e il primo comando successivo **non** passa più. L'ultima riga non è un
+fallimento: è la ricevuta che l'eccezione si è chiusa da sé, esattamente dove la fonte dice che si
+chiude. Il costo è tutto architetturale: `docker exec` non è un servizio Compose, quindi
+`docker compose up -d` da solo **non** produce un replica set funzionante. Serve un passo fuori dal
+file — uno script, un `make`, o le dita di chi presenta.
+
+**Seconda strada — il design §5.4: variabili di root sul membro 1, sidecar autenticato.**
+
+Prima domanda da sciogliere: l'entrypoint dell'immagine ufficiale, che per creare l'utente avvia un
+`mongod` temporaneo togliendo `--replSet` ([S-022](#s-022)), sopravvive alla presenza di
+`--keyFile`? Sì — nei log del membro compare `Successfully added user: { "user" : "lab-admin",
+"roles" : [ "root" ] }`. Il caso che ADR-0026 aveva incontrato era `--configsvr`, che l'entrypoint
+**non** toglie e che da solo non esiste: è quello a rompersi, non `--replSet`. La differenza fra i
+due casi non era scritta da nessuna parte, e per sei giorni ADR-0026 è stato letto come se valesse
+per entrambi.
+
+Poi il sidecar, al primo colpo, è fallito:
+
+```console
+$ docker logs spike-b-rs-init
+MongoNetworkError: connect ECONNREFUSED 172.20.0.3:27017
+```
+
+`depends_on` con `condition: service_started` è arrivato mentre il membro era ancora nella fase del
+`mongod` temporaneo, che ascolta solo su loopback. È esattamente la corsa che il Task 5 del piano
+aveva previsto, misurata prima di scrivere il file definitivo. Ripetuta l'inizializzazione a membri
+avviati, la strada regge:
+
+```console
+$ mongosh --host mongo-rs-1 -u lab-admin -p ... --eval 'rs.initiate({...})'
+{"ok":1}
+$ mongosh ... --eval 'rs.status().members.map(m => m.stateStr).join(",")'
+PRIMARY,SECONDARY,SECONDARY
+```
+
+E i membri 2 e 3, partiti **vuoti** e senza alcuna variabile di root, accettano le credenziali di
+`lab-admin`: la sincronizzazione iniziale porta con sé anche la collezione `admin.system.users`.
+Un utente creato su un membro solo diventa, senza altri passi, l'utente di tutto il set.
+
+**Terza prova — l'affermazione del design sul sidecar è vera.**
+
+Uno stack con un membro non inizializzato e un sidecar sulla rete Compose, che prova
+`rs.initiate()` dall'esterno del container:
+
+```console
+$ docker logs spike-c-rs-init
+ERRORE codeName=Unauthorized code=13
+Command replSetInitiate requires authentication
+```
+
+L'affermazione del design regge. Il sidecar raggiunge il `mongod` — non è un problema di rete — ma
+arriva da un altro indirizzo, e l'eccezione non lo riconosce. Ed è qui che si chiude una riserva
+aperta da sei giorni: [S-006](#s-006) aveva dichiarato il 2026-08-25 che il vincolo «solo da
+loopback» **non è enunciato da nessuna fonte primaria**, e [S-055](#s-055) ha confermato che
+neppure la pagina della v7.0 lo enuncia. Adesso c'è la misura. Il vincolo esiste, il prodotto lo
+applica, la documentazione non lo scrive: la riserva passa da «vero per convenzione» a «vero,
+misurato qui, e ancora non scritto dalla fonte».
+
+**Quarta prova — la terza via: un sidecar che condivide il namespace di rete del membro.**
+
+Se il problema è l'indirizzo di provenienza, si può cambiare l'indirizzo di provenienza invece di
+rinunciare all'eccezione. Un container avviato con `--network container:<membro>` — in Compose
+`network_mode: "service:mongo-rs-1"` — non ha una propria interfaccia di rete: **usa quella del
+membro**, e `localhost` dentro il sidecar è lo stesso `localhost` del `mongod`.
+
+```console
+$ docker run --rm --network container:spike-c-rs-1 mongo@sha256:b642... \
+    mongosh --quiet --host localhost --eval '...'
+NAMESPACE_CONDIVISO_OK {"ok":1}
+UTENTE_CREATO da sidecar in namespace condiviso
+CHIUSA_DOPO_IL_PRIMO_UTENTE codeName=Unauthorized code=13
+```
+
+Le tre righe sono la strada intera in tre battute: l'eccezione si apre a un container che non è il
+membro, concede `replSetInitiate` e poi `createUser`, e si chiude subito dopo. Questa via non sta
+né nel design né in ADR-0026: è saltata fuori chiedendosi *perché* la prova C fallisse, invece di
+prendere atto che falliva.
+
+**Misura di contorno, raccolta di passaggio e utile al Task 5.** Su un `mongod` avviato con
+`--keyFile` e non ancora inizializzato, `hello()` risponde **senza credenziali**:
+
+```console
+$ docker exec spike-c-rs-1 mongosh --quiet --eval 'const h = hello(); print("isWritablePrimary=" + h.isWritablePrimary + " secondary=" + h.secondary)'
+isWritablePrimary=false secondary=true
+```
+
+Serve a disinnescare l'uovo e la gallina dell'healthcheck: un controllo che chiede «`hello()`
+risponde?» diventa verde **prima** dell'inizializzazione, e quindi un servizio di inizializzazione
+può dipendere da `service_healthy` senza aspettare qualcosa che solo lui può produrre. Un controllo
+che chiedesse «sei primario o secondario?» resterebbe rosso fino a `rs.initiate()`, e
+l'inizializzazione non partirebbe mai.
+
+- **Conseguenza:** le tre strade funzionano tutte, quindi la scelta non è tecnica ma di prezzo.
+  ADR-0026 costa un passo fuori da Compose; il design costa una password nel repository; la terza
+  via non costa nessuno dei due e paga con un costrutto Docker che va spiegato. La decisione è
+  registrata in [ADR-0040](Decision.md#adr-0040).
+- **Riserve:** tutto su una macchina sola, su Docker Desktop, con una sola ripetizione per strada;
+  le prove dicono *che* una strada funziona, non quanto sia stabile sotto ripetizione o su Linux
+  nativo. La corsa del sidecar della strada B è stata osservata una volta e aggirata a mano: non è
+  stato misurato dopo quanto tempo il membro smette di rifiutare la connessione, perché la
+  soluzione scelta non passa da un'attesa a tempo. Il comportamento di `network_mode:` con
+  `service:` è stato provato nella forma equivalente da riga di comando (`docker run --network
+  container:…`), e non ancora dentro un file Compose del repository: la conferma nella forma
+  definitiva spetta al Task 2.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0040
+
+---
+
+<a id="v-024"></a>
+### V-024 — La terza via nella forma definitiva: un container che non ha una rete propria, e per questo può creare il primo utente
+
+- **Comandi:** `docker compose --env-file tools/images.env --env-file docker/02-replicaset/.env -f
+  docker/02-replicaset/compose.yaml up -d --wait` · `docker inspect` · `docker logs rs-init` ·
+  `mongosh`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, immagine
+  `mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b` (MongoDB 7.0.40),
+  stack `docker/02-replicaset/compose.yaml` del repository, volumi vuoti
+- **Che cosa restava da dimostrare:** [V-023](#v-023) chiudeva con una riserva scritta a chiare
+  lettere — il comportamento di `network_mode: "service:"` era stato provato «nella forma
+  equivalente da riga di comando (`docker run --network container:…`), e non ancora dentro un file
+  Compose del repository». Su quella prova incompleta è stato deciso [ADR-0040](Decision.md#adr-0040).
+  Questa voce salda il debito: stessa terza via, ma nello stack vero, scritta come la leggerà chi
+  clona.
+- **Esito, il namespace è davvero condiviso:** Compose non copia la configurazione di rete del
+  membro, aggancia `rs-init` al suo container. L'identificatore che compare in `NetworkMode` è, cifra
+  per cifra, l'identificatore di `mongo-rs-1`:
+
+```
+NetworkMode di rs-init: container:fdf722b35d3d782d47a5e97caef7ce21ab0ebd3581795d6566cd1fff735fa8d7
+id di mongo-rs-1:       fdf722b35d3d782d47a5e97caef7ce21ab0ebd3581795d6566cd1fff735fa8d7
+indirizzo di mongo-rs-1: 172.18.0.3
+```
+
+C'è un solo indirizzo, e appartiene al membro. `rs-init` non ne ha uno suo: quando parla a
+`localhost` parla all'interfaccia del `mongod`, che è la ragione per cui l'eccezione localhost lo
+riconosce.
+
+- **Esito, la catena arriva in fondo da sola:** quattro righe, nell'ordine previsto, con codice di
+  uscita 0.
+
+```
+inizializzo il replica set «rs0»
+primario eletto: mongo-rs-1:27017
+utente amministratore «admin» creato
+catena completata
+```
+
+- **Esito, il set esiste ed è chiuso:** con le credenziali si vede il set formato; senza, la stessa
+  interrogazione viene rifiutata. L'eccezione localhost si è richiusa da sé alla creazione del primo
+  utente, come [S-055](#s-055) prescrive.
+
+```
+set=rs0
+  mongo-rs-1:27017  PRIMARY  health=1
+  mongo-rs-2:27017  SECONDARY  health=1
+  mongo-rs-3:27017  SECONDARY  health=1
+--- senza credenziali ---
+rifiutato: Unauthorized (13)
+```
+
+Una scrittura con `w: "majority"` sul primario torna `inserito=true` e il documento si legge sul
+membro 3: la replica non è solo dichiarata, trasporta dati.
+
+- **Esito, l'healthcheck è verde in tutte e due le fasi, per due motivi diversi:** è il punto che
+  vale la pena guardare due volte. La condizione scritta nel file è
+  `h.isWritablePrimary || h.secondary || h.isreplicaset === true`, ed è un `or` di tre termini
+  perché nessuno dei tre da solo copre entrambe le fasi. Prima di `rs.initiate()` i tre membri
+  rispondono `isWritablePrimary=false secondary=false isreplicaset=true` ([V-023](#v-023), con la
+  nota di precisione in testa a quella voce): passa il terzo termine. Dopo, `isreplicaset` sparisce
+  e passano i primi due:
+
+```
+mongo-rs-1  isWritablePrimary=true secondary=false isreplicaset=undefined
+mongo-rs-2  isWritablePrimary=false secondary=true isreplicaset=undefined
+mongo-rs-3  isWritablePrimary=false secondary=true isreplicaset=undefined
+```
+
+Un healthcheck che avesse chiesto solo «sei primario o secondario?» sarebbe rimasto rosso nella
+prima fase, e `rs-init` — che dipende da `service_healthy` — non sarebbe mai partito per produrre
+proprio ciò che gli si chiedeva di avere già. Un healthcheck che avesse chiesto solo
+`isreplicaset === true` sarebbe diventato rosso appena il set si forma, cioè avrebbe segnato come
+malato uno stack perfettamente sano.
+
+- **Conseguenza:** la riserva di [V-023](#v-023) è scaricata, e [ADR-0040](Decision.md#adr-0040)
+  regge nella forma definitiva senza modifiche. Il resto delle conseguenze — quando la catena si
+  possa dire finita — sta in [V-025](#v-025) e in [ADR-0041](Decision.md#adr-0041).
+- **Riserve:** una macchina sola, Docker Desktop, nessuna prova su Linux nativo. `NetworkMode` dice
+  `container:<identificatore>`, non `service:mongo-rs-1`: Compose risolve il nome del servizio in un
+  identificatore **al momento della creazione**, il che implica che `mongo-rs-1` debba esistere
+  prima di `rs-init`. Qui quell'ordine è garantito dal `depends_on`, e **non è stato misurato** che
+  cosa succeda togliendolo — la prova non è stata fatta perché il `depends_on` serve comunque per la
+  condizione `service_healthy`, ma resta un'affermazione che questo repository non ha verificato.
+  Infine, che `rs-init` non possa pubblicare porte né essere raggiunto per nome sulla rete Compose è
+  dedotto dal non avere un'interfaccia propria, non provato tentandolo.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0041
+
+---
+
+<a id="v-025"></a>
+### V-025 — «Fatto» detto due volte: `up --wait` esce con successo quattordici secondi prima che la replica esista
+
+> **Nota di allineamento, 2026-08-31.** Il fenomeno descritto qui regge intatto, il numero no.
+> Al Task 7 il caricamento dei dati di demo è entrato dentro `rs-init` ([ADR-0043](Decision.md#adr-0043)),
+> quindi quel servizio dura di più e lo scarto misurato è salito a **ventidue** secondi
+> ([V-028](#v-028)). Il titolo resta com'era perché così è stato misurato quel giorno, su quella
+> configurazione: chi cita lo scarto citi la voce che corrisponde allo stack che ha davanti, e
+> soprattutto lo rimisuri invece di impararlo a memoria — è la conclusione, non il quattordici.
+
+- **Comandi:** `docker compose … up -d --wait` · `docker compose … wait rs-init` ·
+  `docker compose … config` · `docker inspect`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, stack
+  `docker/02-replicaset/compose.yaml`, immagine `mongo@sha256:b6421fd6…` (MongoDB 7.0.40)
+- **Esito, lo scarto:** `up -d --wait` termina con codice 0 dopo otto secondi. In quell'istante
+  `rs-init` è in stato `running` — ha appena cominciato — e chi si collega al membro 1 riceve un
+  errore:
+
+```
+«up -d --wait» uscita=0 dopo 8 secondi
+stato di rs-init in quell'istante: running
+--- che cosa vede un client in quell'istante ---
+NotYetInitialized (94)
+
+rs-init uscito dopo 22 secondi dall'avvio, codice=0
+scarto fra «up dice fatto» e «la replica c'e'»: 14 secondi
+```
+
+Quattordici secondi in cui il comando ha già detto di sì e il replica set non esiste. Il perché sta
+nella definizione: [S-057](#s-057) documenta `--wait` come «Wait services be running|healthy», e
+`rs-init` non ha un healthcheck — quindi la soglia applicabile è `running`. Un container che deve
+morire è `running` **nel momento esatto in cui comincia**, e `--wait` si dichiara soddisfatto lì.
+Non è un difetto di Compose: è l'opzione che fa quello che dichiara, applicata a un servizio per cui
+la parola «pronto» significa il contrario di «in esecuzione».
+
+- **Esito, come si chiude lo scarto:** `docker compose wait rs-init` — «Block until containers of
+  all (or specified) services stop», [S-057](#s-057) — blocca fino all'uscita e ne riporta il
+  codice.
+
+```
+«up -d --wait» + «wait rs-init»: 20 secondi, uscita=0
+stampato da «compose wait»: container "6727c2a2386e…" exited with status code 0
+subito dopo wait: set=rs0
+```
+
+Le due opzioni non sono alternative e non si somigliano: `up --wait` serve ai tre membri, che devono
+essere **sani**; `compose wait` serve a `rs-init`, che deve essere **finito**. Lo stack ne ha bisogno
+di entrambe perché contiene i due generi di servizio.
+
+- **Esito, un solo `--env-file` non basta, e si vede:** lo stack ha bisogno di due file d'ambiente —
+  il pin dell'immagine in `tools/images.env`, la password in `docker/02-replicaset/.env`. Passando
+  solo il primo, il secondo **non viene letto**, benché stia accanto al file indicato con `-f`:
+
+```
+uscita di «config» con un solo --env-file: 1
+error while interpolating services.rs-init.environment.PASSWORD_AMMINISTRATORE: required variable
+PASSWORD_AMMINISTRATORE is missing a value: assente — copiare docker/02-replicaset/.env.example in
+.env e riempire la password
+```
+
+È la conferma diretta di [S-056](#s-056): «Passing the `--env-file` argument overrides the default
+file path». La flag non aggiunge un file, ne prende il posto. Con entrambe le occorrenze lo stesso
+comando esce 0. Vale la pena notare **come** si è manifestato l'errore: non con un utente creato con
+password vuota, ma con un rifiuto che nomina il file da copiare. Quel messaggio esiste perché la
+variabile è scritta nella forma `${PASSWORD_AMMINISTRATORE:?…}`; nella forma senza `:?` la stessa
+dimenticanza sarebbe passata in silenzio.
+
+- **Esito, l'idempotenza:** rieseguendo l'avvio su uno stack già inizializzato, `rs-init` riconosce
+  il set e non tocca niente, uscendo di nuovo 0. `docker logs rs-init` mostra **entrambe** le
+  esecuzioni una dopo l'altra, perché Compose riavvia il container one-shot esistente invece di
+  crearne uno nuovo: le prime quattro righe sono del primo avvio, le seconde quattro del secondo.
+
+```
+inizializzo il replica set «rs0»
+primario eletto: mongo-rs-1:27017
+utente amministratore «admin» creato
+catena completata
+replica set «rs0» già formato: non lo reinizializzo
+primario eletto: mongo-rs-1:27017
+utente amministratore già presente: non lo ricreo
+catena completata
+```
+
+- **Esito, i tempi, con una sorpresa:** misurati dal lancio alla fine di `compose wait rs-init`,
+  cioè fino alla replica realmente formata.
+
+```
+freddo, giro 1: 21 secondi
+freddo, giro 2: 21 secondi
+freddo, giro 3: 19 secondi
+caldo (volumi conservati): 24 secondi
+```
+
+Il riavvio **a caldo è più lento** dell'avvio da volumi vuoti. Controintuitivo, e utile a chi deve
+riavviare lo stack in sala: non conviene fare `down` e `up` sperando che «tanto i dati ci sono già».
+Dopo uno smontaggio completo si spengono tre membri, e alla ripartenza il set deve rieleggere un
+primario prima che qualunque cosa funzioni; da volumi vuoti l'elezione è la prima e avviene su un
+set appena costruito. Questa è però una **spiegazione**, non una misura: vedi le riserve.
+
+- **Conseguenza:** l'avvio dello stack 02 è di due comandi, non di uno, e gli ambienti si passano
+  con due `--env-file`. Registrato in [ADR-0041](Decision.md#adr-0041), che ne fa la forma
+  obbligatoria per il Makefile del Task 7.
+- **Riserve:** i secondi valgono per questa macchina e per questa immagine, e non vanno riportati
+  come previsione altrove: quello che non cambia è **che lo scarto esista**, perché discende dalla
+  definizione di `--wait` e non dalla velocità dell'host. Il numero 14 è di una sola esecuzione. La
+  lentezza dell'avvio a caldo è stata osservata **una volta sola**, contro tre giri a freddo: la
+  differenza è larga (24 contro 19÷21) ma un solo campione non stabilisce una regola, e la causa
+  proposta — la rielezione del primario dopo lo spegnimento — non è stata isolata da nessuna misura,
+  è un'ipotesi coerente con il funzionamento noto del protocollo. Va rifatta con più ripetizioni
+  prima di dirla in sala. Infine `compose wait` è stato osservato solo su un'uscita 0: che riporti
+  fedelmente anche un codice diverso da zero è documentato ma non provato qui, e conviene provarlo
+  al Task 7, dove quel codice diventa il verdetto di un bersaglio del Makefile.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0041, ADR-0052
+
+---
+
+<a id="v-026"></a>
+### V-026 — Sei mutazioni sul file vero: un controllo che non si è visto fallire lì dove serve non è un controllo
+
+- **Comandi:** `uv run --project tools python tools/check_stack.py --variabile
+  PASSWORD_AMMINISTRATORE=… <copia mutata di docker/02-replicaset/compose.yaml>`, ripetuto su sei
+  copie, ognuna con un solo difetto introdotto
+- **Ambiente:** macOS 26.6.2 arm64, Python 3.13 via `uv`, `tools/check_stack.py` dopo il Task 6 di
+  `feature/02`, `tools/images.env` come file d'ambiente predefinito
+- **Che cosa restava da dimostrare:** le quattro regole nuove del Task 6 erano rosse sui campioni
+  costruiti nei test, e verdi sui due file veri. Verde su un campione costruito prova che la regola
+  esiste; verde sul file vero **non prova niente**, perché non distingue «la regola ha guardato e ha
+  approvato» da «la regola non è mai entrata in funzione». Le regole 2 e 4 si autolimitano leggendo
+  il file — la 2 si accende solo se qualcuno dichiara `--replSet`, la 4 solo se qualcuno dichiara
+  `depends_on` — e una guardia scritta male le spegne in silenzio proprio sul file che contava.
+- **Metodo:** si prende il file vero, se ne fa una copia, si introduce **un solo** difetto, si passa
+  la copia allo strumento. Se il messaggio giusto compare, la regola era accesa su quel file. Il
+  difetto viene introdotto con `sed` o con una sostituzione che verifica prima quante occorrenze
+  esistono, così una modifica che non ha attecchito si presenta come un errore invece che come un
+  verde.
+- **Esito, sei difetti e sei messaggi distinti:**
+
+```
+regola 1 — keyfile da bind mount
+  ✗ mongo-rs-1: il keyfile «/keyfile/mongo-keyfile» arriva da «./keyfile», che è un
+    percorso dell'host. […] serve un volume nominato (ADR-0014)
+
+regola 2 — membro senza --keyFile
+  ✗ mongo-rs-1: avvia un membro di replica set senza «--keyFile». Parte lo stesso e resta
+    fuori dalla replica: gli altri lo rifiutano all'handshake […] (ADR-0014)
+
+regola 3 — one-shot con restart che lo rialza
+  ✗ keyfile-init: «mongo-rs-1» lo attende come completato, ma «keyfile-init» non dichiara
+    «restart: "no"». Compose lo rialza appena esce […] (ADR-0023)
+
+regola 4 — service_started verso un mongod
+  ✗ rs-init attende «mongo-rs-1» con «service_started», ma «mongo-rs-1» avvia un mongod:
+    la condizione scatta quando il container esiste, non quando il server risponde […]
+
+regola 4 — service_started verso un one-shot
+  ✗ mongo-rs-1 attende «keyfile-init» con «service_started», ma «keyfile-init» è un
+    one-shot […]: riesce sulla macchina veloce e fallisce in sala […]
+
+difetto vecchio — forma abbreviata senza cache
+  ✗ mongo-rs-1: avvia mongod senza «--wiredTigerCacheSizeGB» […] (ADR-0004)
+```
+
+- **Esito, il file intatto:**
+
+```
+Stack conformi: 1.
+uscita: 0
+```
+
+L'ultima delle sei merita una riga a parte, perché non è una regola nuova: è una regola vecchia che
+non poteva fallire. `avvia_mongod()` riconosceva solo i comandi che cominciano con la parola
+`mongod`; l'entrypoint ufficiale dell'immagine antepone `mongod` da sé quando il primo argomento
+comincia per trattino ([S-022](#s-022)), e nella forma abbreviata — quella che gira in metà degli
+esempi in rete — lo strumento non vedeva un mongod, quindi non pretendeva né la cache né il keyfile.
+Una regola che dorme è peggio di una regola assente: dà la ricevuta senza aver guardato.
+
+- **Conseguenza:** `make stack-check` passa ora entrambi i file Compose e non solo il primo; le
+  quattro regole nuove e la correzione della forma abbreviata sono registrate in
+  [ADR-0042](Decision.md#adr-0042).
+- **Riserve:** sei difetti non sono tutti i difetti. Questa prova stabilisce che ogni regola nuova
+  è **accesa** sul file vero, non che l'insieme delle regole sia completo: un file Compose può
+  restare conforme a tutte e sei e non funzionare comunque, e infatti la conformità statica non ha
+  mai sostituito l'avvio dello stack, che resta il verdetto di [V-024](#v-024) e [V-025](#v-025).
+  Le mutazioni sono state introdotte a mano, una volta sola, e non da un generatore sistematico:
+  non c'è un numero di copertura da citare, c'è un elenco di sei casi che si possono rileggere.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0042
+
+---
+
+<a id="v-027"></a>
+### V-027 — Il ritardo di replica a riposo, e quanto costa davvero chiedere la maggioranza
+
+- **Comandi:** `mongosh --file` di uno script che scrive sul primario e interroga un secondario in
+  un ciclo stretto finché il documento non compare; 10 giri per esecuzione, 3 esecuzioni
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, stack
+  `docker/02-replicaset/compose.yaml`, tre membri con 768 MiB e 0,75 CPU ciascuno, replica formata
+  e `lab.ordini` già caricata, nessun altro carico
+- **Che cosa si voleva sapere:** la pagina del Task 9 parla di «ritardo di replica» e senza un
+  numero non lo mostra. Serviva anche il prezzo di `w: "majority"`, perché il dataset dello stack 02
+  si scrive così e dire «costa di più» senza dire quanto è un'affermazione che non impegna nessuno.
+- **La misura ovvia non funziona, ed è il primo risultato.** `rs.status()` porta `optimeDate` per
+  ogni membro, e la differenza fra primario e secondari è il modo in cui il ritardo si misura in
+  tutti gli esempi che si trovano. Su questo set, a riposo, tre letture a cinque secondi di
+  distanza:
+
+```
+mongo-rs-2:27017  ritardo 0 ms
+mongo-rs-3:27017  ritardo 0 ms
+```
+
+`optimeDate` deriva dal timestamp dell'oplog, che ha **granularità di un secondo**: quello zero non
+significa «nessun ritardo», significa «meno di un secondo, e più in là non vedo». Per un set che
+replica in millisecondi è uno strumento che risponde sempre la stessa cosa.
+
+- **La misura vera:** si scrive sul primario con `w: 1` — che torna appena il primario ha preso la
+  scrittura, quindi il cronometro parte prima che i secondari sappiano qualcosa — e si interroga un
+  secondario in un ciclo finché il documento non compare.
+
+```
+esecuzione 1
+ritardo primario -> secondario     min 1  mediana 1  max 3   media 1.6 ms
+costo di una scrittura w: 1        min 0  mediana 1  max 58  media 7.0 ms
+costo di una w: majority           min 2  mediana 2  max 68  media 8.9 ms
+valori grezzi del ritardo: 3 1 1 1 1 3 2 2 1 1
+
+esecuzione 2
+ritardo primario -> secondario     min 1  mediana 1  max 9   media 1.9 ms
+costo di una scrittura w: 1        min 0  mediana 1  max 9   media 1.6 ms
+costo di una w: majority           min 1  mediana 2  max 3   media 2.0 ms
+valori grezzi del ritardo: 9 1 1 2 1 1 1 1 1 1
+
+esecuzione 3
+ritardo primario -> secondario     min 1  mediana 1  max 46  media 6.2 ms
+costo di una scrittura w: 1        min 0  mediana 1  max 8   media 1.8 ms
+costo di una w: majority           min 2  mediana 2  max 82  media 10.4 ms
+valori grezzi del ritardo: 46 1 3 6 1 1 1 1 1 1
+```
+
+**I due numeri da tenere sono le mediane, e le medie vanno ignorate.** Ritardo mediano **1 ms**;
+`w: 1` mediana **1 ms**, `w: "majority"` mediana **2 ms**. Le medie sono più alte perché ogni
+esecuzione ha esattamente un valore fuori scala — 3, 9, 46 — ed è sempre **il primo giro**: i valori
+grezzi lo mostrano a occhio. Non è ritardo di replica, è la prima connessione al secondario che si
+apre e si autentica. Una media su dieci giri di cui uno è il riscaldamento non descrive niente.
+
+- **Conseguenza:** chiedere la maggioranza costa **un millisecondo in più** che non chiederla, su
+  questa configurazione. Registrato in [ADR-0043](Decision.md#adr-0043) come il motivo per cui il
+  dataset dello stack 02 si scrive con `w: "majority"` senza rimpianti: la garanzia si prende perché
+  è quasi gratis, non perché il prezzo non conti.
+- **Riserve:** e sono la parte importante di questa voce. **I tre membri girano sulla stessa
+  macchina**, dentro la stessa rete Docker: fra loro non c'è una rete vera, c'è un bridge locale.
+  Il costo di `w: "majority"` è, per definizione, un giro fino al secondo membro più veloce — qui
+  vale un millisecondo, su due datacenter varrebbe la latenza fra i due datacenter, e sarebbe il
+  termine dominante. Il numero **non va portato sul palco come se descrivesse la produzione**: va
+  detto insieme alla frase che lo qualifica. Seconda riserva: il ciclo di attesa costa un giro di
+  rete per ogni tentativo, quindi il ritardo misurato ha un pavimento di circa un giro — il ritardo
+  vero potrebbe essere sotto il millisecondo e questo metodo non saprebbe distinguerlo. Terza: il
+  set è a riposo e la collezione di prova è vuota; sotto il carico della demo dell'applicazione i
+  numeri saranno altri, e vanno rimisurati là invece che estrapolati da qui.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0043, ADR-0046, ADR-0112
+
+---
+
+<a id="v-028"></a>
+### V-028 — Lo stack 02 dall'avvio alla prova: 42 controlli, e lo stesso dataset dello stack 01
+
+- **Comandi:** `make up-02` · `make seed-02` · `make reset-02` · `make down-02` · `make smoke-02` ·
+  `docker stop mongo-rs-3`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, immagine
+  `mongo@sha256:b6421fd6d1c5ded6377b397d8983e2f82e2100dc5123332dcfda2065a472be5b` (MongoDB 7.0.40)
+- **Che cosa si voleva sapere:** se i sei bersagli del `Makefile`, il seed dentro `rs-init` e
+  `tools/smoke-replicaset.sh` fanno quello che dicono — e, soprattutto, se lo smoke sa diventare
+  rosso. Un `Superati: 42 · Errori: 0` che non si è mai visto fallire vale quanto il verde del
+  Task 6 prima di [V-026](#v-026).
+- **Esito, l'avvio a freddo:**
+
+```
+up --wait uscita=0
+container "4955bdf1…" exited with status code 0
+compose wait rs-init uscita=0
+
+up --wait ha impiegato   8 secondi
+compose wait ha aggiunto 22 secondi
+totale                   30 secondi
+
+=== log di rs-init ===
+inizializzo il replica set «rs0»
+primario eletto: mongo-rs-1:27017
+utente amministratore «admin» creato
+catena completata
+Carico 50000 ordini in lab.ordini con w: "majority"...
+Caricati 50000 ordini in 6439 ms.
+```
+
+Il divario fra i due comandi è ora di **22 secondi**, non dei 14 misurati in [V-025](#v-025): il
+seed vive dentro `rs-init`, quindi `rs-init` dura di più, quindi il tratto che `up --wait` non copre
+si allunga. Il fenomeno è lo stesso e la conclusione di [ADR-0041](Decision.md#adr-0041) non cambia
+— cambia il numero, ed è il motivo per cui il numero non va imparato a memoria.
+
+- **Esito, l'impronta del dataset:**
+
+```
+✓ impronta di lab.ordini: 50000 124861860.70 150281
+```
+
+Sono **gli stessi tre numeri** dello stack 01 ([V-013](#v-013)), ottenuti da un file diverso, su una
+topologia diversa, con un write concern diverso. È il controllo che tiene insieme i due stack: una
+parte della demo confronta la stessa interrogazione sull'uno e sull'altro, e con dataset diversi il
+confronto sarebbe una recita. I due script di prova sorvegliano la stessa terna, quindi modificarne
+uno solo fa fallire l'altro.
+
+- **Esito, lo smoke sa diventare rosso.** Con `docker stop mongo-rs-3`:
+
+```
+uscita=1
+  ✗ salute di mongo-rs-3: atteso healthy, ottenuto «unhealthy»
+  ✗ PID 1 non è mongod su mongo-rs-3: «»
+  ✗ i tre keyfile differiscono o mancano: 33257423… 33257423…
+  ✗ secondari: atteso 2, ottenuto «1»
+  ✗ membri non in salute: atteso nessuno, ottenuto «mongo-rs-3:27017»
+  ✗ memoria vista da mongo-rs-3 (MiB): atteso 768, ottenuto «»
+  ✗ cache WiredTiger di mongo-rs-3 (byte): atteso 268435456, ottenuto «»
+  ✗ nessuna porta pubblicata per mongo-rs-3:27017
+Superati: 34 · Errori: 8
+```
+
+E, nella stessa esecuzione, le risposte che contano:
+
+```
+  ✓ primari: 1
+  ✓ scrittura con w: majority accettata: true
+  ✓ rilettura da mongo-rs-2 (secondario): 1
+  ✓ impronta di lab.ordini: 50000 124861860.70 150281
+```
+
+Questo è un risultato di progetto, non solo una prova: la prima versione dello script si fermava
+dopo tre righe, perché aveva ereditato da `smoke-standalone.sh` un cancello che esce appena un nodo
+non è sano. Su un'istanza singola quel cancello è giusto — senza il nodo non c'è niente da chiedere.
+Su tre membri butta via esattamente le risposte che uno cerca in quel momento. Il cancello è stato
+ristretto al caso «il container non esiste»:
+
+```
+  ✗ il container mongo-rs-3 non esiste — esegui prima «make up-02»
+Superati: 0 · Errori: 3
+Mancano 3 container su 3: lo stack non è avviato.
+```
+
+- **Esito, `reset-02` conserva il segreto:**
+
+```
+prima:  volumi dati-1 dati-2 dati-3 keyfile   keyfile sha 33257423c039b2a2
+dopo:   volumi keyfile                        keyfile sha 33257423c039b2a2
+```
+
+- **Esito, i tempi degli altri bersagli:** `make up-02` a caldo (dati conservati) 16 s; dopo
+  `reset-02`, cioè con i dati da rifare e il keyfile già buono, 29 s; `make seed-02` su uno stack in
+  piedi ricarica 50 000 documenti in 7 658 ms e stampa da sé le due righe dell'idempotenza
+  («replica set già formato: non lo reinizializzo», «utente amministratore già presente»).
+  `make smoke-02` è stato eseguito quattro volte di fila su stack sano: `Superati: 42 · Errori: 0`
+  tutte e quattro.
+- **Conseguenza:** i sei bersagli, il seed dentro `rs-init` e lo script di prova sono registrati in
+  [ADR-0043](Decision.md#adr-0043).
+- **Riserve:** una macchina sola, Docker Desktop, nessun Linux nativo — vale per i tempi, non per
+  gli esiti. Lo smoke è stato visto fallire su **un** guasto, un membro fermato: gli altri 34
+  controlli restano verdi perché il resto funzionava, non perché siano stati messi alla prova uno
+  per uno come in [V-026](#v-026). Il caso «due membri fermi su tre», che è quello interessante —
+  il set perde la maggioranza e diventa di sola lettura — non è stato provato qui: è la scena del
+  Task 8, e va misurato là. Infine `make down-02` e `make reset-02` sono stati eseguiti su uno stack
+  che non aveva mai perso un volume per errore: che si comportino bene su uno stato sporco non è
+  stato verificato.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0043
+
+---
+
+<a id="v-029"></a>
+### V-029 — Dieci secondi contro mezzo: le due morti di un primario non costano lo stesso
+
+- **Comandi:** `docker kill <primario>` · `db.adminCommand({shutdown: 1})` · un `mongosh` che
+  gira dentro un membro superstite e interroga `hello()` in un ciclo da 20 ms · `docker inspect`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, stack
+  `docker/02-replicaset/compose.yaml`, tre membri sani, `mongo-rs-1` primario per priorità 2,
+  nessun carico applicativo. Tre esecuzioni per scena.
+- **Che cosa si voleva sapere:** quanto dura, cronometrato, l'intervallo fra la caduta del
+  primario e il momento in cui un client può di nuovo scrivere. Il numero serve alla pagina del
+  Task 9 e serve a decidere se la scena regge dal vivo — dieci secondi di schermo fermo davanti a
+  cento persone sono una cosa diversa da due.
+- **Come si è misurato, e perché non nel modo ovvio.** Il cronometro non poteva partire *dopo* il
+  colpo: `mongosh` impiega quasi un secondo ad avviarsi e ad autenticarsi, e quel secondo sarebbe
+  finito dentro la misura. L'osservatore viene quindi avviato **prima**, dentro un membro
+  superstite; quando è connesso e caldo stampa `PRONTO`, e solo allora chi lo ha lanciato uccide il
+  primario e segna `t0`. Il ciclo interroga `hello()` ogni 20 ms fino a vedere un `primary` diverso
+  da quello di partenza.
+
+- **Esito, scena 1 — `docker kill` sul primario:**
+
+```
+giro 1   nuovo primario mongo-rs-3:27017   elezione in  9812 ms
+giro 2   nuovo primario mongo-rs-2:27017   elezione in 10619 ms
+giro 3   nuovo primario mongo-rs-3:27017   elezione in 10943 ms
+stato del container ucciso, tutte e tre le volte:
+  Status=exited  RestartCount=0  ExitCode=137
+```
+
+- **Esito, scena 2 — il processo esce da sé (`shutdownServer()`):**
+
+```
+giro 1   nuovo primario mongo-rs-2:27017   elezione in 574 ms
+giro 2   nuovo primario mongo-rs-2:27017   elezione in 480 ms
+giro 3   nuovo primario mongo-rs-2:27017   elezione in 486 ms
+stato del container terminato:
+  Status=running  RestartCount=1, poi 2, poi 3  ExitCode=0
+```
+
+**Venti volte più veloce, e nel verso che nessuno si aspetta.** Il gesto brutale è quello lento; il
+gesto educato è quello rapido. Il motivo sta nel log ([V-030](#v-030)) e non è misterioso: con
+`docker kill` nessuno avvisa nessuno, quindi i superstiti devono aspettare che scada
+`electionTimeoutMillis` — che vale 10 000 ms, e infatti i tre numeri della scena 1 stanno tutti
+poco sopra i dieci secondi. Con `shutdown` il primario cede il ruolo *e lo dice*: non c'è nessun
+timeout da far scadere, e restano solo i millisecondi del voto.
+
+- **`RestartCount=0` è la seconda metà del risultato.** Su un replica set vale quello che
+  [V-017](#v-017) aveva misurato su un'istanza singola: dopo un `docker kill` la politica
+  `restart: unless-stopped` **non interviene**, perché per il demone quella fermata l'ha voluta un
+  umano. Il container resta `exited` con `ExitCode=137`, e ci resta finché qualcuno non lo riavvia.
+  Dopo lo `shutdown`, invece, `RestartCount` avanza a ogni giro e il membro torna su da sé: è la
+  prova che la politica funziona e che il problema non era mai la politica.
+- **Conseguenza:** le due scene sono due bersagli distinti — `make failover-02` e
+  `make failover-02-termina` — registrati in [ADR-0044](Decision.md#adr-0044). La misura conferma
+  su tre membri quanto [ADR-0034](Decision.md#adr-0034) aveva deciso su uno solo, e le dà il numero
+  che le mancava.
+- **Riserve:** tre membri sulla stessa macchina, senza carico e senza rete vera: i dieci secondi
+  sono dominati da un timeout di configurazione e quindi reggeranno altrove, ma il mezzo secondo
+  della scena 2 no — è tempo di rete e di voto, e su datacenter separati vale di più.
+  `electionTimeoutMillis` non è stato modificato: abbassarlo accorcerebbe la scena 1, e non lo si è
+  fatto apposta, perché il valore predefinito è quello che il pubblico troverà. Le tre esecuzioni
+  per scena sono poche per parlare di distribuzione; bastano per dire che i due ordini di grandezza
+  non si sovrappongono. Infine il primario è sempre stato `mongo-rs-1`: il caso in cui cade un
+  **secondario** — che non provoca nessuna elezione — non è cronometrato qui perché non ha niente
+  da cronometrare.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0044, ADR-0046, ADR-0049, ADR-0050, ADR-0051, ADR-0096, ADR-0097
+
+---
+
+<a id="v-030"></a>
+### V-030 — Le righe di un'elezione, finalmente viste: il voto dura sei millisecondi, il resto è attesa
+
+- **Comandi:** `docker kill <primario>` · `docker logs mongo-rs-2` · filtro per `id` sul JSON
+- **Ambiente:** come [V-029](#v-029). Log del membro **eletto** (`mongo-rs-2`), non di chi ha votato.
+- **Che cosa si voleva sapere:** [ADR-0035](Decision.md#adr-0035) aveva lasciato aperto un debito
+  dichiarato: la sezione sull'elezione di `docs/03-amministrazione/log.md` poggiava solo su
+  [S-044](#s-044), che descrive il meccanismo ma **non nomina una sola riga di log**. Gli `id`
+  andavano inseriti «in `feature/02`, dopo averne vista una». Questa è quella.
+
+- **Esito, la sequenza completa** (orari veri, un'elezione sola):
+
+```
+19:01:47.369  id=21216    REPL      Member is now in state DOWN
+              attr: hostAndPort=mongo-rs-1:27017, heartbeatMessage="Connection refused"
+
+   ... nove secondi, e diciannove ripetizioni di id=23974 «Heartbeat failed after max retries» ...
+
+19:01:56.558  id=4615652  ELECTION  Starting an election, since we've seen no PRIMARY in
+                                    election timeout period
+              attr: electionTimeoutPeriodMillis=10000
+19:01:56.558  id=21438    ELECTION  Conducting a dry run election to see if we could be elected
+              attr: currentTerm=13
+19:01:56.560  id=51799    ELECTION  VoteRequester processResponse
+              attr: dryRun=true, vote="yes", from=mongo-rs-3:27017
+19:01:56.560  id=21444    ELECTION  Dry election run succeeded, running for election
+              attr: newTerm=14
+19:01:56.560  id=6015300  ELECTION  Storing last vote document in local storage for my election
+19:01:56.564  id=51799    ELECTION  VoteRequester processResponse
+              attr: dryRun=false, vote="yes", from=mongo-rs-3:27017
+19:01:56.564  id=21450    ELECTION  Election succeeded, assuming primary role
+              attr: term=14
+19:01:56.564  id=21358    REPL      Replica set state transition
+              attr: newState="PRIMARY", oldState="SECONDARY"
+```
+
+Sul membro che ha **votato** e non è stato eletto compaiono invece solo `id=23980` «Responding to
+vote request», due volte — una per il giro a vuoto e una per quello vero — e `id=21215` «Member is
+in new state».
+
+**Il numero che cambia il racconto: 56.558 → 56.564 sono sei millisecondi.** L'elezione vera —
+giro a vuoto, voto scritto su disco, richiesta di voto, ruolo assunto — dura quanto un battito di
+ciglia. I dieci secondi di [V-029](#v-029) non sono l'elezione: sono l'**attesa prima di
+cominciarla**, e il log lo dice per esteso in un attributo, `electionTimeoutPeriodMillis: 10000`.
+Ancora più preciso: la caduta è **notata subito**, a `19:01:47.369`, tre decimi di secondo dopo il
+colpo, con «Connection refused» scritto nell'attributo. Il set sa che il primario è morto quasi
+istantaneamente e aspetta comunque dieci secondi prima di reagire — perché un membro irraggiungibile
+per un istante non è un membro morto, e indire un'elezione a ogni singhiozzo di rete costerebbe più
+di quello che salva.
+
+- **Conseguenza:** gli `id` entrano in `docs/03-amministrazione/log.md` al Task 12, e la riserva
+  dichiarata da [ADR-0035](Decision.md#adr-0035) può essere tolta. Lo script
+  `tools/failover-replicaset.sh` filtra il log **per questi `id`** e non per il testo dei
+  messaggi, secondo la regola 1 di quell'ADR. Registrato in [ADR-0044](Decision.md#adr-0044).
+- **Riserve:** una sola elezione osservata riga per riga, su un set a tre membri con priorità
+  2/1/1 e senza carico. Il numero di termine (`term`) qui è 13→14 perché il set aveva già subìto
+  altre prove: su un set appena creato sarebbe 1→2, e chi confronta i propri log non deve
+  aspettarsi lo stesso valore. La sequenza è stata letta sul nodo **eletto**: guardare il log del
+  votante fa concludere che l'elezione non lasci quasi traccia, ed è l'errore più facile da
+  commettere. Infine non è stata osservata un'elezione *contesa* — due candidati nello stesso
+  termine, con un `dry run` che fallisce — che è il caso in cui `21438` e `21444` divergono.
+- **Data:** 2026-08-31
+- **Usata da:** ADR-0044, ADR-0046, ADR-0049
+
+---
+
+<a id="v-031"></a>
+### V-031 — La maggioranza persa: il superstite è vivo, è sano, e non scrive più
+
+- **Comandi:** `./tools/failover-replicaset.sh maggioranza` (cioè `make failover-02-maggioranza`)
+  · `docker kill` su due membri, il primario lasciato in piedi · `hello()` interrogato in ciclo
+  stretto dentro il primario stesso · `rs.conf()`, `rs.status()`, e una scrittura provata a mano
+- **Ambiente:** stack `docker/02-replicaset`, `mongo@sha256:b6421f…` (MongoDB 7.0.40), tre membri
+  con priorità 2/1/1, macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0. Nessun carico.
+  Impostazioni lette da `rs.conf()`, non supposte: `heartbeatIntervalMillis: 2000`,
+  `electionTimeoutMillis: 10000`, `heartbeatTimeoutSecs: 10`.
+- **Che cosa si voleva sapere:** [V-029](#v-029) e [V-030](#v-030) misurano due scene che
+  **finiscono bene** — il set perde il primario e se ne dà un altro. Chi guarda ne ricava che un
+  replica set «regge ai guasti», senza mai sentir dire *a quanti*. Il caso che risponde è l'altro:
+  due membri su tre fermi. È dichiarato scoperto in [ADR-0043](Decision.md#adr-0043) e in
+  [ADR-0044](Decision.md#adr-0044), ed è l'unica scena che spieghi perché i membri sono tre.
+
+- **Esito, primo numero — il primario si retrocede da solo, e ci mette nove secondi.** Sei
+  esecuzioni, stesso protocollo: si ferma un secondario (il set non se ne accorge), poi si ferma
+  il secondo e si cronometra da lì.
+
+```
+9 364 · 9 136 · 9 331 · 9 334 · 9 327 · 9 316  ms      mediana 9 329 ms
+```
+
+  Il cronometro gira **dentro il primario**, in una `mongosh` collegata e autenticata prima del
+  colpo, che interroga `hello()` ogni 20 ms e si ferma al primo `isWritablePrimary` diverso da
+  `true`. È la sua stessa retrocessione: nessun altro nodo può datarla, perché non ne resta
+  nessuno.
+
+- **Perché nove e non dieci.** `electionTimeoutMillis` vale 10 000 ms, ma il conto non parte dal
+  colpo: parte dall'**ultimo battito ricevuto da una maggioranza**. I battiti vanno ogni
+  `heartbeatIntervalMillis` = 2 000 ms ([S-044](#s-044) lo dice a parole: «Replica set members
+  send heartbeats (pings) to each other every two seconds»), quindi il colpo cade in un punto
+  qualunque di quella finestra e la misura vale fra 8 e 10 secondi. Le sei esecuzioni stanno in
+  9,1–9,4 s: coerente, e appunto per questo **il numero non va imparato a memoria**.
+
+- **Esito, la sequenza nel log** (esecuzione del 2026-09-01, `id` sul superstite `mongo-rs-1`):
+
+```
+08:28:45.164  id=21216    REPL   Member is now in state DOWN      ← il primo membro fermato
+08:28:47.193  id=21216    REPL   Member is now in state DOWN      ← il secondo, 0,4 s dopo il colpo
+
+   ... nove secondi, e id=23974 «Heartbeat failed after max retries» ripetuto ogni 2 s ...
+
+08:28:56.092  id=21809    REPL   Can't see a majority of the set, relinquishing primary
+08:28:56.092  id=21475    REPL   Stepping down from primary in response to heartbeat
+08:28:56.092  id=21343    REPL   Starting to kill user operations
+08:28:56.093  id=21358    REPL   Replica set state transition
+08:28:56.094  id=5123007  REPL   Interrupting PrimaryOnlyService due to stepDown
+```
+
+  **`id=21809` è la riga che vale la scena**, e dice in inglese esatto quello che si fatica a far
+  passare a parole: non «ho perso la connessione», ma «non vedo una maggioranza, quindi **cedo**».
+  La forma è la stessa di [V-030](#v-030): la caduta è notata in quattro decimi di secondo, e la
+  reazione arriva nove secondi dopo perché è **decisa**, non subita. `id=21343` spiega di
+  passaggio perché le connessioni aperte cadono: le operazioni degli utenti vengono interrotte.
+
+- **Esito, che cosa risponde da lì in poi.**
+
+| richiesta | come | risposta |
+|---|---|---|
+| scrittura | qualunque | `NotWritablePrimary` (code **10107**) — «not primary» |
+| lettura | `mongosh --host localhost`, connessione **diretta** | `lab.ordini` → 50 000 documenti |
+| lettura | URI con `replicaSet=rs0`, `readPreference` predefinita | `MongoServerSelectionError` |
+| lettura | URI con `replicaSet=rs0`, `readPreference=secondaryPreferred` | 50 000 documenti |
+
+  Il superstite si presenta come `isWritablePrimary=false, secondary=true, primary=nessuno`, e
+  `rs.status()` lo dà `SECONDARY health=1` con gli altri due «(not reachable/healthy)». La
+  differenza fra le due letture non è un capriccio: [S-045](#s-045) documenta che `mongosh`
+  aggiunge `directConnection=true` da sé *a meno che* la stringa non contenga `replicaSet`. Con
+  la connessione diretta si parla a **quel** nodo e si legge; con l'URI del replica set si chiede
+  al driver di trovare un primario, e un primario non c'è. **Chi prova la demo con `mongosh
+  --host` conclude che il set funziona ancora.** L'applicazione, no.
+
+- **Esito, il rientro.** Riavviando i due membri fermati, il primario torna dopo 9 207 · 12 348 ·
+  12 425 ms: il tempo di far ripartire due `mongod` e di rieleggere. Nessuno lo fa da sé — i
+  container sono `exited` dopo un `docker kill` ([V-017](#v-017)) — e il gesto è
+  `./tools/reset-demo.sh 02`, che li rialza, aspetta le priorità e ripulisce la collezione di
+  scarto lasciata dalla scena.
+
+- **Conseguenza:** la scena entra in `tools/failover-replicaset.sh` come terzo bersaglio e nel
+  `Makefile` come `failover-02-maggioranza`; i numeri vanno in `docs/02-architetture/replica-set.md`
+  al Task 9. Registrata in [ADR-0045](Decision.md#adr-0045). Il debito dichiarato in
+  [ADR-0043](Decision.md#adr-0043) e in [ADR-0044](Decision.md#adr-0044) è saldato.
+- **Riserve:** il messaggio d'errore dell'URI di replica set è, alla lettera,
+  `MongoServerSelectionError: getaddrinfo ENOTFOUND mongo-rs-2` — un errore di **risoluzione del
+  nome**, non di selezione del server. È un artefatto dei container: un container fermo sparisce
+  dal DNS della rete Compose, mentre su macchine vere il nome risolverebbe e la connessione
+  verrebbe rifiutata, con un testo diverso. Chi riconosce la situazione dal testo dell'errore
+  sbaglierà: è la stessa lezione di [ADR-0035](Decision.md#adr-0035), un piano più in là. Poi:
+  la finestra 8–10 s è dedotta dai due parametri e corroborata da sei valori che stanno tutti in
+  9,1–9,4 s, ma gli estremi non sono stati osservati — un colpo che cadesse subito dopo un battito
+  dovrebbe dare ~8 s, e non è capitato. La scena ferma sempre **due secondari**, lasciando in
+  piedi il primario; il caso simmetrico — primario più un secondario, con un secondario solo
+  superstite — non è cronometrato, perché lì non c'è nessuna retrocessione da datare. Infine
+  «ecco perché i membri sono tre e non due» resta un **ragionamento** sulla stessa regola, non una
+  misura: un set a due membri non è stato costruito, e la sua maggioranza sarebbe 2, cioè zero
+  guasti tollerati in scrittura.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0045, ADR-0046, ADR-0051, ADR-0052, ADR-0096, ADR-0097
+
+---
+
+<a id="v-032"></a>
+### V-032 — Il container lavora, `docker logs` tace: la cattura si congela quando il demone riparte
+
+- **Comandi:** `docker logs <membro>` · `docker inspect --format '{{.State.StartedAt}}'` ·
+  `db.adminCommand({ getLog: "global" })` · un container creato apposta come controllo
+- **Ambiente:** Docker Desktop 29.7.2 su macOS 26.6.2 arm64. Il demone era stato **fermo tutta la
+  notte** — la sessione si è aperta con `Cannot connect to the Docker daemon` — ed è stato
+  riavviato la mattina del 2026-09-01. I tre membri dello stack 02 sono tornati su da soli, come
+  prescrive `restart: unless-stopped`, e risultavano `healthy`.
+- **Che cosa si voleva sapere:** niente. È stata trovata cercando dell'altro, ed è il motivo per
+  cui è finita qui: `tools/failover-replicaset.sh` legge il log con `docker logs`, e in queste
+  condizioni non avrebbe stampato **niente**, senza dire perché.
+
+- **Esito, il fatto nudo.** Su `mongo-rs-1`, alle 08:12 del 2026-09-01:
+
+```
+docker inspect  → StartedAt = 2026-09-01T08:05:55.098Z   RestartCount = 0
+docker logs     → 13 944 righe, l'ultima delle quali del 2026-08-31T19:19:50.378
+getLog global   → totalLinesWritten = 2 548, righe da 08:08:31.096 a 08:12:03.430
+```
+
+  Il container è partito **stamattina**, mongod ha scritto **2 548 righe** da allora, e
+  `docker logs` non ne mostra una. Non dà errore: dà silenzio, che è la forma peggiore, perché
+  chi legge conclude che l'evento non ha lasciato traccia.
+
+- **Esito, il controllo.** Un container creato in quel momento (`docker run -d alpine …`) è stato
+  catturato normalmente. Quindi non è il demone a non catturare: è la cattura dei container
+  **preesistenti** al suo riavvio a non ripartire.
+
+- **Esito, e non è nemmeno stabile.** Ricontrollando un'ora dopo, la cattura era ripresa **da
+  sola** su due membri su tre, lasciando un buco:
+
+| membro | ultima riga di ieri | prima riga di oggi | buco |
+|---|---|---|---|
+| `mongo-rs-1` | 2026-08-31T19:19:50.378 | 2026-09-01T08:15:23.610 | 9 min 28 s dall'avvio |
+| `mongo-rs-2` | 2026-08-31T19:19:50.378 | 2026-09-01T08:20:01.936 | ripresa dopo un riavvio |
+| `mongo-rs-3` | 2026-08-31T19:20:05.557 | *nessuna* | tutta la mattina |
+
+  Le righe del buco non sono ricomparse più: per chi legge `docker logs`, sono perse. Su
+  `mongo-rs-3` la cattura è tornata solo dopo che `reset-demo.sh` ne ha ricreato l'esecuzione.
+  Nessun campanello: `docker ps` dice `healthy`, `docker inspect` dice `running`, l'healthcheck
+  passa. Lo stato del container non racconta niente dello stato del suo log.
+
+- **Conseguenza:** `tools/failover-replicaset.sh` non si fida più. Prima di leggere confronta
+  l'ultima riga catturata con l'istante di avvio del container: se il log è più vecchio
+  dell'avvio non può essere di quella esecuzione, e le righe si chiedono a **mongod**, che le
+  tiene in memoria e non dipende da Docker. Il confronto è coperto da
+  `tools/tests/test_failover_log.py`, costruito sugli istanti veri di questa verifica —
+  perché un rilevatore la cui condizione di scatto si presenta di rado può rompersi senza che
+  nessuno se ne accorga, fino alla sera in cui serve. Registrata in
+  [ADR-0045](Decision.md#adr-0045).
+- **Riserve:** **la causa non è stata identificata**, e nemmeno il motivo per cui la cattura
+  riprende. Un solo riavvio del demone osservato, non provocato apposta e non riprodotto: questa
+  voce dice *che succede*, non *quando*. Osservata su Docker Desktop, dove fra il container e il
+  file di log c'è una macchina virtuale in più; su un `dockerd` nativo di Linux il meccanismo è
+  diverso e non è stato provato. [S-033](#s-033) documenta il driver `json-file` e non nomina
+  questo caso — la pagina parla di rotazione e di dimensioni, mai di una cattura che si ferma.
+  Infine il ripiego ha un orizzonte suo: `getLog: "global"` è un anello di **1 024 righe**
+  (misurato: `totalLinesWritten` 2 548, `log.length` 1 023), quindi su un nodo chiacchierone le
+  righe che interessano possono esserne già uscite. Lo stesso vale, dall'altro lato, per il
+  `tail -600` con cui si legge `docker logs`: un ciclo d'attesa che riapre una `mongosh` ogni
+  mezzo secondo ha prodotto circa 800 righe di `NETWORK` e `ACCESS` in pochi minuti, e ha spinto
+  fuori dalla finestra proprio le righe di `REPL` che si cercavano.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0045, ADR-0052
+
+---
+
+<a id="v-033"></a>
+### V-033 — La controprova di V-016: dodicimila scritture confermate, il primario ucciso, zero perse
+
+- **Comandi:** uno scrittore `mongosh` collegato con l'URI del replica set che inserisce documenti
+  uno alla volta con `w: "majority"` e stampa l'`_id` **dopo** la conferma del server; a metà corsa
+  `docker kill` sul primario; a membro rialzato, si verifica quali dei confermati esistano ancora,
+  leggendo con `readConcern: "majority"`
+- **Ambiente:** stack `docker/02-replicaset`, MongoDB 7.0.40, tre membri con priorità 2/1/1, macOS
+  26.6.2 arm64, Docker 29.7.2. Lo scrittore gira **dentro un membro che non verrà ucciso**, così il
+  colpo non porta via anche il cliente. Due esecuzioni da 45 secondi.
+- **Che cosa si voleva sapere:** [ADR-0032](Decision.md#adr-0032) rimanda esplicitamente a
+  `feature/02` il confronto sulla perdita di dati, e la pagina dell'istanza singola ha un numero che
+  fa male: **100 scritture confermate al client e sparite** dopo un `SIGKILL`, con la write concern
+  predefinita ([V-016](#v-016)). Il confronto senza il numero gemello è una discussione; con il
+  numero gemello è una misura.
+
+- **Esito, il numero gemello.**
+
+| | istanza singola ([V-016](#v-016)) | replica set, `w: "majority"` |
+|---|---:|---:|
+| scritture confermate al client | 41 558 | 12 901 |
+| **confermate e perdute** | **100** | **0** |
+
+  E non è che siano sopravvissute «quasi tutte»: nella collezione ci sono **12 902** documenti e il
+  massimo `n` scritto è **12 902**, quindi l'insieme è completo, senza buchi. Prima esecuzione,
+  senza istanti nei documenti: 11 937 confermate, 11 937 sopravvissute, zero errori.
+
+- **Esito, che cosa ha visto l'applicazione.** Quasi niente, ed è il secondo risultato. Su 12 902
+  tentativi, **un solo errore**:
+
+```
+ERR 2698 connection 1 to 172.18.0.3:27017 closed
+```
+
+  Poi lo scrittore è ripartito da sé, senza che nessuno lo toccasse. Il prezzo è stato una **pausa**,
+  e si vede negli istanti che il client scrive dentro i documenti:
+
+```
+n=2697  t=08:49:50.524
+n=2698  t=08:49:50.527   ← l'errore, e il colpo: docker kill alle 08:49:50
+n=2699  t=08:49:50.669
+n=2700  t=08:50:00.824   ← 10 155 ms dopo
+```
+
+  **Varco massimo 10 155 ms**; i quattro salti successivi per grandezza sono 142, 132, 99 e 92 ms.
+  Un'unica `insertOne` è rimasta appesa dieci secondi dentro il driver e poi è riuscita: è
+  l'elezione di [V-029](#v-029) vista dal lato dell'applicazione, che non sa niente di elezioni e si
+  limita ad aspettare. Su 45 secondi di corsa, 12 902 scritture: circa **287 al secondo**, con dieci
+  secondi buttati in mezzo.
+
+- **Esito, il caso incerto — e vale il resto della voce.** Il documento `n=2698`, quello per cui il
+  client ha ricevuto un **errore**, nel database **c'è**. Scritto e mai confermato. È l'immagine
+  speculare esatta di [V-016](#v-016): là il client aveva in mano un `acknowledged: true` per dati
+  che non esistevano, qui ha in mano un errore per dati che esistono. In tutti e due i casi ciò che
+  il client crede non coincide con ciò che il database ha, e la differenza fra i due è che **questo
+  si sopravvive** — a patto che la scrittura si possa rifare senza danno. Un'applicazione che
+  reagisce a un errore riscrivendo, e la cui riscrittura non è idempotente, qui si fa un duplicato.
+- **Conseguenza:** chiude il rimando di [ADR-0032](Decision.md#adr-0032). Il numero va in
+  `docs/02-architetture/replica-set.md` accanto al suo gemello, registrato in
+  [ADR-0046](Decision.md#adr-0046).
+- **Riserve:** **la quasi invisibilità del guasto non è merito della replica, è merito dei
+  retryable write**, che nel driver sono attivi per impostazione predefinita: senza di essi
+  l'applicazione avrebbe visto una raffica di errori e avrebbe dovuto decidere lei che fare. La
+  prova con `retryWrites=false` **non è stata fatta**, e sarebbe la naturale da aggiungere. Poi:
+  gli istanti nei documenti li scrive il **client** quando costruisce il documento, cioè all'inizio
+  della chiamata — il varco fra due istanti consecutivi è quindi la durata della chiamata in mezzo,
+  che è proprio quello che si voleva, ma è un orologio di client e non del server. Due esecuzioni
+  sole. In tutte e due è stato ucciso il **primario mentre gli altri due erano sani**, cioè con la
+  maggioranza superstite: non dice niente sul caso di [V-031](#v-031), dove le scritture si fermano
+  del tutto. E `w: "majority"` qui vuol dire «due container su tre sullo stesso portatile»: la
+  garanzia è la stessa che si avrebbe altrove, il costo no ([V-027](#v-027)).
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0046
+
+---
+
+<a id="v-034"></a>
+### V-034 — La finestra dell'oplog dello stack 02: quindici ore dentro due gigabyte
+
+- **Comandi:** `rs.printReplicationInfo()` e `db.getSiblingDB("local").oplog.rs.stats()` sul
+  primario, dopo una giornata di prove sullo stack.
+- **Ambiente:** stack `docker/02-replicaset`, MongoDB 7.0.40, tre membri con priorità 2/1/1,
+  macOS 26.6.2 arm64, Docker 29.7.2.
+- **Che cosa si voleva sapere:** l'oplog è il pezzo che rende possibile il backup a caldo coerente,
+  ed è **finito**. Prima di scrivere una pagina che dice «attenzione alla finestra» serviva sapere
+  quanto è larga la finestra qui.
+- **Esito:**
+
+```text
+configuredLogSizeMB : 2032.35
+usedMB              :  120.39
+timeDiff            : 54339 s   →  15,09 ore
+tFirst              : Mon Aug 31 2026 18:43:29 GMT+0000
+tLast               : Tue Sep 01 2026 09:49:08 GMT+0000
+```
+
+  Due gigabyte di oplog, riempiti per il 6 %, che coprono **quindici ore** di storia. I 2 032 MB non
+  sono stati scelti da nessuno: sono il 5 % dello spazio libero al primo avvio, che è il valore
+  predefinito dell'immagine.
+- **Conseguenza:** la finestra dell'oplog di questo stack è troppo larga perché un dump la superi.
+  Per mostrare il fallimento è servita un'istanza usa-e-getta ([V-036](#v-036)).
+- **Riserve:** **le quindici ore non sono una proprietà dello stack, sono una proprietà del
+  traffico.** La stessa configurazione sotto la scrittura di [V-036](#v-036) — documenti da 100 KB —
+  scenderebbe a minuti. Il numero da guardare non è mai la dimensione dell'oplog: è
+  `timeDiff`, e va guardato **sotto il carico vero**. Misura singola, su una macchina che quel
+  giorno faceva quasi solo prove di failover.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0047
+
+---
+
+<a id="v-035"></a>
+### V-035 — Un dump a caldo mentre si scrive, e due restore dello stesso file: sette documenti di differenza
+
+- **Comandi:** uno scrittore `mongosh` che inserisce in `lab.movimenti` per 30 secondi, un documento
+  alla volta, con un istante `t` messo dal client; a metà corsa, sul primario,
+  `mongodump --oplog --out /tmp/dump-02` con l'URI del replica set e l'autenticazione di
+  amministratore; poi, due volte, `lab.dropDatabase()` seguito da `mongorestore` sullo stesso dump —
+  la prima senza `--oplogReplay`, la seconda con.
+- **Ambiente:** stack `docker/02-replicaset`, MongoDB 7.0.40, `mongodump`/`mongorestore` 100.18.0
+  presi da `/usr/bin` dentro l'immagine pinnata (non installati a parte), macOS 26.6.2 arm64,
+  Docker 29.7.2. Il dataset di partenza è quello di `reset-demo.sh 02`: `lab.ordini`, 50 000
+  documenti, impronta `50000 124861860.70 150281`.
+- **Che cosa si voleva sapere:** `--oplog` promette coerenza a un punto nel tempo. Serviva sapere
+  **quale** punto, e quanto valga davvero la riproduzione dell'oplog: se la differenza fra i due
+  restore fosse zero, l'opzione sarebbe cerimonia.
+- **Esito, il dump.** È durato **50 ms**, dalle 09:51:48.369 alle 09:51:48.419, e in quel mezzo
+  decimo di secondo le scritture non si sono fermate:
+
+```text
+lab.movimenti     733 documenti
+lab.ordini      50 000 documenti
+oplog catturato     12 voci
+```
+
+  Lo scrittore ha messo giù **6 107** documenti in tutto, dalle 09:51:44.079 alle 09:52:14.054.
+  Contati sull'istante scritto dal client: **732** esistevano all'inizio del dump, **741** alla fine,
+  **5 366** sono arrivati dopo che il dump era finito.
+- **Esito, i due restore.** Stesso file, stessa destinazione svuotata prima con `dropDatabase()`:
+
+| | senza `--oplogReplay` | con `--oplogReplay` |
+|---|---:|---:|
+| documenti ripristinati | 50 733 | 50 733 |
+| falliti | 0 | 0 |
+| impronta di `lab.ordini` | `50000 124861860.70 150281` ✓ | `50000 124861860.70 150281` ✓ |
+| `lab.movimenti` | **733** | **740** |
+| ultimo movimento | `n=733  t=09:51:48.370` | `n=740  t=09:51:48.388` |
+
+  La seconda esecuzione dice a voce alta che cosa ha fatto in più: `replaying oplog`, poi
+  `applied 12 oplog entries`. **Sette documenti**: è quanto vale la riproduzione dell'oplog su un
+  dump durato cinquanta millisecondi. Su un dump che dura mezz'ora vale mezz'ora di scritture.
+- **Esito, il punto nel tempo — ed è la ragione della voce.** Il restore completo si ferma a **740**;
+  alla fine del dump i documenti erano **741**. Il punto di ripristino **non è l'ultima riga di log
+  del comando**: è l'istante dell'ultima voce di oplog catturata, e cade **dentro** l'esecuzione. Un
+  documento scritto fra la cattura dell'ultima voce e il ritorno del comando è nel database e non è
+  nel backup. Nessuna delle due esecuzioni ha ricostruito gli indici — `no indexes to restore for
+  collection lab.ordini` — perché il dataset di demo non ne ha oltre a `_id_`.
+- **Conseguenza:** la pagina `docs/03-amministrazione/backup-restore.md` può dire «coerente a un
+  punto nel tempo» indicando **quale** punto, e può quantificare `--oplogReplay` invece di
+  raccomandarlo. Registrato in [ADR-0047](Decision.md#adr-0047).
+- **Riserve:** gli istanti `t` li scrive il **client** quando costruisce il documento, non il server
+  quando lo applica: il confine 740/741 è approssimato al millisecondo di due orologi diversi, non
+  dimostrato confrontando i timestamp dell'oplog. Una sola esecuzione. Il dump è girato **sul
+  primario**: `--readPreference=secondary` toglierebbe carico alla sorgente e **non è stato
+  provato**. Il dump è completo — `--oplog` lo impone ([S-011](#s-011)) — e quindi contiene
+  `admin/system.users.bson`: il restore ha stampato `restoring users from …`, il che significa che
+  **il file di backup vale quanto le credenziali del database** e va trattato come tale
+  ([ADR-0014](Decision.md#adr-0014)). Nessun restore è stato fatto su uno stack **diverso** da
+  quello di origine, che è il caso vero di un ripristino.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0047
+
+---
+
+<a id="v-036"></a>
+### V-036 — L'oplog che rotola sotto il dump: «oplog overflow», uscita 1, e 1,8 GB di BSON senza `oplog.bson`
+
+- **Comandi:** un'istanza usa-e-getta con l'immagine pinnata, senza keyfile e senza autenticazione,
+  avviata con `--replSet mini --oplogSize 1 --bind_ip_all`; carico di dati; uno scrittore che
+  inserisce documenti da 100 KB senza sosta; `mongodump --oplog --out /tmp/dump-mini` durante la
+  scrittura. Il container è stato rimosso con `docker rm -f -v` a prova finita.
+- **Ambiente:** `mongo@sha256:b6421fd6…`, MongoDB 7.0.40, macOS 26.6.2 arm64, Docker 29.7.2.
+  Istanza separata: lo stack del lab ha una finestra di **15 ore** ([V-034](#v-034)) e non può
+  mostrare questo guasto.
+- **Che cosa si voleva sapere:** `--oplog` funziona finché l'oplog conserva le voci prodotte durante
+  il dump. Se il dump dura più della finestra, la garanzia salta. Il piano di questa feature chiede
+  di mostrarlo **mentre fallisce**, non di raccontarlo.
+- **Esito, il primo tentativo — fallito, e istruttivo.** Con `--oplogSize 1` l'oplog **non** si è
+  fermato a 1 MB: è arrivato a **429,86 MB** con una finestra di **131 secondi**, e il dump da
+  2,2 GB, durato 4,8 secondi, è riuscito con 857 voci catturate. Il motivo sta nel log del server:
+
+```text
+id 22402  OplogCapMaintainerThread-local.oplog.rs
+"WiredTiger record store oplog truncation finished"
+pinnedOplogTimestamp: 09:59:44   numRecords: 1835   dataSize: 188 494 870   durationMillis: 3751
+```
+
+  Il taglio dell'oplog è limitato da un **timestamp bloccato**: WiredTiger non può buttare via voci
+  che servirebbero a ripartire dopo un crash, e quel confine è l'ultimo checkpoint. I checkpoint,
+  per impostazione predefinita, sono ogni **60 secondi**. Ne segue una conseguenza che vale la pena
+  scrivere: **la finestra dell'oplog non può scendere sotto l'intervallo di checkpoint, per quanto
+  si rimpicciolisca l'oplog.** Un oplog da 1 MB con checkpoint ogni minuto tiene comunque un minuto
+  di storia, e centinaia di megabyte.
+- **Esito, il secondo tentativo — il fallimento vero.** Stessa istanza, avviata in più con
+  `--syncdelay 1`, cioè un checkpoint al secondo. La finestra è crollata dove serviva:
+
+```text
+oplog configurato MB = 1.00
+oplog usato MB       = 27.63
+finestra secondi     = 1
+voci nell'oplog      = 287
+```
+
+  Con 1,5 GB da scaricare e la scrittura in corso, il dump ha impiegato **3,4 secondi** — tre volte
+  la finestra — ed è finito così:
+
+```text
+10:03:43.261  writing `lab.grandi` to /tmp/dump-mini/lab/grandi.bson
+10:03:46.673  done dumping `lab.grandi` (15000 documents)
+10:03:46.678  Failed: oplog overflow: mongodump was unable to capture all new oplog entries during execution
+USCITA=1
+```
+
+- **Esito, il pezzo che si dimentica.** Il comando è fallito **dopo** aver scritto tutto:
+
+```text
+/tmp/dump-mini/lab/grandi.bson     1 536 555 000 byte
+/tmp/dump-mini/lab/disturbo.bson     320 525 373 byte
+/tmp/dump-mini/oplog.bson                  assente
+/tmp/dump-mini/prelude.json                assente
+```
+
+  Un dump riuscito ha `oplog.bson` e `prelude.json` in cima alla cartella; questo ha 1,8 GB di BSON
+  e nessuno dei due. Sul disco resta qualcosa che **assomiglia** a un backup, pesa come un backup, e
+  non è coerente a nessun punto nel tempo. L'unico segnale è il codice di uscita **1**: uno script
+  di backup che non lo controlla conserva l'oggetto sbagliato.
+- **Conseguenza:** il fallimento entra nella pagina con il suo testo esatto, insieme alla regola che
+  ne discende — si controlla il codice di uscita, e si controlla che `oplog.bson` esista. Registrato
+  in [ADR-0047](Decision.md#adr-0047).
+- **Riserve:** **la prova è forzata, e va detto come.** Nessuno mette in produzione un oplog da 1 MB
+  con un checkpoint al secondo: il caso vero è l'opposto — un oplog normale e un dump che dura ore.
+  Qui i due termini sono stati compressi per farli stare in tre secondi; il meccanismo e il messaggio
+  d'errore sono quelli veri, la scala no. `--syncdelay` è un parametro che il manuale sconsiglia di
+  toccare, ed è stato toccato **solo** su un'istanza usa-e-getta, mai sullo stack del lab. Infine:
+  **la pagina di `mongodump` non nomina questo guasto.** Elenca le combinazioni vietate e le
+  operazioni che lo fanno fallire ([S-011](#s-011)), ma non dice da nessuna parte che l'oplog possa
+  rotolare via sotto il dump. Il limite è reale, il messaggio d'errore esiste nel programma, e la
+  fonte primaria tace.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0047, ADR-0126
+
+---
+
+<a id="v-037"></a>
+### V-037 — `--oplogReplay` con `--nsInclude`: il rifiuto arriva prima di toccare i dati
+
+- **Comando:** `mongorestore --oplogReplay --nsInclude 'lab.*' /tmp/dump-02` sullo stack del lab,
+  sullo stesso dump completo di [V-035](#v-035).
+- **Ambiente:** stack `docker/02-replicaset`, `mongorestore` 100.18.0.
+- **Che cosa si voleva sapere:** [S-059](#s-059) dichiara che `--oplogReplay` non convive con le
+  opzioni che restringono l'ambito del restore. Restava da sapere **quando** se ne accorge: prima o
+  dopo aver scritto.
+- **Esito:**
+
+```text
+Failed: cannot use --oplogReplay with includes specified
+0 document(s) restored successfully. 0 document(s) failed to restore.
+USCITA=1
+```
+
+  Prima. **Zero documenti** toccati: il controllo è a monte, non a metà strada.
+- **Conseguenza:** il limite dichiarato dalla fonte si può mostrare in due righe, e la coppia
+  «dump completo obbligatorio / restore completo obbligatorio» diventa una regola verificata invece
+  che una nota a piè di pagina. Registrato in [ADR-0047](Decision.md#adr-0047).
+- **Riserve:** provata **solo** la combinazione con `--nsInclude`. Le altre cinque dell'elenco —
+  `--db`, `--collection`, `--nsExclude`, `--nsFrom`, `--nsTo` — non sono state provate, e il
+  messaggio d'errore potrebbe essere diverso. Non è stato provato il caso simmetrico e più insidioso:
+  un restore **parziale senza** `--oplogReplay`, che non dà nessun errore e produce un ripristino
+  incoerente in silenzio.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0047
+
+---
+
+<a id="v-038"></a>
+### V-038 — `--keyFile` senza `--auth`, e dove vivono gli utenti di un replica set
+
+- **Comandi:** `docker inspect` sul comando di `mongo-rs-1`; `stat` sul keyfile dentro il
+  container; una sessione `mongosh` **senza credenziali** su `localhost:27017` da dentro il membro;
+  poi, autenticati, lettura di `admin.system.users` sui tre membri, creazione di un utente sul
+  primario, rilettura sui secondari, tentativo di creazione **su un secondario** e su `local`.
+- **Ambiente:** stack `docker/02-replicaset` in esercizio, mongod 7.0.40, replica `rs0`.
+- **Che cosa si voleva sapere:** quattro cose che la pagina della sicurezza deve poter affermare.
+  Che `--keyFile` attivi il controllo degli accessi **da solo** ([S-002](#s-002)); che l'eccezione
+  localhost sia davvero chiusa dopo il primo utente ([S-006](#s-006)); se l'utente interno dei
+  membri sia un documento da qualche parte; e se in un replica set esistano utenti «locali a un
+  nodo», che è la distinzione che [ADR-0026](Decision.md#adr-0026) intesta a quella pagina.
+- **Esito:**
+
+```text
+comando:  ["mongod","--replSet","rs0","--keyFile","/keyfile/mongo-keyfile",
+           "--bind_ip_all","--wiredTigerCacheSizeGB","0.25"]
+keyfile:  /keyfile/mongo-keyfile  400  mongodb:mongodb  1024 byte
+          16 righe, 1008 caratteri base64 senza gli a capo
+utente del processo: uid=999(mongodb) gid=999(mongodb)
+```
+
+  Nel comando **`--auth` non c'è**. Da una connessione senza credenziali, sullo stesso loopback a
+  cui l'eccezione localhost si applicherebbe:
+
+```text
+hello()                            -> OK: setName=rs0 primary=mongo-rs-1:27017
+admin.system.users.countDocuments  -> Unauthorized: Command aggregate requires authentication
+replSetGetStatus                   -> Unauthorized: Command replSetGetStatus requires authentication
+lab.ordini.countDocuments          -> Unauthorized: Command aggregate requires authentication
+createUser                         -> Unauthorized: Command createUser requires authentication
+```
+
+  Autenticati, i tre membri dicono la stessa cosa — un utente, e l'utente interno **non è un
+  documento**:
+
+```text
+mongo-rs-1 (primario)  utenti=1  __system=0   admin.admin  ruoli=[{"role":"root","db":"admin"}]
+mongo-rs-2 (secondario) utenti=1 __system=0   admin.admin  ruoli=[{"role":"root","db":"admin"}]
+mongo-rs-3 (secondario) utenti=1 __system=0   admin.admin  ruoli=[{"role":"root","db":"admin"}]
+```
+
+  Creando `lettore-demo` sul primario, i due secondari lo vedono subito (`utenti=2`, stessi ruoli).
+  I due tentativi che dovevano fallire falliscono:
+
+```text
+createUser su un secondario   -> NotWritablePrimary: not primary
+createUser sul database local -> BadValue: Cannot create users in the local database
+```
+
+  L'utente di prova è stato rimosso; i tre membri sono tornati a `utenti=1`.
+- **Conseguenza:** quattro affermazioni della pagina della sicurezza sono misurate invece che
+  dedotte. La quarta è quella che chiude il debito di [ADR-0026](Decision.md#adr-0026): in un
+  replica set **un utente locale a un nodo non esiste**, e non per convenzione — MongoDB rifiuta di
+  crearne uno nell'unico database che non viene replicato. Registrato in
+  [ADR-0048](Decision.md#adr-0048).
+- **Riserve:** il keyfile misura **1024 byte** sul disco, che è esattamente il massimo dichiarato da
+  [S-005](#s-005) per la lunghezza di una chiave («between 6 and 1024 characters»); tolti i sedici
+  a capo che `openssl` inserisce, i caratteri base64 sono **1008**. Quale dei due numeri MongoDB
+  confronti con il limite **non è scritto** nella fonte: la ricetta ufficiale
+  `openssl rand -base64 756` produce un file che sta al confine con entrambe le letture, e questa
+  verifica non le distingue. Non è stato provato che cosa succeda con un keyfile più lungo. Non è
+  stato provato il caso dello sharded cluster, dove l'eccezione localhost «applies to each shard
+  individually as well as to the cluster as a whole» ([S-006](#s-006)) e dove gli utenti locali a
+  uno shard esistono davvero: è materia di `feature/03`.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0048
+
+---
+
+<a id="v-039"></a>
+### V-039 — `clusterAuthMode` è a senso unico, e la strada passa da `tlsMode`
+
+- **Comandi:** quattro avvii di `mongod` con `--clusterAuthMode` e senza il resto, per vedere dove
+  si ferma; poi un'istanza avviata come prescrive la procedura di migrazione
+  ([S-062](#s-062)) — keyfile, certificato autofirmato, `--tlsMode allowTLS`,
+  `--clusterAuthMode sendKeyFile` — su cui la sequenza è stata eseguita con `setParameter`, prima
+  nell'ordine sbagliato e poi in quello documentato.
+- **Ambiente:** istanze usa-e-getta con l'immagine pinnata (mongod 7.0.40), rimosse con
+  `docker rm -f -v`. Lo stack del lab non è stato toccato: su di esso è stato solo **letto**
+  `getParameter` → `clusterAuthMode: 'keyFile'`, `tlsMode: 'disabled'`.
+- **Che cosa si voleva sapere:** [S-062](#s-062) elenca i passi ma non dice se siano reversibili, e
+  presenta i due `setParameter` del secondo passo nello stesso blocco senza dire che l'ordine conti.
+  Prima di scrivere «si può fare a caldo» in una pagina, conviene averlo fatto.
+- **Esito.** Gli avvii, tutti con **uscita 1**:
+
+```text
+--clusterAuthMode x509         BadValue: need to enable TLS via the tlsMode flag
+--clusterAuthMode sendX509     BadValue: need to enable TLS via the tlsMode flag
+--clusterAuthMode sendKeyFile  BadValue: need to enable TLS via the tlsMode flag
+--clusterAuthMode keyFile      Location5579201: Unable to acquire security key[s]
+  (preceduto da  id 20254  «Read security file failed»  InvalidPath)
+```
+
+  Il terzo è quello che sorprende: **anche il modo di transizione, quello che continua a mandare il
+  keyfile, si rifiuta di partire senza TLS.** La migrazione non comincia da X.509, comincia da TLS.
+
+  Sull'istanza configurata a dovere, partendo da `[sendKeyFile / allowTLS]`, l'ordine sbagliato:
+
+```text
+clusterAuthMode=x509         -> BadValue: Illegal state transition for clusterAuthMode,
+                                need to enable SSL for outgoing connections
+clusterAuthMode=sendX509     -> BadValue: (idem)
+clusterAuthMode=keyFile      -> Location5579202: Illegal state transition for clusterAuthMode
+                                from 'sendKeyFile' to 'keyFile'
+```
+
+  E l'ordine documentato, sulla stessa istanza ripartita da capo:
+
+```text
+partenza: [sendKeyFile / allowTLS]
+  tlsMode=preferTLS            [sendKeyFile / allowTLS]   ->  accettato
+  clusterAuthMode=sendX509     [sendKeyFile / preferTLS]  ->  accettato
+  tlsMode=requireTLS           [sendX509 / preferTLS]     ->  accettato
+  clusterAuthMode=x509         [sendX509 / requireTLS]    ->  accettato
+arrivo:   [x509 / requireTLS]     il nodo scrive: true     stato: PRIMARY
+```
+
+  Nessun riavvio, nessuna interruzione: il nodo è rimasto primario e scrivibile per tutta la
+  sequenza. Indietro non si torna:
+
+```text
+clusterAuthMode=sendX509  [x509]        -> Location5579202: Illegal state transition
+                                           for clusterAuthMode from 'x509' to 'sendX509'
+clusterAuthMode=keyFile   [x509]        -> Location5579202: (idem, verso 'keyFile')
+tlsMode=preferTLS         [requireTLS]  -> BadValue: Illegal state transition for tlsMode,
+                                           attempt to change from requireTLS to preferTLS
+```
+
+- **Conseguenza:** la pagina può affermare tre cose che la fonte non scrive. Che l'ordine dei due
+  `setParameter` **non è indifferente**: `clusterAuthMode` non sale finché `tlsMode` non è almeno
+  `preferTLS`, perché il vincolo è sulle connessioni **uscenti**. Che la scala è **a senso unico**,
+  su entrambi i parametri: sbagliare tappa costa un riavvio, non un comando. E che il ritorno al
+  keyfile, dopo, non è un ripensamento ma una rimessa in piedi. Registrato in
+  [ADR-0048](Decision.md#adr-0048).
+- **Riserve:** **un solo nodo.** La sequenza è stata eseguita su un replica set di un membro, dove
+  l'autenticazione interna non ha nessuno con cui parlare: quello che non è stato provato è
+  esattamente ciò che rende la procedura un *rolling upgrade*, cioè un cluster misto in cui un nodo
+  a `sendX509` e uno a `sendKeyFile` continuano a riconoscersi. Il certificato è **autofirmato** e
+  privo di estensioni di uso della chiave, quindi per [S-061](#s-061) «no restrictions apply»: i
+  requisiti `serverAuth`/`clientAuth` non sono stati messi alla prova, e nemmeno la regola che
+  vuole un'unica CA per tutti i membri. Un dettaglio osservato e **non spiegato**: reimpostare
+  `clusterAuthMode` al valore che ha già viene rifiutato, con il messaggio sul TLS invece che con
+  quello sulla transizione — chi scrive uno script di migrazione idempotente lo scoprirà, e questa
+  verifica non dice perché.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0048
+
+---
+
+<a id="v-040"></a>
+### V-040 — Con `requireTLS` il client cambia mestiere, e il certificato deve nominare l'host
+
+- **Comandi:** un'istanza usa-e-getta con `--tlsMode requireTLS`, `--tlsCertificateKeyFile` e
+  `--tlsCAFile` puntati a un certificato autofirmato con
+  `subjectAltName = DNS:x509-san, DNS:localhost`, e cinque tentativi di connessione con `mongosh`
+  da dentro il container.
+- **Ambiente:** istanza usa-e-getta con l'immagine pinnata, rimossa con `docker rm -f -v`.
+- **Che cosa si voleva sapere:** il quarto passo di [S-062](#s-062) avverte che il requisito TLS
+  «applies to all connections; that is, with the clients as well as with the members of the
+  cluster». Quell'avviso è la ragione per cui una migrazione a X.509 non è un lavoro da
+  amministratore soltanto, e vale la pena vederlo succedere.
+- **Esito:**
+
+```text
+127.0.0.1  tls=true   -> Hostname/IP does not match certificate's altnames:
+                         IP: 127.0.0.1 is not in the cert's list:      (rifiuto del CLIENT)
+localhost  senza tls  -> connessione chiusa
+                         lato server: SSLHandshakeFailed
+                         «The server is configured to only allow SSL connections»
+x509-san   tls=true   -> connessione chiusa
+                         lato server: id 23255, «No SSL certificate provided by peer;
+                         connection rejected»  →  SSLHandshakeFailed
+```
+
+  Tre rifiuti diversi, e nessuno dei tre è il server che va male. Il primo è il **client** che
+  verifica il nome: il certificato elenca `DNS:localhost` e nessun indirizzo, quindi connettersi a
+  `127.0.0.1` non passa. Il secondo è il client in chiaro contro un server che non parla più in
+  chiaro. Il terzo è il server che, avendo un `--tlsCAFile`, **pretende un certificato anche dal
+  client** e non lo riceve.
+- **Conseguenza:** la pagina può dire, con i messaggi accanto, che passare a `requireTLS` sposta il
+  lavoro sui client e sui nomi: ogni host va nominato nel `SAN`, e ogni client va provvisto. È il
+  costo che il keyfile non ha, ed è il motivo per cui questo repository non lo paga.
+  Registrato in [ADR-0048](Decision.md#adr-0048).
+- **Riserve:** **nessun certificato client è stato generato**, quindi non è stato mostrato il caso
+  che funziona — solo i tre modi di sbagliare. Non è stata provata l'opzione che allenta la
+  pretesa del server (`--tlsAllowConnectionsWithoutCertificates`), né l'autenticazione **dei client**
+  via X.509, che è cosa diversa dall'autenticazione interna fra membri ed è fuori dal Task. Il
+  certificato è autofirmato e usato al tempo stesso come certificato del server e come CA: in una
+  configurazione vera i due file sono distinti.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0048
+
+---
+
+<a id="v-041"></a>
+### V-041 — «Too open» non vuol dire leggibile da tutti: basta un bit fuori dal proprietario
+
+- **Comandi:** `openssl rand -base64 756 > /kf` · `chmod <permessi> /kf` ·
+  `gosu mongodb mongod --replSet rs0 --keyFile /kf --dbpath /data/db2 --bind_ip 127.0.0.1`
+- **Ambiente:** sei container usa-e-getta dall'immagine pinnata
+  `mongo@sha256:b6421fd6…`, `mongod` 7.0.40, keyfile di 1024 byte con proprietario `mongodb:mongodb`
+  in tutti i casi. L'unica variabile è il permesso.
+- **Che cosa si voleva sapere:** il messaggio esatto che `mongod` produce quando il keyfile ha
+  permessi larghi era stato preso al Task 2 di `feature/02` e trascritto nel
+  [registro](registro-operativo-sviluppo.md), ma **non era mai entrato in questo file**: era
+  l'unico debito documentale dichiarato aperto dai primi due task. Qui viene ripreso, e insieme si
+  chiede la cosa che il registro non diceva — **dove passa la soglia**.
+
+- **Esito, la soglia:**
+
+```
+-r--------  400   parte, arriva a «Listening on»
+-rw-------  600   parte, arriva a «Listening on»
+-rw-r-----  640   RIFIUTATO   uscita 1
+-rw-r--r--  644   RIFIUTATO   uscita 1
+-r--r--r--  444   RIFIUTATO   uscita 1
+-r-------x  401   RIFIUTATO   uscita 1
+```
+
+**La soglia non è «leggibile da tutti»: è «un bit qualsiasi acceso fuori dal proprietario».** `640`
+concede la lettura al solo gruppo e viene rifiutato come `644`. `401` non concede nessuna lettura a
+nessuno — concede il bit di *esecuzione* al mondo, che su un file di chiavi non significa niente — e
+viene rifiutato lo stesso. Le due combinazioni che passano sono `400` e `600`.
+
+- **Esito, le due righe di log** (identiche in tutti e quattro i casi rifiutati):
+
+```json
+{"s":"I",  "c":"ACCESS",  "id":20254, "ctx":"main", "msg":"Read security file failed",
+ "attr":{"error":{"code":30,"codeName":"InvalidPath",
+                  "errmsg":"permissions on /kf are too open"}}}
+{"s":"F",  "c":"CONTROL", "id":20575, "ctx":"main", "msg":"Error creating service context",
+ "attr":{"error":"Location5579201: Unable to acquire security key[s]"}}
+```
+
+**La riga che spiega è informativa; la riga fatale non spiega.** `"s":"I"` porta il nome del file e
+la parola `permissions`; `"s":"F"`, che è quella che il container stampa per ultima prima di
+morire, dice soltanto «Unable to acquire security key[s]» e non nomina né i permessi né il
+percorso. Chi filtra per severità — la prima cosa che si fa davanti a un container che esce subito
+— trova la riga muta e perde quella utile. I due identificatori sono `id: 20254` per la causa e
+`id: 20575` per l'effetto, e valgono più del testo perché il testo cambia fra versioni
+([ADR-0035](Decision.md#adr-0035), regola 1).
+
+- **Conseguenza:** entra come voce **12** in
+  [`02-architetture/trappole-mongodb-in-docker.md`](02-architetture/trappole-mongodb-in-docker.md#t-12),
+  con il sintomo per titolo. È anche la ragione per cui `docker/02-replicaset/init/01-keyfile.sh`
+  genera il keyfile **dentro un volume nominato** e non lo monta dall'host: su un bind mount da
+  macOS i permessi del file non sono quelli che si sono scritti.
+- **Riserve:** provato su `mongod` 7.0.40 su Linux dentro container. Il controllo dei permessi non
+  esiste su Windows, dove la documentazione del keyfile non lo nomina; qui non è stato verificato.
+  Non è stato provato il caso del **proprietario sbagliato** con permessi stretti (`400` ma
+  `root:root` mentre `mongod` gira come `mongodb`), che produce un errore diverso — di lettura, non
+  di permessi larghi — e che nel lab non può capitare perché lo script genera e assegna il file
+  nello stesso gesto.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0049
+
+---
+
+<a id="v-042"></a>
+### V-042 — I comandi di amministrazione del replica set, eseguiti: due righe della guida erano sbagliate
+
+- **Comandi:** `rs.status()` · `rs.conf()` · `rs.reconfig()` · `replSetReconfig` ·
+  `rs.printSecondaryReplicationInfo()` · `rs.stepDown()` · `rs.add()` · `rs.remove()` ·
+  `rs.initiate()` · `db.getMongo().setReadPref()`, dati sia al primario sia a un secondario
+- **Ambiente:** stack `docker/02-replicaset`, tre membri sani, `mongosh` 2.10.0 dentro
+  l'immagine pinnata, `lab.ordini` con 50 000 documenti.
+- **Che cosa si voleva sapere:** [ADR-0036](Decision.md#adr-0036), regola 6, aveva marcato
+  «**non eseguito su questo branch**» tutta la §3.2 della guida a `mongosh`. Questo è il branch che
+  la deve eseguire. La domanda non è «funzionano?» ma «la guida dice il vero?».
+
+- **Esito 1 — la lettura da un secondario funziona, e la guida diceva il contrario.** La §3.2
+  avvertiva: «un secondario non risponde alle letture finché non glielo si dice». Misurato su
+  `mongo-rs-2`, collegandosi al nodo e basta:
+
+```
+nodo=mongo-rs-2:27017  scrivo=false  secondario=true
+readPrefMode = primary
+countDocuments        -> 50000
+find().limit(1)       -> 1 documento
+runCommand({find:…})  -> 1 documento
+insertOne             -> NotWritablePrimary: not primary
+```
+
+Nessun `setReadPref`, nessun `secondaryOk`, e la lettura passa. La stessa pagina lo diceva già
+correttamente in §1.5 — «`mongodb://nodo1:27017/` parla con **quel nodo**, anche se è un
+secondario» — quindi la guida **contraddiceva se stessa**, e la misura sta con §1.5. Quello che
+resta vero è la seconda metà: la **scrittura** su un secondario è rifiutata, con
+`NotWritablePrimary: not primary`.
+
+- **Esito 2 — dire il nome di un secondario non basta a parlarci.** La stessa interrogazione, con
+  tre modi di scrivere «collegati a `mongo-rs-2`»:
+
+```
+--host mongo-rs-2:27017         uri …?directConnection=true      servito da mongo-rs-2  (secondario)
+--host rs0/mongo-rs-2:27017     uri …?replicaSet=rs0             servito da mongo-rs-1  (primario)
+…?directConnection=false        uri …&directConnection=false     servito da mongo-rs-1  (primario)
+```
+
+Nei due casi in cui il driver conosce il replica set, il nodo che si è nominato viene usato come
+*seme* e poi scartato: si finisce sul primario. È la conferma misurata delle quattro eccezioni di
+[S-045](#s-045), ed è la ragione per cui `readPreference` da sola non manda le letture a un
+secondario.
+
+- **Esito 3 — le funzioni `rs.print*` non stampano niente dentro `--file`.**
+
+```
+rs.printSecondaryReplicationInfo();          nessun output
+print(rs.printSecondaryReplicationInfo());   source: mongo-rs-2:27017
+                                             { syncedTo: '…', replLag: '0 secs (0 hrs) behind the primary ' }
+                                             ---
+                                             source: mongo-rs-3:27017
+                                             { syncedTo: '…', replLag: '0 secs (0 hrs) behind the primary ' }
+```
+
+Non stampano: **restituiscono un oggetto**, che nella shell interattiva viene stampato dal ciclo di
+valutazione e in uno script no. Vale per `rs.printSecondaryReplicationInfo()` e per
+`rs.printReplicationInfo()`. È la stessa famiglia di sorprese della «regola dell'ultimo» di
+[V-020](#v-020), su un'altra strada.
+
+- **Esito 4 — `rs.reconfig()` disarma il controllo che il server fa.** Il comando grezzo protegge:
+
+```
+replSetReconfig(version=1)  su una configurazione a version=3
+  -> NewReplicaSetConfigurationIncompatible: New replica set configuration version and term
+     must be greater than old, but {version: 1, term: 38} is not greater than
+     {version: 3, term: 38} for replica set rs0
+replSetReconfig(version+1)  -> ok=1
+```
+
+L'aiuto di `mongosh`, no:
+
+```
+rs.reconfig(<configurazione con version: 1>)  -> ok=1,  version finale 3
+```
+
+`rs.reconfig()` **riscrive il numero di versione** con quello corrente più uno prima di spedire, e
+quindi il rifiuto non arriva mai. Chi si fida del ciclo leggi-modifica-riscrivi come di una
+protezione contro le modifiche concorrenti si fida di una protezione che l'aiuto ha tolto.
+
+- **Esito 5 — gli stessi comandi dati a un secondario:**
+
+```
+rs.conf()                    -> version=4          (si legge: la configurazione è replicata)
+rs.reconfig(rs.conf())       -> NotWritablePrimary: New config is rejected :: caused by ::
+                                replSetReconfig should only be run on a writable PRIMARY.
+                                Current state SECONDARY;
+rs.add("mongo-rs-9:27017")   -> identico al precedente  (rs.add è un rs.reconfig)
+rs.remove("mongo-rs-3:27017")-> identico al precedente
+rs.initiate()                -> AlreadyInitialized: already initialized
+rs.stepDown(20)              -> NotWritablePrimary: not primary so can't step down
+rs.stepDown(1)               -> BadValue: stepdown period must be longer than
+                                secondaryCatchUpPeriodSecs
+```
+
+Due dettagli che si vedono solo eseguendo. `rs.add` e `rs.remove` non hanno un errore proprio:
+dicono `replSetReconfig`, perché sono `replSetReconfig`. E `rs.stepDown(1)` viene rifiutato **per
+l'argomento prima che per il ruolo** — il periodo predefinito di attesa dei secondari è 10 secondi,
+e un `rs.stepDown(<meno di 10>)` fallisce su qualunque nodo, primario compreso.
+
+- **Esito 6 — `rs.stepDown()` cronometrato, tre giri**, con la disciplina di [V-029](#v-029):
+  osservatore già caldo su `mongo-rs-3`, comando spedito al primario, `hello()` interrogato in un
+  ciclo stretto.
+
+```
+giro 1   nuovo primario mongo-rs-2:27017   dopo   8 ms     ritorno di mongo-rs-1 dopo 11308 ms
+giro 2   nuovo primario mongo-rs-2:27017   dopo 101 ms     ritorno di mongo-rs-1 dopo 11293 ms
+giro 3   nuovo primario mongo-rs-2:27017   dopo  87 ms     ritorno di mongo-rs-1 dopo 11021 ms
+```
+
+**Il terzo termine di paragone del Task 8, ed è il più veloce di tutti.** `docker kill` costa
+~10 000 ms, `shutdownServer()` ~500 ms ([V-029](#v-029)), `rs.stepDown()` fra 8 e 101. Il motivo è
+lo stesso in tutti e tre i casi e sta in [V-030](#v-030): quello che si paga non è l'elezione, sono
+i dieci secondi di `electionTimeoutMillis` che nessuno spende quando il primario **dice** che se ne
+va.
+
+**E poi torna indietro da solo.** Con `mongo-rs-1` a priorità 2, dopo il periodo di
+`rs.stepDown(10)` il nodo si ricandida e riprende il posto: undici secondi dopo il comando il set è
+com'era. Su un palco è una demo che si rimette a posto da sé, e insieme una demo che **si annulla
+mentre la si sta spiegando** se chi parla si dilunga.
+
+- **Esito 7 — la configurazione del lab, letta invece che dichiarata:**
+
+```
+rs.conf()  _id=rs0  members: mongo-rs-1/priority 2  mongo-rs-2/priority 1  mongo-rs-3/priority 1
+           settings.electionTimeoutMillis   = 10000
+           settings.heartbeatIntervalMillis = 2000
+           settings.catchUpTimeoutMillis    = -1
+rs.status() majorityVoteCount=2  writeMajorityCount=2
+            mongo-rs-2 syncSourceHost = mongo-rs-1:27017
+            mongo-rs-3 syncSourceHost = mongo-rs-2:27017
+```
+
+I due numeri di [S-044](#s-044) — due secondi di battito, dieci di attesa — non sono
+un'impostazione del lab: sono i valori predefiniti, e il lab non li ha toccati.
+`mongo-rs-3` **non si sincronizza dal primario** ma da `mongo-rs-2`: il concatenamento della
+replica è attivo per impostazione predefinita, e chi guarda `rs.status()` aspettandosi tre frecce
+verso il primario ne trova due in fila.
+
+- **Conseguenza:** la §3.2 della guida perde la marcatura «non eseguito» per tutto ciò che è
+  elencato qui, e la corregge dove la misura la smentisce. La §3.3, sullo sharded cluster, **resta
+  marcata**: è dovuta a `feature/03`. Registrato in [ADR-0049](Decision.md#adr-0049).
+- **Riserve:** `rs.add()` e `rs.remove()` sono stati eseguiti **solo nella forma che fallisce**, su
+  un secondario: aggiungere un quarto membro richiede un quarto container che questo stack non ha,
+  e togliere un membro vivo romperebbe le prove che vengono dopo. La riga della tabella resta, con
+  la marcatura. Il ritorno del primario a priorità 2 è una seconda elezione e non è stato
+  cronometrato a parte. Le tre esecuzioni di `rs.stepDown()` sono su una macchina sola e senza
+  carico: la distanza fra 8 e 101 ms è rumore di scheduling, non un fenomeno.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0049, ADR-0051
+
+---
+
+<a id="v-043"></a>
+### V-043 — Il driver riceve i nomi di dentro: `ENOTFOUND` su un host che nessuno ha scritto
+
+- **Comandi:** `docker run --rm <immagine> mongosh "<stringa>"` da un container **fuori** dalla
+  rete Compose e da uno **dentro**, contro le porte pubblicate `27021`/`27022`/`27023`
+- **Ambiente:** stack `docker/02-replicaset` in esecuzione e sano, rete
+  `sqlstart-02-replicaset_default`, `mongosh` 2.10.0.
+- **Che cosa si voleva sapere:** [ADR-0033](Decision.md#adr-0033) aveva nominato, fra le trappole
+  che `feature/02` avrebbe aggiunto, la «scoperta della topologia». Questa è la misura che la
+  rende una voce.
+
+- **Esito:**
+
+```
+1. da FUORI, mongodb://…@host.docker.internal:27021/?replicaSet=rs0
+   -> MongoNetworkError: getaddrinfo ENOTFOUND mongo-rs-2
+
+2. da FUORI, mongodb://…@host.docker.internal:27021/?directConnection=true
+   -> servito da mongo-rs-1:27017
+      hosts   = ["mongo-rs-1:27017","mongo-rs-2:27017","mongo-rs-3:27017"]
+      primary = mongo-rs-1:27017
+      ordini  = 50000
+
+3. da FUORI, i tre indirizzi pubblicati e nessuna opzione
+   mongodb://…@host.docker.internal:27021,host.docker.internal:27022,host.docker.internal:27023/
+   -> MongoNetworkError: getaddrinfo ENOTFOUND mongo-rs-2
+
+4. da DENTRO la rete, mongodb://…@mongo-rs-1:27017/?replicaSet=rs0
+   -> servito da mongo-rs-1:27017, ordini = 50000
+```
+
+**Il caso 2 contiene la spiegazione dei casi 1 e 3.** La connessione diretta riesce, e la prima
+cosa che stampa è l'elenco `hosts`: tre nomi di servizio Compose, che dentro la rete risolvono e
+fuori no. Il replica set non conosce le porte pubblicate sull'host — conosce i nomi con cui i
+membri sono stati configurati — e li consegna a chiunque chieda. Il client li prende per buoni,
+butta via l'indirizzo che gli era stato dato e prova quelli.
+
+**Il caso 3 è quello che sorprende, e va provato prima di scriverlo.** Elencare tutti e tre gli
+indirizzi *pubblicati* sembra la mossa risolutiva e non lo è: una seed list con più host è la terza
+delle quattro eccezioni di [S-045](#s-045) che spengono `directConnection`, quindi il driver
+scopre il replica set e sostituisce i tre indirizzi buoni con i tre nomi che non risolvono. Più
+indirizzi si scrivono, più il fallimento è certo.
+
+**Il nome nel messaggio non è quello che si è scritto, e cambia a ogni tentativo.** Tre esecuzioni
+identiche del caso 1 hanno prodotto `ENOTFOUND mongo-rs-1`, `ENOTFOUND mongo-rs-2`,
+`ENOTFOUND mongo-rs-1`: il driver nomina uno dei tre membri, non necessariamente il primo e mai
+quello digitato. Cercare in rete il nome che compare nell'errore porta quindi fuori strada, perché
+quel nome è un dettaglio locale del `compose.yaml`.
+
+- **Conseguenza:** entra come voce **13** in
+  [`02-architetture/trappole-mongodb-in-docker.md`](02-architetture/trappole-mongodb-in-docker.md#t-13),
+  accanto alla voce [5](02-architetture/trappole-mongodb-in-docker.md#t-05) che ha lo stesso
+  messaggio e una causa diversa: là il nome non risolveva perché il client era fuori rete, qui il
+  nome non lo ha nemmeno scritto il client. Registrato in [ADR-0049](Decision.md#adr-0049).
+- **Riserve:** `host.docker.internal` è un nome di Docker Desktop; su un Docker Engine per Linux
+  l'equivalente si ottiene con `--add-host host.docker.internal:host-gateway`, e non è stato
+  provato. La terza via d'uscita — riconfigurare il replica set con nomi e porte risolvibili da
+  fuori, cioè `rs.reconfig()` sugli `host` dei membri — **non è stata eseguita**: cambierebbe in
+  modo permanente lo stack del lab, che deve restare quello del talk. Non è stato provato il caso
+  intermedio in cui i nomi risolvono ma le porte no, che dà un errore di connessione invece che di
+  risoluzione.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0049
+
+---
+
+<a id="v-044"></a>
+### V-044 — Tre modi di diventare primario, tre prime righe diverse: il log dice se è stato un guasto
+
+- **Comandi:** `rs.stepDown()` sul primario · `docker logs mongo-rs-2` e `docker logs mongo-rs-1`,
+  filtrati per componente `ELECTION` e per `id`
+- **Ambiente:** stack `docker/02-replicaset`, tre membri sani, `mongo-rs-1` a priorità 2 e quindi
+  destinato a riprendersi il posto da solo. Nessun carico.
+- **Che cosa si voleva sapere:** `docs/03-amministrazione/log.md`, §3.1, afferma — ragionando su
+  [S-044](#s-044) e senza aver visto un log — che «la manutenzione ordinaria produce lo stesso
+  tracciato nel log di un incidente, e che leggere una riga di elezione non basta a sapere se c'è
+  stato un problema». Il Task 12 doveva riempire quella sezione di `id`, e prima di riempirla ha
+  controllato la frase.
+
+- **Esito: la frase è falsa, e lo si vede alla prima riga.** Un solo `rs.stepDown(10)` produce
+  **due** elezioni — la dimissione e il rientro del nodo a priorità 2 — e nessuna delle due
+  assomiglia a quella del guasto di [V-030](#v-030).
+
+*Sul nodo che viene eletto al posto di chi si dimette* (`mongo-rs-2`):
+
+```
+11:52:29.687  id=4615661  ELECTION  Starting an election due to step up request
+11:52:29.687  id=21437    ELECTION  Skipping dry run and running for election
+                                    attr: newTerm=39
+11:52:29.688  id=6015300  ELECTION  Storing last vote document in local storage for my election
+11:52:29.690  id=51799    ELECTION  VoteRequester processResponse
+                                    attr: dryRun=false, vote="yes", from=mongo-rs-1:27017
+11:52:29.690  id=21450    ELECTION  Election succeeded, assuming primary role
+11:52:29.690  id=21358    REPL      Replica set state transition
+                                    attr: newState="PRIMARY", oldState="SECONDARY"
+11:52:29.692  id=21107    REPL      Stopping replication producer
+```
+
+*Sul nodo che si è dimesso e poi si riprende il posto* (`mongo-rs-1`, priorità 2):
+
+```
+11:52:29.685  id=21358    REPL      Replica set state transition  PRIMARY -> SECONDARY
+11:52:29.692  id=4615601  ELECTION  Scheduling priority takeover
+                                    attr: when=2026-09-01T11:52:39.958Z
+11:52:39.685  id=4764800  ELECTION  Not starting an election, since we are not an electable
+                                    single node
+11:52:40.111  id=4615660  ELECTION  Starting an election for a priority takeover
+11:52:40.111  id=21438    ELECTION  Conducting a dry run election to see if we could be elected
+11:52:40.112  id=21444    ELECTION  Dry election run succeeded, running for election
+11:52:40.116  id=21450    ELECTION  Election succeeded, assuming primary role
+```
+
+- **Le tre prime righe, che sono la risposta:**
+
+| `id` | messaggio | che cosa è successo |
+| ---: | --- | --- |
+| `4615652` | «Starting an election, since we've seen no PRIMARY in election timeout period» | **nessuno ha avvisato**: il timeout è scaduto. È un guasto ([V-030](#v-030)) |
+| `4615661` | «Starting an election due to step up request» | qualcuno ha chiesto a un altro nodo di dimettersi. È manutenzione |
+| `4615660` | «Starting an election for a priority takeover» | un nodo a priorità più alta si riprende il posto. È la configurazione che lavora |
+
+- **Due differenze che seguono dalla prima.** Nel caso del guasto compaiono `id: 21216` «Member is
+  now in state DOWN» e diciannove `id: 23974` «Heartbeat failed after max retries»; nel caso della
+  dimissione **non compare nessuna delle due**, perché nessun membro è mai mancato. E il giro a
+  vuoto viene saltato: `id: 21437` «Skipping dry run and running for election» invece della coppia
+  `21438`/`21444`, con un solo `VoteRequester processResponse` invece di due. È la spiegazione dei
+  millisecondi di [V-042](#v-042): chi riceve una richiesta di promozione non ha bisogno di
+  chiedere agli altri se sarebbe eletto, perché glielo hanno appena chiesto.
+- **`4615601` annuncia il futuro.** «Scheduling priority takeover» compare **tre millisecondi dopo
+  la dimissione** e porta nell'attributo l'ora esatta in cui il rientro avverrà. Chi legge il log
+  dal vivo sa già, dieci secondi prima, che il primario sta per tornare. E nel mezzo `4764800`
+  spiega perché non è ancora successo: «Not starting an election, since we are not an electable
+  single node», che è il periodo di `rs.stepDown()` che scorre.
+- **Conseguenza:** la frase di §3.1 viene corretta invece che confermata, e la §3.3 di
+  `docs/03-amministrazione/log.md` riporta tutte e tre le prime righe. Registrato in
+  [ADR-0049](Decision.md#adr-0049). Per chi prepara la demo: la riga da proiettare non è
+  `21450` «Election succeeded» — che è identica in tutti e tre i casi — ma la prima, che è l'unica
+  che distingue.
+- **Riserve:** letto su un set a tre membri con priorità 2/1/1; su un set a priorità tutte uguali
+  il rientro non avviene e `4615660` non compare mai. Non è stato osservato il caso di
+  `rs.stepDown()` con `force: true`, né quello di un `replSetStepUp` chiesto direttamente a un
+  secondario, che è il comando che `4615661` nomina e che qui è arrivato per conseguenza e non per
+  richiesta esplicita. Gli `id` sono di `mongod` 7.0.40: sono stabili, i testi molto meno
+  ([ADR-0035](Decision.md#adr-0035), regola 1).
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0049
+
+---
+
+<a id="v-045"></a>
+### V-045 — Le quattro scene registrate: tredici kilobyte di testo, e una misura fuori dall'intervallo
+
+- **Comandi:** `python3 tools/registra-terminale.py <file>.cast -- make smoke-02` ·
+  `… -- make failover-02` · `… -- make failover-02-termina` ·
+  `… -- make failover-02-maggioranza`, con `./tools/reset-demo.sh 02` fra una scena e l'altra
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, stack `docker/02-replicaset` con i tre membri
+  sani prima di ogni scena, nessun carico applicativo. Terminale registrato a 100×30.
+- **Che cosa si voleva sapere:** se una registrazione di terminale in formato asciinema v2 basti
+  come materiale di riserva del talk, e quanto pesi.
+
+- **Esito, le quattro scene:**
+
+```
+file                                   durata   eventi   byte   il numero che porta
+01-smoke-replica-set.cast              16,9 s      49    4630   Superati: 42 · Errori: 0
+02-failover-docker-kill.cast           17,2 s      17    2556   elezione in 8617 ms
+                                                                 exited, RestartCount=0, ExitCode=137
+03-failover-terminazione-pulita.cast   25,1 s      23    2589   elezione in 1039 ms
+                                                                 running, RestartCount=1, ExitCode=0
+04-maggioranza-persa.cast              15,6 s      29    3714   SECONDARY dopo 8634 ms
+```
+
+- **Tredici kilobyte per quattro scene.** Il formato è JSON su righe: un'intestazione e poi un
+  evento per blocco di output, `[secondi, "o", testo]`. Si legge con `cat`, si cerca con `grep`, si
+  confronta con `diff`, e sta in un repository senza le cautele che
+  [S-021](#s-021) impone ai file grandi. Un `.mp4` delle stesse quattro scene starebbe fra le
+  decine e le centinaia di megabyte.
+- **Una misura cade fuori dall'intervallo noto, e conferma la riserva che c'era.** La scena della
+  terminazione pulita ha dato **1039 ms**, contro i 574, 480 e 486 ms dei tre giri di
+  [V-029](#v-029) — circa il doppio del massimo osservato. Il metodo è lo stesso, non un altro:
+  `tools/failover-replicaset.sh` usa l'osservatore preriscaldato dentro un membro superstite che
+  interroga `hello()` ogni 20 ms, cioè esattamente lo strumento di V-029. La differenza è il
+  contesto — la macchina aveva appena eseguito tre scene e tre ripristini — ed è precisamente ciò
+  che V-029 aveva messo nelle riserve: «tre esecuzioni per scena sono poche per parlare di
+  distribuzione; bastano per dire che i due ordini di grandezza non si sovrappongono». Il singolo
+  numero è instabile, il rapporto no: 1039 contro 8617 ms nella stessa sessione restano un ordine
+  di grandezza.
+- **Il `docker kill` è invece stabile e sotto i dieci secondi.** 8617 ms qui, contro 9812, 10 619 e
+  10 943 di V-029. Anche questo è coerente con la spiegazione: il conto dei 10 000 ms parte
+  dall'ultimo battito riuscito e non dal colpo, i battiti vanno ogni 2000 ms, quindi la misura cade
+  fra 8 e 10 secondi a seconda di dove il colpo capita nell'intervallo — ed è quello che la scena
+  stessa stampa a schermo.
+- **Conseguenza:** le quattro registrazioni stanno in
+  `docs/05-talk/registrazioni/`, il formato e lo strumento sono decisi in
+  [ADR-0050](Decision.md#adr-0050). Non sostituiscono i filmati `.mp4` di
+  [ADR-0016](Decision.md#adr-0016), che restano dovuti: una registrazione di terminale non mostra
+  la faccia di chi parla né si proietta senza un terminale.
+- **Riserve:** le scene sono registrate senza voce e senza pause di scena — sono il tracciato di
+  ciò che il terminale ha fatto, non una prova generale. La riproduzione richiede un terminale che
+  interpreti le sequenze ANSI: dentro una pipe i colori diventano caratteri. Una sola esecuzione per
+  scena: i numeri sopra sono singoli, non mediane, e vanno letti accanto a [V-029](#v-029) e
+  [V-031](#v-031) che le mediane le hanno.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0050, ADR-0073
+
+---
+
+<a id="v-046"></a>
+### V-046 — Il dollaro che non arriva: Compose lo mangia, avvisa, e consegna una stringa vuota
+
+- **Comandi:** `docker compose config` · `docker compose up --abort-on-container-exit` su un file
+  Compose usa-e-getta di nove righe
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, immagine `alpine:3` dalla cache
+  locale
+- **Che cosa si voleva sapere:** `docker/02-replicaset/compose.yaml` scrive `$$NOME_REPLICA` e non
+  `$NOME_REPLICA` nel comando di `rs-init`, con un commento che spiega perché. La regola è
+  documentata ([S-064](#s-064)) ma qui non era mai stata **vista fallire**, e una trappola scritta
+  senza averne visto il sintomo è una previsione ([ADR-0052](Decision.md#adr-0052)). Il file di
+  prova mette le due forme una accanto all'altra:
+
+```yaml
+services:
+  prova:
+    image: alpine:3
+    environment:
+      DENTRO: valore-del-container
+    command:
+      - sh
+      - -c
+      - 'echo "singolo=[$DENTRO]  doppio=[$$DENTRO]"'
+```
+
+- **Esito, quello che il container stampa:**
+
+```
+prova-1  | singolo=[]  doppio=[valore-del-container]
+```
+
+  La variabile è dichiarata in `environment` **due righe sopra**, e nella forma con un dollaro solo
+  arriva vuota. Non è che la shell non la trovi: la shell non la vede nemmeno nominare, perché
+  Compose ha sostituito `$DENTRO` prima di consegnare il comando.
+
+- **Esito, dove lo si può vedere prima di avviare:** `docker compose config` mostra il file dopo
+  l'interpolazione, e la sostituzione è già avvenuta:
+
+```
+level=warning msg="The \"DENTRO\" variable is not set. Defaulting to a blank string."
+    command:
+      - sh
+      - -c
+      - echo "singolo=[]  doppio=[$$DENTRO]"
+```
+
+  **Uscita `0`.** L'avviso è un avviso: il file è valido, lo stack parte, il comando gira. È la
+  forma esatta descritta da [S-064](#s-064) — «it displays a warning and substitutes» con la stringa
+  vuota — e la ragione per cui il fenomeno sopravvive alle riletture.
+
+- **Esito, il caso peggiore — la variabile esiste sull'host:**
+
+```
+$ DENTRO=valore-dell-host docker compose … up
+prova-1  | singolo=[valore-dell-host]  doppio=[valore-del-container]
+```
+
+  Qui l'avviso **sparisce**, perché Compose la variabile l'ha trovata: nella shell di chi ha
+  digitato il comando. Il container riceve il valore dell'host al posto del proprio, senza che nulla
+  segnali niente. Due macchine con ambienti diversi eseguono lo stesso file Compose e ottengono
+  comportamenti diversi, ed è il modo in cui questo errore arriva fino in produzione.
+
+- **Conseguenza:** la voce **16** di `docs/02-architetture/trappole-mongodb-in-docker.md`. Conferma
+  per misura la scelta già scritta in `docker/02-replicaset/compose.yaml`, dove le tre variabili del
+  comando di `rs-init` sono `$$NOME_REPLICA`, `$$UTENTE_AMMINISTRATORE`, `$$PASSWORD_AMMINISTRATORE`.
+- **Riserve:** provato su `alpine:3` e non sullo stack del lab, di proposito: sullo stack la forma
+  giusta è già scritta, e per vedere il sintomo bisognerebbe romperla. Una sola esecuzione per
+  ciascuno dei tre casi — non ci sono tempi da mediare, i risultati sono testo e sono deterministici.
+  Il fenomeno riguarda `command` perché è lì che il lab lo incontra; vale identico per `entrypoint`,
+  `healthcheck` e per i valori di `environment`, che non sono stati provati. Infine `config` non
+  «disfa» il doppio dollaro: lo ristampa come `$$DENTRO`, perché quello che mostra è ancora un file
+  Compose, non ciò che vedrà la shell.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0052
+
+
+<a id="v-047"></a>
+### V-047 — La password nella tabella dei processi: `mongosh` si oscura da solo, il client `docker` no
+
+- **Comandi:** `mongosh --help` dentro `mongo-rs-1` · `ps -eo args` dentro il container e
+  sull'host, con un `mongosh` vivo · lo stesso con `docker exec -e SEGRETO=…` in più
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, client `/usr/local/bin/docker`, immagine
+  `mongo:7.0.40`, `mongosh` **2.10.0** dentro il container
+- **Che cosa si voleva sapere:** `tools/smoke-replicaset.sh` portava un commento che prometteva una
+  protezione — «la password passa per `-e` e non sulla riga di comando di mongosh» — e sotto una
+  riga che passava `--password "${PASSWORD}"` a `mongosh` **e** un `-e SEGRETO="${PASSWORD}"` che
+  nessun comando leggeva. Un revisore esterno ha segnalato la contraddizione fra il testo e il
+  codice. Prima di riscrivere il commento serviva sapere che cosa sia vero davvero, perché la
+  risposta che sembra ovvia — «la password è comunque leggibile in `ps` nel container» — è quella
+  che si scrive senza guardare.
+
+- **Esito, primo punto — `mongosh` non ha una via che non sia la riga di comando.** Nella 2.10.0
+  l'aiuto elenca **due** sole opzioni che nominano una password, entrambe con un argomento:
+
+```
+-p, --password [arg]                       Password for authentication
+    --tlsCertificateKeyFilePassword [arg]  Password for key in PEM file for TLS
+```
+
+  Nessuna variabile d'ambiente compare nell'aiuto. Le alternative sono il prompt interattivo, che
+  non esiste in uno script, e lo standard input, che con `--eval` è già occupato dallo script.
+  Quindi la password **deve** stare fra gli argomenti: non è una scorciatoia, è l'unica strada.
+
+- **Esito, secondo punto — dentro il container non si vede.** Con un `mongosh` autenticato in
+  esecuzione, `ps -eo args` dentro `mongo-rs-1` conta **zero** occorrenze della password in chiaro
+  e **una** del segnaposto `<credentials>`. La riga è questa, e non è quella che era stata digitata:
+
+```
+mongosh mongodb://<credentials>@127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&authSour…
+```
+
+  `mongosh` riscrive il proprio `argv`: unisce utente, password e host in una stringa di
+  connessione e ne oscura le credenziali. La convinzione di partenza era sbagliata.
+
+- **Esito, terzo punto — sull'host si vede, e nessuno la oscura.** La stessa esecuzione, vista da
+  `ps -eo args` sull'host, produce **quattro** righe che contengono la password in chiaro. Fra
+  queste il client Docker (qui con la password sostituita a mano per poterla riportare):
+
+```
+/usr/local/bin/docker exec mongo-rs-1 mongosh --quiet --username admin --password <password> …
+```
+
+  L'esposizione non è dove la si cercava. `mongosh` protegge il proprio processo; il processo che
+  lo lancia — `docker`, e quindi `docker compose exec` — non protegge il proprio, e vive
+  sull'host, dove girano anche i programmi di chiunque altro usi quella macchina.
+
+- **Esito, quarto punto — la variabile «protettiva» raddoppiava l'esposizione.** Aggiungendo
+  `-e SEGRETO=<password>` allo stesso comando, la **singola** riga di comando del client `docker`
+  contiene **due** copie della password invece di una. Il conteggio, sull'host:
+
+```
+copie della password nella singola riga di comando di docker sull'host: 2
+```
+
+  Il `-e` non toglie la password dalla riga di comando: ce la mette una seconda volta, sulla riga
+  che espone davvero. Il codice che il commento presentava come una cautela peggiorava di misura la
+  cosa che diceva di curare, e per giunta nessuno leggeva la variabile — `grep -rn SEGRETO tools/
+  docker/ Makefile` ne trovava una sola occorrenza, la definizione.
+
+- **Conseguenza:** [ADR-0054](Decision.md#adr-0054). In `tools/smoke-replicaset.sh` il
+  `-e SEGRETO=` è stato tolto e il commento riscritto su questi quattro punti. Gli altri strumenti
+  — `failover-replicaset.sh`, `reset-demo.sh` — passavano già `--password` senza decorazioni e non
+  cambiano.
+- **Riserve:** misurato solo su `mongosh` 2.10.0; l'oscuramento dell'`argv` è comportamento della
+  shell, non un contratto documentato in una pagina di manuale, e una versione futura potrebbe
+  cambiarlo — il che rafforza la conclusione invece di indebolirla, perché la protezione su cui non
+  si deve contare è proprio quella. La finestra fra l'`exec` e la riscrittura dell'`argv` non è
+  stata cercata: se esiste è di millisecondi, ma esiste. Non è stato provato il caso TLS, dove la
+  password della chiave PEM segue la stessa strada. E resta vero il contorno che conta più di tutto
+  il resto: è una password di laboratorio, e il file che la porta è fuori dal repository
+  ([ADR-0014](Decision.md#adr-0014)).
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0054, ADR-0127
+
+
+<a id="v-048"></a>
+### V-048 — 126 e 127: la shell distingue «non c'è» da «non si esegue», e il registratore no
+
+- **Comandi:** `sh -c` e `bash -c` su tre bersagli · `tools/registra-terminale.py … -- <bersaglio>`
+  prima e dopo la correzione
+- **Ambiente:** macOS 26.6.2 arm64, Python 3.14.7, `/bin/sh` e `/bin/bash` di sistema
+- **Che cosa si voleva sapere:** un revisore esterno ha segnalato che in
+  `tools/registra-terminale.py` la chiamata a `os.execvpe` nel processo figlio non è protetta. Il
+  programma un controllo preventivo ce l'aveva — `shutil.which(comando[0]) is None and not
+  os.path.exists(comando[0])` → uscita 127 — e la domanda era se quel controllo bastasse. Un file
+  che **esiste** e non si può eseguire lo attraversa.
+
+- **Esito, primo punto — che cosa fa la shell.** Tre bersagli, due shell, sempre gli stessi codici:
+
+```
+sh, comando assente         -> 127   (command not found)
+sh, file non eseguibile     -> 126   (Permission denied)
+sh, directory               -> 126   (is a directory)
+bash, comando assente       -> 127
+bash, file non eseguibile   -> 126
+```
+
+  La distinzione non è un dettaglio di stile: 127 dice «hai sbagliato a scrivere il nome», 126 dice
+  «il nome è giusto, manca il permesso». Sono due errori che si riparano in due modi diversi.
+
+- **Esito, secondo punto — che cosa faceva il registratore, prima.** Un file `.sh` con modo `644`,
+  passato dopo `--`, attraversava il controllo preventivo perché esiste. Poi `execvpe` falliva nel
+  figlio, che a quel punto era già dentro lo pseudo-terminale: il traceback di Python è stato
+  **scritto nella registrazione**. Il `.cast` prodotto contiene quattro eventi, e il terzo è questo
+  (accorciato):
+
+```
+[0.009369, "o", "Traceback (most recent call last):\r\n  File \"…/tools/registra-terminale.py\", line 220 …"]
+[0.009452, "o", "…PermissionError: [Errno 13] Permission denied: './nonesegui.sh'\r\n"]
+```
+
+  Tre cose sbagliate insieme: il file `.cast` **resta su disco** e sembra una registrazione valida;
+  dentro ci sono i **percorsi assoluti** della macchina di chi registra; e il programma esce con
+  **1**, il codice generico di un'eccezione Python, che non distingue questo caso da nessun altro.
+  La riserva del talk ([ADR-0050](Decision.md#adr-0050)) è materiale che si guarda il giorno in cui
+  la demo dal vivo è già fallita: una che mostra un traceback di Python è peggio di non averla.
+
+- **Esito, terzo punto — dopo la correzione.** Con il controllo preventivo esteso a
+  `os.access(…, os.X_OK)` e la `execvpe` racchiusa in un `try`, i due casi si comportano come la
+  shell:
+
+```
+file non eseguibile   -> uscita 126, «comando non eseguibile: …», nessun .cast scritto
+directory             -> uscita 126, nessun traceback né su stderr né dentro la registrazione
+comando assente       -> uscita 127, «comando non trovato: …», nessun .cast   (invariato)
+```
+
+  La directory è il caso che il controllo preventivo **non** può prendere: per il sistema una
+  directory è attraversabile, quindi `os.access(…, os.X_OK)` risponde di sì, ed è `exec` a
+  rifiutarla. Serve la protezione nel figlio — e la shell arriva alla stessa conclusione per la
+  stessa strada: `sh -c './'` esce 126.
+
+- **Conseguenza:** [ADR-0053](Decision.md#adr-0053), e cinque casi nuovi in
+  `tools/tests/test_registra_terminale.py`, che passa da 8 a 13.
+- **Riserve:** i codici della shell sono misurati su macOS, con `/bin/sh` e `/bin/bash` di sistema;
+  sono convenzione POSIX diffusa ma qui valgono come **misura su questa macchina**, non come
+  citazione di uno standard. Non sono stati provati gli altri modi in cui `exec` può fallire —
+  binario per un'altra architettura, `ENOEXEC` su un file senza `#!`, `ETXTBSY` — che ora finiscono
+  tutti nello stesso ramo protetto senza essere distinti fra loro. La finestra fra `fork` e `exec`
+  resta la parte più delicata del programma e non è coperta da altro che da questi test.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0053
+
+
+<a id="v-049"></a>
+### V-049 — Il difetto che macOS nasconde: Linux non chiude il pty, e il codice di uscita diventava 0
+
+- **Comandi:** `tools/registra-terminale.py … -- <comando che lascia un discendente>` su macOS e
+  dentro un container `alpine:3`, prima e dopo la correzione
+- **Ambiente:** macOS 26.6.2 arm64, Python 3.14.7 · container `alpine:3` con `python3` 3.14.7,
+  Docker 29.7.2
+- **Che cosa si voleva sapere:** una seconda review esterna sulla PR #3 ha segnalato che il ciclo di
+  cattura di `registra-terminale.py` ha **due** uscite, e che la seconda perde lo stato. Quando il
+  comando registrato finisce senza chiudere lo pseudo-terminale — succede se lascia dietro di sé un
+  discendente — il ramo non bloccante `os.waitpid(pid, os.WNOHANG)` lo **raccoglie** e ne butta via
+  lo stato; la `waitpid` finale non trova più nessuno, solleva `ChildProcessError`, e il ripiego
+  `stato = 0` fa riportare **successo**. Il rilievo proponeva anche un caso di prova. Chi lo ha
+  scritto non ha potuto eseguirlo — la propria sandbox glielo ha impedito.
+
+- **Esito, primo punto — su macOS non si riproduce, e non per caso.** Tre costruzioni diverse,
+  tutte con il comando che esce `7` lasciando un discendente attaccato al pty:
+
+```
+sh -c 'sleep 5 & exit 7'                        -> uscita 7, in 0,068 s
+sh -c '(trap "" HUP; sleep 5) & exit 7'         -> uscita 7, in 0,075 s
+python3 …  (figlio con os.setsid(), sleep 3)    -> uscita 7, in 0,087 s
+```
+
+  Nessuna arriva al ramo non bloccante: se ci arrivasse, il ciclo aspetterebbe almeno il timeout di
+  `select`, cioè 0,2 s. Il pty si chiude subito lo stesso, e la registrazione risulta vuota anche
+  quando il discendente stampa (`echo TARDI` dopo un secondo non compare nel `.cast`). È il
+  comportamento BSD: quando muore il processo di controllo, il kernel **revoca** il terminale di
+  controllo, e i descrittori del lato schiavo che i discendenti si portano dietro non lo tengono
+  più aperto.
+
+- **Esito, secondo punto — su Linux si riproduce alla prima.** Stesso strumento, stesso comando,
+  dentro `alpine:3`:
+
+```
+$ python3 /strumenti/registra-terminale.py /prova/linux.cast -- python3 /prova/tiene_il_pty.py
+registrato: /prova/linux.cast · 0.0 s · uscita 0
+real  0m 0.25s
+codice riportato su Linux: 0  (atteso 7)
+```
+
+  Il tempo lo conferma: **0,25 s**, cioè il timeout di `select` più il giro non bloccante. Linux non
+  revoca niente, il discendente tiene aperto il lato schiavo, il pty non dà EOF, e si finisce
+  esattamente nel ramo che perde lo stato.
+
+- **Esito, terzo punto — dopo la correzione.** Lo stato raccolto dal ramo non bloccante viene
+  conservato e riusato al posto della `waitpid` finale:
+
+```
+codice riportato su Linux dopo la correzione: 7  (atteso 7)
+```
+
+  La suite del file passa **14 su 14** su tutte e due le piattaforme.
+
+- **Conseguenza:** [ADR-0055](Decision.md#adr-0055), e un test in più in
+  `tools/tests/test_registra_terminale.py`. Il test è scritto in modo che su macOS passi per
+  l'altra strada — il pty si chiude comunque, il codice arriva dalla `waitpid` finale — e su Linux
+  provi davvero il ramo corretto: prima della correzione, là, riportava 0.
+- **Riserve:** il container è `alpine:3` con `musl`, non `glibc`, e non è una delle immagini pinnate
+  del laboratorio: serviva un Linux qualsiasi, non quello del lab. La revoca del terminale su macOS
+  è dedotta dal comportamento osservato — tre costruzioni, tutte con EOF immediato, compresa quella
+  con `setsid()` che al SIGHUP è immune — e non da una pagina di manuale citata qui. Non è stato
+  provato WSL2, che è Linux e dovrebbe comportarsi come il container. Resta fuori dalla misura la
+  domanda vicina: in quel ramo l'output prodotto **dopo** l'uscita del comando non viene registrato,
+  ed è per costruzione, non un difetto.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0055
+
+
+<a id="v-050"></a>
+### V-050 — `git worktree remove` difende i file non tracciati e cancella gli ignorati senza dire niente
+
+- **Comandi:** `git worktree add --detach`, `git status --porcelain [-uall] [--ignored]`,
+  `git worktree remove`
+- **Ambiente:** macOS 26.6.2 arm64, git 2.50.1 (Apple Git-155)
+- **Che cosa si voleva sapere:** chiusa e unita la PR #3, il worktree che aveva ospitato
+  `feature/02` andava rimosso. La domanda non era se il lavoro fosse al sicuro — quello lo dice
+  `git merge-base --is-ancestor` — ma **che cosa si perde** che git non conta: i file ignorati, che
+  in questo repository non sono solo cache, perché `docker/02-replicaset/.env` è ignorato per
+  decisione ([ADR-0014](Decision.md#adr-0014)) e contiene la password dell'amministratore del lab.
+
+- **Esito, primo punto — con un file ignorato dentro, la rimozione riesce in silenzio.** Un
+  worktree di prova, un `.env` scritto al suo interno, e la domanda posta a git:
+
+```
+$ git -C w1 status --porcelain
+[uscita 0]
+
+$ git worktree remove w1
+[uscita 0]
+```
+
+  Nessuna riga in uscita né dal primo comando né dal secondo. `status` dice «pulito» perché il file
+  è ignorato, e `remove` non obietta: la directory non esiste più, e il `.env` con lei.
+
+- **Esito, secondo punto — con un file non tracciato dentro, la rimozione si rifiuta.** Stesso
+  worktree di prova, un `appunto.txt` qualunque al posto del `.env`:
+
+```
+$ git -C w2 status --porcelain
+?? appunto.txt
+[uscita 0]
+
+$ git worktree remove w2
+fatal: 'w2' contains modified or untracked files, use --force to delete it
+[uscita 128]
+```
+
+  La directory sopravvive. La rete di sicurezza esiste, ed è buona: copre i file **non tracciati**.
+  Non copre gli **ignorati**, che sono una categoria diversa e nel primo caso è passata liscia.
+
+- **Esito, terzo punto — dall'esterno il controllo non è possibile, e non per la regola di
+  ignore.** Elencare i file ignorati dal checkout che contiene il worktree restituisce una riga
+  sola, `!! .claude/worktrees/…/`, con la barra finale: la directory, non il suo contenuto. Il
+  motivo non è il `.gitignore`, è il **confine di repository**. Messi fianco a fianco un worktree
+  annidato e una directory normale, e chiesto a git di scendere con `-uall`, che è l'opzione
+  apposita:
+
+```
+$ git status --porcelain -uall
+?? dirnormale/dentro.txt
+?? w3/
+```
+
+  Nella directory normale git entra e nomina il file; nel worktree si ferma sulla soglia e nomina
+  la directory. Nessuno dei due è ignorato: la differenza è solo che il secondo contiene un `.git`.
+
+- **Conseguenza:** [ADR-0056](Decision.md#adr-0056). Nel caso concreto il controllo, eseguito
+  dall'interno, ha trovato quattro voci non rigenerabili a colpo d'occhio — tre di configurazione
+  di uno strumento di indicizzazione e `docker/02-replicaset/.env` — e ha stabilito che quella era
+  l'**unica** copia del file: nel checkout principale non compariva. È stato messo in salvo prima
+  della rimozione.
+- **Riserve:** misura su una sola piattaforma e una sola versione di git; il comportamento è
+  documentato come intenzionale, ma qui non è citata la pagina di manuale che lo dichiara — è
+  osservato. Non è stato provato `--force`, che per definizione cancella tutto, né il caso di un
+  file insieme modificato e ignorato. Il confine di repository è stato provato con un worktree; un
+  submodule dovrebbe comportarsi allo stesso modo per la stessa ragione, e non è stato provato.
+  Resta fuori dalla misura `git clean`, che è l'altro modo di arrivare alla stessa lista.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0056
+
+
+<a id="v-051"></a>
+### V-051 — La 8.0.30 non è pubblicata: il traguardo di ADR-0028 al 2026-09-01
+
+- **Comandi:** `curl` sull'API dei tag di Docker Hub (`/v2/repositories/library/mongo/tags`) e sul
+  feed ufficiale dei download (`https://downloads.mongodb.org/current.json`)
+- **Ambiente:** macOS 26.6.2 arm64, curl 8.7.1, interrogazione del 2026-09-01 alle 20:15 CEST
+- **Che cosa si voleva sapere:** [ADR-0028](Decision.md#adr-0028) adotta MongoDB 7.0.40 «con la
+  8.0.30 come traguardo», e ha la scadenza scritta dentro: si ripinna appena i binari escono. Il
+  punto di ripresa di `feature/03` mette questa verifica come primo passo, prima di montare il
+  terzo stack. La domanda è secca: la 8.0.30 esiste?
+
+- **Esito, primo punto — su Docker Hub non c'è.** Interrogando l'API filtrando per nome:
+
+```
+GET /v2/repositories/library/mongo/tags?page_size=100&name=8.0.30
+-> {"count": 0, "results": []}
+```
+
+  L'ultima patch pubblicata della linea 8.0 resta la **8.0.29**, la stessa nominata da ADR-0028
+  ventisette giorni fa. L'immagine ufficiale non è ferma: i tag mobili (`latest`, `8`, `noble`)
+  risultano aggiornati il **2026-08-31**, cioè ieri. Non è un repository abbandonato che non
+  pubblica: è un repository vivo in cui quella patch non è uscita.
+
+- **Esito, secondo punto — nel feed ufficiale nemmeno.** Il feed dei download elenca, per ogni
+  linea, la versione corrente:
+
+```
+8.3.8, 8.2.12, 8.0.29, 7.0.40, 6.0.29, 5.0.34, 4.4.31
+```
+
+  Sono i due dei tre canali che ADR-0028 aveva nominato, e concordano.
+
+- **Esito, terzo punto — la versione del lab è ancora la corrente della sua linea.** Filtrando per
+  `name=7.0.4` si ottengono `7.0.4`, `7.0.40` e le loro varianti, e nessuna `7.0.41`. La 7.0.40 non
+  è una versione che invecchia mentre il lab la usa: è la punta della 7.0.
+
+- **Una trappola metodologica, incontrata e schivata.** La prima interrogazione chiedeva i tag con
+  `name=8.0` e leggeva la risposta: l'elenco finiva su `8.0.29`, e sembrava una conferma. Non lo
+  era. La risposta è paginata a 100 risultati su **435**, e l'ultimo elemento della pagina era
+  `8.0.29-windowsservercore-ltsc2025`: in ordine lessicografico la `8.0.30` sarebbe stata la prima
+  della pagina successiva. Una risposta corretta a una domanda mal posta, con la forma di una
+  risposta alla domanda giusta. La verifica vale perché la seconda interrogazione ha filtrato per
+  nome esatto, dove il conteggio è `0` e non dipende da dove cade il taglio.
+
+- **Conseguenza:** [ADR-0058](Decision.md#adr-0058). Il lab resta su 7.0.40 e il controllo si
+  ripete a data fissa invece che a sensazione.
+- **Riserve:** il feed `current.json` elenca la versione corrente per linea, non l'elenco completo
+  delle patch pubblicate; l'assenza da lì e da Docker Hub non è una prova formale che la 8.0.30 non
+  esista in nessun canale, ma è esattamente il criterio che ADR-0028 si era dato. Non è stato
+  riletto il changelog per verificare che la correzione sia **ancora** attribuita alla 8.0.30 e non
+  spostata a una patch successiva: se fosse spostata cambierebbe il numero da attendere, non
+  l'esito di oggi. Non è stata interrogata l'immagine `mongodb/mongodb-community-server`, che è il
+  terzo canale nominato da ADR-0028.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0058
+
+<a id="v-052"></a>
+### V-052 — Lo scheletro dello stack 03: i profili contati, e un config server sano per un termine solo
+
+- **Comandi:** `docker compose … config --services` con i tre profili possibili;
+  `docker compose … --profile palco up -d --wait`; `docker logs`; `docker inspect --format`;
+  `mongosh --eval` dentro il container; `tools/check_stack.py`
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, 11,66 GiB assegnati alla VM,
+  immagine `mongo` 7.0.40 pinnata per digest da `tools/images.env`, 2026-09-01
+- **Che cosa si voleva sapere:** se lo scheletro dello stack 03 — `keyfile-init` senza profilo
+  più il replica set dei config server — regge le tre affermazioni su cui è costruito: che i
+  profili selezionino esattamente i servizi previsti, che la catena dichiari «pronto» quando lo
+  è, e che l'healthcheck ereditato dallo stack 02 funzioni anche su un `mongod` con
+  `--configsvr`.
+
+- **Esito, primo punto — i profili selezionano quello che devono.** Contando i servizi:
+
+```
+--profile palco     -> keyfile-init, cfg1                    (2)
+--profile completo  -> keyfile-init, cfg1, cfg2, cfg3        (4)
+nessun profilo      -> keyfile-init                          (1)
+```
+
+  La terza riga è la conferma che conta: `keyfile-init` è **senza** `profiles`, quindi resta
+  selezionato sempre, e la relazione `depends_on` va da un servizio con profilo verso uno senza.
+  È la direzione documentata da [S-015](#s-015), l'unica delle due; la riserva dichiarata da
+  [ADR-0010](Decision.md#adr-0010) sull'altra direzione resta aggirata per costruzione.
+
+- **Esito, secondo punto — la catena a due anelli funziona.** `up -d --wait` con il profilo
+  `palco` esce **0** dopo aver percorso l'ordine per intero: `sh-keyfile-init` `Started` →
+  `Exited` → `sh-cfg1` `Started` → `Healthy`. Il keyfile risulta:
+
+```
+-r-------- 1 999 999 1024 /keyfile/mongo-keyfile
+```
+
+  cioè 400 e proprietà `999:999`, che è l'utente `mongodb` dell'immagine ufficiale
+  ([S-023](#s-023)). I 1024 byte sono i 756 di entropia in base64.
+
+- **Esito, terzo punto — e questo è quello che vale.** Su un config server avviato con
+  `--replSet` e mai inizializzato, `db.hello()` risponde:
+
+```json
+{"isWritablePrimary": false, "secondary": false, "isreplicaset": true}
+```
+
+  I primi due termini sono **falsi**. L'unico vero è il terzo. Un healthcheck scritto come
+  `isWritablePrimary || secondary` — la forma che il design §5.4 suggerisce — resterebbe rosso
+  per sempre, e la catena non arriverebbe mai a `rs.initiate()`. La disgiunzione a tre termini
+  dello stack 02 vale quindi anche su un `--configsvr`, e non era scontato: è un ruolo diverso,
+  con una porta predefinita diversa e vincoli propri.
+
+  Il ruolo è confermato dal server stesso, non dedotto dal file: il log di avvio riporta
+  `"clusterRole":"configsvr"`, e il comando del container è
+  `mongod --configsvr --replSet cfgrs --keyFile … --bind_ip_all --port 27017
+  --wiredTigerCacheSizeGB 0.25`.
+
+- **Esito, quarto punto — l'eccezione localhost è più stretta di come si racconta.** Dallo stesso
+  container, `db.adminCommand({getCmdLineOpts: 1})` **fallisce**:
+
+```
+MongoServerError: not authorized on admin to execute command { getCmdLineOpts: 1, … }
+```
+
+  mentre `db.hello()` passa. Su un nodo con `--keyFile` e nessun utente creato, l'eccezione non
+  apre il server: apre la creazione del primo utente. È un'informazione utile alla pagina della
+  sicurezza, che oggi la descrive in termini più larghi.
+
+- **Esito, quinto punto — lo scheletro è già conforme.** `tools/check_stack.py` sul solo file
+  dello stack 03 riporta `Stack conformi: 1.` senza che sia stata aggiunta nessuna regola nuova.
+
+- **Conseguenza:** [ADR-0059](Decision.md#adr-0059).
+- **Riserve:** il profilo `completo` è stato verificato solo con `config --services`, non avviato:
+  la misura non dice niente su undici container in piedi insieme, che è la domanda del §6 dello
+  spike e va rifatta nel repository. Il CSRS **non** è stato inizializzato, quindi `hello()`
+  misura lo stato che precede `rs.initiate()` e non quello che segue. Non esiste ancora nessun
+  `mongos`, quindi niente di ciò che riguarda il routing è coperto. Tutto su arm64: la
+  disponibilità dei tag e il comportamento dei limiti di memoria su amd64 non sono stati
+  riverificati qui.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0059
+
+<a id="v-053"></a>
+### V-053 — Profili e `depends_on`: la riserva di ADR-0010, misurata su quattro casi
+
+- **Comandi:** `docker compose config --services` su due file di prova con `busybox`,
+  con `--profile palco`, con `--profile completo` e senza profili; `docker compose create`
+  nominando il servizio sulla riga di comando
+- **Ambiente:** macOS 26.6.2 arm64, Docker Compose v5.4.0, Docker Engine 29.7.2, 2026-09-01
+- **Che cosa si voleva sapere:** che cosa succede quando un servizio **selezionato** dichiara
+  `depends_on` verso un servizio **non selezionato** perché il suo profilo non è attivo.
+  [S-015](#s-015) documenta una sola direzione — servizio con profilo verso le sue dipendenze —
+  e la sua riserva dice che l'altra va misurata invece che dedotta. [ADR-0010](Decision.md#adr-0010)
+  aveva ereditato quella riserva e la teneva aperta dal 24 agosto. Lo stack 03 non poteva più
+  aggirarla: i suoi servizi di inizializzazione devono dipendere da membri che nel profilo
+  `palco` non esistono, oppure rinunciare a dipenderne.
+
+- **Esito, primo caso — servizio CON profilo verso una dipendenza non selezionata.** Un file con
+  `a` in entrambi i profili, `b` solo in `completo`, e `init-con-profilo` (entrambi i profili)
+  che dipende da tutti e due:
+
+```
+--profile palco     service "init-con-profilo" depends on undefined service "b":
+                    invalid compose project                              (uscita 1)
+--profile completo  a, b, init-con-profilo                               (uscita 0)
+```
+
+- **Esito, secondo caso — servizio SENZA profilo verso una dipendenza non selezionata.** È il caso
+  che la documentazione non tratta, ed è quello che ADR-0010 aveva lasciato aperto. Con
+  `init-senza-profilo` (nessun `profiles`) che dipende da `b`:
+
+```
+nessun profilo      service "init-senza-profilo" depends on undefined service "b":
+                    invalid compose project                              (uscita 1)
+--profile palco     stesso errore                                        (uscita 1)
+```
+
+  **La regola è simmetrica.** Non conta chi ha il profilo e chi no: conta che entrambi i servizi
+  siano selezionati. Un servizio selezionato non può dipendere da uno non selezionato, in nessuna
+  delle due direzioni.
+
+- **Esito, terzo caso — la validazione riguarda solo i servizi selezionati.** Sul file del primo
+  caso, senza nessun profilo attivo, `config --services` esce **0** e non stampa niente:
+  `init-con-profilo` non è selezionato, quindi il suo `depends_on` non viene nemmeno guardato. Un
+  `depends_on` rotto può quindi restare invisibile finché non si attiva il profilo che lo
+  seleziona.
+
+- **Esito, quarto caso — nominare il servizio è diverso dall'attivare il profilo.** `docker compose
+  create init-con-profilo`, senza nessun profilo attivo, esce **0** e crea **tre** container:
+
+```
+prova-profili-caso1-init-con-profilo-1  Created
+prova-profili-caso1-b-1                 Created
+prova-profili-caso1-a-1                 Created
+```
+
+  `b` viene tirato dentro nonostante il suo profilo non sia attivo. È la frase di [S-015](#s-015)
+  — «Only the targeted service (and any of its declared dependencies via `depends_on`) is
+  started» — e vale **solo** per il servizio nominato sulla riga di comando. Attivare un profilo e
+  nominare un servizio sono due modi di selezionare che si comportano in modo opposto davanti alla
+  stessa dipendenza: il primo è un errore, il secondo un'inclusione automatica.
+
+- **Il fallimento è rumoroso**, ed è la parte buona: Compose rifiuta l'intero progetto prima di
+  avviare qualsiasi cosa, con il nome del servizio e il nome della dipendenza nel messaggio.
+  Nessuno stack parte a metà.
+
+- **Conseguenza:** [ADR-0060](Decision.md#adr-0060). La riserva di [ADR-0010](Decision.md#adr-0010)
+  e quella di [S-015](#s-015) sono chiuse: la risposta è che il caso non trattato **fallisce**, e
+  fallisce dicendolo.
+- **Riserve:** misurato su Compose v5.4.0. Non è documentato, quindi è comportamento osservato e
+  non garantito: una versione futura potrebbe scegliere di tirare dentro la dipendenza come fa con
+  i servizi nominati. Chi aggiorna Compose rifaccia i quattro casi — il file di prova sta in
+  quattordici righe. Non è stato provato `--profile "*"`, né `COMPOSE_PROFILES`.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0060
+
+<a id="v-054"></a>
+### V-054 — I tre replica set dello stack 03, e una guardia provata rompendola due volte
+
+- **Comandi:** `docker compose --profile … up -d --wait`; `docker inspect --format`;
+  `docker wait`; `docker compose wait`; `mongosh --eval` dentro i container
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, immagine `mongo` pinnata per digest da
+  `tools/images.env`, 2026-09-01
+- **Che cosa si voleva sapere:** se i tre componenti dello stack 03 che tengono dati — il replica
+  set dei config server e i due shard — si formano da soli in tutti e due i profili, e se la
+  guardia bilaterale dei due script di inizializzazione ([ADR-0060](Decision.md#adr-0060)) becca
+  davvero i disallineamenti fra l'elenco dei membri e il profilo attivo.
+
+- **Esito, primo punto — i profili selezionano 7 e 13 servizi.** Con il Task 2 completo:
+  `palco` sette (`keyfile-init`, `cfg1`, `cfg-init`, `shard1a`, `shard1-init`, `shard2a`,
+  `shard2-init`), `completo` tredici. I sei servizi in più sono i due terzi di membri che il
+  profilo del talk non avvia.
+
+- **Esito, secondo punto — i tre set si formano, in tutti e due i profili.** Con `palco`, i tre
+  one-shot escono **0** e dicono:
+
+```
+membri da configurare: cfg1:27017
+inizializzo il replica set dei config server «cfgrs»
+primario del config server eletto: cfg1:27017
+utente amministratore «admin» creato
+config server pronto
+shard «shard1rs» pronto, primario: shard1a:27017
+shard «shard2rs» pronto, primario: shard2a:27017
+```
+
+  Con `completo`, `rs.status()` su ciascuno dei tre set:
+
+```
+cfgrs    ok=1 membri=3 -> cfg1:PRIMARY   cfg2:SECONDARY   cfg3:SECONDARY
+shard1rs ok=1 membri=3 -> shard1a:PRIMARY shard1b:SECONDARY shard1c:SECONDARY
+shard2rs ok=1 membri=3 -> shard2a:PRIMARY shard2b:SECONDARY shard2c:SECONDARY
+```
+
+  Il primario è il membro «a» in tutti e tre: `priority: 2` sul primo membro
+  ([ADR-0051](Decision.md#adr-0051)) funziona anche qui, e per una demo cronometrata vuol dire
+  sapere in anticipo quale container fermare.
+
+- **Esito, terzo punto — la guardia becca il caso pericoloso.** `--profile completo` con gli
+  elenchi lasciati al valore del `palco`: nove `mongod` in piedi, tre set da inizializzare a un
+  membro solo. Tutti e tre gli one-shot escono **5** (`USCITA_MEMBRO_DI_TROPPO`) senza toccare
+  niente. Senza guardia lo stack sarebbe partito, sarebbe sembrato sano, e la scena del failover
+  non avrebbe avuto niente da mostrare: è il guasto che di suo non fallisce.
+
+- **Esito, quarto punto — e becca anche l'altro.** `--profile palco` con gli elenchi del
+  `completo`: tutti e tre escono **4** (`USCITA_MEMBRO_ASSENTE`) dopo i trenta secondi di attesa,
+  dicendo quale membro manca e perché:
+
+```
+ERRORE: il membro «cfg2:27017» non risponde dopo 30 secondi.
+Di solito significa che MEMBRI_CFG elenca più membri di quanti il
+profilo attivo ne avvii. Con «--profile palco» il config server è uno solo.
+```
+
+- **Esito, quinto punto — `up --wait` esce 0 in tutti e quattro i casi, anche quando gli init
+  falliscono.** È la riconferma di [V-025](#v-025) su uno stack diverso, e la ragione per cui
+  [ADR-0041](Decision.md#adr-0041) vuole due comandi e non uno. Peggio: nel caso del disallineamento
+  Compose stampa
+
+```
+Container sh-cfg-init  Healthy
+```
+
+  per un container che `docker inspect` descrive come `stato=exited uscita=5 salute=nessun
+  healthcheck definito`. La parola «Healthy» sulla riga di un container morto non è un capriccio:
+  per `--wait` un servizio senza healthcheck è a posto appena parte. Nella prima misura del profilo
+  `completo` `up --wait` è uscito 0 mentre i tre one-shot erano ancora **in corsa**.
+
+  Una precisazione che lo stack 02 non poteva mostrare: `docker compose wait cfg-init` **senza**
+  `--profile` risponde `no containers for project "sqlstart-03-sharded"` e esce **1**. Il verdetto
+  di ADR-0041 va quindi dato con il profilo addosso, ed è un vincolo per il Task 4 del piano.
+
+- **Esito, sesto punto — l'eccezione localhost, misurata al confine su un nodo senza utenti.**
+  Uno shard resta senza utenti finché il Task 9 non decide diversamente, quindi la sua eccezione
+  localhost è aperta. Da dentro `sh-shard1a`, senza credenziali:
+
+```
+hello              AMMESSO
+replSetGetStatus   AMMESSO   (risposta piena: set, membri, stateStr)
+listDatabases      AMMESSO   (ok=1, ma l'elenco è VUOTO)
+getCmdLineOpts     NEGATO    Unauthorized
+serverStatus       NEGATO    Unauthorized
+find su una raccolta   NEGATO    Unauthorized
+insert su una raccolta NEGATO    Unauthorized
+```
+
+  Il confronto di controllo è su `sh-cfg1`, dove l'utente amministratore esiste e l'eccezione è
+  quindi chiusa: lì `replSetGetStatus` e `listDatabases` rispondono **Unauthorized**, e passa solo
+  `hello()`. La differenza fra le due colonne è l'eccezione localhost e nient'altro.
+
+  Ne segue che l'eccezione **non** è «solo la creazione del primo utente», come [V-052](#v-052)
+  aveva concluso da una misura sola: concede anche di leggere lo stato del replica set per intero.
+  Non concede di leggere dati, di scriverne, né di sapere come è stato avviato il server. È un
+  confine con una forma, non una porta aperta o chiusa, e la pagina della sicurezza del Task 9 lo
+  deve disegnare così.
+
+- **Conseguenza:** [ADR-0060](Decision.md#adr-0060).
+- **Riserve:** non c'è ancora nessun `mongos`, quindi i tre set esistono e **non si conoscono**:
+  niente di ciò che riguarda il routing, `sh.addShard()` o la distribuzione dei documenti è coperto
+  qui. La password usata nella prova è di scarto e i volumi sono stati cancellati con `down -v`
+  alla fine di ogni caso. Tutto su arm64. Il sesto punto è misurato su un `mongod --shardsvr`: non
+  è stato riverificato su un `--configsvr` senza utenti.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0060
+
+<a id="v-055"></a>
+### V-055 — `mongos` senza shard: sano, interrogabile, e muto quando dovrebbe gridare
+
+- **Comandi:** `docker compose --profile … up -d --wait`; `docker compose wait add-shard`;
+  `docker inspect --format`; `docker logs`; `mongosh --eval` dentro i container; `docker stop` /
+  `docker start`
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.4.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-01
+- **Che cosa si voleva sapere:** che cosa risponde un `mongos` a cui non è stato ancora registrato
+  nessuno shard. La domanda non è oziosa: decide che cosa può chiedere il suo healthcheck. Se la
+  sonda pretendesse un cluster completo, il servizio one-shot che registra gli shard — che gira
+  **dentro** `mongos` e quindi lo aspetta sano — non partirebbe mai, e lo stack si bloccherebbe
+  su se stesso. Serviva sapere se la sonda può essere onesta e restare una sonda di vita.
+
+- **Esito, primo punto — con zero shard `mongos` è sano e risponde a quasi tutto.** Autenticati come
+  amministratore, su un router appena avviato e nessuno shard nel cluster:
+
+```
+hello()                OK      ok=1 msg=isdbgrid
+ping                   OK      ok=1
+config.shards count    OK      0
+listDatabases          OK      ["admin","config"]
+lettura su demo        OK      []
+SCRITTURA su demo      ERRORE  ShardNotFound — Database demo could not be created :: caused by :: No shards found
+enableSharding demo    ERRORE  ShardNotFound — Database demo could not be created :: caused by :: No shards found
+```
+
+  Il container è `Up (healthy)` per Docker, `sh.status()` stampa `shards []` con il balancer
+  `Currently enabled: yes`, e `hello()` risponde `ok=1 msg=isdbgrid` **anche senza credenziali** —
+  che è la ragione per cui la sonda dell'healthcheck può restare una riga sola senza password
+  dentro il file Compose.
+
+- **Esito, secondo punto — la lettura tace, la scrittura no.** È il punto didattico della misura, e
+  non era scontato: `find()` su una collezione di un database inesistente risponde `[]` **senza
+  nessun errore**, esattamente come risponderebbe un cluster sano con la collezione vuota. Le due
+  situazioni sono indistinguibili dal lato del client. Solo la scrittura distingue, e lo fa con un
+  messaggio che nomina la causa vera: `No shards found`. Un cluster senza shard non è rotto in
+  modo visibile: è rotto in modo che si nota alla prima scrittura, e a una demo dal vivo la prima
+  scrittura arriva dopo che si è già detto al pubblico che il cluster è pronto.
+
+- **Esito, terzo punto — `sh.addShard()` chiude la catena, e i due shard entrano.** Il one-shot
+  esce **0**, `docker compose wait add-shard` risponde 0, e il registro dice:
+
+```
+shard già registrati: nessuno
+registro lo shard «shard1rs» -> shard1rs/shard1a:27017
+registro lo shard «shard2rs» -> shard2rs/shard2a:27017
+shard nel cluster: shard1rs -> shard1rs/shard1a:27017
+shard nel cluster: shard2rs -> shard2rs/shard2a:27017
+cluster pronto: 2 shard registrati
+```
+
+  Subito dopo, la stessa scrittura che un minuto prima falliva viene accettata e riletta:
+  `insertOne` risponde `acknowledged: true`, `find` restituisce `[{"x":1}]`. È la differenza fra
+  tre replica set e uno sharded cluster, ed è **una riga scritta in `config.shards`**: sui nove
+  `mongod` non è cambiato niente, stessi processi e stessi dati.
+
+- **Esito, quarto punto — `sh.status()` dopo la registrazione.** Due shard con `state: 1`,
+  `active mongoses [ { '7.0.40': 1 } ]`, autosplit `Currently enabled: yes`, balancer
+  `Currently enabled: yes` e `Failed balancer rounds in last 5 attempts: 0`;
+  `sh.getBalancerState()` risponde `true`. È la misura chiesta dal piano del Task 3, rifatta qui
+  dentro il repository e non nella directory di prova dello spike.
+
+- **Esito, quinto punto — la riesecuzione non rompe niente.** Ricreato il one-shot con
+  `up -d --force-recreate add-shard`, esce **0** e scrive
+  `shard «shard1rs» già registrato: non lo riaggiungo` per tutti e due. Serviva perché un
+  `make up-03` dato due volte davanti al pubblico non deve fallire la seconda.
+
+- **Esito, sesto punto — il profilo `completo`, e il router che non ha niente da perdere.** Sedici
+  container, tutti `healthy` o `Exited (0)`. Con gli elenchi a tre membri, `sh.addShard()` registra
+  la composizione per intero — `shard1rs/shard1a:27017,shard1b:27017,shard1c:27017` — e
+  `config.mongos` elenca tutti e due i router: `["mongos2:27017","mongos:27017"]`. Fermato
+  `sh-mongos` con `docker stop`, la scrittura data a `mongos2` passa (`acknowledged: true`) e
+  `mongos2` vede i due shard. Nessun dato è andato perso perché **su un `mongos` non ce n'è**: è
+  l'unico servizio dello stack senza volume, e la sua morte è un dettaglio operativo, non un
+  incidente.
+
+- **Conseguenza:** [ADR-0061](Decision.md#adr-0061).
+- **Riserve:** nessuna collezione è stata distribuita — `shardCollection`, la shard key e la
+  distribuzione dei chunk restano fuori (Task 6). La misura del secondo punto vale per un database
+  che non esiste; non è stato provato che cosa risponde una lettura su un database **esistente**
+  ma con gli shard tolti a posteriori, che è un caso che questo stack non sa produrre. Il quinto
+  punto ricrea il container, non riesegue lo script dentro lo stesso container. Le password usate
+  nelle prove sono di scarto e ogni caso si è chiuso con `down -v`, senza container né volumi
+  residui. Tutto su arm64.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0061
+
+<a id="v-056"></a>
+### V-056 — La sentinella: `up --wait` diventa onesto, e un ramo d'errore che era codice morto
+
+- **Comandi:** `docker compose up -d --wait` con e senza il servizio sentinella;
+  `docker compose wait`; `docker inspect --format`; `docker logs`; un banco di prova in
+  `busybox` con un one-shot a durata e codice di uscita governati da fuori
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.4.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-01
+- **Che cosa si voleva sapere:** il Passo 4 del Task 4 chiede di verificare che
+  `docker compose --profile palco up --wait` esca 0 **soltanto** quando `sh.status()` è già utile.
+  Non è verificabile così com'è — [V-025](#v-025) e [ADR-0041](Decision.md#adr-0041) hanno già
+  stabilito che `up --wait` non aspetta i one-shot — quindi la domanda vera è se si possa
+  **costruire** quella proprietà, e a che prezzo.
+
+- **Esito, primo punto — il banco di prova isola il meccanismo.** Tre container `busybox`: un
+  one-shot che dorme sei secondi e poi esce con il codice che gli si passa, una sentinella che
+  dipende da lui con `service_completed_successfully` e resta viva, un servizio di controllo che
+  non dipende da niente. Senza la sentinella:
+
+```
+progetto intero, one-shot che uscirà 0  ->  up --wait esce 0 dopo 1 secondo, one-shot «running»
+progetto intero, one-shot che uscirà 7  ->  up --wait esce 0 dopo 0 secondi
+                                            e Compose stampa «Container lavoro Healthy»
+```
+
+  Con la sentinella, gli stessi due casi:
+
+```
+one-shot che esce 0  ->  up --wait esce 0 dopo 7 secondi
+one-shot che esce 7  ->  up --wait esce 1, «service "lavoro" didn't complete
+                         successfully: exit 7», sentinella ferma in «Created»
+```
+
+- **Esito, secondo punto — lo stesso, sullo stack vero.** Con `--profile palco` e `add-shard`
+  rallentata di 40 secondi per rendere deterministica una corsa che altrimenti si vince per caso:
+
+| | `up --wait` | dopo | shard registrati | add-shard |
+|---|---|---|---|---|
+| senza sentinella | **0** | 18 s | **0** | `running` |
+| senza sentinella, catena rotta | **0** | 18 s | 0 | `running` |
+| con sentinella | 0 | 60 s | **2** | `exited 0` |
+| con sentinella, catena rotta | **1** | 35 s | 0 | `exited 6` |
+
+  Nel quarto caso il messaggio è `service "add-shard" didn't complete successfully: exit 6` e la
+  sentinella resta in `Created`. Nel terzo, nell'istante in cui `up --wait` torna, `sh.status()`
+  mostra i due shard con `state: 1`, il balancer attivo e una scrittura che viene accettata: è
+  esattamente la proprietà che il Passo 4 chiedeva di verificare, ottenuta costruendola.
+
+- **Esito, terzo punto — quello che la sentinella non dà.** `up --wait` esce **1**, non 6. Il
+  verdetto è giusto e il colpevole è nominato, ma il codice specifico dello script — 6 per
+  `addShard` fallita, 7 per cluster incompleto — sopravvive solo nel testo del messaggio.
+
+- **Esito, quarto punto — e il secondo comando qui farebbe danno.** `docker compose wait
+  add-shard` dopo un `up --wait` riuscito risponde `no containers for project
+  "sqlstart-03-sharded"` ed esce **1**, con il flag di profilo acceso: il container ha già finito, e
+  `wait` vuole qualcosa di vivo a cui attaccarsi. Il controllo è sul banco `busybox`, dove lo
+  stesso comando su un one-shot **ancora in corsa** esce 0 e stampa `exited with status code 0`.
+  La forma prescritta da ADR-0041 per lo stack 02 è quindi la forma sbagliata per lo stack 03, e
+  non per una questione di stile: fallirebbe.
+
+- **Esito, quinto punto — un ramo d'errore che era codice morto.** Rompendo la stringa di uno
+  shard (`SHARD_1: nonesiste/shard1a:27017`) è venuto fuori che `sh.addShard()` **solleva** invece
+  di rispondere `ok: 0`: `MongoServerError: Could not find host matching read preference
+  { mode: "primary" } for set nonesiste`. mongosh usciva **1** per eccezione non gestita, quindi
+  il controllo `if (!esito.ok)` di `20-add-shard.js` non veniva valutato mai, l'uscita 6 era
+  irraggiungibile e il messaggio che nomina le due cause frequenti non si stampava. Con il
+  `try/catch` aggiunto, lo stesso caso dà uscita **6** e stampa:
+
+```
+ERRORE: sh.addShard(«nonesiste/shard1a:27017») ha risposto ok=0
+Messaggio: Could not find host matching read preference { mode: "primary" } for set nonesiste
+Le due cause frequenti: il mongod non è stato avviato con --shardsvr,
+oppure il replica set nominato non ha un primario eletto.
+```
+
+- **Esito, sesto punto — un file di override ACCODA le liste, non le sostituisce.** Il primo
+  tentativo di controllo metteva `profiles: ["mai"]` su `up-03` in un file passato con un secondo
+  `-f`, aspettandosi di spegnerlo. `config --services` continuava a elencarlo: la lista risultante
+  è `["palco","completo","mai"]`, e `--profile palco` lo seleziona lo stesso. Due misure fatte
+  così erano prive di valore e sono state rifatte su una copia del file senza il servizio. Vale
+  per ogni campo a sequenza, non solo per `profiles`.
+
+- **Conseguenza:** [ADR-0062](Decision.md#adr-0062).
+- **Riserve:** il quarto punto non è stato riverificato sullo stack 02, dove `up-02` esegue
+  proprio i due comandi: lì `up --wait` torna **prima** che `rs-init` finisca ([V-025](#v-025)),
+  quindi `wait` trova il container vivo e il bersaglio funziona — ma la distanza fra le due cose
+  è di secondi, e nessuna misura dice quanto sia stabile su una macchina diversa. È un controllo
+  da fare al Task 7. Le prove sono tutte sul profilo `palco`; il rallentamento di 40 secondi è un
+  artificio da banco di prova e non descrive un tempo reale. Password di scarto, ogni caso chiuso
+  con `down -v`, nessun residuo. Tutto su arm64.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0062
+
+<a id="v-057"></a>
+### V-057 — I tre ruoli dello sharded: sei modi di sbagliarli, cinque che lo dicono e uno che no
+
+- **Comandi:** `docker run --rm` con `mongod` e `mongos` e le opzioni rotte una alla volta;
+  copie di `docker/03-sharded/compose.yaml` con un difetto ciascuna avviate con
+  `docker compose --profile palco up -d --wait`; `docker inspect --format`; `docker logs`;
+  `tools/check_stack.py` su sette copie dello stesso file
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.4.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-01
+- **Che cosa si voleva sapere:** il Task 5 chiede di insegnare a `check_stack.py` le regole dello
+  stack sharded. Prima di scrivere una regola serve sapere **che cosa succede davvero senza**, per
+  due motivi distinti. Il primo è di forma: i messaggi di `check_stack.py` citano il sintomo, e un
+  sintomo si cita solo dopo averlo visto. Il secondo è di merito: una regola che previene un errore
+  già rumoroso vale meno di una che previene un errore muto, e prima di misurare non si sa quale
+  delle due si sta scrivendo.
+
+- **Esito, primo punto — quattro rifiuti sulla riga di comando, tutti immediati e tutti espliciti.**
+  Quattro `docker run` da pochi secondi, nessun cluster acceso:
+
+```
+mongod --configsvr --shardsvr --replSet x
+  -> BadValue: shardsvr is not allowed when configsvr is specified   (uscita 1)
+mongos --configdb x/a:27017 --wiredTigerCacheSizeGB 0.25
+  -> Error parsing command line: unrecognised option '--wiredTigerCacheSizeGB'
+mongos --configdb a:27017,b:27017
+  -> FailedToParse: invalid url [a:27017,b:27017]
+mongos --port 27017
+  -> BadValue: error: no args for --configdb
+```
+
+  Nessuno dei quattro processi parte, e ognuno nomina l'opzione che ha in mano. Il terzo dice
+  anche una cosa sulla storia: dalla 3.4 `--configdb` accetta soltanto la forma
+  `nomeSet/host:porta`, e l'elenco nudo di host — la scrittura di prima, quella che si trova
+  copiando una guida vecchia — oggi non è un'incompatibilità silenziosa ma un rifiuto.
+
+- **Esito, secondo punto — uno shard senza `--shardsvr`: lo dice l'ultimo anello, e lo dice bene.**
+  Copia dello stack con le sei righe `--shardsvr` tolte, profilo `palco`. `up --wait` esce **1**,
+  `add-shard` esce **6**, e il log è questo:
+
+```
+registro lo shard «shard1rs» -> shard1rs/shard1a:27017
+ERRORE: sh.addShard(«shard1rs/shard1a:27017») ha risposto ok=0
+Messaggio: Cannot run addShard on a node started without --shardsvr
+Le due cause frequenti: il mongod non è stato avviato con --shardsvr,
+oppure il replica set nominato non ha un primario eletto.
+```
+
+  Due cose vanno annotate. La prima: `sh.addShard()` qui **restituisce** `ok: 0`, non solleva —
+  al contrario del caso di [V-056](#v-056), dove con un replica set irraggiungibile sollevava. I
+  due comportamenti convivono, e il `try/catch` aggiunto al Task 4 li copre entrambi; senza di
+  quello, metà dei casi sarebbe rimasta muta. La seconda: il commento di `shard1a` nel file
+  Compose diceva che «il messaggio parla d'altro». Non è vero, il messaggio nomina esattamente
+  l'opzione che manca, e il commento è stato corretto.
+
+- **Esito, terzo punto — un config server senza `--configsvr`: lo dice il primo anello.**
+  Copia con le tre righe `--configsvr` tolte. `up --wait` esce **1**, `cfg-init` esce **1** —
+  che non è nessuno dei codici che [ADR-0036](Decision.md#adr-0036) assegna, perché è
+  un'eccezione non gestita — e stampa:
+
+```
+inizializzo il replica set dei config server «cfgrs»
+MongoServerError: Nodes being used for config servers must be started with the --configsvr flag
+```
+
+- **Esito, quarto punto — il refuso nel nome del set: novantaquattro secondi, e la causa non
+  compare da nessuna parte.** Copia con `cfgsr` al posto di `cfgrs` dentro `--configdb`: due
+  lettere scambiate, tutto il resto intatto. È il caso peggiore dei sei, e per tre ragioni che si
+  sommano.
+
+  Primo, il tempo. `up --wait` esce **1 dopo 94 secondi**, contro i 20-60 degli altri casi: il
+  `mongos` non fallisce, ritenta, e la catena si ferma solo quando la sonda esaurisce i dodici
+  tentativi. `add-shard` e `up-03` restano in `Created`, cfg1 e i due shard risultano `healthy`.
+
+  Secondo, il posto. Tutti i processi partono; il solo malato è il router, che resta
+  `unhealthy` senza mai aprire la porta — `mongosh` da dentro il container risponde
+  `MongoNetworkError: connect ECONNREFUSED 127.0.0.1:27017`.
+
+  Terzo, e decisivo: **la stringa `cfgrs` non compare mai nel log di `mongos`.** Contata:
+  zero occorrenze. Il nome giusto non viene mai messo accanto a quello sbagliato, e quello che
+  si legge invece è questo:
+
+```
+"msg":"RSM host was removed from the topology","attr":{"replicaSet":"cfgsr","addr":"cfg1:27017"}
+"msg":"Host failed in replica set","attr":{"replicaSet":"cfgsr","host":"cfg2:27017", …
+   "error":"HostUnreachable: …"
+"s":"W", "c":"SHARDING", "msg":"Error loading global settings from config server.
+   Sleeping for 2 seconds and retrying","attr":{"error":{"code":133,
+   "codeName":"FailedToSatisfyReadPreference", …
+```
+
+  Chi legge trova «host irraggiungibile» su `cfg2` e `cfg3` — che nel profilo `palco` sono
+  irraggiungibili **per costruzione**, sono semi e basta, come lo spike ha già documentato — e
+  `FailedToSatisfyReadPreference` sul solo host che invece risponde benissimo. La diagnosi punta
+  alla rete. La causa sono due lettere.
+
+- **Esito, quinto punto — le sette copie del file vero.** Le regole nuove non sono state provate
+  solo sui campioni dei test, come già per [V-026](#v-026): sette copie di
+  `docker/03-sharded/compose.yaml`, un difetto ciascuna, passate a `check_stack.py`. La copia
+  intatta esce **0**; le altre sei escono **1 con esattamente un problema ciascuna**, e sei
+  messaggi diversi. Un problema solo per copia, non una cascata: la regola che scatta è quella
+  del difetto introdotto.
+
+- **Esito, sesto punto — la notizia, che è l'opposto di quella attesa.** Cinque dei sei sintomi
+  nominano l'opzione che manca, e lo fanno con una frase che si può cercare in rete così com'è.
+  Non sono errori muti. Il guadagno delle regole nuove non è quindi tradurre un messaggio oscuro:
+  è **incontrarlo in due secondi con `make stack-check` invece che al minuto e ventuno di un
+  avvio**, davanti al pubblico, con dieci container accesi da spegnere. Il sesto sintomo, il
+  refuso, è l'unico veramente muto, ed è quello per cui la terza regola esiste da sola.
+
+- **Conseguenza:** [ADR-0063](Decision.md#adr-0063).
+- **Riserve:** tutte le prove sul profilo `palco`; il profilo `completo` non è stato rotto, e non
+  c'è motivo di aspettarsi sintomi diversi, ma non è misurato. I quattro rifiuti del primo punto
+  sono su `docker run` nudo, senza keyfile né rete Compose: dicono che la riga di comando è
+  rifiutata, non che nel cluster il sintomo si presenti identico. Le novantaquattro secondi del
+  quarto punto dipendono dai parametri della sonda di `mongos` — dodici tentativi ogni cinque
+  secondi con venti di grazia — e cambierebbero cambiando quelli. Password di scarto, ogni caso
+  chiuso con `down -v`, nessun container né volume residuo. Tutto su arm64.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0063
+
+<a id="v-058"></a>
+### V-058 — Ventimila documenti distribuiti: quattro chunk, 49,3 % / 50,7 %, e sei cose che il cluster non lascia fare
+
+- **Comandi:** `docker compose --profile palco up -d --wait` e `--profile completo up -d --wait`
+  su `docker/03-sharded/compose.yaml`; `mongosh` attraverso `mongos` con
+  `$shardedDataDistribution`, `config.shards`, `config.chunks`, `explain()`;
+  `mongosh` in diretta su `shard1a` e su `cfg1`; `docker inspect --format`; `docker logs`;
+  `tools/smoke-sharded.sh` nei due profili
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.4.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-01
+- **Che cosa si voleva sapere:** il Task 6 aggiunge i dati di demo e la prova end-to-end. Servivano
+  tre cose distinte: che la shard key scelta distribuisca davvero e non solo sulla carta; quali
+  costanti lo smoke può permettersi di asserire senza diventare fragile; e da dove si leggono le
+  misure interne dei nodi, dato che uno sharded cluster non si lascia interrogare come un replica
+  set.
+
+- **Esito, primo punto — la distribuzione, che è la misura per cui esiste tutto il resto.** Con
+  shard key `{_id: "hashed"}` su collezione vuota e poi 20 000 documenti inseriti a lotti di 5 000
+  con `w: "majority"`:
+
+```
+shard key: {"_id":"hashed"} · chunk: 4
+  shard1rs:  9860 documenti (49,3 %)
+  shard2rs: 10140 documenti (50,7 %)
+indici: _id_, _id_hashed
+```
+
+  I quattro chunk non sono un caso: [S-066](#s-066) documenta due chunk per shard come valore
+  predefinito quando si distribuisce una collezione vuota, e due shard fanno quattro. Lo spike §5
+  aveva misurato lo stesso numero senza sapere che fosse un predefinito. Gli orfani sono zero su
+  tutti e due gli shard.
+
+- **Esito, secondo punto — la distribuzione non dipende dal profilo.** Stessi identici numeri —
+  9860 e 10140 — su `palco` (un membro per insieme) e su `completo` (tre). Non è ovvio a chi guarda
+  ma lo è ripensandoci: la ripartizione dipende dall'hash delle chiavi e dai confini dei chunk, e i
+  membri in più sono copie dello stesso shard. Il tempo di caricamento è lo stesso a meno del
+  rumore, 1202 ms contro 1217 ms, perché `w: "majority"` su un set a tre membri con tutti i nodi
+  sani costa quanto su uno a un membro.
+
+- **Esito, terzo punto — il baratto della shard key, misurato invece che raccontato.** Tre
+  `explain()` attraverso il router, contando gli shard interrogati:
+
+```
+db.ordini.find({_id: 42})                       -> shard2rs                (1 shard)
+db.ordini.find({_id: {$gte: 100, $lt: 200}})    -> shard1rs, shard2rs      (2 shard)
+db.ordini.find({citta: "Ancona"})               -> shard1rs, shard2rs      (2 shard)
+```
+
+  È la conferma sperimentale di [S-066](#s-066): mirata l'uguaglianza sulla chiave, in broadcast
+  l'intervallo sulla **stessa** chiave. La terza riga è il caso normale di un campo qualsiasi e
+  serve da controprova, perché senza si potrebbe credere che il broadcast dipenda dall'intervallo e
+  non dall'hash.
+
+- **Esito, quarto punto — gli utenti di uno sharded cluster non stanno sugli shard, e la cosa si
+  scopre provando.** Le stesse credenziali che funzionano sul router, usate in diretta su
+  `shard1a`, danno `MongoServerError: Authentication failed`. Senza credenziali si ottiene
+  `not authorized on admin to execute command`. Su `cfg1` invece la stessa coppia entra e risponde
+  (`mem=512`, `cache=268435456`). Gli utenti vivono nel database `admin` dei config server, e uno
+  shard interrogato direttamente autentica contro i propri, che non esistono. Conseguenza pratica
+  per lo smoke: le misure interne dei nodi non si possono leggere con `hostInfo()` su tutti, e si
+  leggono da `docker inspect` e dalla riga `cache_size=…` del log di avvio.
+
+  **Seguito, 2026-09-02.** Questo punto vale fino a [ADR-0071](Decision.md#adr-0071). Da quando
+  ogni shard ha un amministratore locale, le credenziali del cluster su `shard1a` **entrano** e
+  rispondono, e senza credenziali la risposta non è più `not authorized on admin to execute
+  command` ma `Command find requires authentication` ([V-067](#v-067)). Resta vero ciò che il
+  punto spiega — gli utenti del cluster vivono nel database `admin` dei config server, e uno
+  shard autentica contro i propri: adesso i propri esistono, e sono un altro elenco.
+
+- **Esito, quinto punto — che cosa distingue davvero un router da un nodo, e che cosa no.** Su
+  `mongos` la sezione `wiredTiger` di `serverStatus()` **non esiste** — non è vuota, manca — e la
+  stringa `cache_size` compare **zero volte** nel log, contro le nove dei nove `mongod`. Ma il
+  controllo che sembrava ovvio è sbagliato: `docker inspect` mostra `/data/db` montato **anche su
+  `mongos`**, perché l'immagine di MongoDB dichiara `VOLUME /data/db` nel proprio Dockerfile e
+  Docker crea un volume anonimo su ogni container che ne nasce. Il discriminante vero è il volume
+  **nominato**: `sqlstart-03-sharded_dati-cfg1` su un nodo, nessun `dati-…` sul router. La prima
+  stesura dello smoke ha fallito proprio qui, ed è l'unico rosso dell'intera prova.
+
+- **Esito, sesto punto — i tempi e le costanti che lo smoke può asserire.** `up -d --wait` chiude
+  a **uscita 0 in 23 secondi** sul profilo `palco` e in **36** su `completo`, catena completa
+  compresa il seed. Il secondo `up` di seguito esce 0 e il seed stampa «lab.ordini ha già 20000
+  documenti: non ricarico»: idempotente. Impronta del dataset `20000 50083417.93 60278` (documenti,
+  somma degli importi a due decimali, somma delle righe), identica nei due profili — sono i primi
+  20 000 dei 50 000 degli stack 01 e 02, stesso generatore e stesso seme. Limiti di memoria letti
+  dai container: 536 870 912 sui config server, 671 088 640 sugli shard, 268 435 456 sui router.
+  Cache di WiredTiger `cache_size=256M` su tutti e nove i `mongod`. Porte pubblicate 27117 e 27118,
+  rotazione `10m`/`3` su tutti, keyfile identico e a `400` sugli undici container.
+
+- **Esito, settimo punto — la prova completa, nei due profili.** `tools/smoke-sharded.sh` chiude a
+  **62 controlli superati e 0 errori** su `palco` e **99 e 0** su `completo`. La differenza di
+  conteggio è tutta nel numero di nodi: i controlli per nodo si moltiplicano, quelli sul cluster no.
+  Una scrittura con `w: "majority"` attraverso il router viene accettata e riletta; la collezione
+  che la riceve **non** risulta distribuita e vive sullo shard primario del database (`shard2rs`),
+  che è la prova del concetto di shard primario.
+
+- **Riserve:** la distribuzione 49,3 % / 50,7 % è una proprietà di **questo** dataset con **questo**
+  seme, non una garanzia: la soglia dello smoke è fissata al 40 % per shard proprio per non
+  confondere una fluttuazione con un guasto. I quattro chunk valgono finché gli shard sono due e
+  nessuno passa `numInitialChunks`; lo smoke tratta un numero maggiore come informazione e non come
+  errore. Il conteggio dei controlli dipende dal numero di nodi del profilo e cambierà al primo
+  controllo aggiunto. Password di scarto, `.env` cancellato in coda, ogni giro chiuso con `down -v`
+  e residui verificati a zero: nessun container, nessun volume, nessuna rete. Tutto su arm64.
+- **Data:** 2026-09-01
+- **Usata da:** ADR-0064, ADR-0065, ADR-0068, ADR-0071, ADR-0072
+
+<a id="v-059"></a>
+### V-059 — Il profilo con cui si spegne non è quello con cui si è acceso, e Compose non lo dice
+
+- **Comandi:** `docker compose --profile palco|completo|"*" up -d --wait`, `… down`, `… ps`,
+  `docker network ls`, `docker volume ls` su `docker/03-sharded/compose.yaml`
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.5.0, VM Docker con
+  11,67 GiB e 8 CPU, immagine `mongo` pinnata per digest da `tools/images.env`, 2026-09-02
+- **Che cosa si voleva sapere:** il Task 7 sceglie di passare il profilo come **variabile** del
+  `Makefile` invece di generare due famiglie di bersagli. Prima di scriverlo andava verificato che
+  la variabile bastasse davvero — cioè che `PROFILO=palco make down-03` dopo un avvio in
+  `completo` lasciasse la macchina pulita, che è la sequenza che capita a chi fa una prova
+  generale e poi spegne.
+
+- **Esito, primo punto — non basta, e il modo in cui non basta è il peggiore.** Acceso in
+  `completo` (18 servizi) e spento con `--profile palco`:
+
+```
+container rimossi:   11  (quelli del profilo palco)
+container rimasti:    7  (sh-cfg2, sh-cfg3, sh-shard1b, sh-shard1c, sh-shard2b, sh-shard2c, sh-mongos2)
+rete:                 «Network sqlstart-03-sharded_rete Resource is still in use»
+codice di uscita:     0
+```
+
+  Uscita **zero**. Compose stampa il messaggio sulla rete e considera il comando riuscito: chi
+  legge solo l'esito crede di aver spento, e si ritrova sette mongod accesi che continuano a
+  tenere la RAM e le porte. Al `up` successivo la rete esiste già, quindi nemmeno lì si accorge di
+  niente.
+
+- **Esito, secondo punto — `down` senza `--profile` si comporta come `--profile palco`.** Stesso
+  identico risultato: 11 rimossi, 7 rimasti, rete viva. La forma «neutra» non è neutra, perché i
+  servizi senza profilo esplicito sono l'unico insieme sempre attivo ([S-068](#s-068)) e gli altri
+  vanno nominati.
+
+- **Esito, terzo punto — due forme funzionano, e una sola non va tenuta aggiornata a mano.**
+  `--profile completo down` toglie tutto (18 container, rete rimossa) perché `completo` è un
+  soprainsieme di `palco`; `--profile "*" down` toglie tutto senza sapere quali profili esistano.
+  Controprova a stack acceso in `palco` con un servizio del `completo` aggiunto a mano:
+  `make down-03` con il jolly ha rimosso tutti i container e la rete, e ha lasciato in piedi i
+  **5** volumi, che è esattamente ciò che `down` deve fare e `reset` no.
+
+- **Perché conta oltre lo stack 03.** La forma sbagliata non produce nessun segnale: nessun codice
+  di errore, nessuna riga rossa, e `docker compose ps` interrogato con lo stesso profilo sbagliato
+  mostra zero container, cioè **conferma** l'idea sbagliata. L'unico modo di accorgersene è
+  guardare `docker ps` senza filtri, che è quello che nessuno fa quando ha appena letto «done».
+
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0066
+
+<a id="v-060"></a>
+### V-060 — Il config server scriveva in un volume anonimo: zero file contro ottantatré
+
+- **Comandi:** `make up-03`, `make down-03`, `make reset-03`, `docker logs sh-add-shard`,
+  `docker inspect --format '{{range .Mounts}}…'`, `docker image inspect --format
+  '{{json .Config.Volumes}}'`, `docker run --rm --entrypoint cat … /usr/local/bin/docker-entrypoint.sh`,
+  `docker run --rm -v <volume>:/v alpine sh -c 'ls -1 /v | wc -l'`
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.5.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-02
+- **Che cosa si voleva sapere:** perché `make up-03` fallisse su volumi già esistenti. Il Task 7
+  provava i bersagli nuovi, e la sequenza più ordinaria di tutte — accendere, spegnere,
+  riaccendere — non funzionava.
+
+- **Esito, primo punto — il sintomo, che accusava la persona sbagliata.**
+
+```
+shard già registrati: nessuno
+registro lo shard «shard1rs» -> shard1rs/shard1a:27017
+registro lo shard «shard2rs» -> shard2rs/shard2a:27017
+ERRORE: sh.addShard(«shard2rs/shard2a:27017») ha risposto ok=0
+Messaggio: can't add shard 'shard2rs/shard2a:27017' because a local database 'lab' exists in
+another shard1rs
+```
+
+  Il messaggio dice che il secondo shard ha già il database `lab`, e in effetti ce l'ha: è il
+  dataset del giro precedente. Ma la riga che spiega tutto è la prima — **«shard già registrati:
+  nessuno»** — su un cluster che al giro prima ne aveva due. Gli shard ricordavano i loro dati, i
+  config server avevano dimenticato i propri.
+
+- **Esito, secondo punto — dove finivano i metadati, contato.** Con il cluster acceso e sano:
+
+```
+dati-cfg1       0 file
+dati-cfg2       0 file
+dati-shard1a   83 file
+dati-shard2a   76 file
+```
+
+  I volumi nominati dei config server erano **vuoti**. `docker inspect sh-cfg1` mostrava tre
+  montaggi: `keyfile -> /keyfile`, `dati-cfg1 -> /data/db` e un terzo con un nome di 64 cifre
+  esadecimali su `/data/configdb`, cioè un volume **anonimo**. I metadati stavano lì.
+
+- **Esito, terzo punto — la causa, che è una riga dell'entrypoint dell'immagine.** Letta dentro
+  l'immagine pinnata con `docker run --rm --entrypoint cat`, righe 236-238:
+
+```
+# if running as config server, then the default dbpath is /data/configdb
+dbPath=/data/configdb
+```
+
+  La citazione va attribuita con precisione, che è il seguito della nota di metodo 108.
+  [S-022](#s-022) documenta lo **stesso script nel ramo 8.0**, dove la regola c'è ma il commento
+  è scritto con altre parole — «if "--configsvr" is specified, then the default dbPath is
+  "/data/configdb"» — e il codice interroga anche `sharding.clusterRole` per il caso in cui il
+  ruolo arrivi da un file di configurazione invece che da un argomento. Le righe qui sopra sono
+  quelle dell'immagine **7.0.40** che il lab usa davvero, e sono la fonte primaria di questa
+  misura; S-022 conferma che la regola non è un'idiosincrasia della versione pinnata.
+
+  E l'immagine dichiara **due** `VOLUME`, non uno: `docker image inspect --format
+  '{{json .Config.Volumes}}'` risponde `{"/data/configdb":{},"/data/db":{}}`. Le due cose insieme
+  fanno il guasto: un `mongod --configsvr` scrive in /data/configdb, e se lì non c'è un montaggio
+  Compose ne crea uno anonimo, che `down` abbandona penzolante e che il `up` successivo rifà
+  vuoto. Il volume nominato che il file Compose chiedeva per nome esisteva, era montato, ed era
+  inutile.
+
+- **Esito, quarto punto — perché nessuno se n'era accorto in quattro giorni.** Tutte le prove dei
+  Task 3-6 finivano con `down -v`, che cancella tutto e riparte da zero: la perdita dei metadati
+  è invisibile a chi non riaccende **conservando** i dati. Lo smoke, dal canto suo, verificava che
+  ogni mongod avesse il proprio volume nominato — e ce l'aveva. Il controllo era giusto per metà,
+  che è la metà che non serve: non chiedeva se il processo ci scrivesse dentro.
+
+- **Esito, quinto punto — la riparazione, misurata.** Dichiarando `--dbpath /data/db` sui tre
+  config server ([ADR-0067](Decision.md#adr-0067)):
+
+```
+make reset-03   uscita 0 in  4 s
+make up-03      uscita 0 in 25 s      dati-cfg1: 99 file
+make down-03    uscita 0 in  7 s
+make up-03      uscita 0 in 22 s      <- il giro che prima falliva
+
+shard già registrati: shard1rs, shard2rs
+shard «shard1rs» già registrato: non lo riaggiungo
+shard «shard2rs» già registrato: non lo riaggiungo
+cluster pronto: 2 shard registrati
+```
+
+  Il ramo idempotente di `add-shard` — scritto al Task 4 e fino a oggi mai eseguito su un vero
+  riavvio, perché i metadati non arrivavano mai al secondo giro — ha funzionato al primo colpo.
+  `make smoke-03` chiude a **62 controlli e 0 errori** come prima della correzione.
+
+- **Esito, sesto punto — le due guardie, provate rompendole.** La regola statica di
+  `check_stack.py` sul file corretto: «Stack conformi: 3». Sullo stesso file con `--dbpath` tolto
+  al solo `cfg1`:
+
+```
+✗ cfg1: monta «dati-cfg1» su «/data/db» ma scriverà in «/data/configdb». Là l'immagine dichiara
+  un VOLUME, che Compose soddisfa con un volume ANONIMO: «down» lo abbandona e i dati spariscono
+  a ogni spegnimento, senza un errore (ADR-0067)
+```
+
+  Il controllo a runtime dello smoke confronta due valori distinti e non due copie della stessa
+  cosa: `cfg1` volume su `/data/db`, mongod scrive in `/data/db`; togliendo `--dbpath` dal comando
+  del container la funzione risponde `/data/configdb`, cioè il disaccordo che deve segnalare. Sei
+  test nuovi in `tools/tests/test_check_stack.py`, suite a **131 passed**.
+
+- **Riserve:** i conteggi dei file dentro i volumi sono stati presi con `docker run --rm -v
+  <volume>:/v alpine sh -c 'ls -1 /v | wc -l'`, e `alpine` **non è fra le immagini pinnate del
+  lab**: chi rifacesse questa misura su una macchina scollegata non troverebbe l'immagine
+  ([ADR-0009](Decision.md#adr-0009)). Non serve pinnarla — la stessa misura viene con la sola
+  immagine già pinnata, scavalcando l'entrypoint, verificato lo stesso giorno:
+  `docker run --rm --entrypoint sh -v <volume>:/v "$MONGO_IMAGE" -c 'ls -1 /v | wc -l'`. Il numero
+  non dipende da quale immagine lo conta: dipende dal volume, che è montato allo stesso modo nei
+  due casi. Le sei misure qui sopra restano quelle prese davvero, con `alpine`.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0067
+
+<a id="v-061"></a>
+### V-061 — Il balancer non si muove mai, e la chiave sbagliata passa per «bilanciata»
+
+- **Comandi:** `make up-03`; da `mongos`, `db.collection.stats()`, `$shardedDataDistribution`,
+  `config.chunks`, `config.changelog`, `sh.balancerCollectionStatus()`, `sh.shardCollection()` con
+  le due strategie, `insertMany` con `ordered` vero e falso; `make smoke-03`
+- **Ambiente:** macOS 26.6.2 arm64, Docker Engine 29.7.2, Docker Compose v5.5.0, immagine `mongo`
+  pinnata per digest da `tools/images.env` (MongoDB 7.0.40), profilo `palco`, 2026-09-02
+- **Che cosa si voleva sapere:** il Task 8 scrive la pagina dello sharded cluster, e due sezioni
+  non si potevano scrivere con quello che c'era. La prima è il balancer: dire «bilancia» è un
+  aggettivo, e serviva sapere se in questa demo lavori davvero. La seconda è la shard key
+  sbagliata, che fino a oggi il repository citava ([S-067](#s-067)) senza averla mai vista fallire —
+  e una trappola scritta senza il sintomo è una previsione ([ADR-0052](Decision.md#adr-0052)).
+
+- **Esito, primo punto — quanto pesa davvero la collezione della demo.** Da `mongos`, su
+  `lab.ordini` a cluster sano:
+
+```
+documenti      : 20000
+dataSize       : 2 437 499 byte   (avgObjSize 121)
+shard1rs       : 1 201 545 byte
+shard2rs       : 1 235 954 byte
+differenza     :    34 409 byte
+```
+
+  La soglia oltre la quale il balancer si muove è **tre volte** la dimensione di range configurata,
+  cioè 384 MB con i 128 MB predefiniti ([S-070](#s-070)). `sh.balancerCollectionStatus("lab.ordini")`
+  conferma il predefinito in vigore — `chunkSize: 128` — e risponde `balancerCompliant: true`. La
+  differenza misurata sta **quattro ordini di grandezza** sotto la soglia: 34 KB contro 384 MB, un
+  rapporto di circa **1 a 11 700**.
+
+- **Esito, secondo punto — e infatti il balancer non ha mai spostato niente.** Il registro del
+  cluster, dalla nascita:
+
+```
+config.changelog: 6 eventi in tutto
+   addShard: 2
+   shardCollection.start: 1      shardCollection.end: 1
+   setClusterParameter.start: 1  setClusterParameter.end: 1
+migrazioni (moveChunk | moveRange): 0
+balancer abilitato: true     ·     in corso: false
+```
+
+  I quattro chunk della demo **non sono opera del balancer**: sono la distribuzione iniziale che
+  `shardCollection()` fa su una collezione vuota, due per shard ([S-066](#s-066)). Il balancer è
+  acceso, guarda, e non ha mai avuto niente da fare. Detto per la pagina: in questa demo il balancer
+  **non entra in scena**, e raccontarlo come se stesse lavorando sarebbe falso.
+
+- **Esito, terzo punto — i confini dei quattro chunk, che non sono casuali.** Letti da
+  `config.chunks`, con i due estremi a 64 bit riportati in decimale:
+
+```
+shard2rs   MinKey            ->  -4 611 686 018 427 387 902     (-2^62 + 2)
+shard2rs   -4 611 686 …902   ->                            0
+shard1rs                 0   ->   4 611 686 018 427 387 902     (+2^62 - 2)
+shard1rs    4 611 686 …902   ->  MaxKey
+```
+
+  È lo spazio dei valori hash — un intero con segno a 64 bit — tagliato in **quattro parti uguali**,
+  due per shard. Non è una distribuzione che emerge dai dati: è geometria decisa prima che il primo
+  documento esista.
+
+- **Esito, quarto punto — la chiave sbagliata, provata.** Database di scarto, stessa forma di
+  documento, stessi `_id` interi 0…19 999, chiave `{_id: 1}` invece di `{_id: "hashed"}`. Alla
+  distribuzione, su collezione **vuota**:
+
+```
+chunk alla creazione: 1
+   shard1rs   MinKey -> MaxKey
+```
+
+  Un chunk solo, su un solo shard, come [S-071](#s-071) dichiara. Poi i ventimila documenti:
+
+```
+shard1rs: 20000 documenti, 1 200 000 byte
+shard2rs: —  (non compare nella distribuzione)
+chunk dopo l'inserimento: 1
+migrazioni nel changelog: 0
+balancerCompliant: TRUE
+```
+
+  **Il cento per cento dei documenti su uno dei due shard, e il cluster la considera una collezione
+  bilanciata.** Non è un guasto del balancer: 1,2 MB di differenza sono sotto la soglia di 384 MB,
+  quindi la risposta è formalmente corretta. È il punto didattico dell'intera misura — l'errore non
+  ha nessun sintomo, e lo strumento che dovrebbe accorgersene risponde «tutto a posto».
+
+- **Esito, quinto punto — la controprova, con la sola chiave cambiata.** Stessa collezione, stessa
+  forma, stessi `_id`, chiave `{_id: "hashed"}`:
+
+```
+shard1rs:  9860 documenti
+shard2rs: 10140 documenti
+```
+
+  Sono **le stesse due cifre** della demo ([V-058](#v-058)), su un database diverso e con documenti
+  diversi: la ripartizione dipende dall'hash degli `_id` e dai confini dei chunk, non dal contenuto.
+
+- **Esito, sesto punto — il tempo, dove c'era una contraddizione da sciogliere.** Le prime misure
+  davano la chiave hashed a circa 9 800 ms contro i 530 della ranged, mentre [V-058](#v-058) aveva
+  cronometrato il seed della demo — stessa chiave hashed, stessi ventimila documenti — a **1202 ms**.
+  Uno dei due numeri doveva essere sbagliato. Alternando l'ordine su tre giri il divario è rimasto
+  al suo posto (hashed 9910 / 8180 / 10027 ms, ranged 704 / 192 / 432), quindi non era rumore. La
+  differenza era nel codice: il seed del lab scrive `insertMany(lotto, { ordered: false, … })`
+  (`docker/03-sharded/init/30-dati-demo.js`, riga 296), le prove no. Quattro casi, due giri:
+
+```
+                          giro 1      giro 2
+hashed  ordered: true     11 328 ms    9 393 ms
+hashed  ordered: false       336 ms      408 ms
+ranged  ordered: true        340 ms      192 ms
+ranged  ordered: false       248 ms    1 947 ms
+```
+
+  Il costo **non è la chiave hashed**: è la chiave hashed *insieme* al lotto ordinato. Con
+  `ordered: false` le due chiavi costano uguale. Con `ordered: true` — che è il **predefinito** —
+  la hashed paga un fattore fra venti e trenta, perché mantenere l'ordine fra shard diversi
+  impedisce al router di spedire in parallelo, e con una chiave hashed lo shard di destinazione
+  cambia quasi a ogni documento ([S-071](#s-071)).
+
+- **Esito, settimo punto — il laboratorio è rimasto intatto.** Ogni prova è stata fatta in un
+  database `prova` cancellato in coda; `lab.ordini` è rimasta a 20 000 documenti in ogni
+  controllo, e `make smoke-03` chiude a **62 controlli superati e 0 errori** dopo tutto.
+
+- **Riserve:** cinque. *(a)* Il valore `1 947 ms` di «ranged, `ordered: false`» è fuori scala
+  rispetto agli altri tre valori ranged, tutti fra 192 e 340 ms: è rumore della macchina, e viene
+  riportato invece che tolto perché toglierlo sarebbe scegliere i dati. Tutti i tempi sono
+  esecuzioni singole su un portatile con Docker Desktop, non medie. *(b)* La soglia dei 384 MB
+  **non è stata superata**: è provato che sotto la soglia il balancer sta fermo, non che sopra si
+  muova. *(c)* Lo shard che riceve tutto con la chiave monotona è lo **shard primario del
+  database**, e non è sempre lo stesso: nei primi giri era `shard1rs`, nell'ultimo `shard2rs`.
+  Quello che è costante è che sia **uno solo**. *(d)* Il fattore venticinque vale per due shard e
+  per documenti di 121 byte medi; con più shard il divario può solo peggiorare, ma non è stato
+  provato. *(e)* Tutto sul profilo `palco`, cioè con un membro per insieme, e su arm64.
+- **Riserva aggiunta il 2026-09-02, a poche ore di distanza:** i **quattro** chunk del terzo punto
+  sono quattro **in quella finestra**. Spento e riacceso lo stack sugli stessi volumi, l'AutoMerger
+  di MongoDB 7.0 ha fuso le due coppie contigue e ne restano **due**, uno per shard, senza che
+  nessun documento si sia mosso ([V-062](#v-062), [S-072](#s-072)). I numeri qui sopra restano
+  quelli misurati; quello che non regge è la frase «il balancer non entra mai in scena», e la
+  correzione è in [ADR-0069](Decision.md#adr-0069).
+- **Conseguenza:** [ADR-0068](Decision.md#adr-0068), e le sezioni 4 e 3.2 di
+  `docs/02-architetture/sharded-cluster.md`.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0068, ADR-0069
+
+<a id="v-062"></a>
+### V-062 — I quattro chunk erano diventati due: il balancer entra in scena, e non è una migrazione
+
+- **Che cosa è stato verificato:** perché lo stesso cluster, riacceso sugli stessi volumi, mostri
+  **due** chunk dove [V-061](#v-061) ne aveva contati **quattro**, senza che nessuno abbia inserito,
+  cancellato o spostato niente. E se questo smentisca la frase «il balancer non entra mai in scena»
+  scritta lo stesso giorno in [`sharded-cluster.md`](02-architetture/sharded-cluster.md).
+- **Ambiente:** stack `docker/03-sharded`, profilo `palco`, MongoDB 7.0.40. Spento con `make down-03`
+  (che conserva i volumi) e riacceso con `make up-03`. Nessun dato toccato: `lab.ordini` a 20 000
+  documenti prima e dopo.
+- **Comandi:** `config.changelog` interrogato per `what` e per esteso sugli eventi `merge`;
+  `config.chunks` per i confini e per `history`; `docker inspect --format '{{.State.StartedAt}}'`
+  per l'istante di avvio dei container; `db.collection.getShardDistribution()` per la
+  distribuzione.
+
+- **Esito, primo punto — la fusione è successa, ed è registrata.** Il registro del cluster contiene
+  **due** eventi `merge`, che in [V-061](#v-061) non c'erano:
+
+  ```
+  12:34:16.530Z   merge   lab.ordini   server cfg1:27017   owningShard shard1rs   numChunks 2
+                          min {_id: 0}          ->  max {_id: MaxKey}
+  12:34:31.450Z   merge   lab.ordini   server cfg1:27017   owningShard shard2rs   numChunks 2
+                          min {_id: MinKey}     ->  max {_id: 0}
+  ```
+
+  Due fusioni, due chunk consumati ciascuna: dai quattro di [V-061](#v-061) ai due di adesso, uno
+  per shard, con i confini `MinKey → 0` su `shard2rs` e `0 → MaxKey` su `shard1rs`. I due confini
+  interni — −2⁶²+2 e +2⁶²−2 — sono spariti; **quello fra i due shard, lo zero, no.**
+
+- **Esito, secondo punto — il campo `server` dice dove gira il balancer, e conferma la fonte.** Tutti
+  e due gli eventi portano `server: cfg1:27017`. [S-070](#s-070) afferma «the balancer runs on the
+  primary of the config server replica set (CSRS)» e [S-073](#s-073) aggiunge che il processo «has
+  moved from the `mongos` instances to the primary member of the config server replica set»: qui
+  non è una citazione, è un campo di un documento scritto dal cluster. Il container che sembra non
+  fare niente è l'unico che ha fatto qualcosa.
+
+- **Esito, terzo punto — è successo all'accensione, non dopo un'attesa.** I container dei dati sono
+  partiti alle `12:34:12.735Z`, il router alle `12:34:22.418Z`. La prima fusione è delle
+  `12:34:16.530Z`: **3,8 secondi** dopo l'avvio del config server, e sei secondi *prima* che il
+  router esistesse. La seconda arriva 15 secondi dopo la prima. [S-072](#s-072) lo dice: «Unless
+  explicitly disabled, the AutoMerger **starts the first time the balancer is enabled**».
+
+- **Esito, quarto punto — e questo spiega perché [V-061](#v-061) vedeva quattro chunk.** Non era un
+  errore di misura: era la stessa cosa guardata prima. La collezione è stata distribuita alle
+  `10:41:09Z`, e la fusione richiede che la storia del chunk sia purgabile — [S-072](#s-072) elenca
+  `minSnapshotHistoryWindowInSeconds` e `transactionLifetimeLimitSeconds` — quindi al primo giro,
+  fatto subito dopo l'accensione, i chunk erano troppo freschi. Poi l'AutoMerger «pauses for the
+  next `autoMergerIntervalSecs`», e in quella sessione lo stack è stato spento **prima** che
+  l'intervallo scadesse. Al riavvio delle `12:34` la prima condizione è tornata vera — il balancer
+  veniva abilitato per la prima volta — e la seconda pure, perché di tempo ne era passato quasi due
+  ore. Le due misure sono tutte e due giuste; è il fenomeno che ha due fasi.
+
+- **Esito, quinto punto — nessun documento si è mosso.** La distribuzione è identica a prima della
+  fusione e identica a [V-058](#v-058): `shard1rs` 9860 documenti e 1.14 MiB, `shard2rs` 10 140 e
+  1.17 MiB, 49,3 % / 50,7 %, `avgObjSize` 121 byte. Il conteggio degli eventi resta a **zero**
+  `moveChunk` e **zero** `moveRange`. E la `history` dei chunk superstiti riporta un solo elemento,
+  con `validAfter` all'istante della distribuzione iniziale: nessuna migrazione, mai. La fusione
+  cambia **la mappa**, non i dati.
+
+- **Esito, sesto punto — che cosa era falso, e in che misura.** La frase «il balancer non entra mai
+  in scena» di [`sharded-cluster.md`](02-architetture/sharded-cluster.md) e di
+  [ADR-0068](Decision.md#adr-0068) è **falsa**: il balancer entra in scena, alle 12:34:16, e fa una
+  cosa visibile. Restano vere le due affermazioni che le stavano accanto — non **migra** mai, e non
+  lo fa perché la differenza di 34 409 byte è mille volte sotto la soglia dei 384 MB. Sbagliata era
+  l'identificazione fra «il balancer» e «le migrazioni»: il balancer di una 7.0 fa due mestieri, e
+  nel lab ne esercita esattamente uno.
+
+- **Riserve:**
+  - **a.** Il valore predefinito di `autoMergerIntervalSecs` non è stato letto dal cluster:
+    `getClusterParameter` interrogato per `*` non restituisce nessun parametro con «merge» nel nome
+    su questo deployment, e `getParameter` risponde `InvalidOptions`. Che l'intervallo fra due giri
+    esista è del manuale ([S-072](#s-072)); **quanto** duri non è misurato qui, e la finestra fra le
+    `10:41` e le `12:34` dice solo che è più lungo di zero e che in mezzo lo stack era spento.
+  - **b.** Non è provato che senza il riavvio la fusione sarebbe comunque avvenuta. Lo spegnimento e
+    la riaccensione sono l'occasione in cui è stata osservata, non necessariamente la causa: il
+    manuale dice che l'AutoMerger riparte al primo avvio del balancer, il che rende il riavvio
+    *sufficiente* ma non dimostra che fosse *necessario*.
+  - **c.** Durante la stessa sessione è stato eseguito `sh.stopBalancer()` seguito da
+    `sh.startBalancer()` ([V-063](#v-063)), che secondo [S-073](#s-073) spegne e riaccende anche
+    l'AutoMerger. Non ha prodotto nuove fusioni, ma con due soli chunk non contigui sullo stesso
+    shard non c'era più niente da fondere: la prova non distingue «non è ripartito» da «è ripartito
+    e non ha trovato lavoro».
+  - **d.** Vale per due shard e per una collezione con chiave hashed distribuita da vuota. Con più
+    shard le sequenze contigue sarebbero più d'una per shard, e il conto finale sarebbe diverso.
+- **Conseguenza:** ADR-0069
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0069
+
+<a id="v-063"></a>
+### V-063 — La §3.3 della guida a `mongosh`, eseguita: sette risposte che la marcatura nascondeva
+
+- **Che cosa è stato verificato:** tutti i comandi della tabella di
+  [`guida-mongosh.md` §3.3](04-mongosh/guida-mongosh.md#33-sharded-cluster), marcata «non eseguito
+  su questo branch» dalla `feature/00`. La regola è [ADR-0049](Decision.md#adr-0049) — un debito si
+  chiude eseguendo — e [ADR-0036](Decision.md#adr-0036): in automazione il codice di uscita di
+  `mongosh` non è una prova, l'esito si legge dall'output.
+- **Ambiente:** stack `docker/03-sharded`, profilo `palco`, MongoDB 7.0.40, 2026-09-02.
+- **Comandi:** dal router `sh-mongos` autenticato; in diretta su `sh-shard1a` e `sh-cfg1` per i casi
+  d'errore.
+
+- **Esito, primo punto — `sh.status()` a un `mongod` di un cluster vero dà un errore diverso da
+  quello scritto in pagina.** Il blocco che stava in §3.3, preso su un'istanza singola, mostra
+  `MongoshInvalidInputError: This db does not have sharding enabled`. Su uno shard di questo
+  cluster la risposta è un'altra:
+
+  ```console
+  $ docker exec sh-shard1a mongosh --quiet --eval 'sh.status()'
+  Warning: MongoshWarning: [SHAPI-10003] You are not connected to a mongos.
+  MongoServerError: not authorized on config to execute command { find: "version", … }
+  ```
+
+  L'avviso `SHAPI-10003` è lo stesso; l'errore no. Un `mongod` che *fa parte* di un cluster il
+  database `config` ce l'ha davvero, quindi non può dire «sharding non abilitato»: dice che chi
+  chiede non è autorizzato a leggerlo. Sono due sintomi dello stesso sbaglio, e riconoscerne uno
+  solo porta fuori strada.
+
+- **Esito, secondo punto — `db.hello().msg` distingue i tre ruoli, ma solo uno dà una risposta.**
+  Sul router `isdbgrid`; su `shard1a` **stringa vuota** (il campo non c'è); su `cfg1` `undefined` con
+  `setName: cfgrs`. La regola di [§2.4](04-mongosh/guida-mongosh.md#24-sapere-con-chi-si-sta-parlando)
+  regge, ma è una regola a senso unico: `isdbgrid` prova che si è sul router, la sua assenza non dice
+  su quale dei due altri ruoli si sia.
+
+- **Esito, terzo punto — `sh.enableSharding()` e `sh.shardCollection()` rieseguiti non protestano.**
+  `sh.enableSharding("lab")` su un database già abilitato risponde `ok: 1`. E
+  `sh.shardCollection("lab.ordini", {_id: "hashed"})` su una collezione già distribuita **con la
+  stessa chiave** risponde `collectionsharded: 'lab.ordini', ok: 1`. Sono idempotenti, ed è la
+  ragione per cui lo script di avvio del lab può girare due volte senza rompere niente
+  ([ADR-0065](Decision.md#adr-0065)).
+
+- **Esito, quarto punto — e l'irreversibilità si manifesta come un errore solo se si cambia la
+  chiave.** `sh.shardCollection("lab.ordini", {_id: 1})` sulla stessa collezione:
+
+  ```
+  AlreadyInitialized: sharding already enabled for collection lab.ordini
+  ```
+
+  Il cluster non offre di ridistribuire e non chiede conferma: dice che la cosa è già stata fatta.
+  È la faccia operativa del «MongoDB provides no method to unshard a sharded collection» di
+  [S-069](#s-069) — la porta non è chiusa a chiave, non c'è proprio.
+
+- **Esito, quinto punto — i due errori di `sh.addShard()`, che accusano cose diverse.** Rieseguito
+  su uno shard già registrato: `IllegalOperation: A shard named shard1rs containing the replica set
+  'shard1rs' already exists`. Su un insieme che non esiste:
+  `FailedToSatisfyReadPreference: Could not find host matching read preference { mode: "primary" }
+  for set shard9rs`. Il secondo è quello che si prende chi sbaglia un nome host in un file Compose,
+  e **non nomina** né Docker né la rete: parla di read preference, e manda a cercare nel posto
+  sbagliato.
+
+- **Esito, sesto punto — il bilanciatore, i tre comandi in sequenza.**
+
+  ```
+  sh.getBalancerState()   true
+  sh.isBalancerRunning()  "full"
+  sh.stopBalancer()       { ok: 1 }
+  sh.getBalancerState()   false
+  sh.startBalancer()      { ok: 1 }
+  sh.getBalancerState()   true
+  ```
+
+  I due interrogativi non chiedono la stessa cosa: [S-073](#s-073) — «`sh.getBalancerState()` checks
+  if the balancer is enabled […] does **not** check if the balancer is actively migrating data».
+  Il primo dice *può*, il secondo dice *sta*. E `stopBalancer()` fa più di quel che dice: dalla 7.0
+  spegne anche l'AutoMerger ([S-073](#s-073)), cioè la cosa che in questo lab il balancer fa davvero
+  ([V-062](#v-062)).
+
+- **Esito, settimo punto — `getShardDistribution()` su una collezione non distribuita non è un
+  errore normale.** Su `lab.ordini` stampa le due righe per shard e i totali. Su una collezione
+  qualunque creata al volo:
+
+  ```
+  undefined: [SHAPI-10001] Collection nondistribuita is not sharded
+  ```
+
+  Il `codeName` è `undefined`: è un errore di `mongosh`, non del server, e chi filtra per
+  `e.codeName` in uno script non lo intercetta.
+
+- **Esito, ottavo punto — il codice di uscita conferma [ADR-0036](Decision.md#adr-0036), e lo fa nel
+  modo peggiore.** Lo stesso comando che fallisce con `AlreadyInitialized`:
+
+  ```console
+  $ mongosh … --eval 'try { sh.shardCollection("lab.ordini", {_id: 1}) } catch (e) { … }'   → 0
+  $ mongosh … --eval 'sh.shardCollection("lab.ordini", {_id: 1})'                           → 1
+  ```
+
+  Il codice di uscita segue l'eccezione **non catturata**, non l'esito dell'operazione. Uno script
+  scritto bene — che cattura gli errori per stamparli — esce sempre `0`, cioè proprio lo script
+  prudente è quello di cui l'uscita non dice niente.
+
+- **Esito, nono punto — i comandi del router dati a uno shard.**
+  `sh.enableSharding()` risponde `CommandNotFound: no such command: 'enableSharding'. Are you
+  connected to mongos?` — un errore che si diagnostica da solo. `sh.getBalancerState()` invece
+  risponde `Unauthorized: not authorized on config to execute command …`, che non nomina il
+  problema vero.
+
+- **Riserve:**
+  - **a.** Le tre righe eseguite su `sh-shard1a` e la prima su `sh-cfg1` lo sono state **senza
+    autenticarsi**, perché le credenziali del cluster su uno shard non funzionano
+    ([V-058](#v-058)). Gli errori `Unauthorized` e `not authorized on config` sono quindi il
+    sintomo di **due** cose insieme — comando sbagliato e nessuna autenticazione — e la prova non le
+    separa.
+  - **b.** `sh.startBalancer()` e `sh.stopBalancer()` sono stati eseguiti a cluster fermo, senza
+    nessuna migrazione in corso: l'avvertenza del manuale secondo cui «if a migration is in
+    progress, the system will complete the in-progress migration before stopping»
+    ([S-073](#s-073)) non è stata provata, e su questo stack non è provabile.
+  - **c.** `sh.status()` è stato letto, non riprodotto per intero: la pagina ne riporta le sezioni
+    `shards`, `balancer` e `chunks`, non l'output completo.
+- **Conseguenza:** ADR-0069 (la fusione dei chunk) e ADR-0070 (la marcatura tolta)
+- **Seguito, 2026-09-02.** La riserva **a** — «gli errori `Unauthorized` e `not authorized on
+  config` sono il sintomo di **due** cose insieme … e la prova non le separa» — è stata sciolta
+  lo stesso giorno da [ADR-0071](Decision.md#adr-0071), che ha dato agli shard un
+  amministratore e quindi ha reso possibile autenticarsi. Il primo e il nono punto di questa
+  verifica non descrivono più lo stack: le risposte di oggi, e che cosa nascondevano quelle di
+  ieri, stanno in [V-067](#v-067).
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0069, ADR-0070, ADR-0072
+
+<a id="v-064"></a>
+### V-064 — Gli utenti locali a uno shard: l'eccezione localhost è aperta su ogni shard, e chiude una riserva vecchia di una settimana
+
+- **Che cosa è stato provato:** lo stack `03-sharded`, profilo `palco`, MongoDB 7.0.40. Il debito
+  marcato in [`sicurezza-keyfile-x509.md`](03-amministrazione/sicurezza-keyfile-x509.md) §4 diceva
+  che sullo sharded cluster gli utenti locali a uno shard «esistono davvero» e che l'eccezione
+  localhost «applies to each shard individually» ([S-006](#s-006), [S-074](#s-074)), e che niente di
+  questo era stato provato. Provato.
+- **Esito 1 — il cluster ha un utente solo, e non sta sugli shard.** Su `cfg1`, autenticati come
+  amministratore: `[{"user":"admin","db":"admin"}]`. Su `shard1a` e su `shard2a`, letti con
+  l'identità interna: **zero utenti** su entrambi. Gli utenti del cluster vivono sul config server,
+  come dichiara il file Compose, e gli shard non ne ricevono copia.
+- **Esito 2 — le credenziali del cluster non aprono uno shard.** `admin` con la sua password, dato
+  direttamente a `shard1a` e a `shard2a`: `MongoServerError: Authentication failed.`, uscita **1**.
+  Non è un problema di permessi: quell'utente su quel nodo non esiste.
+- **Esito 3 — sul cluster l'eccezione è chiusa, e su ogni shard è aperta.** Da dentro `sh-mongos`,
+  senza credenziali: `createUser` → `Unauthorized: Command createUser requires authentication`. Da
+  dentro `sh-shard2a`, sul suo loopback, senza credenziali:
+  `db.getSiblingDB("admin").createUser({user: "radice-locale", pwd: …, roles: [{role: "root", db: "admin"}]})`
+  → **creato**. Ripetuto in modo indipendente su `shard1a`: creato anche lì. Un `root` sullo shard,
+  senza presentare niente.
+- **Esito 4 — serve il loopback, e la prova è nello stesso istante.** Riavviato `shard2a` per
+  riaprire l'eccezione, due tentativi identici a pochi secondi l'uno dall'altro:
+
+  ```
+  da host.docker.internal:27151 (porta pubblicata)   whatsmyuri  192.168.65.1:44239
+                                                     createUser  Unauthorized: Command createUser
+                                                                 requires authentication
+  da localhost:27017 (dentro il container)           whatsmyuri  127.0.0.1:48626
+                                                     createUser  CREATO
+  ```
+
+  Stesso nodo, stesso stato, stesso comando: cambia solo l'indirizzo da cui la connessione arriva.
+  **Le porte pubblicate sull'host non aprono l'eccezione**, perché a `mongod` la connessione arriva
+  dal gateway di Docker.
+- **Esito 5 — e in Docker «da localhost» è più largo di quanto sembri.** Un container qualunque,
+  avviato con `--network container:sh-shard2a`, condivide il **network namespace** dello shard: il
+  suo `localhost` è il loopback dello shard. Riavviato `shard2a` per riaprire l'eccezione, da quel
+  container:
+
+  ```
+  il keyfile qui: non c'è
+  whatsmyuri      "127.0.0.1:46146"
+  createUser root su admin   →  CREATO
+  ```
+
+  Il container non ha il volume del keyfile e non potrebbe leggerlo, e ciononostante si è fatto un
+  `root` sullo shard. Non è un caso di laboratorio: è esattamente il meccanismo con cui i servizi
+  `shard1-init` e `shard2-init` del file Compose eseguono `rs.initiate()`
+  ([S-074](#s-074)). La stessa porta che serve ad avviare lo stack resta aperta dopo.
+- **Esito 6 — il primo utente non può avere ruoli su un altro database.** Quattro tentativi, tutti
+  come primo utente, tutti da loopback:
+
+  ```
+  roles: [ {userAdminAnyDatabase, admin}, {read, lab} ]  →  Unauthorized: not authorized on admin
+                                                            to execute command { createUser: … }
+  roles: [ {read, lab} ]                                 →  Unauthorized: … stessa forma
+  roles: [ {root, admin} ]                               →  creato
+  roles: [ ]                                             →  creato
+  ```
+
+  Il manuale dice che il primo utente «must have privileges to create other users»
+  ([S-074](#s-074)): **non è imposto** — un utente senza alcun ruolo viene accettato e spende
+  l'eccezione. Quello che è imposto, e che il manuale non dice, è che i ruoli stiano su `admin`.
+- **Esito 7 — l'eccezione non si riapre cancellando l'ultimo utente.** Su `shard1a`, dopo aver
+  creato e poi cancellato l'utente di prova, con **zero utenti** in `admin.system.users`:
+  `createUser` da loopback → `Unauthorized: Command createUser requires authentication`. Dopo
+  `docker restart sh-shard1a`, stesso comando, stessi zero utenti → **creato**. La condizione «there
+  are no users or roles created» è una condizione del **processo**, non del database: una volta che
+  un utente è esistito, l'eccezione resta chiusa fino al riavvio.
+- **Esito 8 — chi ha il keyfile è amministratore del nodo, ed è la via di rientro.** Con
+  `-u __system -p "$(tr -d '\n\r ' < /keyfile/mongo-keyfile)" --authenticationDatabase local` si
+  legge `admin.system.users` e si cancellano utenti su qualunque nodo. È servito davvero: l'utente
+  senza ruoli dell'esito 5 non poteva cancellarsi da solo e aveva chiuso l'eccezione dietro di sé.
+- **Esito 9 — un amministratore locale vede il suo shard e basta.** Autenticato su `shard2a`:
+  `lab.ordini` **10 140** documenti, `db.hello().setName` `shard2rs`. Dal router la stessa
+  collezione ne ha 20 000. La stessa credenziale presentata al `mongos`:
+  `MongoServerError: Authentication failed.`
+- **Esito 10 — un amministratore locale può cancellare se stesso, e la connessione muore con lui.**
+  `dropUser` sul proprio utente riesce; il comando **successivo sulla stessa connessione** fallisce
+  con `MongoServerError: Authentication failed.`, perché l'identità è appena stata rimossa. Da uno
+  script sembra un errore di autenticazione, ed è invece la conseguenza dell'operazione precedente
+  riuscita.
+- **Esito 11 — `whatsmyuri` risponde sempre.** `db.adminCommand({whatsmyuri: 1})` ha risposto senza
+  credenziali anche con l'eccezione chiusa (`"127.0.0.1:44086"`). È il modo di sapere quale
+  indirizzo il server attribuisce al client, cioè di rispondere alla domanda «sono davvero su
+  localhost, per lui?» prima di chiedersi perché l'eccezione non si applichi.
+- **Riserve:**
+  - **a.** il profilo `palco` ha **un solo membro per shard**, che è quindi sempre il primario. Che
+    l'eccezione si comporti allo stesso modo sui secondari di uno shard a tre membri non è stato
+    provato; il manuale parla di «the shard's primary» quando prescrive il rimedio.
+  - **b.** `enableLocalhostAuthBypass: 0` non è stato provato: metterlo a `0` sugli shard
+    impedirebbe a `11-shard-initiate.js` di eseguire `rs.initiate()`, e lo stack non partirebbe.
+    Che sia questa la ragione è dedotto dalla fonte ([S-074](#s-074), quinto punto), non misurato
+    disattivandolo.
+  - **c.** l'esito 4 è misurato su Docker Desktop per macOS, dove il gateway è `192.168.65.1`.
+    L'indirizzo cambia altrove; quello che si generalizza è che **non** è il loopback, non il numero.
+  - **c-bis.** l'esito 5 dice che il network namespace condiviso basta; non dice che sia l'unica
+    via. Chi può parlare al demone Docker può anche leggere il volume del keyfile con un altro
+    container, e a quel punto l'eccezione non gli serve.
+  - **d.** l'esito 6 descrive che cosa il server accetta, non perché. La lettura plausibile — che
+    l'eccezione conceda `createUser` su `admin` e non `grantRole` su altri database — non è
+    confermata da nessuna fonte trovata.
+  - **e.** ogni utente creato durante la misura è stato cancellato; lo stato finale, letto con
+    l'identità interna, è **zero utenti su entrambi gli shard**. Due shard sono stati riavviati
+    durante la prova, e `make smoke-03` dopo è verde.
+- **Conseguenza:** [ADR-0070](Decision.md#adr-0070), e la sezione 4 di
+  `docs/03-amministrazione/sicurezza-keyfile-x509.md`.
+- **Seguito, 2026-09-02:** questa verifica descrive lo stack **prima** di
+  [ADR-0071](Decision.md#adr-0071), che ha creato un amministratore locale su ogni shard. Gli esiti
+  restano veri di quello stato e sono riproducibili su uno shard riavviato senza il suo init; sullo
+  stack di oggi l'esito 5 non passa più, ed è [V-066](#v-066) a misurarlo.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0070, ADR-0071
+
+---
+
+<a id="v-065"></a>
+### V-065 — `--oplog` sullo sharded cluster: il divieto ha due facce, e il restore riporta i dati senza la distribuzione
+
+- **Che cosa è stato provato:** lo stack `03-sharded`, profilo `palco`, MongoDB 7.0.40, database
+  `lab` con 20 000 documenti distribuiti. Il debito marcato in
+  [`backup-restore.md`](03-amministrazione/backup-restore.md) citava
+  [S-011](#s-011) — «You can't run `mongodump` with `--oplog` on a sharded cluster» — e rinviava la
+  prova a `feature/03`. Provato: `mongodump` e `mongorestore` attraverso il `mongos`, e `mongodump`
+  dato direttamente a uno shard.
+- **Esito 1 — il divieto, quando il comando è per il resto corretto.** `mongodump --oplog --out …`
+  contro `sh-mongos`: `Failed: can't use --oplog option when dumping from a mongos`, uscita **1**.
+  Nessun file scritto.
+- **Esito 2 — la stessa proibizione, con un'accusa diversa e fuorviante.**
+  `mongodump --oplog --db lab --out …`, sullo stesso router nello stesso istante:
+  `Failed: bad option: --oplog mode only supported on full dumps`, uscita **1**. Il messaggio non
+  nomina più `mongos`, e manda a togliere `--db`. Le due regole sono verificate in quest'ordine, e
+  la prima nasconde la seconda: chi sbaglia due cose ne vede riferita una sola, e non è quella che
+  conta.
+- **Esito 3 — uno shard singolo, invece, `--oplog` lo accetta.** Lo stesso comando dato dentro
+  `sh-shard1a` con l'identità interna: uscita **0**, e nella cartella `admin/  lab/  oplog.bson
+  (103 byte)  prelude.json`. Uno shard è un replica set, e ha il suo oplog. Che tanti dump coerenti
+  per singolo shard non facciano un dump coerente del cluster è ragionamento, non misura: vedi
+  riserva **b**.
+- **Esito 4 — il dump attraverso il router funziona.** `mongodump --db lab --out …` su `sh-mongos`:
+  uscita **0**, `lab/ordini.bson` di **2 437 499 byte**, 20 000 documenti. Un dump completo (senza
+  `--db`) porta via anche `config/` per intero e `admin/system.users.bson` (524 byte): le credenziali
+  del cluster finiscono nel backup, e vale [ADR-0014](Decision.md#adr-0014) su dove si posa.
+- **Esito 5 — l'avviso che non si può togliere.** Ogni dump attraverso il router emette, una volta:
+
+  ```
+  Warning: using a non-primary readPreference with a connection to mongos may produce
+  inconsistent duplicates or miss some documents.
+  ```
+
+  Ripetuto **passando esplicitamente `--readPreference=primary`**: l'avviso compare identico, una
+  volta, e il dump riesce lo stesso. Non è un'opzione mancante da aggiungere: è un avvertimento su
+  cui dalla riga di comando non si può agire.
+- **Esito 6 — il restore riesce, e la collezione non è distribuita.**
+  `mongorestore --nsFrom 'lab.ordini' --nsTo 'lab.ordini_ripristinata'` attraverso il router: uscita
+  **0**, `finished restoring lab.ordini_ripristinata (20000 documents, 0 failures)`, e l'indice
+  `_id_hashed` **ricreato**. Ma:
+
+  ```
+  documenti                20000
+  indici                   _id_, _id_hashed
+  in config.collections    assente  →  non distribuita
+  getShardDistribution()   [SHAPI-10001] Collection ordini_ripristinata is not sharded
+  ```
+
+  La collezione di partenza sta `shard1rs=9860  shard2rs=10140`; la ripristinata sta tutta sul
+  primary shard di `lab`, che è `shard2rs`. `mongorestore` ricrea gli indici e non chiama
+  `shardCollection()`: c'è la chiave, non c'è la distribuzione, e nessun errore lo dice.
+- **Esito 7 — il balancer era acceso per tutta la prova.**
+  `!sh.getBalancerState() && !sh.isBalancerRunning()` → `fermo: false`. [S-073](#s-073) prescrive di
+  fermarlo prima di un backup manuale; qui non è stato fermato di proposito, per misurare il caso
+  peggiore, e nessuno degli esiti sopra dipende da quella scelta.
+- **Riserve:**
+  - **a.** nessun esito misura una **incoerenza** effettiva: l'avviso dell'esito 5 dice che può
+    accadere, e per farla accadere servirebbe una migrazione in corso durante il dump. Non provocata.
+  - **b.** che il restore preceduto da `sh.shardCollection()` sulla collezione vuota produca una
+    collezione distribuita è dedotto dall'ordine con cui lo stack si costruisce, **non** misurato.
+  - **c.** i «extra steps» che [S-060](#s-060) attribuisce al backup di uno sharded cluster restano
+    non identificati: la fonte li nomina in una casella di tabella e non li elenca.
+  - **d.** che il `config/` presente nel dump basti a ricostruire un cluster non è stato provato, e
+    nessuna fonte letta lo afferma.
+  - **e.** `lab.ordini_ripristinata` è stata cancellata, tutte le cartelle di dump rimosse dai
+    container, e `make smoke-03` dopo la prova è verde.
+- **Conseguenza:** [ADR-0070](Decision.md#adr-0070), e la sezione 6 di
+  `docs/03-amministrazione/backup-restore.md`.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0070
+
+<a id="s-075"></a>
+### S-075 — MongoDB Manual 7.0: Keyfile Authentication for Self-Managed Sharded Clusters
+
+- **URL:** https://www.mongodb.com/docs/v7.0/tutorial/deploy-sharded-cluster-with-keyfile-access-control/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** v7.0
+- **Consultata:** 2026-09-02
+- **Verdetto:** conferma, e sposta una premessa
+- **Perché è stata cercata.** [S-074](#s-074) prescrive un obbligo — «you **must** still prevent
+  unauthorized access to the individual shards» — e nomina il rimedio in tre parole: «Create a user
+  administrator on the shard's primary». Prima di scriverlo in uno script di avvio serviva la
+  procedura per esteso, nella versione pinnata, dalla pagina che la possiede: il tutorial completo di
+  autenticazione a keyfile su sharded cluster.
+- **Cosa afferma, primo punto — la procedura c'è, ed è un passo numerato.** Dentro «Create the Shard
+  Replica Sets», il passo 4 è «Create the shard-local user administrator (optional).» Preceduto da
+  «Connect to the primary before continuing. Use `rs.status()` to locate the primary member.» e da
+  «You must be connected to the primary to create users.» L'esempio è questo:
+
+  ```js
+  admin = db.getSiblingDB("admin")
+  admin.createUser({
+    user: "fred",
+    pwd: passwordPrompt(),
+    roles: [ { role: "userAdminAnyDatabase", db: "admin" } ]
+  })
+  ```
+
+- **Cosa afferma, secondo punto — e lo fa sotto eccezione localhost.** «The localhost interface is
+  only available since no users have been created for the deployment. The localhost interface closes
+  after the creation of the first user.» Non è una scorciatoia da laboratorio: è il modo in cui il
+  manuale stesso crea il primo utente di uno shard, collegandosi al primario. Chi lo scrive in uno
+  script di avvio non sta deviando dalla procedura, la sta eseguendo.
+- **Cosa afferma, terzo punto — l'ordine non è indifferente.** L'intestazione della sezione lo
+  motiva: «These steps include optional procedures for adding shard-local users. Executing them now
+  ensures that there are users available for each shard to perform shard-level maintenance.» «Now»
+  vuol dire **prima** di `sh.addShard()`, che nel tutorial viene dopo, insieme al `mongos` e
+  all'amministratore del cluster.
+- **Cosa afferma, quarto punto — a che cosa servono, e a che cosa non servono.** Nelle
+  considerazioni: «some maintenance operations require direct connections to specific shards… you
+  must connect directly to the shard and authenticate as a shard-local administrative user». E il
+  confine: «Shard-local users exist only in the specific shard and should only be used for
+  shard-specific maintenance and configuration. **You cannot connect to the `mongos` with
+  shard-local users.**»
+- **Cosa afferma, quinto punto — un secondo utente, sempre facoltativo.** Dopo l'amministratore degli
+  utenti la pagina prevede uno «shard-local cluster administrator» con ruolo `clusterAdmin`, creato
+  autenticandosi come il primo. Sono due utenti distinti con due password distinte, ciascuna
+  digitata a `passwordPrompt()`.
+- **Cosa afferma, sesto punto — sulle password e sul keyfile.** «Passwords should be random, long,
+  and complex to ensure system security and to prevent or delay malicious access.» E, sulla
+  tecnologia scelta: «Keyfiles are bare-minimum forms of security and are best suited for testing or
+  development environments. For production environments we recommend using X.509 certificates.»
+- **Riserve:**
+  - **a.** la pagina **non** contiene, per i config server, nessun passo di creazione utenti: il
+    replica set dei config server si inizializza e basta, e l'amministratore del cluster nasce più
+    avanti attraverso il `mongos`. Che l'utente del cluster si crei sul config server — come fa
+    questo laboratorio — è una via equivalente nei risultati e diversa nella forma, e la differenza
+    non è discussa da questa fonte.
+  - **b.** la pagina non dice che cosa accada agli shard che restano **senza** utenti locali, se non
+    per il rimando dell'obbligo di [S-074](#s-074). Non c'è, in tutta la pagina, una frase che
+    avverta che uno shard senza utenti ha l'eccezione localhost aperta: la si deduce mettendo
+    insieme le due fonti.
+  - **c.** `passwordPrompt()` presuppone qualcuno alla tastiera. La pagina non descrive nessuna forma
+    non presidiata della stessa procedura, e quindi non copre — né benedice — quello che fa uno
+    script di avvio automatico.
+- **Usata da:** ADR-0071
+
+---
+
+<a id="v-066"></a>
+### V-066 — L'amministratore locale a uno shard: la porta di V-064 si chiude, e se ne apre una con la chiave
+
+- **Che cosa è stato provato:** lo stack `03-sharded`, profilo `palco`, MongoDB 7.0.40, dopo la
+  modifica di [ADR-0071](Decision.md#adr-0071) a `docker/03-sharded/init/11-shard-initiate.js`. La
+  domanda: il rimedio che [S-074](#s-074) prescrive e che [S-075](#s-075) descrive chiude davvero
+  quello che [V-064](#v-064) aveva misurato, e che cos'altro cambia.
+- **Esito 1 — l'utente nasce anche su volumi già inizializzati.** Lo stack è stato riacceso sui
+  volumi esistenti, dove i due replica set di shard erano già formati. Gli init hanno saltato
+  `rs.initiate()` e creato l'utente lo stesso:
+
+  ```
+  replica set «shard1rs» già formato: non lo reinizializzo
+  primario dello shard «shard1rs» eletto: shard1a:27017
+  amministratore locale «admin» creato su «shard1rs»
+  shard «shard1rs» pronto, eccezione localhost chiusa
+  ```
+
+  È la conferma pratica dell'esito 7 di [V-064](#v-064): l'eccezione è una condizione del
+  **processo**, non del disco. Un container nuovo su un volume vecchio la trova aperta.
+- **Esito 2 — l'attacco di V-064 non passa più.** Ripetuto identico, stesso comando, stesso
+  bersaglio:
+
+  ```
+  keyfile in questo container: assente
+  whatsmyuri: 127.0.0.1:36768
+  createUser: Unauthorized: Command createUser requires authentication
+  ```
+
+  Il container condivide ancora il network namespace dello shard e il server lo vede ancora arrivare
+  da `127.0.0.1`. Cambia solo che adesso un utente c'è. Lo stesso vale per `docker exec` sullo shard
+  senza credenziali.
+- **Esito 3 — l'amministratore locale funziona, ed è locale.** Autenticato su `shard1a`:
+
+  ```
+  setName: shard1rs
+  utenti su questo shard: [{"user":"admin","db":"admin"}]
+  ruoli: [{"role":"root","db":"admin"}]
+  lab.ordini su questo shard: 9860        (dal router: 20 000)
+  rs.status().set: shard1rs, membri 1
+  ```
+
+  Un utente solo per shard, con `root` su `admin`, che vede il proprio pezzo di collezione.
+- **Esito 4 — «you cannot connect to the mongos with shard-local users», misurato.** La
+  dimostrazione richiede un nome diverso, perché in questo laboratorio l'utente dello shard e quello
+  del cluster hanno **lo stesso nome e la stessa password** e dall'esterno sono indistinguibili.
+  Creato `solo-shard1` sul solo `shard1a`:
+
+  ```
+  presentato a shard1a   lab.ordini: 9860
+  presentato al mongos   MongoServerError: Authentication failed.
+  ```
+
+  Conferma [S-075](#s-075) e spiega perché l'esito 3 non basta da solo a provare che le due
+  anagrafiche siano due.
+- **Esito 5 — `userAdminAnyDatabase` si fa `root` da solo, in un comando.** È il ruolo che
+  [S-075](#s-075) prescrive per l'amministratore locale, ed è stato provato per capire quanto costi
+  scostarsene:
+
+  ```
+  legge lab.ordini:         Unauthorized
+  grantRolesToUser(root):   riuscito
+  adesso legge lab.ordini:  9860
+  ```
+
+  Un amministratore degli utenti **è** un amministratore, per definizione: può concedere a se stesso
+  qualunque ruolo. Fra `userAdminAnyDatabase` e `root`, su questo nodo, non c'è una barriera di
+  privilegio: c'è un comando in più.
+- **Esito 6 — la porta pubblicata dello shard adesso accetta credenziali.** È il cambiamento con il
+  segno opposto, e va scritto. Prima nessuno poteva autenticarsi su `shard1a` perché non c'erano
+  utenti; adesso, da fuori Docker:
+
+  ```
+  mongodb://admin:…@host.docker.internal:27141/?directConnection=true&authSource=admin
+  setName: shard1rs · documenti: 9860
+  ```
+
+  L'eccezione localhost non c'entra — quella via non l'ha mai aperta ([V-064](#v-064) esito 4). Ciò
+  che è cambiato è che ora esiste una credenziale che quella porta riconosce, ed è la stessa del
+  cluster.
+- **Esito 7 — idempotente al secondo avvio.** Rieseguito `make up-03` a stack acceso, i due init
+  hanno risposto «amministratore locale già presente … non lo ricreo» e sono usciti `0`. Il ramo
+  percorso è quello di `Unauthorized`, non quello di «already exists»: a eccezione chiusa il nodo
+  non arriva nemmeno a valutare se l'utente esista.
+- **Esito 8 — lo smoke test.** Sostituito il controllo che verificava l'invariante vecchia — le
+  credenziali del cluster rifiutate dallo shard ([V-058](#v-058)) — con tre controlli nuovi:
+  l'amministratore locale esiste ed è locale (1 utente, 9 860 documenti su 20 000), e l'eccezione
+  localhost è chiusa **su entrambi** gli shard. `make smoke-03`: **64 controlli, 0 errori**.
+  `make stack-check`: «Stack conformi: 3».
+- **Riserve:**
+  - **a.** vale per il profilo `palco`, un membro per shard. Sui **secondari** di uno shard a tre
+    membri non è stato provato: `createUser` su un secondario fallisce comunque con
+    `NotWritablePrimary`, ma che l'eccezione si comporti allo stesso modo resta la riserva **a** di
+    [V-064](#v-064), non chiusa qui.
+  - **b.** l'esito 5 prova che `userAdminAnyDatabase` può concedersi `root` **su quel nodo**. Non
+    dice niente su che cosa accada in un'installazione con ruoli personalizzati o con
+    `authorization` delegata altrove.
+  - **c.** l'esito 6 è misurato su Docker Desktop per macOS con le porte pubblicate dal profilo
+    `palco`. Uno stack che non pubblichi le porte degli shard non ha quella via, e la modifica di
+    ADR-0071 non gliene aggiunge.
+  - **d.** non è stato provato che cosa succeda se uno **solo** dei due init fallisce: lo stack si
+    fermerebbe prima, perché `add-shard` dipende da entrambi, ma lo stato intermedio — uno shard con
+    l'utente e uno senza — non è stato osservato.
+  - **e.** gli utenti di prova (`solo-shard1`, `solo-utenti`) sono stati cancellati; lo stato finale,
+    letto autenticati, è **un solo utente `admin` per shard**.
+- **Conseguenza:** [ADR-0071](Decision.md#adr-0071), la nuova §4.2 di
+  `docs/03-amministrazione/sicurezza-keyfile-x509.md` e i tre controlli nuovi di
+  `tools/smoke-sharded.sh`.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0071
+
+---
+
+<a id="v-067"></a>
+### V-067 — L'errore che indicava l'indirizzo sbagliato è sparito: adesso lo shard risponde, e risponde il vuoto
+
+- **Che cosa è stato provato:** rimisurare, dopo [ADR-0071](Decision.md#adr-0071), le risposte che
+  [V-058](#v-058) e [V-063](#v-063) avevano registrato interrogando uno shard come se fosse un
+  router. La riserva **a** di [V-063](#v-063) diceva che quegli errori erano il sintomo di **due**
+  cose insieme — comando dato all'indirizzo sbagliato e nessuna autenticazione — e che la prova non
+  le separava. L'amministratore per shard le separa, perché adesso su uno shard ci si può
+  autenticare.
+- **Ambiente:** stack `docker/03-sharded`, profilo `palco`, MongoDB 7.0.40, 2026-09-02, volumi
+  ricreati da zero. Comandi via `docker exec` sui container `sh-shard1a`, `sh-cfg1` e `sh-mongos`.
+- **Esito 1 — senza credenziali non si arriva più all'autorizzazione.** `sh.status()` in diretta su
+  uno shard:
+
+  ```console
+  $ docker exec sh-shard1a mongosh --quiet --eval 'sh.status()'
+  Warning: MongoshWarning: [SHAPI-10003] You are not connected to a mongos. This command may not
+  work as expected.
+  MongoServerError: Command find requires authentication
+  ```
+
+  Prima diceva `not authorized on config to execute command { find: "version", … }`
+  ([V-063](#v-063)). I due messaggi sembrano parenti e descrivono stati opposti: il primo è di un
+  nodo che **ti ha lasciato entrare** e ti nega quella lettura — è l'eccezione localhost, che
+  autorizza soltanto la creazione del primo utente; il secondo è di un nodo che non ti conosce. Il
+  messaggio cambiato è la prova, dal di fuori, che sullo shard l'eccezione è chiusa. Sul config
+  server, dove utenti ce n'erano già, la risposta è la stessa: `Command find requires
+  authentication`.
+- **Esito 2 — con le credenziali del cluster, lo shard risponde.**
+
+  ```
+  setName: shard1rs · lab.ordini: 9860
+  ```
+
+  [V-058](#v-058), quarto punto, aveva misurato `MongoServerError: Authentication failed` sulla
+  stessa coppia. È lo stesso cambiamento dell'esito 6 di [V-066](#v-066), qui per via di
+  `docker exec` invece che dalla porta pubblicata.
+- **Esito 3 — l'errore che la guida attribuiva alle istanze singole compare su uno shard.**
+  Autenticati:
+
+  ```console
+  $ docker exec sh-shard1a mongosh --quiet -u admin -p … --authenticationDatabase admin \
+      --eval 'sh.status()'
+  Warning: MongoshWarning: [SHAPI-10003] You are not connected to a mongos. This command may not
+  work as expected.
+  MongoshInvalidInputError: [SHAPI-10003] This db does not have sharding enabled. Be sure you are
+  connecting to a mongos from the shell and not to a mongod.
+  ```
+
+  È parola per parola l'errore che [V-063](#v-063) diceva appartenere a **un'altra situazione**,
+  quella dell'istanza singola. Non era falso allora e non lo è adesso: il primo errore ne nascondeva
+  un secondo. Finché la lettura veniva rifiutata, `mongosh` non arrivava a scoprire che cosa ci
+  fosse da leggere.
+- **Esito 4 — che cosa manca davvero, adesso che si può guardare.** Il documento che `mongosh` cerca
+  per decidere se lo sharding c'è:
+
+  ```
+  config.version su shard1a                 -> null
+  config.version attraverso il mongos       -> { "_id": 1, "clusterId": "6a9832ea14d252dc5b3ddef2" }
+  config.shards.countDocuments() su shard1a -> 0
+  ```
+
+  Il database `config` sullo shard **esiste** e ha venti collezioni — `cache.chunks.lab.ordini`,
+  `cache.collections`, `cache.databases`, `rangeDeletions`, `transactions`, `system.sessions` e le
+  altre — ma non `version`, non `shards`, non `chunks`. La frase «uno shard il database `config` ce
+  l'ha davvero» resta vera, e non basta: ce l'ha, e dentro non c'è l'anagrafe del cluster, che vive
+  sui config server.
+- **Esito 5 — il vuoto sembra una risposta.** `sh.getBalancerState()`, autenticati:
+
+  ```
+  in diretta su shard1a       -> true
+  attraverso il mongos        -> true
+  config.settings su shard1a  -> []
+  config.settings dal mongos  -> []
+  ```
+
+  La stessa risposta per due ragioni diverse. Dal router è lo stato vero: in `config.settings` non
+  c'è nessun documento che fermi il bilanciatore, e in sua assenza il bilanciatore è acceso. Dallo
+  shard è il valore che si ottiene leggendo a vuoto una collezione che lì non esiste.
+  [V-063](#v-063), nono punto, aveva misurato `Unauthorized: not authorized on config to execute
+  command …` e l'aveva chiamato un errore «che non nomina il problema vero». Adesso il problema non
+  lo nomina nessuno: chi chiede riceve `true`.
+- **Esito 6 — i comandi, invece, falliscono ancora forte.** Sulla stessa shell autenticata:
+
+  ```
+  sh.enableSharding("prova") -> MongoServerError: no such command: 'enableSharding'.
+                                Are you connected to mongos?
+  sh.isBalancerRunning()     -> MongoServerError: no such command: 'balancerStatus'
+  ```
+
+  La riga che divide i due comportamenti non è «al router sì, allo shard no»: è come `mongosh`
+  realizza la funzione. Quelle che si risolvono in una **lettura** di `config` adesso riescono e
+  tornano vuote; quelle che spediscono un **comando** trovano un `mongod` che quel comando non ce
+  l'ha, e lo dicono. `no such command` arriva anche **senza** credenziali, misurato: il nome
+  sbagliato viene rifiutato prima che l'autenticazione entri in gioco.
+- **Riserve:**
+  - **a.** `sh.enableSharding()` oggi risponde `MongoServerError: no such command`;
+    [V-063](#v-063) aveva registrato lo stesso testo con l'etichetta `CommandNotFound:`. Ciò che
+    segue i due punti è identico, l'etichetta no, e la differenza non è stata spiegata: qui vale la
+    misura di oggi.
+  - **b.** l'esito 5 dice che `true` è la risposta con `config.settings` vuoto in tutti e due i
+    posti. Non è stato provato che cosa risponda lo shard con il bilanciatore **fermo** dal router:
+    servirebbe `sh.stopBalancer()`, un secondo giro e una ripulitura dello stato.
+  - **c.** tutto è misurato sul profilo `palco`, un membro per shard, su arm64. La password è stata
+    letta da `.env` e non compare in nessun output riportato.
+- **Conseguenza:** [ADR-0072](Decision.md#adr-0072); la riscrittura di §3.3 di
+  `docs/04-mongosh/guida-mongosh.md`, dei due passaggi di `docs/02-architetture/sharded-cluster.md`,
+  del commento di `tools/reset-demo.sh` e di quello di
+  `docker/03-sharded/init/10-cfg-initiate.js`.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0072
+
+---
+
+<a id="v-068"></a>
+### V-068 — Le cinque scene dello sharded: diciotto kilobyte, quarantaquattro volte meno con `plain`, e cinque riproduzioni identiche all'originale
+
+- **Comandi:** `python3 tools/registra-terminale.py <file>.cast --titolo "…" -- make <bersaglio>`
+  con `up-03`, `stato-03`, `distribuzione-03`, `guasto-03` e `guasto-03 PROFILO=completo`; poi
+  `python3 tools/registra-terminale.py --riproduci <file>.cast` su ciascuna delle cinque
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.4.0, stack `docker/03-sharded`,
+  MongoDB 7.0.40. Terminale registrato a 100×30. Profilo `palco` per le prime quattro scene,
+  `completo` per la quinta.
+- **Che cosa si voleva sapere:** se il Blocco 3 abbia una riserva utilizzabile in sala, quanto pesi,
+  e se ciò che è stato registrato sia davvero ciò che si rivede.
+
+- **Esito, le cinque scene:**
+
+```
+file                             durata  eventi   byte   il numero che porta
+05-avvio-sharded.cast             22,9 s     53   5407   la catena finisce con sh-up-03 Healthy
+06-stato-sharded.cast              6,5 s     14   4422   2 shard · 4 chunk (2+2) · 1 router
+07-distribuzione-sharded.cast      4,0 s     12   2809   9860 + 10140 = 20000
+08-guasto-shard-palco.cast        40,1 s     18   3167   1 s sullo shard vivo, 15 s e 16 s di attesa
+09-failover-membro-shard.cast     12,3 s     15   2552   20000 in 0 s, primario shard1a → shard1b
+```
+
+  Diciotto kilobyte per cinque scene, che portano a trentun kilobyte il totale della cartella
+  insieme alle quattro di [V-045](#v-045).
+
+- **Esito — `COMPOSE_PROGRESS=plain` vale quarantaquattro volte, e non è una questione di peso.**
+  Lo **stesso** `up` sullo **stesso** stack già acceso, registrato due volte a nove secondi di
+  distanza: **134 861 byte in 205 eventi** con il renderer predefinito, **3 050 byte in 28 eventi**
+  con `COMPOSE_PROGRESS=plain`. Durata praticamente identica — 8,6 s contro 8,5 s — perché il
+  comando è lo stesso: a cambiare è solo quanto terminale viene consumato per mostrarlo. Il
+  renderer predefinito ridisegna una tabella animata e riscrive ogni riga a ogni aggiornamento;
+  riprodotto, è illeggibile. In `plain` ogni container scrive la propria riga una volta sola e
+  l'ordine della catena — keyfile, config server, shard, router, `addShard`, dati — si vede
+  scorrere. La prima registrazione dell'avvio **a freddo**, fatta prima di scoprirlo, pesava
+  **588 KB**.
+
+- **Esito — le cinque riproduzioni coincidono byte per byte con l'originale.** Ogni `.cast` è stato
+  riaperto con `--riproduci` dentro uno pseudo-terminale, il testo raccolto e confrontato con quello
+  della registrazione di partenza:
+
+```
+05-avvio-sharded.cast          22,9 s · uscita 0 · riproduzione identica · 3905 byte di testo
+06-stato-sharded.cast           6,5 s · uscita 0 · riproduzione identica · 3575 byte di testo
+07-distribuzione-sharded.cast   4,0 s · uscita 0 · riproduzione identica · 2053 byte di testo
+08-guasto-shard-palco.cast     40,1 s · uscita 0 · riproduzione identica · 2165 byte di testo
+09-failover-membro-shard.cast  12,3 s · uscita 0 · riproduzione identica · 1669 byte di testo
+```
+
+  Con una avvertenza che il primo confronto ha fatto fallire per niente: lo pseudo-terminale
+  traduce ogni `\n` in `\r\n`, quindi un `\r\n` registrato torna indietro come `\r\r\n`. Normalizzata
+  quella traduzione, le cinque coincidono senza eccezioni.
+
+- **Esito — lo stesso comando racconta due storie diverse, e sono vere tutt'e due.**
+  `make guasto-03` nel profilo `palco`: fermato l'unico membro di `shard1rs`, la lettura mirata
+  sullo shard vivo risponde in **1 s**, quella sullo shard fermo e il conteggio totale falliscono
+  dopo **15 s** e **16 s** con `FailedToSatisfyReadPreference: Could not find host matching read
+  preference { mode: "primary" } for set shard1rs`; il nodo riavviato restituisce i 20000 in
+  **3 s**. Lo stesso comando nel profilo `completo`: le tre risposte arrivano tutte — `1 s`, `1 s`,
+  **`0 s`** — e il primario di `shard1rs`, letto da un membro superstite, è passato da
+  `shard1a:27017` a `shard1b:27017` senza che nessuno intervenisse. La differenza fra le due scene
+  non è il prodotto: è il numero di membri per shard.
+
+- **Esito — la password non compare in nessuna delle cinque.** Cercata alla lettera dentro i cinque
+  `.cast`: zero occorrenze. La riga di comando del `docker` dell'host non entra nella registrazione
+  perché non viene battuta — `tools/demo-sharded.sh` legge il valore dal `.env` e lo passa a
+  `mongosh` dentro il container ([ADR-0054](Decision.md#adr-0054)).
+
+- **Riserve:**
+  - **a.** Una sola esecuzione per scena. I numeri qui sopra sono singoli, non mediane, e vale per
+    loro la lezione di [V-045](#v-045): il singolo numero balla, il rapporto fra due scene no.
+  - **b.** I **15 s** e **16 s** della scena 8 non sono un parametro documentato che sia stato
+    letto: sono il tempo che il router ha impiegato prima di rinunciare, misurato con il
+    cronometro della shell attorno alla chiamata. Il valore dipende dai timeout di scoperta del
+    router e da quando il nodo è caduto rispetto al giro di sonde; non è stato ripetuto.
+  - **c.** I **588 KB** dell'avvio a freddo con il renderer predefinito sono un'osservazione
+    singola, fatta prima del confronto controllato e non ripetuta. Il confronto che regge è quello
+    a stack acceso: 134 861 contro 3 050 byte.
+  - **d.** Una sola macchina, arm64, con Docker Desktop. Le durate dell'avvio dipendono dalla
+    cache delle immagini e dal disco.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0073
+
+---
+
+<a id="v-069"></a>
+### V-069 — I tre debiti di strumentazione, misurati: quindici porte su quindici, un profilo inesistente che accusa il keyfile, e ventuno secondi di margine
+
+- **Comandi:** per le porte, un lettore YAML dei tre `docker/*/compose.yaml` confrontato con la
+  riga `PORTE=(...)` di `tools/preflight.sh`; per il profilo,
+  `make up-03 PROFILO=inesistente`, `docker compose … --profile inesistente config --services` e
+  `docker compose … config --profiles`; per il margine, tre giri a freddo e tre a caldo di
+  `docker compose … up -d --wait` seguito da `docker compose … wait rs-init`, cronometrati, con un
+  osservatore che interroga `docker inspect -f '{{.State.Status}}' rs-init` ogni 50 ms.
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.5.0, MongoDB 7.0.40. Stack 03 acceso
+  nel profilo `palco` durante la prova del profilo inesistente; stack 02 avviato e smontato apposta
+  per la terza misura, con i tre volumi dei dati rimossi prima di ogni giro a freddo.
+- **Che cosa si voleva sapere:** se i tre debiti segnati da [ADR-0049](Decision.md#adr-0049) e
+  [ADR-0062](Decision.md#adr-0062) fossero difetti reali oggi, e in che modo si manifesterebbero.
+
+- **Esito — le quindici porte coincidono, e nessuno le teneva insieme.** I tre file Compose
+  pubblicano **15** porte dell'host; `tools/preflight.sh` ne elenca **15**. Pubblicate e non
+  controllate: nessuna. Controllate e non pubblicate: nessuna. Ripetute: nessuna. L'elenco è in
+  ordine crescente.
+
+```
+27017  01-standalone/mongo-standalone
+27021  02-replicaset/mongo-rs-1      27022  …/mongo-rs-2       27023  …/mongo-rs-3
+27117  03-sharded/mongos             27118  …/mongos2 [completo]
+27131  03-sharded/cfg1               27132  …/cfg2 [completo]   27133  …/cfg3 [completo]
+27141  03-sharded/shard1a            27142  …/shard1b [completo] 27143 …/shard1c [completo]
+27151  03-sharded/shard2a            27152  …/shard2b [completo] 27153 …/shard2c [completo]
+```
+
+  Il debito non era un errore: era che i due elenchi coincidevano **per attenzione**. Sette delle
+  quindici porte esistono solo nel profilo `completo`, e sono proprio quelle che si dimenticano.
+
+- **Esito — un profilo che non esiste non è un errore per Compose, ed è la misura che sorprende.**
+  `docker compose … --profile inesistente config --services` risponde con **un solo servizio**,
+  `keyfile-init`: l'unico del file che non dichiara `profiles:`. Un profilo sconosciuto non seleziona
+  niente, quindi restano i servizi che non appartengono a nessun profilo. `make up-03
+  PROFILO=inesistente` stampa esattamente questo, e esce **2**:
+
+```
+ Container sh-keyfile-init  Starting
+ Container sh-keyfile-init  Started
+ Container sh-keyfile-init  Waiting
+container sh-keyfile-init exited (0)
+make: *** [up-03] Error 1
+```
+
+  Cinque righe che accusano il one-shot del keyfile di essere uscito 0, cioè di aver fatto il suo
+  mestiere. La parola «profilo» non compare in nessuna. Il cluster acceso in `palco` non è stato
+  toccato: i cinque container erano ancora in piedi e sani dopo il tentativo. La domanda giusta ha
+  invece una risposta pulita: `docker compose --env-file tools/images.env --env-file
+  docker/03-sharded/.env -f docker/03-sharded/compose.yaml config --profiles` stampa `completo` e
+  `palco`, e esce 0. Senza i due `--env-file` fallisce su `MONGO_IMAGE`, quindi il comando che
+  interroga i profili deve portarseli dietro.
+
+- **Esito — il margine di `up-02` è ventuno secondi a freddo e quattro a caldo, e non è fortuna.**
+  Tre giri a freddo, volumi dei dati rimossi ogni volta:
+
+```
+giro   up -d --wait torna   rs-init esce   margine   wait rs-init
+  1              7,92 s        29,51 s     21,59 s   uscita 0 in 21,55 s
+  2              7,31 s        29,46 s     22,16 s   uscita 0 in 22,06 s
+  3              7,28 s        29,18 s     21,90 s   uscita 0 in 21,83 s
+```
+
+  Tre giri a caldo, sullo stack già acceso: `up -d --wait` torna in **1,98 / 1,84 / 1,84 s** e
+  `wait rs-init` blocca ancora **3,97 / 3,87 / 3,94 s** prima di uscire 0. Il margine non è un caso
+  fortunato: `rs-init` è l'ultimo anello della catena e non ha healthcheck, quindi la soglia che
+  `--wait` gli applica è `running` ([S-057](#s-057)) ed è soddisfatta nell'istante in cui parte.
+  La finestra a disposizione del secondo comando **coincide con l'intera durata del lavoro di
+  `rs-init`**, e si chiuderebbe solo se `rs-init` smettesse di lavorare.
+
+- **Esito — il fallimento temuto esiste, si riproduce, e mente sul motivo.** Dato `wait rs-init`
+  una seconda volta, quando `rs-init` ha già finito, la risposta è `no containers for project
+  "sqlstart-02-replicaset"` con uscita **1**, in **0,08 s**. Nello stesso istante il progetto ha
+  **cinque** container — `mongo-rs-1`, `mongo-rs-2`, `mongo-rs-3` in esecuzione, `rs-init` e
+  `rs-keyfile-init` usciti — e `docker compose ps -a` li elenca tutti. `compose wait` guarda solo i
+  container **vivi**: il messaggio nomina l'intero progetto per dire che non ne trova uno solo.
+  Nell'uso reale non capita perché `up -d --wait` riavvia `rs-init` a ogni giro, verificato: al
+  secondo `make up-02` di fila la sequenza è `rs-init Starting`, `Started`, `Waiting`, `Healthy`, e
+  il `wait` che segue trova di nuovo qualcosa da attendere.
+
+- **Riserve:**
+  - **a.** L'osservatore che cronometra l'uscita di `rs-init` è stato scritto per il caso a freddo,
+    dove il container non esiste ancora. A caldo legge lo stato `exited` **residuo** del giro
+    precedente e risponde subito: i suoi timestamp a caldo sono privi di significato e non sono
+    riportati. Il margine a caldo qui sopra è la durata del blocco di `wait rs-init`, che è la
+    stessa grandezza misurata in un altro modo, ma è una misura indiretta.
+  - **b.** Tre giri per condizione su una sola macchina, arm64, con Docker Desktop. Le durate a
+    freddo dipendono dal disco e dalla cache delle immagini; il rapporto fra le due condizioni no.
+  - **c.** Che un profilo sconosciuto selezioni i soli servizi senza `profiles:` è misurato su
+    Compose **v5.5.0** e non è stato cercato nella documentazione: potrebbe cambiare. Il verso in
+    cui sbaglierebbe è innocuo — il guardiano rifiuterebbe un profilo che Compose accetta, non il
+    contrario.
+  - **d.** La coincidenza delle quindici porte è una fotografia del 2 settembre 2026. Il valore
+    della misura non è il numero: è che da oggi la coincidenza è controllata da
+    `tools/tests/test_coerenza_repo.py` e non più dall'attenzione di chi modifica.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0074, ADR-0075
+
+---
+
+<a id="v-070"></a>
+### V-070 — I due messaggi di un `--configdb` malformato, e il nome di set vuoto che passava per refuso
+
+- **Comandi:** `docker run --rm --entrypoint mongos <digest> --configdb <forma>` su tre forme
+  malformate; `check_stack.nome_del_set` chiamata direttamente su quattro stringhe; e
+  `check_stack.verifica` su un documento sharded sintetico con `--configdb /cfg1:27017`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, immagine `mongo` pinnata per digest da
+  `tools/images.env` (MongoDB 7.0.40), 2026-09-02. Nessuno stack acceso: i tre rifiuti sono
+  dell'analizzatore degli argomenti e arrivano in meno di un secondo.
+- **Che cosa si voleva sapere:** se il rilievo lasciato da Copilot sulla PR #4 —
+  «`nome_del_set()` può restituire una stringa vuota se `--configdb` inizia con `/`, e a quel
+  punto il chiamante la tratta come un nome di replica set valido» — descriva un difetto reale.
+
+- **Esito, primo punto — l'osservazione è esatta.** La funzione, prima della correzione:
+
+```
+nome_del_set('/cfg1:27017')      -> ''
+nome_del_set('   /cfg1:27017')   -> '   '
+nome_del_set('cfgrs/cfg1:27017') -> 'cfgrs'
+nome_del_set('cfg1:27017')       -> None
+```
+
+- **Esito, secondo punto — la diagnosi no: nessun file passava.** Dato a `verifica` un `mongos`
+  con `--configdb /cfg1:27017`, i problemi restituiti sono **due**, non zero: il file veniva
+  bocciato e `check_stack.py` usciva diverso da zero. La stringa vuota non veniva accettata come
+  nome valido — cadeva nel controllo successivo, «nessun mongod dichiara questo `--replSet`».
+  **Non c'era nessun falso negativo**, e non c'è mai stato uno stack approvato per sbaglio.
+
+- **Esito, terzo punto — il difetto vero è la diagnosi, ed è peggiore di quanto suggerito.** Il
+  messaggio che usciva era questo:
+
+```
+mongos: «--configdb» nomina il replica set «», che nessun mongod di questo
+file dichiara con «--replSet». È il caso del refuso, ed è l'unico in cui
+nessuno protesta: i processi partono tutti, e mongos resta a cercare un
+set che non esiste (ADR-0063)
+```
+
+  Due affermazioni false in tre righe. «Nomina il replica set «»»: non nomina niente. «Nessuno
+  protesta: i processi partono tutti»: `mongos` con quell'argomento **non parte**, esce **2** e lo
+  dice. Il messaggio mandava a cercare un refuso di due lettere dentro i `--replSet` del file,
+  mentre il difetto era una barra di troppo sotto gli occhi di chi legge.
+
+- **Esito, quarto punto — `mongos` ha due messaggi per il `--configdb` malformato, non uno.** È la
+  virgola a decidere quale:
+
+```
+mongos --configdb a:27017,b:27017
+  -> FailedToParse: invalid url [a:27017,b:27017]                          (uscita 2)
+mongos --configdb cfg1:27017
+  -> BadValue: configdb supports only replica set connection string        (uscita 2)
+mongos --configdb /cfg1:27017
+  -> BadValue: configdb supports only replica set connection string        (uscita 2)
+```
+
+  [V-057](#v-057) aveva misurato la sola forma con la virgola, ed è accurata. Il messaggio di
+  `check_stack.py` però citava quella stringa come se fosse **l'unica**, e la prova che lo copriva
+  usava un host solo: uno scarto fra ciò che la prova esercitava e ciò che il messaggio prometteva,
+  nato dentro lo stesso commit. Adesso il messaggio porta entrambe le stringhe.
+
+- **Riserve:**
+  - **a.** Le tre forme sono state provate con `docker run` sulla riga di comando, fuori dallo
+    stack. È il posto giusto — il rifiuto è dell'analizzatore degli argomenti e precede qualunque
+    rete — ma non dice nulla su che cosa farebbe un `mongos` già avviato.
+  - **b.** I testi dei due messaggi sono di **MongoDB 7.0.40**, l'immagine pinnata del repository.
+    Sono stringhe di prodotto e possono cambiare di versione: quello che non cambia è che il
+    processo esce 2 senza partire.
+  - **c.** Non è stata cercata una classificazione esaustiva delle forme malformate. Due messaggi
+    sono quelli incontrati su tre tentativi, non l'elenco completo di ciò che `mongos` sa dire.
+  - **d.** La correzione riguarda **la qualità della diagnosi, non la copertura**: prima e dopo, un
+    `--configdb` con il nome di set vuoto fa fallire `make stack-check`. Chi misurasse il valore di
+    questa modifica contando gli stack bocciati non troverebbe differenza.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0076
+
+---
+
+<a id="v-071"></a>
+### V-071 — Un `mongos` senza `--keyFile`: approvato dal controllo, e un log che accusa la password
+
+- **Comandi:** una copia di `docker/03-sharded/compose.yaml` con cancellate le sole due righe
+  `--keyFile` / `/keyfile/mongo-keyfile` del `mongos`, passata a `tools/check_stack.py`; poi
+  `docker compose -f <copia> -p prova-keyfile --profile palco up -d --wait` e
+  `docker logs sh-mongos`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.5.0, immagine `mongo` pinnata per
+  digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-02
+- **Che cosa si voleva sapere:** se il rilievo lasciato dal secondo revisore sulla PR #4 — «la
+  regola che pretende `--keyFile` vive dentro il ramo di `avvia_mongod`, e un `mongos` non è un
+  `mongod`» — descriva un falso negativo reale, su un file vero e non su un documento sintetico.
+
+- **Esito, primo punto — il controllo approvava.** Prima della correzione, su quella copia:
+
+```
+Stack conformi: 1
+```
+
+  con uscita **0**. Uno sharded cluster il cui router non possiede il segreto con cui il resto del
+  cluster si autentica, dichiarato conforme.
+
+- **Esito, secondo punto — lo stack non parte.** `up -d --wait` esce **1**:
+
+```
+dependency failed to start: container sh-mongos is unhealthy
+```
+
+- **Esito, terzo punto — il log accusa l'autenticazione, non il keyfile.** Il router entra in un
+  ciclo che si ripete ogni due secondi:
+
+```
+"msg":"Failed to refresh key cache"
+"msg":"Error loading global settings from config server. Sleeping for 2 seconds and retrying"
+  error: {"code": 13, "codeName": "Unauthorized",
+          "errmsg": "Error loading clusterID :: caused by :: Command find requires authentication"}
+```
+
+  `Command find requires authentication` è la frase che si legge quando una password è sbagliata, e
+  manda a controllare `.env`. Qui la password è giusta: manca la riga che dà al router il keyfile,
+  e senza quella il router non ha nessuna identità da presentare al config server. Il messaggio è
+  vero alla lettera e indica il posto sbagliato — la stessa forma d'errore della **nota 129**.
+
+- **Esito, quarto punto — dopo la correzione il file è bocciato.** Sulla stessa copia:
+
+```
+✗ …/compose.SENZA-KEYFILE-MONGOS.yaml: mongos: avvia un mongos senza «--keyFile». Il router non
+  ha il segreto con cui il resto del cluster si autentica: parte, resta unhealthy e ripete «Error
+  loading clusterID :: caused by :: Command find requires authentication», che sembra una
+  credenziale sbagliata e invece è una riga mancante (ADR-0014, V-071)
+```
+
+- **Riserve:**
+  - **a.** Provato sul solo profilo `palco`. La copia difettosa toglieva il keyfile al **primo**
+    `mongos`; `mongos2`, che esiste solo in `completo`, non è stato provato. La regola però
+    interroga ogni servizio del file, non il primo.
+  - **b.** Le stringhe di log sono di **MongoDB 7.0.40**, l'immagine pinnata del repository, e
+    possono cambiare di versione. Quello che non cambia è che il container resta `unhealthy` e che
+    `up --wait` esce diverso da zero.
+  - **c.** La regola nuova guarda che l'opzione **ci sia**, non che il file puntato esista o sia
+    montato: quella è una verifica separata e già presente (`problemi_keyfile`).
+  - **d.** Non è stato provato che cosa succeda al contrario — un `mongos` con `--keyFile` e un
+    `mongod` senza. Quel caso era già coperto dalla regola precedente.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0077
+
+---
+
+<a id="v-072"></a>
+### V-072 — Il cambio di profilo su uno stack già inizializzato, e ventimila documenti non distribuiti dichiarati pronti
+
+- **Comandi:** `make up-03` (profilo `palco`), poi
+  `docker compose --profile completo up -d --wait cfg2 cfg3` e
+  `MEMBRI_CFG="cfg1:27017,cfg2:27017,cfg3:27017" docker compose … up --force-recreate
+  --exit-code-from cfg-init cfg-init`, con `rs.status()` subito dopo; e, separatamente,
+  `lab.ordini.drop()` seguito da un `insertMany` di 20 000 documenti senza distribuirli, poi il
+  riavvio del solo servizio `seed`
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, Compose v5.5.0, immagine `mongo` pinnata per
+  digest da `tools/images.env` (MongoDB 7.0.40), 2026-09-02
+- **Che cosa si voleva sapere:** se gli altri due rilievi del secondo revisore sulla PR #4
+  descrivano casi raggiungibili in cui la catena esce **0** su uno stack che non fa quello che
+  promette.
+
+- **Esito, primo punto — il cambio di profilo passa in silenzio.** L'anello dei config server
+  riceve tre membri, ne trova uno, e dichiara pronto:
+
+```
+sh-cfg-init  | membri da configurare: cfg1:27017, cfg2:27017, cfg3:27017
+sh-cfg-init  | replica set «cfgrs» già formato: non lo reinizializzo
+sh-cfg-init  | primario del config server eletto: cfg1:27017
+sh-cfg-init  | utente amministratore già presente: non lo ricreo
+sh-cfg-init  | config server pronto
+sh-cfg-init exited with code 0
+```
+
+  e subito dopo, sullo stesso set:
+
+```
+membri nel set: 1
+  - cfg1:27017 [PRIMARY]
+```
+
+  Due config server sani girano fuori dalla replica. Le due guardie di
+  [ADR-0060](Decision.md#adr-0060) non lo vedono, e non è un difetto delle guardie: cfg2 e cfg3
+  **rispondono**, quindi la prima è soddisfatta; nessun candidato è **fuori elenco**, quindi la
+  seconda pure. Il disallineamento è una terza direzione, che nasce dal disco e non dall'ambiente.
+
+- **Esito, secondo punto — la guardia esistente funziona, nella sua direzione.** Rilanciando lo
+  stesso anello con `MEMBRI_CFG` lasciato al valore del `palco` mentre cfg2 e cfg3 giravano, la
+  catena si è fermata da sé con uscita **5** (`USCITA_MEMBRO_DI_TROPPO`). Non era la misura
+  cercata — è capitata durante un'altra prova — e vale la pena scriverla: ADR-0060 regge, il buco
+  è accanto e non dentro.
+
+- **Esito, terzo punto — il seed accetta ventimila documenti non distribuiti.** Con `lab.ordini`
+  rifatta a mano, piena e senza riga in `config.collections`:
+
+```
+sh-seed  | lab.ordini ha già 20000 documenti: non ricarico.
+sh-seed  | Per ricaricare comunque: «make seed-03», che passa RICARICA=1.
+sh-seed  | ATTENZIONE: lab.ordini non risulta distribuita.
+sh-seed exited with code 0
+```
+
+  L'avviso c'era già, ed è esatto. A mancare era il codice d'uscita: un laboratorio sullo sharding
+  la cui collezione non è partizionata veniva consegnato verde.
+
+- **Esito, quarto punto — dopo le correzioni i due casi sono rumorosi.** Stessa sequenza, stack
+  ricostruito:
+
+```
+sh-cfg-init  | ERRORE: il replica set «cfgrs» esiste già con altri membri.
+sh-cfg-init  |   configurati adesso: cfg1:27017
+sh-cfg-init  |   chiesti da MEMBRI_CFG: cfg1:27017, cfg2:27017, cfg3:27017
+sh-cfg-init exited with code 6
+
+sh-seed  | ERRORE: lab.ordini ha già 20000 documenti ma NON è distribuita.
+sh-seed exited with code 9
+```
+
+- **Esito, quinto punto — i giri leciti restano verdi.** `make up-03` da zero e poi ripetuto: **0**
+  entrambe le volte. `make up-03 PROFILO=completo` da zero e poi ripetuto: **0** entrambe le volte.
+  `make seed-03`, che è la via d'uscita indicata dal messaggio di uscita 9, ricostruisce la
+  collezione distribuita (`shard1rs: 9860 · shard2rs: 10140`). `make smoke-03 PROFILO=completo`:
+  **Superati: 101 · Errori: 0**.
+
+- **Riserve:**
+  - **a.** Il cambio di profilo è stato **simulato** accendendo cfg2 e cfg3 e rilanciando il solo
+    `cfg-init` con `MEMBRI_CFG` sovrascritto. È la stessa sequenza che `make up-03
+    PROFILO=completo` esegue su uno stack `palco` acceso, ma quel bersaglio non è stato invocato in
+    quella forma: la misura riguarda l'anello, non il bersaglio.
+  - **b.** Riprodotto sui **config server**. I due anelli degli shard hanno lo stesso identico ramo
+    e hanno ricevuto la stessa correzione, ma il guasto non è stato riprodotto su di loro.
+  - **c.** La collezione non distribuita è stata prodotta a mano. Il caso è **raggiungibile**; non
+    è dimostrato che una sequenza di comandi del laboratorio lo produca, né quanto sia frequente.
+  - **d.** La distribuzione su **un solo shard** resta un avviso e non un errore. È una scelta e
+    non una dimenticanza — unire i chunk su uno shard è una scena della demo
+    ([ADR-0069](Decision.md#adr-0069)) — quindi il seed non boccia ogni stato diverso da quello che
+    avrebbe prodotto lui, solo l'assenza dal catalogo.
+  - **e.** Il confronto fra membri usa `hello()`, che risponde senza credenziali. Somma `hosts`,
+    `passives` e `arbiters` per difendersi da un membro a `priority: 0`, ma quel caso non esiste in
+    questo laboratorio e non è stato provato.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0077
+
+---
+
+<a id="v-073"></a>
+### V-073 — Rimosso il worktree, la sessione che ci stava dentro resta agganciata al percorso e non può più fare niente
+
+- **Comandi:** `git worktree remove`, `git worktree list`, `git branch`, e gli strumenti di sessione
+  `EnterWorktree` / `ExitWorktree`
+- **Ambiente:** macOS 26.6.2 arm64, git 2.50.1 (Apple Git-155), sessione Claude Code avviata
+  isolata dentro `.claude/worktrees/feature-03-stack-sharded`
+- **Che cosa si voleva sapere:** non era una prova progettata, è un guasto capitato e poi
+  ricostruito. Chiusa e unita la PR #4, la pulizia prevista da [ADR-0056](Decision.md#adr-0056) è
+  stata eseguita dal checkout principale **mentre la sessione che aveva sviluppato il branch era
+  ancora viva dentro il worktree**. La domanda che ne è nata: che cosa succede a una sessione
+  isolata quando la directory a cui è agganciata sparisce, e come se ne esce.
+
+- **Esito, primo punto — la guardia sopravvive alla directory, e blocca tutto.** L'isolamento è
+  **stato della sessione**: un percorso assoluto registrato all'avvio, che nessun comando git
+  aggiorna. Rimosso il worktree, ogni comando di shell è stato rifiutato, compresi quelli che non
+  nominavano git e quelli che puntavano altrove:
+
+```
+This session is isolated in the worktree /…/.claude/worktrees/feature-03-stack-sharded,
+but this command's working directory resolved to the shared checkout
+(/…/.claude/worktrees/feature-04-app-python). Refusing to run it there
+```
+
+  Rifiutata anche ogni scrittura, con un invito impossibile da soddisfare:
+
+```
+This session is isolated in the worktree /…/feature-03-stack-sharded.
+Edit the worktree copy of this file instead of the shared-checkout path.
+```
+
+  Lo strumento di lettura ha continuato a funzionare. La sessione poteva guardare e non toccare.
+
+- **Esito, secondo punto — il rientro diretto nel worktree nuovo non funziona.** `EnterWorktree`
+  con il percorso del worktree appena creato è stato rifiutato due volte, per due ragioni diverse.
+  Finché la directory di lavoro era ripiegata sulla home dell'utente: `Cannot enter an existing
+  worktree: the current directory is not in a git repository`. Dopo che un `cd` riuscito l'aveva
+  portata dentro il worktree nuovo: `Cannot enter worktree: /…/feature-04-app-python is the current
+  working directory`. Non si può riagganciare rientrando: bisogna prima uscire.
+
+- **Esito, terzo punto — `ExitWorktree` in modalità `keep` sgancia, anche se non dovrebbe.** La sua
+  documentazione dichiara che fuori da una sessione aperta con `EnterWorktree` l'operazione è nulla.
+  L'isolamento ricevuto **all'avvio** conta come sessione aperta: il comando ha sganciato il pin e
+  riportato la sessione nel checkout principale, dopodiché git, la shell e la scrittura sono tornati
+  a funzionare, e `EnterWorktree` con `path:` ha agganciato il worktree nuovo al primo tentativo.
+
+```
+Exited worktree. Your work is preserved at /…/feature-03-stack-sharded
+on branch worktree-feature-03-stack-sharded.
+Session is now back in /…/SqlStart2026.
+```
+
+- **Riserva sul messaggio.** Le due cose che quella riga promette **non esistono**: la directory era
+  già stata cancellata, e il branch `worktree-feature-03-stack-sharded` non compare in `git branch`
+  né prima né dopo. Il messaggio è composto senza verificare, ed è innocuo purché non lo si segua:
+  non c'è nessun ramo di salvataggio da andare a cercare, e nessuno da cancellare.
+
+- **Che cosa non è stato provato:** se `ExitWorktree` sganci allo stesso modo una sessione il cui
+  worktree esiste ancora — qui la directory era già sparita. E se il blocco si presenti identico su
+  un sistema operativo diverso: la misura è di una macchina sola.
+
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0079
+
+---
+
+<a id="v-074"></a>
+### V-074 — Il primo appuntamento di ADR-0058: la 8.0.30 non è pubblicata, e il numero da aspettare non si è spostato
+
+- **Comandi:** `curl` sull'API dei tag di Docker Hub per `library/mongo` e per
+  `mongodb/mongodb-community-server`, filtrando **per nome esatto**; `curl` sul feed ufficiale dei
+  download (`https://downloads.mongodb.org/current.json`); `curl` sul changelog della serie 8.0
+  ([S-028](#s-028)) nella variante `.md`
+- **Ambiente:** macOS 26.6.2 arm64, curl 8.7.1, interrogazione del 2026-09-02 alle 23:10 CEST
+- **Che cosa si voleva sapere:** [ADR-0058](Decision.md#adr-0058) ha fissato **due date** per il
+  controllo che [ADR-0028](Decision.md#adr-0028) aveva lasciato condizionale. La prima cade
+  all'apertura di `feature/04` ([ADR-0078](Decision.md#adr-0078): vale l'evento, non la data
+  scritta), e va onorata prima di montare l'applicazione su una versione — ripinnare il giorno dopo
+  significherebbe rigirare le registrazioni. Domanda secca, la stessa di
+  [V-051](#v-051): la 8.0.30 esiste?
+
+- **Esito, primo canale — su Docker Hub non c'è.** Filtrando per nome esatto:
+
+```
+GET /v2/repositories/library/mongo/tags?page_size=100&name=8.0.30
+-> {"count": 0, "results": []}
+```
+
+  Il controllo che rende leggibile quello zero: la stessa interrogazione con `name=8.0.29` dà
+  `count: 7`. Il filtro funziona, quindi il conteggio nullo è un'assenza e non una domanda mal
+  posta. I tag mobili (`latest`, `8`) risultano aggiornati il **2026-08-31**, come alla verifica
+  precedente; `8.0` e `7.0.40` al 2026-08-18.
+
+- **Esito, secondo canale — il feed ufficiale è identico a ventiquattr'ore prima.** Le versioni
+  correnti per linea sono **8.3.8** (21/07/2026), **8.2.12** (26/06/2026), **8.0.29** (21/07/2026),
+  **7.0.40** (21/07/2026), 6.0.29, 5.0.34, 4.4.31 — tutte marcate `production_release`. La 7.0.40 è
+  ancora la punta della propria linea: la versione del lab non sta invecchiando mentre la si usa.
+
+- **Esito, terzo canale — quello che V-051 aveva lasciato scoperto.** ADR-0028 nominava anche
+  l'immagine `mongodb/mongodb-community-server`, che la verifica del 1º settembre non aveva
+  interrogato. Interrogata adesso, dà lo stesso zero — e dà anche la prova più forte di tutta la
+  verifica:
+
+```
+mongodb/mongodb-community-server, name=8.0.30 -> count: 0
+mongodb/mongodb-community-server, name=8.0.29 -> count: 164
+  fra cui  8.0.29-ubuntu2204-slim-20260902T071320Z
+           8.0.29-ubi9-slim-20260902T070906Z
+```
+
+  Quel canale ha ricostruito e ripubblicato le immagini **stamattina**, con la marca temporale nel
+  nome del tag, e ciò che ha ripubblicato è la **8.0.29**. Non è un canale fermo che tace: è un
+  canale attivo che oggi continua a non avere la 8.0.30.
+
+- **Esito, quarto punto — chiusa la riserva sul changelog.** V-051 dichiarava di non aver riletto il
+  changelog per verificare che la correzione fosse **ancora** attribuita alla 8.0.30 invece che
+  spostata a una patch successiva. Riletto ([S-028](#s-028)): la sezione `## 8.0.30 Changelog`
+  esiste, è la prima del documento, e contiene
+  [SERVER-125742](https://jira.mongodb.org/browse/SERVER-125742) «Remove the graceful exit for
+  kernel version 7.0.14 and above», cioè esattamente la correzione che ADR-0028 aspetta. Il numero
+  da attendere non si è spostato: la documentazione della 8.0.30 è pubblicata, i binari no.
+
+- **Conseguenza:** [ADR-0080](Decision.md#adr-0080). Il lab resta su 7.0.40, il primo dei due
+  appuntamenti di ADR-0058 è speso, e resta il secondo — il 16 settembre.
+- **Riserve:** il feed `current.json` elenca la versione corrente per linea, non tutte le patch
+  pubblicate; come per V-051, l'assenza da questi canali non è una prova formale che la 8.0.30 non
+  esista da nessuna parte, ma è il criterio che ADR-0028 si era dato, e adesso copre tutti e tre i
+  canali che nominava. Il changelog è documentazione, non un annuncio di rilascio: dice che cosa
+  conterrà la 8.0.30, non quando esce, e non c'è in quella pagina alcuna data prevista. Non è stato
+  chiesto a MongoDB se e quando la pubblicheranno — nessun canale del repository lo permette senza
+  aprire un contatto, e non è previsto.
+- **Data:** 2026-09-02
+- **Usata da:** ADR-0080
+
+---
+
+<a id="v-075"></a>
+### V-075 — `j: true` sullo standalone: la perdita si azzera davvero, e costa fra il 32 % e il 45 %
+
+- **Comandi:** dalla radice del repository, con lo stack 01 acceso.
+
+```
+make app-workload TARGET=standalone ARGS="--writes 5000 --writers 8 --readers 0 --sink null --no-journal"
+make app-workload TARGET=standalone ARGS="--writes 5000 --writers 8 --readers 0 --sink null --journal"
+make app-workload TARGET=standalone ARGS="--writes 1 --writers 1 --readers 0 --sink null"
+```
+
+  e, per la durabilità, un carico a scadenza interrotto da un `SIGKILL` al container a otto
+  secondi dall'avvio, seguito dal conteggio dei sopravvissuti:
+
+```
+make app-workload TARGET=standalone DOVE=host ARGS="--duration 25 --writers 1 --readers 0 --sink null --journal"
+docker kill -s KILL mongo-standalone
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker Desktop, MongoDB 7.0.40, stack 01, applicazione
+  `mongolab` 0.1.0. Il container `mongo-standalone` ha `cpus: 1.0` e `mem_limit: 1024m`; il
+  container dell'applicazione `cpus: 1.0` e `mem_limit: 512m`.
+- **Che cosa si voleva sapere:** [V-016](#v-016) ha misurato **cento scritture confermate e
+  sparite** dopo un `SIGKILL`, e ha chiuso con una riserva esplicita: «non è stato provato lo
+  stesso esperimento con `j: true`, che secondo [S-035](#s-035) dovrebbe azzerare la perdita al
+  prezzo della velocità: è la misura naturale da aggiungere quando l'applicazione Python
+  (`feature/04`) potrà farla sotto carico controllato». L'applicazione adesso c'è, e
+  [ADR-0109](Decision.md#adr-0109) le ha dato l'interruttore. Le due metà della riserva —
+  l'azzeramento **e** il prezzo — si misurano tutte e due, perché un confronto che riporta solo la
+  buona notizia non è un confronto.
+
+- **Esito, prima metà — il prezzo.** Cinquemila scritture con otto scrittori, tre corse per parte,
+  latenze in millisecondi e durata a orologio:
+
+| | p50 | p95 | durata |
+|---|---|---|---|
+| `--no-journal` | 1,5 · 1,5 · 1,7 | 3,2 · 3,3 · 3,9 | 1,79 · 1,70 · 1,68 s |
+| `--journal` | 2,3 · 2,3 · 2,5 | 4,7 · 3,8 · 6,6 | 2,19 · 2,22 · 2,19 s |
+
+  La durata a orologio contiene l'avvio dell'interprete, che è un costo fisso e non va attribuito
+  al giornale: misurato a parte con una scrittura sola, vale 0,78 · 0,68 · 0,67 s. Al netto restano
+  ≈ 1,02 s contro ≈ 1,50 s, cioè **≈ 4 900 scritture/s contro ≈ 3 330/s: −32 %**.
+
+- **Esito, seconda metà — la perdita.** Uno scrittore, carico a scadenza, `SIGKILL` al container
+  dopo otto secondi, poi il conteggio dei documenti sopravvissuti e dell'`_id` più alto:
+
+| | scritture | confermate | sopravvissuti | `_id` massimo | **confermate e perse** | ritmo |
+|---|---|---|---|---|---|---|
+| `--no-journal` | 14 273 | 14 272 | 14 270 | 14269 | **2** | ≈ 1 784/s |
+| `--journal` | 7 848 | 7 847 | 7 847 | 7846 | **0** | ≈ 981/s |
+
+  `j: true` azzera la perdita, come [S-035](#s-035) prometteva. Con un solo scrittore il prezzo
+  sale a **−45 %**, più del −32 % misurato con otto: il group commit ammortizza il `fsync` fra più
+  scrittori concorrenti, e chi scrive da solo se lo paga tutto.
+
+- **Esito, terzo punto — lo stato del container e il ricovero.** Entrambe le volte
+  `Status=exited OOMKilled=false ExitCode=137 RestartCount=0`, che è la stessa lettura di
+  [V-016](#v-016) e [V-017](#v-017). Al riavvio il log dichiara il ricovero:
+
+```
+{"s":"W","c":"STORAGE","id":22302,"ctx":"initandlisten","msg":"Recovering data from the last clean checkpoint."}
+... recovery log replay has successfully finished and ran for 184 milliseconds
+... recovery rollback to stable ... 0 milliseconds
+... recovery checkpoint ... 47 milliseconds
+```
+
+- **Che cosa questa misura toglie a V-016.** V-016 contava gli ack leggendo un file su cui
+  `mongosh` stampava, e la sua riserva diceva che una pipe può bufferizzare: il numero di ack
+  registrati poteva essere **minore** di quelli davvero ricevuti, quindi la perdita misurata era un
+  **minimo**. Qui gli ack li conta il processo che li riceve — `Riepilogo.documenti_confermati` è la
+  somma dei `WriteSucceeded`, cioè delle risposte del server già arrivate al chiamante — e quella
+  riserva cade. Il numero è la perdita, non un suo minimo.
+- **Riserve:** `SIGKILL` uccide il **processo**, non l'host: quello che ha già raggiunto la page
+  cache del sistema operativo sopravvive comunque. Questa misura riguarda il buffer in-processo di
+  WiredTiger, non un blackout — un'interruzione di corrente perderebbe di più, e non è stata
+  provata perché su un portatile non si prova. Questo spiega anche la distanza fra le **2** perse
+  qui e le **100** di V-016: scrittore diverso, ritmo diverso, una prova sola per parte, e la
+  finestra è larga quanto il tempo che passa fra due checkpoint — non è una costante di MongoDB.
+  Le due prove di durabilità sono una per parte: la differenza fra 0 e 2 è netta nel verso, non
+  nella cifra. Il conteggio dei sopravvissuti si fida dell'`_id` progressivo che il generatore
+  assegna: regge perché nessuna scrittura è fallita se non l'ultima, quella interrotta dal kill.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0109
+
+---
+
+<a id="v-076"></a>
+### V-076 — `retryWrites=false` durante un failover vero: il prezzo non è la perdita, è l'incertezza
+
+- **Comandi:** dentro la rete Compose, guidando la scena come fa la prova d'integrazione del
+  Task 13 — è l'unica disposizione in cui il client vede la topologia e qualcuno può fermare un
+  nodo ([M-019](../app/docs/Sources.md#m-019)):
+
+```
+mongolab demo failover --target rs --sink plain --carico 10 --elezione 25 --recupero 15 --retry-writes
+mongolab demo failover --target rs --sink plain --carico 10 --elezione 25 --recupero 15 --no-retry-writes
+```
+
+  `mongo-rs-1` viene ucciso e poi riavviato quando la scena lo annuncia; il replica set viene
+  rimesso in piedi fra una corsa e l'altra.
+- **Ambiente:** stack 02 con tre membri, MongoDB 7.0.40, `defaultWriteConcern {w: "majority"}`
+  implicita, `writeConcernMajorityJournalDefault: true`, tre membri con un voto e
+  `secondaryDelaySecs: 0`.
+- **Che cosa si voleva sapere:** «cosa questa pagina non dice» di
+  [`replica-set.md`](02-architetture/replica-set.md) dichiarava lo scoperto così: «non prova la
+  perdita con `retryWrites=false`. È la misura naturale da aggiungere accanto a
+  [V-033](#v-033): mostrerebbe che cosa vede un'applicazione senza la rete di sicurezza del
+  driver».
+
+- **Esito — due corse per parte:**
+
+| | interruzione | perse | confermate | ritrovate | **non confermate** | avvicendamento |
+|---|---|---|---|---|---|---|
+| `--retry-writes` | 10 021 ms | 0 | 28 802 | 28 802 | **0** | rs-1 → rs-3 |
+| `--retry-writes` | 10 017 ms | 0 | 30 177 | 30 177 | **0** | — |
+| `--no-retry-writes` | 10 016 ms | 0 | 30 421 | 30 429 | **8** | rs-1 → rs-2 |
+| `--no-retry-writes` | 10 010 ms | 0 | 30 739 | 30 740 | **1** | — |
+
+- **Il debito chiedeva la parola sbagliata.** Chiedeva «la perdita», e la perdita è **zero da
+  entrambe le parti**: `w: "majority"` fa il suo mestiere, e nessuna scrittura confermata sparisce
+  nemmeno senza i tentativi del driver. Quello che cambia è l'altra colonna: **scritture arrivate
+  al database il cui ack non è mai tornato al chiamante**. Otto in una corsa, una nell'altra. Senza
+  i tentativi automatici l'applicazione non sa se quelle scritture ci sono, e se le riprova a mano
+  senza una chiave di idempotenza le duplica.
+- **L'interruzione non cambia.** ~10 s da entrambe le parti: `retryWrites` non accorcia l'elezione,
+  non la allunga, e non ha niente a che vedere con quanto dura il buco. Compra solo il fatto che il
+  buco sia trasparente al chiamante.
+- **Dove atterra questa distinzione.** Esattamente sulla differenza che il dominio
+  dell'applicazione aveva già scritto e che finora nessuna misura aveva riempito: `Bilancio`
+  separa «scritture perse» da «scritture non confermate» proprio perché sono due cose diverse.
+  Questa è la misura in cui la seconda colonna è l'unica che si muove.
+- **Riserve:** due corse per parte, su un lab dove l'elezione dura una decina di secondi perché i
+  membri sono tre container sullo stesso portatile. Il numero di scritture non confermate dipende
+  da quante ne stavano in volo nell'istante dell'interruzione, cioè dal ritmo: **non è una
+  costante**, e infatti fra le due corse va da 8 a 1. Ciò che si trasferisce è che il numero sia
+  diverso da zero solo da una parte. Le scritture «ritrovate» si contano rileggendo la collezione
+  a scena finita: se una scrittura fosse arrivata **dopo** quella rilettura non sarebbe contata, e
+  la finestra è chiusa dal recupero della scena, non da una garanzia.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0109
+
+---
+
+<a id="v-077"></a>
+### V-077 — `maxStalenessSeconds`: il minimo è 90 s, e in questo lab non può escludere nessuno
+
+- **Comandi:** dentro la rete Compose, contro lo stack 02:
+
+```
+mongolab workload --target rs --writers 0 --readers 4 --duration 8 --sink plain --max-staleness 30
+mongolab workload --target rs --writers 0 --readers 4 --duration 8 --sink plain --max-staleness 90
+```
+
+  più `replSetGetStatus` per il ritardo dichiarato dal server, e venti letture con la stessa
+  preferenza per contare **quale nodo** ha risposto.
+- **Ambiente:** stack 02, tre membri, MongoDB 7.0.40, `lab.ordini` con 50 000 documenti.
+- **Che cosa si voleva sapere:** «cosa questa pagina non dice» di
+  [`replica-set.md`](02-architetture/replica-set.md) dichiarava: «non usa `maxStalenessSeconds`. Il
+  manuale lo indica come rimedio alla lettura di dati vecchi ([S-058](#s-058)); qui non è stato né
+  usato né misurato».
+
+- **Esito, primo punto — sotto i 90 secondi non si legge, e si scopre subito.** Con
+  `--max-staleness 30`: **219 691 letture, 0 riuscite, 219 691 fallite**. Non un timeout di
+  selezione dopo trenta secondi di attesa: un rifiuto immediato, sollevato **per ogni operazione**,
+  con questo testo:
+
+```
+ConfigurationError: maxStalenessSeconds must be at least 90. maxStalenessSeconds is set to 30.
+```
+
+  Il novanta non è arbitrario: il manuale lo lega all'intervallo di heartbeat più il periodo di
+  aggiornamento dell'oplog, e sotto quella soglia la misura non sarebbe distinguibile dal rumore
+  del monitoraggio.
+
+- **Esito, secondo punto — a 90 funziona, e legge dove deve.** Con `--max-staleness 90` le letture
+  riescono. Venti letture di controllo si dividono **9 e 11** fra `mongo-rs-2` e `mongo-rs-3`, e
+  **mai** il primario — che è il comportamento voluto: la preferenza costruita è `secondary` e non
+  `secondaryPreferred`, perché un ripiego sul primario nasconderebbe una selezione fallita invece
+  di mostrarla ([ADR-0109](Decision.md#adr-0109)).
+
+- **Esito, terzo punto — a riposo non c'è staleness da escludere.** `replSetGetStatus` dà un
+  ritardo di **+0,000 s** su entrambi i secondari. Nessun nodo è mai vecchio, quindi il filtro non
+  ha nulla su cui mordere.
+
+- **Esito, quarto punto, e qui sta la notizia — un nodo fermato non è «vecchio», è «ignoto».**
+  Messo in pausa `mongo-rs-3`, il server lo dichiara `(not reachable/healthy)` con un ritardo
+  **nominale** di +1 788 528 200 s — cioè l'aritmetica fra un istante vero e uno zero, non una
+  misura. Il driver, che è chi decide, non lo classifica come «stale»: lo classifica come
+  **`Unknown`**. E un nodo `Unknown` viene escluso dalla selezione **prima** che la staleness venga
+  presa in considerazione. Tutte e venti le letture vanno a `mongo-rs-2`.
+- **Conclusione, e va scritta per intero.** In questo lab `maxStalenessSeconds` **non può escludere
+  niente**, mai: tutto ciò che ferma la replica ferma anche l'heartbeat, e chi non risponde è già
+  fuori per un'altra ragione. Per esercitarlo servirebbe un membro che risponde a `hello` mentre
+  **non** applica l'oplog — un membro ritardato (`secondaryDelaySecs`) o un failpoint di prova.
+  Questo stack non ha né l'uno né l'altro, e aggiungerne uno cambierebbe l'architettura che la
+  pagina descrive.
+- **Riserve:** la divisione 9/11 fra i due secondari è su venti letture: dice che la preferenza
+  distribuisce, non che distribuisca uniformemente. Il rifiuto sotto i 90 s è di pymongo, non del
+  server: è il driver a rifiutarsi di comporre la preferenza, quindi il numero non arriva mai a
+  MongoDB e questa misura non dice che cosa farebbe il server se ci arrivasse. La classificazione
+  `Unknown` è quella che riporta la descrizione della topologia lato client; non è stato chiesto al
+  server come classifichi lui il nodo in pausa.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0109
+
+---
+
+<a id="v-078"></a>
+### V-078 — Con un membro in pausa il replica set scrive ventisette volte più piano, e il perché resta aperto
+
+- **Comandi:** lo stesso comando due volte, con l'unica differenza dello stato di `mongo-rs-3`:
+
+```
+docker pause mongo-rs-3
+mongolab workload --target rs --writers 4 --readers 0 --duration 25 --sink plain
+docker unpause mongo-rs-3
+mongolab workload --target rs --writers 4 --readers 0 --duration 25 --sink plain
+```
+
+- **Ambiente:** stack 02, tre membri, `defaultWriteConcern {w: "majority"}` implicita,
+  `writeConcernMajorityJournalDefault: true`.
+- **Che cosa si voleva sapere:** niente. Questa misura è **capitata** mentre si preparava
+  [V-077](#v-077), e si registra perché un fattore ventisette non si lascia in una nota di
+  passaggio.
+
+- **Esito:**
+
+| | scritture in 25 s | p50 | p95 | max |
+|---|---|---|---|---|
+| `mongo-rs-3` in pausa | **466** | 3,7 ms | 1 999,9 ms | 8 293,3 ms |
+| tutti e tre su | **12 829** | 4,2 ms | 41,2 ms | 91,3 ms |
+
+  Fattore **≈ 27,5**, con il p50 quasi identico: la mediana non si accorge di niente, e tutto il
+  danno sta nella coda.
+- **Quello che si può dire.** Con `w: "majority"` su tre membri la maggioranza è due. Con tre
+  membri su, il primario può contare su **due** secondari e prende il più pronto dei due; con uno
+  in pausa la maggioranza dipende da **un** nodo solo, senza alternative: ogni esitazione di quel
+  nodo diventa un'attesa di tutti. La forma del danno — mediana intatta, coda che esplode — è
+  compatibile con questa lettura.
+- **Quello che non si può dire.** Che sia **la** spiegazione. Il p95 a 1 999,9 ms è sospettosamente
+  vicino a un valore tondo di due secondi, e un valore tondo di solito è un intervallo configurato,
+  non un fenomeno: non è stato identificato quale. `docker pause` congela i processi con `SIGSTOP`,
+  che non è un guasto realistico — un nodo spento risponde con un rifiuto immediato, un nodo
+  congelato non risponde affatto, e il driver deve aspettare i propri timeout per accorgersene.
+  **Il meccanismo non è stato diagnosticato**, e questa voce esiste per dire che il numero c'è e la
+  spiegazione no.
+- **Riserve:** una corsa per parte. Venticinque secondi sono pochi per un fenomeno di coda. Il
+  numero dipende da `docker pause`, cioè da un modo di rompere che non ha equivalente in
+  produzione: con un nodo davvero spento il risultato sarebbe probabilmente diverso, e non è stato
+  provato.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0111 — non come base del confronto, ma come sua riserva: è la prova che un
+  dettaglio di stato vale un ordine di grandezza
+
+---
+
+<a id="v-079"></a>
+### V-079 — Le tre architetture sotto la stessa riga: 6,2× fra standalone e replica set, e il ferro non è lo stesso
+
+- **Comandi:** la riga di carico del design, identica per tutti e tre, **da dentro la rete
+  Compose**:
+
+```
+make app-workload TARGET=standalone ARGS="--writers 8 --readers 4 --doc-size 2k --duration 30 --sink null"
+make app-workload TARGET=rs        ARGS="--writers 8 --readers 4 --doc-size 2k --duration 30 --sink null"
+make app-workload TARGET=sharded   ARGS="--writers 8 --readers 4 --doc-size 2k --duration 30 --sink null"
+```
+
+  Tre corse per architettura. Poi due controlli: lo standalone con `--journal`, e tutte e tre con
+  `CPU_APP=4.0 MEMORIA_APP=1024m` davanti al `make`.
+- **Ambiente:** macOS 26.6.2 arm64, Docker Desktop, MongoDB 7.0.40, i tre stack accesi
+  contemporaneamente, applicazione `mongolab` 0.1.0.
+- **Perché da dentro la rete e non dall'host.** Dall'host il bersaglio `rs` è una **connessione
+  diretta** a `localhost:27021`, cioè a un nodo solo ([M-019](../app/docs/Sources.md#m-019)):
+  misurarlo così vorrebbe dire chiamare «replica set» un singolo `mongod` e pubblicare un confronto
+  che non confronta niente. Da dentro la rete tutte e tre vedono la topologia vera e pagano la
+  stessa latenza di bridge locale.
+- **Che cosa si voleva sapere:** è il debito che **tutte e tre** le pagine di
+  [`02-architetture`](02-architetture/standalone.md) si erano intestate con la stessa frase: «il
+  confronto ha senso sotto carico controllato, cioè con l'applicazione Python di `feature/04`, e
+  prima di allora sarebbe aria».
+
+- **Esito, primo punto — il lab così com'è.** Tre corse per riga; scritture al secondo, latenze in
+  millisecondi:
+
+| | scritture/s | p50 | p95 | p99 | letture in 30 s | p50 lett. | p95 lett. |
+|---|---|---|---|---|---|---|---|
+| standalone | 1 712 · 1 677 · 1 656 | 2,8 | 12,3 · 12,9 · 13,9 | ≈ 40,6 | 23 087 · 22 389 · 21 808 | 3,4 | 26,8 |
+| sharded | 427,7 · 426,4 · 419,2 | 5,5 | ≈ 84 | ≈ 95 | 12 652 · 13 210 · 12 858 | 2,7 | 67,8 |
+| replica set | 365,8 · 358,9 · 362,9 | 9,0 | ≈ 75 | ≈ 88 | 20 283 · 20 687 · 21 131 | 2,0 | 50,5 |
+
+  Zero fallite e zero ritentate ovunque: nessuno dei tre stack è stato messo in difficoltà, sono
+  stati messi sotto carico.
+
+- **Esito, secondo punto — il primo numero era sbagliato, e il controllo lo dice.** Rifatte le tre
+  righe con **quattro** CPU al container dell'applicazione invece di una:
+
+| | scritture/s | variazione | p50 | p95 | p99 | letture |
+|---|---|---|---|---|---|---|
+| standalone | 2 333,8 | **+40 %** | 2,8 | 7,4 | 11,0 | 31 065 |
+| sharded | 462,4 | +9 % | 5,2 | 77,2 | 98,5 | 13 505 |
+| replica set | 374,9 | +3 % | 9,0 | 72,8 | 87,5 | 21 305 |
+
+  **Il numero dello standalone nel lab predefinito non misurava lo standalone: misurava il client.**
+  Il container dell'applicazione ha `cpus: 1.0`, e a quel ritmo l'interprete Python satura la
+  propria CPU prima che il server saturi la sua. Gli altri due no — un +3 % e un +9 % sono rumore:
+  quelle due architetture erano già limitate dal server. I rapporti citabili sono quelli della
+  seconda tabella: **standalone / replica set = 6,2×**, **standalone / sharded = 5,0×**,
+  **sharded / replica set = 1,23×**.
+
+- **Esito, terzo punto — la semantica dell'ack non è la stessa, e senza dirlo si misura la
+  durabilità chiamandola velocità.** Interrogati i tre bersagli:
+
+| | write concern effettiva |
+|---|---|
+| standalone | `getDefaultRWConcern` non è supportato; il client dichiara `{}`, cioè **`w: 1` senza giornale** |
+| replica set | `{w: "majority", wtimeout: 0}`, **implicita**, con `writeConcernMajorityJournalDefault: true` |
+| sharded, via mongos | `{w: "majority", wtimeout: 0}`, **implicita** |
+
+  Il controllo che rimette lo standalone almeno sulla stessa soglia di disco — `--journal`, due
+  corse — dà **1 237,0 e 1 176,7 scritture/s**, p50 3,9–4,0, p95 31,4–32,5. Cioè: quasi un terzo
+  della distanza fra standalone e replica set è il prezzo del giornale, non della replica.
+
+- **Esito, quarto punto — perché lo sharded batte il replica set, e perché non conta.** Chiesto al
+  cluster com'è fatto:
+
+```
+shard1rs   shard1rs/shard1a:27017
+shard2rs   shard2rs/shard2a:27017
+lab        primary: shard1rs   partitioned: False
+```
+
+  **Un membro per shard.** `w: "majority"` su un insieme di un membro solo è soddisfatta dal
+  primario da solo, senza andata e ritorno in rete — mentre sul replica set la maggioranza sono due
+  nodi su tre. E la collezione di carico **non è distribuita**: `lab` non è partizionato, quindi
+  tutte le scritture vanno su `shard1rs` e `shard2rs` sta a guardare. Il numero dello sharded non
+  dice «lo sharding è più veloce della replica»: dice che in questo lab lo shard che lavora **non è
+  replicato**, e paga un router al posto di un secondario.
+
+- **Esito, quinto punto — le letture dicono una cosa che non è dell'architettura.** Il p50 di
+  lettura del replica set (**2,0 ms**) è **migliore** di quello dello standalone (**3,4 ms**). Non
+  perché un replica set legga meglio di un `mongod` solo: perché le sue scritture, cinque volte più
+  lente, lasciano il nodo molto meno occupato. Quella colonna misura quanto il carico di scrittura
+  ha saturato il server, non come l'architettura legge.
+
+- **La riserva strutturale: le tre architetture non hanno lo stesso ferro, per costruzione.**
+
+| stack | servizio | `cpus` | `mem_limit` |
+|---|---|---|---|
+| 01 | `mongod` | 1.0 | 1024m |
+| 02 | ogni membro (`CPU_MEMBRO`) | 0.75 | 768m |
+| 03 | ogni shard (`CPU_SHARD`) | 0.5 | 640m |
+| 03 | `mongos` (`CPU_MONGOS`) | 0.5 | 256m |
+| 03 | ogni config server (`CPU_CFG`) | 0.5 | 512m |
+| tutti | `app` (`CPU_APP`) | 1.0 | 512m |
+
+  Il budget è stato distribuito perché il portatile potesse tenere accesi tutti e tre gli stack
+  insieme, il che è la ragione per cui il lab esiste. Ma vuol dire che il percorso di scrittura
+  dello standalone ha **una CPU intera**, quello del replica set 0,75 + 0,75, e quello dello
+  sharded 0,5 di router più 0,5 di shard. **Una parte della distanza è la scelta di Compose, non
+  l'architettura**, e non è separabile senza cambiare il lab.
+- **Riserve:** tre corse per riga nel lab predefinito, una per riga nel controllo a quattro CPU. Un
+  lab su un portatile non è un datacenter: qui la rete è un bridge locale sulla stessa macchina, e
+  il costo della maggioranza — che in produzione è dominato dalla rete — è qui dominato dalla CPU.
+  La forma dei fenomeni si trasferisce, le cifre no. Il carico è un `insert_many` di documenti da
+  2 KB generati in modo deterministico: non è un carico applicativo, non ci sono indici secondari,
+  non ci sono aggiornamenti né letture per chiave. La collezione di carico è nuova a ogni corsa,
+  quindi nessuna misura vede una collezione grande. Il controllo a quattro CPU alza solo il
+  **client**: il limite del server non è parametrizzato nello stack 01 e non è stato toccato, quindi
+  non si sa a quale ritmo lo standalone saturerebbe davvero.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0109, ADR-0111, ADR-0112
+
+---
+
+<a id="v-080"></a>
+### V-080 — `maxPoolSize`: la resa non si muove, i percentili migliorano, e il massimo è un gradino
+
+- **Comandi:** scrittori fermi a 32, client con quattro CPU, e solo il pool che cambia:
+
+```
+CPU_APP=4.0 MEMORIA_APP=1024m make app-workload TARGET=standalone \
+  ARGS="--writers 32 --readers 0 --doc-size 2k --duration 20 --sink null --max-pool-size N"
+```
+
+  con `N` fra 2 e 33, più una corsa senza `--max-pool-size` (il predefinito di pymongo è 100).
+- **Ambiente:** stack 01, MongoDB 7.0.40, `mongod` con `cpus: 1.0`.
+- **Che cosa si voleva sapere:** il design chiama la saturazione del pool «materiale didattico» e il
+  Task 5 aveva lasciato solo il gancio — `scrittori` era il parametro che sarebbe dovuto salire
+  sopra `maxPoolSize`, e il docstring di `WorkloadRunner` diceva «qui la saturazione non si misura e
+  non si può». [ADR-0109](Decision.md#adr-0109) ha aggiunto l'altra manopola, e adesso si può.
+
+- **Esito:**
+
+| `maxPoolSize` | scritture/s | p50 | p95 | p99 | **max** |
+|---|---|---|---|---|---|
+| 2 | 3 613 | 0,5 | 0,8 | 1,5 | **20 004,7** |
+| 4 | 3 284 | 1,0 | 2,5 | 4,0 | **20 009,6** |
+| 8 | 3 090 | 2,1 | 5,6 | 8,8 | **20 002,8** |
+| 16 | 3 113 | 4,3 | 11,6 | 17,2 | **19 997,4** |
+| 31 | 3 526 | 7,4 | 19,9 | 28,7 | **19 973,1** |
+| 32 | 3 470 | 7,7 | 21,1 | 32,7 | 101,7 |
+| 33 | 3 479 | 7,7 | 21,0 | 32,2 | 137,4 |
+| predefinito (100) | 3 476 | 7,6 | 21,4 | 35,2 | 117,6 |
+
+  Zero scritture fallite in **tutte** le righe.
+
+- **Prima lettura — la resa non è la variabile.** Da 3 090 a 3 613 scritture al secondo su un
+  intervallo di pool che va da 2 a 100, cioè cinquanta volte. Il pool non è una manopola di resa:
+  il server satura intorno alle 3 100–3 500 scritture/s e ci resta comunque.
+
+- **Seconda lettura — i percentili *migliorano* quando il pool si stringe, ed è vero.** Con pool 2
+  il p50 è 0,5 ms; con il pool predefinito è 7,6 ms, quindici volte tanto. Non è un errore di
+  misura: con due operazioni in volo il server le serve subito, con cento se le mette in coda lui.
+  La coda non è sparita — **si è spostata dal server al client**, dove nessuna metrica del server la
+  vede.
+
+- **Terza lettura, ed è quella che vale — il massimo è una funzione a gradino su
+  `maxPoolSize = scrittori`.** A 31 connessioni per 32 scrittori il massimo è **19 973 ms**, cioè
+  l'intera corsa; a 32 crolla a **101,7 ms**; a 33 è 137,4 ms. Una connessione in meno del numero di
+  scrittori, e un thread aspetta venti secondi. Con `pool = scrittori − 1` la resa è identica
+  (3 526 contro 3 470) e **tutti i percentili fino al p99 sono indistinguibili dal caso sano**
+  (7,4/19,9/28,7 contro 7,7/21,1/32,7): l'unico numero che denuncia il problema è il massimo.
+
+- **Perché i percentili non lo vedono.** Il thread affamato contribuisce **pochi campioni proprio
+  perché è affamato**: se aspetta, non scrive, e quindi non compare nella statistica. I percentili
+  pesano le operazioni, non i thread — così il thread che soffre di più è quello meno rappresentato
+  nel campione. È il motivo per cui il riassunto di `mongolab` stampa anche il massimo accanto ai
+  tre percentili.
+
+- **Perché non ci sono errori.** `waitQueueTimeoutMS` non è impostato, e il predefinito di pymongo è
+  «nessun limite»: **il driver non si arrende mai**. La fame di connessioni non produce eccezioni,
+  produce attesa — quindi non arriva a nessun cruscotto degli errori.
+
+- **Dove si misura.** L'orologio avvolge l'intera `insert_many`
+  (`app/src/mongolab/application/workload.py:706`), quindi l'attesa di una connessione dal pool è
+  **dentro** il numero misurato. Se fosse fuori, questa misura non esisterebbe.
+- **Una stesura buttata, tenuta come lezione di metodo.** Il primo disegno teneva il pool fermo a 4
+  e faceva salire gli scrittori, su un client con **una** CPU: 4 118 → 3 372 → 2 632 → 2 446 →
+  2 518 scritture/s. Sembrava la saturazione del pool, era la contesa per l'unica CPU del container
+  — far salire i thread cambiava due cose insieme. Il disegno buono tiene fermo ciò che non si
+  vuole misurare.
+- **Riserve:** una corsa per riga; la resa oscilla del 15 % fra righe che dovrebbero essere
+  equivalenti (3 090 contro 3 526), quindi le differenze di resa **non** vanno lette, solo la loro
+  assenza di tendenza. Il gradino è provato a 31/32/33 con 32 scrittori: che sia esattamente
+  `pool = scrittori` è coerente con le altre righe ma è stato verificato su un valore solo di
+  scrittori. Il massimo di ~20 000 ms coincide con la durata della corsa, quindi è un limite
+  inferiore: non si sa quanto avrebbe aspettato quel thread in una corsa più lunga. Tutto su
+  `insert_many` di documenti da 2 KB verso uno standalone: con operazioni più lente per singola
+  connessione il gradino si sposterebbe.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0109
+
+---
+
+<a id="v-081"></a>
+### V-081 — `analyzeShardKey`: il verdetto sulla chiave in uso, due rifiuti, e due condizioni che il comando non dichiara
+
+- **Comandi:** dentro la rete Compose, contro il `mongos` dello stack 03:
+
+```
+docker compose --env-file tools/images.env --env-file docker/03-sharded/.env \
+  -f docker/03-sharded/compose.yaml run --rm \
+  -v <script>:/analyze.py:ro --entrypoint python app /analyze.py
+```
+
+  dove lo script chiama `db.adminCommand({analyzeShardKey: "lab.ordini", key: …,
+  keyCharacteristics: true, readWriteDistribution: true})` su sette chiavi candidate, e poi
+  `configureQueryAnalyzer`.
+- **Ambiente:** stack 03, MongoDB 7.0.40, `lab.ordini` con 20 000 documenti,
+  `avgDocSizeBytes: 121`, `numOrphanDocs: 0`. Campi: `_id` int, `cliente` str, `citta` str, `stato`
+  str, `importo` float, `righe` int, `data` datetime.
+- **Che cosa si voleva sapere:** «cosa questa pagina non dice» di
+  [`sharded-cluster.md`](02-architetture/sharded-cluster.md) dichiarava: «non usa
+  `analyzeShardKey`. Introdotto nella 7.0, sarebbe lo strumento giusto per scegliere una chiave in
+  un caso vero, e richiede un campione di query reali che una demo con dati generati non ha
+  ([S-067](#s-067))».
+
+- **Esito, primo punto — il verdetto sulle sette candidate:**
+
+| chiave | esito |
+|---|---|
+| `{_id: "hashed"}` — quella in uso | 20 000 distinti su 20 000 · unica · frequenza massima **1** · `not monotonic` (r = 0,0) |
+| `{stato: 1}` | **rifiutata**: «does not have enough cardinality to make the required number of chunks of 100, it can only make **6** chunks» |
+| `{citta: 1}` | **rifiutata**: solo **11** chunk |
+| `{cliente: 1}` senza indice | risponde **senza `keyCharacteristics`**, e senza errore |
+| `{cliente: 1}` con indice | 1 999 distinti · non unica · frequenza massima **21** · `not monotonic` (r = −0,0027) |
+| `{data: 1}` con indice | 240 distinti · frequenza massima **104** · `not monotonic` (r = +0,0204) |
+| `{citta: 1, cliente: 1}` senza indice | risponde senza `keyCharacteristics` |
+
+  La chiave scelta da [ADR-0064](Decision.md#adr-0064) prende il massimo su ogni caratteristica che
+  il comando sa misurare. Non è una sorpresa — è una chiave hashed su un campo unico — ed è
+  esattamente per questo che serviva la controprova.
+
+- **Esito, secondo punto — sulle chiavi cattive il comando non dà un voto basso: si rifiuta.** E il
+  messaggio d'errore **è** il verdetto, perché dice quanti chunk quella chiave potrà mai fare: sei
+  per `stato`, undici per `citta`. In un cluster a due shard, sei chunk vuol dire che non c'è nulla
+  da bilanciare. Il rifiuto per cardinalità arriva **prima** del controllo sull'indice: `stato` e
+  `citta` sono state rifiutate senza che nessun indice esistesse.
+
+- **Esito, terzo punto — serve un indice a sostegno, e senza il comando riesce lo stesso.** È la
+  condizione più insidiosa: su `{cliente: 1}` senza indice la risposta arriva con `ok: 1` e
+  **manca la metà che serve a scegliere**. Nessun errore, nessun avviso. Dimostrato costruendo
+  l'indice e rifacendo la stessa domanda:
+
+```
+cliente:1 [senza indice] niente keyCharacteristics · campione 0 letture / 0 scritture
+cliente:1 [con indice]   distinti 1999 · unica False · frequenza massima 21 · not monotonic (r=-0.0027287852)
+```
+
+  Gli indici costruiti per la prova (`t16-cliente`, `t16-data`) sono stati buttati subito dopo, e la
+  collezione è tornata ai suoi due indici `_id_` e `_id_hashed`.
+
+- **Esito, quarto punto — `readDistribution` e `writeDistribution` non si calcolano guardando i
+  dati.** Si calcolano guardando **le query già passate**, e il campione lo raccoglie
+  `configureQueryAnalyzer`, che va acceso *prima*. Acceso (`mode: "full", samplesPerSecond: 10`),
+  atteso, mandati 60 s di traffico costruito apposta — una `find_one` per `_id` a ogni giro, una
+  `find` su `stato` ogni tre, una `update_one` per `_id` ogni dieci, 61 208 giri — e poi chiesto:
+
+```
+letture   campione 576 (find 576) · mirate 77,6% · più shard 0,0% · a tappeto 22,4%
+scritture campione  43            · mirate 100%  · più shard 0,0% · a tappeto 0,0%
+```
+
+  Il traffico generato era **75 % mirato e 25 % a tappeto** sulle letture e 100 % mirato sulle
+  scritture: il campione riproduce la miscela, il che convalida il metodo invece di limitarsi a
+  usarlo.
+
+- **Esito, quinto punto — i due ritardi, chiesti al cluster e non dedotti:**
+
+```
+queryAnalysisSamplerConfigurationRefreshSecs = 10
+queryAnalysisWriterIntervalSecs = 90
+```
+
+  Il primo è ogni quanto il `mongos` si accorge di dover campionare: le query mandate prima di quel
+  momento non entrano nel campione, e non lo dice nessuno. Il secondo è ogni quanto il campione
+  raccolto viene scritto. Fra «ho acceso» e «il campione esiste» passano quindi almeno un minuto e
+  mezzo, durante i quali `analyzeShardKey` risponde «campione 0» — indistinguibile da «non ho acceso
+  niente». Il primo tentativo di questa misura è morto proprio così, e la seconda volta lo
+  spegnimento del campionatore è stato messo in un `finally`.
+- **Che cosa questo cambia per la pagina.** Lo scoperto diceva che `analyzeShardKey` «richiede un
+  campione di query reali che una demo con dati generati non ha». È vero per metà: le
+  **caratteristiche della chiave** non richiedono nessun campione e si ottengono subito, ed è la
+  metà che risponde alla domanda «questa chiave distribuisce?». La **distribuzione delle query**
+  richiede davvero traffico, ma il traffico si può generare — e generarlo con una miscela nota è
+  anche il modo di verificare che il comando dica il vero.
+- **Riserve:** una passata sola per ogni candidata; il comando campiona (`numDocsSampled` = 20 000,
+  cioè tutti, su questa collezione) e su una collezione grande i valori di `numDistinctValues` e
+  `mostCommonValues` sarebbero stime. `{data: 1}` risulta **non monotona** solo perché il seme
+  genera le date a caso: in una collezione vera un campo data sarebbe il caso di scuola della chiave
+  monotona, e questo lab **non può mostrarlo** ([ADR-0031](Decision.md#adr-0031) sceglie un dataset
+  deterministico, non realistico). Il campione di 576 letture su 81 611 query mandate è ~0,7 %: la
+  percentuale 77,6 contro il 75 % vero è dentro il rumore di quel campione, e non va letta come una
+  cifra precisa. Le percentuali di distribuzione dipendono dal traffico che si è scelto di mandare:
+  qui l'ho costruito io, quindi misurano lo strumento, non l'applicazione.
+- **Riserva di metodo, e vale per chi ripeterà la prova:** `config.sampledQueries` interrogata dal
+  `mongos` è rimasta a **0** per tutti i 150 s di attesa mentre `analyzeShardKey` riportava 576
+  campioni. Quel conteggio **non è il termometro giusto**, e chi lo usa per capire se il
+  campionatore sta lavorando conclude di no mentre sta lavorando. L'unico modo affidabile è
+  chiederlo ad `analyzeShardKey`. Di conseguenza questa prova non dice *dopo quanto* il campione sia
+  diventato disponibile: solo che entro 150 s c'era.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0110
+
+---
+
+<a id="v-082"></a>
+
+### V-082 — `serverStatus` non risponde la stessa cosa su tre nodi: 45, 52 e 36 sezioni, e il router ne perde venti
+
+- **Comandi:** su ciascuno dei tre stack accesi insieme,
+
+```
+docker exec -i <nodo> mongosh --quiet --host localhost [--username … --password …] admin \
+  --eval 'const s = db.serverStatus();
+           const k = Object.keys(s).sort();
+           print("N=" + k.length); print("BYTES=" + bsonsize(s)); print(k.join(","))'
+```
+
+  con `<nodo>` fra `mongo-standalone`, `mongo-rs-1` (il primario) e `sh-mongos`.
+- **Ambiente:** MongoDB 7.0.40, stack 01, 02 e 03 accesi contemporaneamente, tutti a riposo.
+- **Che cosa si voleva sapere:** se «guarda `serverStatus`» sia un consiglio che si può dare senza
+  dire su quale nodo, cioè se uno script di monitoraggio scritto su un `mongod` funzioni contro un
+  `mongos`.
+
+- **Esito, primo punto — i tre insiemi di sezioni, e le loro dimensioni:**
+
+| nodo | sezioni di primo livello | dimensione BSON della risposta |
+|---|---|---|
+| `mongo-standalone` | **45** | 73 614 byte |
+| `mongo-rs-1` (primario) | **52** | 75 865 byte |
+| `sh-mongos` (router) | **36** | **26 445 byte** |
+
+- **Esito, secondo punto — lo standalone è un sottoinsieme stretto del replica set.** Verificato
+  come insiemi: tutte e 45 le sezioni dello standalone esistono sul primario. Le **sette** in più
+  del replica set sono `$clusterTime`, `defaultRWConcern`, `operationTime`, `oplogTruncation`,
+  `queryAnalyzers`, `readPreferenceCounters`, `repl`. Chi passa da uno stack all'altro non perde
+  niente in quella direzione: aggiunge.
+
+- **Esito, terzo punto — il router non è un sottoinsieme: toglie venti sezioni e ne aggiunge
+  quattro.** Le **venti** che mancano rispetto al primario:
+
+```unknown
+batchedDeletes      catalogStats        electionMetrics   featureCompatibilityVersion
+flowControl         globalLock          indexBuilds       indexStats
+locks               opcountersRepl      oplogTruncation   profiler
+readConcernCounters readPreferenceCounters                repl
+shardSplits         storageEngine       tenantMigrations  twoPhaseCommitCoordinator
+wiredTiger
+```
+
+  Le **quattro** che solo lui ha: `health`, `hedgingMetrics`, `sharding`, `shardingStatistics`.
+  Le sezioni comuni a tutti e tre i nodi sono **28**.
+
+  L'elenco delle venti non è una curiosità: contiene esattamente le sezioni su cui si appoggia
+  qualunque ricetta di monitoraggio scritta per un `mongod` — `wiredTiger` per la cache e i ticket,
+  `globalLock` per le code, `locks` per la contesa, `repl` e `opcountersRepl` per la replica. Uno
+  script che le legge non dà un errore contro un router: `serverStatus` risponde `ok: 1` e le
+  chiavi non ci sono. Il fallimento arriva più tardi, sotto forma di `undefined`, e nella riga
+  sbagliata. La mancanza di `wiredTiger` era già stata misurata da un'altra direzione
+  ([V-058](#v-058)); questa prova dice **quante altre** ne mancano.
+
+- **Esito, quarto punto — la risposta del router pesa un terzo.** 26 445 byte contro 73 614: la
+  differenza non è solo il numero di sezioni ma la loro profondità, perché ciò che manca è la parte
+  che descrive un motore di archiviazione che il router non ha.
+
+- **Riserve:** una lettura per nodo, a riposo. L'insieme delle sezioni dipende dalla versione e —
+  per alcune — dal fatto che la funzione sia mai stata usata da quando il processo è partito, il
+  che vale per esempio per `queryAnalyzers` sul primario, comparso dopo la prova di
+  [V-081](#v-081). Le sezioni si contano di primo livello: `metrics` è una sola voce qui e contiene
+  decine di sotto-alberi. Il conteggio dice **quali capitoli esistono**, non quanti numeri ci sono
+  dentro.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112
+
+---
+
+<a id="v-083"></a>
+
+### V-083 — Sotto carico il server non mette in coda niente, e la latenza che dichiara non è quella che vede il client
+
+- **Comandi:** un campionatore di `serverStatus` una volta al secondo per 45 s, aperto **prima** del
+  carico e chiuso dopo, dentro una sola sessione `mongosh` — un `docker exec` per campione costerebbe
+  mezzo secondo di orologio e falserebbe la cadenza:
+
+```
+docker exec -i mongo-standalone mongosh --quiet --host localhost admin --eval "$(cat campiona.js)"
+```
+
+  e in parallelo, dall'host:
+
+```
+make app-workload TARGET=standalone \
+  ARGS="--duration 30 --doc-size 2k --writers 8 --readers 4 --sink null"
+```
+
+  Il campionatore stampa una riga TSV con `opcounters`, `connections`,
+  `wiredTiger.concurrentTransactions.write` (`out`, `available`, `totalTickets`, `queueLength`,
+  `totalTimeQueuedMicros`), `globalLock.currentQueue`, `globalLock.activeClients`,
+  `wiredTiger.cache`, `opLatencies.writes` e `mem.resident`. Sul primario del replica set lo stesso
+  con in più il ritardo di ogni membro.
+- **Ambiente:** MongoDB 7.0.40, stack 01 e 02, `mongod` con `cpus: 1.0` e `mem_limit: 1024m` (stack
+  01) e `0.75` / `768m` per membro (stack 02); applicazione nel container con `cpus: 1.0`, cioè il
+  lab predefinito di [V-079](#v-079).
+- **Che cosa si voleva sapere:** che cosa **guardare** mentre il carico gira, e se i numeri che il
+  server dichiara raccontino la stessa storia dei percentili misurati dal client.
+
+- **Esito, primo punto — due corse sullo standalone, viste dal server:**
+
+| | corsa A | corsa B |
+|---|---|---|
+| inserimenti totali nei 30 s attivi | 42 242 | 50 664 |
+| inserimenti/s medi (min–max) | 1 408 (1 151–1 698) | **1 689** (1 170–1 851) |
+| `globalLock.currentQueue.writers` | **0** sempre | **0** sempre |
+| `globalLock.currentQueue.readers` | **0** sempre | **0** sempre |
+| `concurrentTransactions.write.queueLength` | **0** sempre | **0** sempre |
+| `totalTimeQueuedMicros`, delta sui 45 s | **0 µs** | **9 840 µs** |
+| `opLatencies.writes` medio | **84 µs** | **67 µs** |
+| cache WiredTiger | 191 → 207 MiB, dirty max 9,2 MiB | 188 → 206 MiB, dirty max 8,9 MiB |
+| `mem.resident` | 462–463 MB | 461–462 MB |
+| connessioni create nei 45 s | 35 | 36 |
+
+  **Il server non ha mai messo in coda una scrittura.** Nella corsa B ha accumulato in tutto 9,8
+  **millisecondi** di attesa per un ticket, distribuiti su 50 664 scritture: 0,19 µs a scrittura.
+  Nella corsa A, zero. Le tre metriche che si guardano per prime quando «il database è lento» —
+  coda dei writer, coda dei ticket, tempo accumulato in coda — dicono all'unisono che il collo di
+  bottiglia **non era qui**, ed è la conferma lato server di ciò che [V-079](#v-079) aveva concluso
+  dal lato del client: in quel lab il numero era del client.
+
+- **Esito, secondo punto — 67 µs contro 2,8 ms, cioè un fattore quaranta.** Il server dichiara una
+  latenza media di scrittura di 67 µs; il client, sulla stessa corsa, misura un p50 di **2,8 ms**
+  ([V-079](#v-079)). I due numeri non sono in disaccordo: misurano tratti diversi dello stesso
+  percorso. `opLatencies` conta il tempo passato dentro il comando, il client conta anche
+  serializzazione, socket, attraversamento della rete Compose e ritorno. **Guardare solo
+  `opLatencies` su uno standalone significa non vedere il 97 % del tempo che l'utente aspetta.**
+
+- **Esito, terzo punto — sul replica set lo stesso numero dice quasi tutto.** Stessa misura sul
+  primario dello stack 02: 10 928 scritture, `opLatencies.writes` medio **18 390 µs**. Contro i 67
+  µs dello standalone è un fattore **274**, mentre il rapporto di resa fra le due architetture è
+  6,2× ([V-079](#v-079)). La differenza fra i due server sta quindi in ciò che il primario conta e
+  lo standalone no: l'attesa della conferma di maggioranza rientra nella durata del comando. Sul
+  replica set il numero del server e quello del client sono dello stesso ordine (p50 9,0 ms, p95 ≈
+  75 ms); sullo standalone no. **Non è la stessa metrica che diventa più grande: è una metrica che
+  cambia significato quando cambia l'architettura.**
+
+- **Esito, quarto punto — il pool dei ticket di scrittura non è 128, ed è vivo.** Il valore che
+  circola come costante di WiredTiger è 128. Misurato:
+
+```unknown
+standalone, corsa A:  totalTickets 12 → 11   (available 11–12, out 0–1)
+standalone, corsa B:  totalTickets  9 →  8   (available  6–9,  out 0–3)
+primario rs:          totalTickets  8 →  7   (available … ,    out 0–1)
+```
+
+  Nella 7.0 il pool è governato da un controllore che lo dimensiona da solo, e in questi container
+  si è assestato fra **7 e 12**. Chi allarma su «ticket disponibili sotto una soglia fissa» sta
+  confrontando una misura viva con una costante che non vale più. Il numero da guardare è
+  `queueLength` — quanti stanno aspettando — non `available`.
+
+- **Riserve:** due corse sullo standalone e una sul replica set, tutte di 30 s di carico dentro una
+  finestra di campionamento di 45 s. Il campionamento a un secondo **non vede** picchi più brevi: una
+  coda che si forma e si smaltisce fra due campioni non lascia traccia in `queueLength`, e per
+  questo la conclusione «non ha mai messo in coda» si appoggia a `totalTimeQueuedMicros`, che è
+  cumulativo e non può nascondere niente. L'interpretazione del terzo punto — che i 18 ms del
+  primario contengano l'attesa della maggioranza — è coerente con i numeri ma **non è stata
+  isolata**: servirebbe la stessa corsa con `w: 1` sul replica set. Il costo del campionatore è
+  stato controllato a parte e sta nel rumore (+1,4 % e −5,9 % su due coppie, segno che cambia).
+- **Riserva chiusa lo stesso giorno da [V-088](#v-088).** La corsa con `w: 1` è stata eseguita: il
+  cronometro del server scende da 18 913 a 644 µs, e l'interpretazione era giusta. Con una
+  correzione che questa voce non poteva prevedere: fra le due configurazioni non cambia solo il
+  numero di conferme, cambia anche il giornale ([S-077](#s-077)), e delle due è il giornale a
+  costare di più. Anche la conclusione «non ha mai messo in coda» va letta insieme a V-088: era vera
+  perché la maggioranza faceva da freno prima di WiredTiger.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112, ADR-0114
+
+---
+
+<a id="v-084"></a>
+
+### V-084 — Il ritardo di replica letto nel modo standard è inutilizzabile qui: quantizzato al secondo, 10 s a riposo, negativo dal secondario
+
+- **Comandi:** durante la stessa corsa di [V-083](#v-083), sul primario dello stack 02, il ritardo
+  di ogni membro calcolato come lo calcola `rs.printSecondaryReplicationInfo()`:
+
+```
+const r = db.adminCommand({ replSetGetStatus: 1 });
+// optimeDate del primario meno optimeDate di ciascun membro
+```
+
+  e in parallelo, su `mongo-rs-2` (secondario), `metrics.repl.apply.batches.num`,
+  `metrics.repl.apply.ops`, `opcountersRepl.insert`, `metrics.repl.buffer` e la vista che il
+  secondario ha del proprio ritardo.
+- **Ambiente:** MongoDB 7.0.40, stack 02 sano, tre membri `1P,2S,3S` per tutti i 45 campioni.
+- **Che cosa si voleva sapere:** quale metrica di replica si può mostrare dal vivo, dato che il
+  ritardo reale su questo lab è già stato misurato in **≈ 1,6 ms** con un metodo diretto
+  ([V-027](#v-027)).
+
+- **Esito, primo punto — la serie del ritardo, per il membro 2, campionata al secondo:**
+
+```unknown
+0, 10000, 10000, 0, 0, 0, 0, 1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000,
+1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000, 1000, 2000, 1000,
+2000, 1000, 0, 1000, 0, 0, 0, 0, 0, 0, 0, 0, 0     (millisecondi)
+```
+
+  Il membro 3 dà la stessa forma. Tre fatti in una riga sola:
+
+  1. **I valori sono solo 0, 1000 e 2000.** Non esistono valori intermedi perché `optimeDate` ha
+     granularità di **un secondo**: la differenza fra due date arrotondate al secondo è un multiplo
+     di mille millisecondi. Un ritardo di 1,6 ms non è rappresentabile in questa metrica.
+  2. **I due campioni da 10 000 ms sono a riposo**, prima che il carico partisse, su un insieme
+     sano. Sono la firma del fatto che senza scritture l'optime non avanza: il primario ha scritto
+     dieci secondi fa, il secondario ha applicato tutto, e la sottrazione dice «dieci secondi
+     indietro» mentre il secondario è allineato. **Il valore più allarmante della serie è quello
+     dello stato migliore.**
+  3. **Sotto carico oscilla fra 1 000 e 2 000** con la regolarità di un metronomo, perché la vista
+     che il primario ha degli altri arriva dagli heartbeat, che sono ogni 2 000 ms
+     (`heartbeatIntervalMillis`, [V-031](#v-031)): si sta guardando un dato vecchio fino a due
+     secondi, arrotondato al secondo.
+
+- **Esito, secondo punto — dal secondario lo stesso conto è negativo.** Ventidue campioni su 45
+  danno **−1 000 ms**, e uno **−10 000 ms**:
+
+```unknown
+0, 0, 0, 0, -10000, 0, 0, 0, 0, -1000, 0, -1000, 0, -1000, … , 0, 0, 0, 0, 0
+```
+
+  Il secondario conosce il proprio optime **adesso** e quello del primario **dall'ultimo
+  heartbeat**: quando applica in fretta, il suo optime è più recente di quello che crede sia del
+  primario, e la differenza cambia segno. Un ritardo negativo non è un errore da segnalare: è la
+  prova che i due termini della sottrazione **non sono contemporanei**. Chiunque scriva un allarme
+  su questa metrica deve decidere prima da quale nodo la legge.
+
+- **Esito, terzo punto — che cosa si può guardare invece, misurato sul secondario nei 30 s di
+  carico:**
+
+| metrica | delta | lettura |
+|---|---|---|
+| `opcountersRepl.insert` | **9 139** | **identico** agli inserimenti confermati al client |
+| `metrics.repl.apply.batches.num` | 6 501 | ≈ 217 lotti/s sui 30 s attivi |
+| `metrics.repl.apply.ops` | 18 280 | 2,8 operazioni per lotto |
+| `metrics.repl.buffer.count` (massimo) | **3** | il secondario non ha mai accumulato arretrato |
+| `metrics.repl.buffer.sizeBytes` (massimo) | 7 023 | sette kilobyte |
+
+  `opcountersRepl.insert` sul secondario coincide **esattamente** con il numero che il client ha
+  visto confermare. È la metrica che risponde alla domanda «sta applicando tutto?» senza dipendere
+  da nessun orologio. E il buffer, che è la coda vera del percorso di replica, non ha mai contenuto
+  più di tre operazioni: **il secondario non era in ritardo, e nessuna metrica temporale sapeva
+  dirlo.**
+
+- **Esito, quarto punto — sul primario le metriche di applicazione non si muovono.**
+  `metrics.repl.apply.batches.num` sul primario ha delta **0** su tutti i 45 campioni, pur avendo un
+  valore cumulativo non nullo — l'eredità di quando era secondario. Il valore assoluto non dice il
+  ruolo; solo il delta lo dice. Su un cruscotto che mostra il totale, primario e secondario si
+  somigliano.
+
+- **Riserve:** una sola corsa, un solo secondario campionato dei due. La serie del ritardo è di
+  questo lab, con tre container sulla stessa macchina: su nodi separati da una rete vera i valori
+  sarebbero più grandi e la quantizzazione al secondo peserebbe meno. La coincidenza di
+  `opcountersRepl.insert` con le scritture confermate vale perché il carico fa **solo inserimenti**
+  a documento singolo; con aggiornamenti, batch o scritture ripetibili il conto cambia — è
+  esattamente quello che misura [V-085](#v-085). `heartbeatIntervalMillis` è il valore predefinito,
+  non una scelta di questo repository.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112
+
+---
+
+<a id="v-085"></a>
+
+### V-085 — Ogni scrittura ripetibile costa un'operazione replicata in più: `apply.ops` raddoppia
+
+- **Comandi:** notato che sul secondario `metrics.repl.apply.ops` cresceva del **doppio** degli
+  inserimenti (18 280 contro 9 139, [V-084](#v-084)), tre prove in scala decrescente per isolarne la
+  causa. La decisiva è una coppia, a parità di tutto il resto:
+
+```
+make app-workload TARGET=rs ARGS="… --no-retry-writes"     # 800 inserimenti
+make app-workload TARGET=rs ARGS="… --retry-writes"        # 800 inserimenti
+```
+
+  con `opcountersRepl` e `metrics.repl.apply.ops` letti sul secondario prima e dopo ciascuna.
+- **Ambiente:** MongoDB 7.0.40, stack 02, tre membri sani.
+- **Che cosa si voleva sapere:** perché il secondario applica il doppio delle operazioni di quante
+  ne arrivano.
+
+- **Esito, primo punto — le due prove che hanno ristretto il campo.** Un `insertMany` controllato di
+  100 documenti **non riproduce** il raddoppio: `apply.ops` +104, `opcountersRepl.insert` +100. Una
+  corsa concorrente limitata a 800 inserimenti lo riproduce: `apply.ops` +1 613 su +800 inserimenti.
+  Non è quindi il volume né il batching: è qualcosa che l'applicazione fa e lo script no.
+
+- **Esito, secondo punto — la coppia decisiva:**
+
+| corsa | `apply.ops` | `opcountersRepl.insert` | `opcountersRepl.update` |
+|---|---|---|---|
+| `--no-retry-writes` | **+802** | +800 | **+0** |
+| `--retry-writes` | **+1 603** | +800 | **+800** |
+
+  Ogni scrittura ripetibile scrive un record di sessione in `config.transactions`, e **quel record
+  si replica come un `update`**. Ottocento inserimenti diventano milleseicento operazioni sul
+  secondario. Il raddoppio non è un artefatto della misura: è il prezzo, in lavoro replicato, di una
+  garanzia che il driver attiva **per impostazione predefinita**: `retryWrites` è acceso di suo, e
+  [V-076](#v-076) l'ha misurato spegnendolo.
+
+- **Esito, terzo punto — che cosa cambia per chi guarda.** `apply.ops` **non** è il numero di
+  documenti che stanno arrivando al secondario, e leggerlo così porta a credere che il carico sia il
+  doppio di quello che è. Il numero che risponde alla domanda vera è `opcountersRepl.insert`. Le due
+  operazioni in più oltre a `2 × 800` (802 e 1 603 invece di 800 e 1 600) sono traffico interno del
+  set — `noop` periodici — e sono il residuo che dice che la misura non è stata addomesticata.
+
+- **Riserve:** una coppia sola, 800 inserimenti per lato, sullo stack 02. Il rapporto 1:1 fra
+  scrittura ripetibile e `update` replicato vale per inserimenti a documento singolo; con
+  inserimenti multipli in un comando solo il record di sessione è uno per comando, non per
+  documento, ed è probabilmente la ragione per cui l'`insertMany` da 100 non ha mostrato niente —
+  ma **non è stato verificato separatamente**. L'attribuzione a `config.transactions` è dedotta dal
+  fatto che gli `update` compaiono solo con `retryWrites` acceso: la collezione non è stata
+  interrogata direttamente durante la corsa.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112
+
+---
+
+<a id="v-086"></a>
+
+### V-086 — Il router conta esatto quello che gli hai chiesto, somma i filesystem degli shard, e non sa dirti che uno shard sta fermo
+
+- **Comandi:** `opcounters` letti su `sh-mongos`, `sh-shard1a` e `sh-shard2a` prima e dopo
+
+```
+make app-workload TARGET=sharded \
+  ARGS="--duration 30 --doc-size 2k --writers 8 --readers 4 --sink null"
+```
+
+  e `db.stats()` su `lab` chiesto al router e ai due shard.
+- **Ambiente:** MongoDB 7.0.40, stack 03, due shard da un membro, `lab` **non partizionato** con
+  primary shard `shard1rs` ([V-079](#v-079)).
+- **Che cosa si voleva sapere:** che cosa un `mongos` sa dire di sé, dato che gli mancano venti
+  sezioni di `serverStatus` ([V-082](#v-082)).
+
+- **Esito, primo punto — i contatori del router sono quelli del client, alla singola operazione:**
+
+| | prima | dopo | delta | il client dice |
+|---|---|---|---|---|
+| `opcounters.insert` (router) | 120 873 | 133 414 | **+12 541** | **12 541 scritture** |
+| `opcounters.query` (router) | 134 357 | 147 360 | **+13 003** | **13 003 letture** |
+
+  Coincidenza esatta su entrambe le righe. Il router è il posto giusto per rispondere a «quante
+  operazioni sono state chieste al cluster», ed è l'**unico** posto dove quel numero è quello del
+  client.
+
+- **Esito, secondo punto — sotto, il carico è andato tutto su uno shard:**
+
+| | insert | query | connessioni |
+|---|---|---|---|
+| `shard1a` | 98 288 → 110 834 (**+12 546**) | 104 885 → 117 902 (**+13 017**) | 16 → 28 |
+| `shard2a` | 25 868 → 25 868 (**+0**) | 53 811 → 53 811 (**+0**) | 14 → 14 |
+
+  **Zero.** Non «poco»: nessuna operazione. È la conferma quantitativa della riserva che
+  [V-079](#v-079) dichiarava a parole — la collezione di carico non è distribuita, quindi vive
+  intera sul primary shard. Le cinque operazioni di scarto fra router e shard (+12 546 contro
+  +12 541) sono traffico di servizio del `mongod`, non del client.
+
+  Questa è la misura che smonta l'errore più comune davanti a un cluster: **un cluster sharded non
+  distribuisce il carico, distribuisce le collezioni partizionate.** Con `lab` non partizionato,
+  metà del ferro sta a guardare, e il router lo dice solo a chi va a chiederlo shard per shard.
+
+- **Esito, terzo punto — `dbStats` sul router somma cose che non si sommano.** Chiesto a
+  `sh-mongos`, su `lab`: 17 chiavi, di cui `raw` con una voce per shard.
+
+```unknown
+router:  fsTotalSize 125 342 195 712   fsUsedSize 63 012 814 848   objects 99 699
+shard1a: fsTotalSize  62 671 097 856   fsUsedSize 31 506 227 200   objects 89 559
+```
+
+  125 342 195 712 = **2 × 62 671 097 856**, esattamente. Ma i due shard sono due container sulla
+  **stessa** macchina e vedono lo **stesso** `/dev/vda1` da 62 671 097 856 byte. Il router dichiara
+  un disco che non esiste, grande il doppio del vero, e lo stesso vale per lo spazio occupato. Le
+  righe che si sommano legittimamente — `objects`, `dataSize`, `storageSize`, `indexSize` — sono
+  corrette; quelle che descrivono **il ferro** non lo sono, perché sommare presuppone che gli shard
+  siano su macchine diverse. In un cluster vero lo sarebbero; in un lab su un portatile, e in
+  qualunque cluster con più shard sullo stesso host, quel numero è finzione.
+
+- **Riserve:** una corsa sola. La coincidenza esatta fra client e router vale per un carico di sole
+  operazioni singole: con operazioni in lotto i contatori del router contano i **comandi**, non i
+  documenti. Lo scarto di cinque insert sullo shard non è stato attribuito a una causa precisa. Il
+  numero di connessioni sul router **scende** durante la corsa (8 → 4) perché il pool del client
+  viene chiuso alla fine e la lettura di «dopo» arriva dopo: non va letto come un calo di carico.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112
+
+---
+
+<a id="v-087"></a>
+
+### V-087 — `dataSize` non è spazio su disco: 3,06× sui dati veri, 0,97× sulla zavorra, e trentasette collezioni dimenticate
+
+- **Comandi:** su `mongo-standalone`, database `lab`:
+
+```
+db.stats()
+db.getCollection("ordini").stats()
+db.getCollection("carico-20260904-133649").stats()
+db.getCollectionNames().length
+```
+
+- **Ambiente:** MongoDB 7.0.40, stack 01, compressione predefinita (`snappy` sui blocchi,
+  `prefix` sugli indici), dopo una giornata di corse di carico.
+- **Che cosa si voleva sapere:** che cosa risponde davvero `dbStats` alla domanda «quanto occupa
+  questo database», visto che la pagina di monitoraggio deve dire quale numero guardare.
+
+- **Esito, primo punto — `dbStats` sullo standalone, quattordici chiavi:**
+
+```unknown
+collections   38            objects    1 505 885     avgObjSize     1 984
+dataSize      2 987 746 740 storageSize 3 169 259 520 indexSize     18 321 408
+fsUsedSize   31 512 723 456 fsTotalSize 62 671 097 856
+```
+
+  `freeStorageSize` **non c'è**: va chiesto (`db.stats({freeStorage: 1})`), e chi lo cerca senza
+  chiederlo trova `undefined` invece di zero. Sono quattordici chiavi contro le diciassette del
+  router ([V-086](#v-086)), che ne aggiunge tre sue.
+
+- **Esito, secondo punto — il rapporto fra dati e archiviazione cambia di tre volte a seconda di che
+  cosa c'è dentro:**
+
+| collezione | documenti | `avgObjSize` | `size` | `storageSize` | `size`/`storageSize` |
+|---|---|---|---|---|---|
+| `lab.ordini` | 50 000 | 121 B | 6 094 260 | 1 990 656 | **3,06×** |
+| `lab.carico-20260904-133649` | 49 690 | 2 048 B | 101 765 120 | 105 021 440 | **0,97×** |
+
+  Sulla collezione di dati veri la compressione restituisce tre volte lo spazio; sulla collezione di
+  carico **non restituisce niente**, e l'archiviazione è del 3 % più grande dei dati. La ragione sta
+  nel generatore, non nel motore: la zavorra dei documenti di carico è base64 di uno `shake_128`,
+  cioè byte pseudocasuali, e i byte casuali non si comprimono. Il 3 % in più è il costo delle
+  strutture di WiredTiger su un contenuto che non le ripaga.
+
+  **Conseguenza pratica:** `dataSize` sommato su un database misto non dice quanto disco serve, e
+  nemmeno `storageSize` da solo dice quanto si sta risparmiando. Il rapporto è una proprietà **dei
+  dati**, e va misurato sulla collezione, non stimato sul database.
+
+- **Esito, terzo punto — trentotto collezioni, trentasette delle quali di carico.** Ogni corsa di
+  `workload` crea una collezione nuova, chiamata con l'istante di partenza. Dopo una giornata di
+  misure il database `lab` ne ha 37, per 1,5 milioni di documenti e ~3 GB di `dataSize` che non
+  interessano più a nessuno. Nessuno le cancella, e `dbStats` le somma tutte: il numero di
+  `dbStats` sul database è quindi il numero **di tutta la spazzatura accumulata**, e va letto
+  sapendolo. Su un lab si sistema con un `drop`; su un sistema vero, il fatto che nessuno guardi
+  `collections` è il modo tipico in cui un disco si riempie senza spiegazione.
+
+- **Riserve:** una lettura sola, a riposo, su un database in uno stato che dipende da quante corse
+  siano state fatte quel giorno — i valori assoluti non si riproducono, il rapporto sì.
+  `avgObjSize` di 1 984 byte sul database è la media pesata su una popolazione dominata dai
+  documenti di carico da 2 048 byte, non una proprietà dei dati del lab. La compressione non è stata
+  cambiata: `snappy` è il predefinito e non è stato confrontato con `zstd` o `zlib`, che darebbero
+  altri rapporti sulla stessa collezione `ordini` e — verosimilmente — quasi gli stessi sulla
+  zavorra.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0112
+
+---
+
+<a id="s-076"></a>
+### S-076 — MongoDB Manual: Connection String URI Format, opzioni di write concern
+
+- **URL:** https://www.mongodb.com/docs/manual/reference/connection-string-options/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** manual (corrente)
+- **Consultata:** 2026-09-04
+- **Verdetto:** conferma, e smentisce mezzo debito di questo repository
+- **Perché è stata cercata.** Il Task 17 aveva chiuso registrando che «il carico non sa chiedere un
+  write concern diverso dal predefinito», e da lì che la corsa con `w: 1` — quella che isolerebbe i
+  18 390 µs di `opLatencies.writes` del primario, [V-083](#v-083) — non fosse eseguibile. Il Product
+  Owner ha obiettato che `w` è un parametro della stringa di connessione, nella sezione dopo il `?`,
+  e ha chiesto di verificarlo sul manuale invece di discuterne.
+- **Cosa afferma, primo punto — le opzioni di write concern nell'URI sono tre.** La sezione «Write
+  Concern Options» elenca `w`, `wtimeoutMS` e `journal`. Su `w`: «Corresponds to the write concern
+  `w` Option. The `w` option requests acknowledgment that the write operation has propagated to a
+  specified number of `mongod` instances or to `mongod` instances with specified tags.» E i valori
+  ammessi: «You can specify a `number`, the string `majority`, or a `tag set`.»
+- **Cosa afferma, secondo punto — il nome dell'opzione URI è `journal`, non `j`.** «Corresponds to
+  the write concern `j` Option option. The `journal` option requests acknowledgment from MongoDB
+  that the write operation has been written to the journal.» `j` è il nome dell'opzione di write
+  concern sottostante; nella stringa di connessione si scrive `journal`. È esattamente il nome che
+  `opzioni_di_misura` usa dal Task 16, e la coincidenza non era stata verificata su questa pagina.
+- **Cosa afferma, terzo punto — le due si condizionano.** «If you set `journal` to `true`, and
+  specify a `w` value less than 1, `journal` prevails.»
+- **Cosa afferma, quarto punto — l'URI perde contro il parametro del metodo.** «You can specify write
+  concern both in the connection string and as a parameter to methods like `insert` or `update`. If
+  specified in both places, the method parameter overrides the connection string.» È la ragione per
+  cui accendere il write concern sul **client** basta a cambiare come scrive un adattatore che
+  riceve una collezione e non sa da quale client venga: finché nessuno lo chiede per operazione,
+  vince quello del client.
+- **Cosa afferma, quinto punto — l'esempio è una riga intera.**
+
+  ```
+  mongodb://myDatabaseUser:D1fficultP%40ssw0rd@db0.example.com,db1.example.com,db2.example.com/?replicaSet=myRepl&w=majority&wtimeoutMS=5000
+  ```
+
+- **Cosa afferma, sesto punto — `wtimeoutMS` è deprecata.** «The `wtimeoutMS` option is deprecated.
+  Set `timeoutMS` instead. `timeoutMS` overrides `wtimeoutMS`.» E, sul comportamento residuo: «When
+  `wtimeoutMS` is `0`, write operations never time out.»
+- **Cosa afferma, settimo punto — chi le legge.** Le opzioni della stringa di connessione sono
+  supportate «by MongoDB drivers, `mongosh`, `mongofiles`, `mongoimport`, and `mongorestore`». Cioè
+  la stessa parola vale nell'applicazione, nella shell e negli strumenti di backup.
+- **Riserve:** la pagina **non** dichiara nessun predefinito lato server per `w`, e non descrive come
+  il write concern predefinito di un replica set interagisca con un `w` passato nell'URI: rimanda
+  alla pagina di riferimento sul write concern, che è [S-077](#s-077). L'unica affermazione di
+  predefinito è specifica di Atlas — «MongoDB Atlas deployment connection strings use `"majority"` by
+  default» — e non vale per questo laboratorio.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0114
+
+---
+
+<a id="s-077"></a>
+### S-077 — MongoDB Manual: Write Concern, il predefinito implicito e il prezzo di `w: 1`
+
+- **URL:** https://www.mongodb.com/docs/manual/reference/write-concern/
+- **Editore:** MongoDB, Inc. — MongoDB Docs / Database Manual
+- **Versione documentata:** manual (corrente)
+- **Consultata:** 2026-09-04
+- **Verdetto:** conferma, e cambia il disegno della misura
+- **Perché è stata cercata.** Prima di confrontare una corsa con `w: 1` e una senza serviva sapere
+  **che cosa** sia «senza»: se il predefinito di questo insieme sia `1` o `majority`, la stessa
+  misura racconta due storie opposte. E serviva sapere se cambiando `w` cambi solo `w`.
+- **Cosa afferma, primo punto — il predefinito implicito è la maggioranza, con un'eccezione da
+  arbitri.** «The implicit default write concern is `w: majority`.» L'eccezione, per esteso: «The
+  voting majority of a replica set is 1 plus half the number of voting members, rounded down. If the
+  number of data-bearing voting members is not greater than the voting majority, the default write
+  concern is `{ w: 1 }`. In all other scenarios, the default write concern is `{ w: "majority" }`.»
+  Con tre membri portatori di dati e nessun arbitro — la forma dello stack 02 — si ricade nel caso
+  generale, cioè `majority`.
+- **Cosa afferma, secondo punto — `w: 1` è il primario e basta, e si può perdere.** «Requests
+  acknowledgment that the write operation has propagated to the standalone `mongod` or the primary in
+  a replica set. **Data can be rolled back if the primary steps down before the write operations
+  replicate to any of the secondaries.**» È il prezzo esatto della resa che [V-088](#v-088) misura, e
+  va citato insieme al guadagno.
+- **Cosa afferma, terzo punto — cambiare `w` cambia anche il giornale, senza dirlo.** Con `j` non
+  specificato e `w: "majority"`: «If `true`, acknowledgment requires MongoDB to make writes durable
+  by syncing them to on-disk journal, equivalent to `j: true`», dove `true` è il valore di
+  `writeConcernMajorityJournalDefault`, che «defaults to `true`». Con `j` non specificato e
+  `w: <number>`: «Acknowledgment requires writing the operation in memory, **equivalent to
+  `j: false`**.» Cioè passare da `majority` a `1` spegne per conseguenza anche la sincronizzazione
+  del giornale: due variabili in una mossa, ed è la ragione per cui [V-088](#v-088) ha tre corse e
+  non due.
+- **Cosa afferma, quarto punto — `j: true` non protegge dal failover.** «`j: true` alone does not
+  guarantee that the write will not roll back due to replica set primary failover.» E, sulla portata:
+  «With `j: true`, MongoDB returns only after the requested number of members, including the primary,
+  have written to the journal.»
+- **Cosa afferma, quinto punto — `wtimeout` non si applica sotto la soglia.** «`wtimeout` does not
+  apply if `w` is less than or equal to `1`.» E, se manca: «If you do not specify the `wtimeout`
+  option and the level of write concern is unachievable, the write operation will block
+  indefinitely.»
+- **Riserve:** la pagina descrive il predefinito **implicito**; un `setDefaultRWConcern` esplicito lo
+  sostituirebbe, e la pagina non dice come accorgersene. La verifica che su questo laboratorio il
+  predefinito sia davvero implicito è misurata in [V-088](#v-088) con `getDefaultRWConcern`, non
+  dedotta da qui.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0114
+
+---
+
+<a id="v-088"></a>
+### V-088 — La maggioranza è la metà piccola del conto: tre corse sul primario, e il giornale che costa di più
+
+- **Comandi:** lo stesso campionatore di [V-083](#v-083), con in più l'autenticazione — la password
+  arriva per `--env-file` e non compare mai sulla riga di comando ([ADR-0054](Decision.md#adr-0054)):
+
+```
+docker cp campiona-w.js mongo-rs-1:/tmp/campiona-w.js
+docker exec -i --env-file docker/02-replicaset/.env mongo-rs-1 \
+  mongosh --quiet --host localhost admin --file /tmp/campiona-w.js
+```
+
+  e in parallelo, dall'host, tre corse identiche tranne che per le opzioni di write concern:
+
+```
+make app-workload TARGET=rs ARGS="--duration 30 --doc-size 2k --writers 8 --readers 4 --sink null"
+make app-workload TARGET=rs ARGS="… --write-concern 1 --journal"
+make app-workload TARGET=rs ARGS="… --write-concern 1"
+```
+
+- **Ambiente:** MongoDB 7.0.40, stack 02, `mongod` con `cpus: 0.75` e `mem_limit: 768m` per membro,
+  applicazione nel container con `cpus: 1.0` — il lab predefinito di [V-079](#v-079), lo stesso di
+  [V-083](#v-083). Primario `mongo-rs-1`, tre membri con voto, **nessun arbitro**,
+  `writeConcernMajorityJournalDefault: true`, e `getDefaultRWConcern` risponde
+  `{"w":"majority","wtimeout":0}` con `defaultWriteConcernSource: implicit`. Cioè il predefinito di
+  questo insieme è la maggioranza per la regola generale di [S-077](#s-077), e nessuno l'ha
+  impostato a mano.
+- **Che cosa si voleva sapere:** la riserva di [V-083](#v-083). Sul primario `opLatencies.writes`
+  vale 18 390 µs contro i 67 µs dello standalone, e la lettura proposta era «il cronometro del server
+  include l'attesa della maggioranza». Coerente, ma non isolata. La corsa con `w: 1` la isola — e
+  [S-077](#s-077) ha aggiunto che non la isola da sola, perché scendendo da `majority` a un numero si
+  spegne anche il giornale. Da qui la terza corsa.
+- **Esito, primo punto — le tre corse viste dal server e dal client:**
+
+| | `w: majority` (predefinito) | `w: 1` + `journal` | `w: 1` |
+|---|---|---|---|
+| giornale | implicito `j: true` | `j: true` chiesto | implicito `j: false` |
+| scritture confermate in 30 s | 10 544 | 14 585 | **31 535** |
+| inserimenti/s medi | 351 | 486 | **1 087** |
+| `opLatencies.writes` medio | **18 913 µs** | 11 547 µs | **644 µs** |
+| p50 lato client | 9,8 ms | 7,5 ms | **3,4 ms** |
+| p95 lato client | 79,5 ms | 65,7 ms | 42,2 ms |
+| p99 lato client | 97,2 ms | 89,0 ms | 70,2 ms |
+| `totalTimeQueuedMicros`, delta | 10 388 µs | 2 783 µs | **308 413 µs** |
+| letture riuscite | 26 370 | 20 588 | 13 976 |
+
+  La corsa con il predefinito riproduce [V-083](#v-083) a distanza di ore: 18 913 µs contro 18 390,
+  10 544 scritture contro 10 928. La riserva era ben posta e la misura è ripetibile.
+
+- **Esito, secondo punto — la riserva di V-083 si chiude, e la risposta è sì.** Con `w: 1` il
+  cronometro del server scende da 18 913 a **644 µs**, cioè di un fattore **29**. Ciò che il primario
+  contava e lo standalone no era davvero l'attesa della conferma, e adesso è misurato invece che
+  argomentato.
+- **Esito, terzo punto — ma la maggioranza è la metà piccola.** Tenendo il giornale acceso e
+  cambiando solo il numero di conferme, la resa passa da 486 a 351 inserimenti/s: la maggioranza
+  costa **1,38×**. Tenendo `w: 1` e accendendo il giornale, la resa passa da 1 087 a 486: il giornale
+  costa **2,24×**. Il prodotto è il 3,10× fra il predefinito e `w: 1`. **Delle due cose che il
+  predefinito fa senza dirlo, quella cara è la sincronizzazione su disco, non l'attesa dei due
+  secondari** — e nessuna delle due si vede nella riga di comando di chi non le ha chieste.
+- **Esito, quarto punto — restano 644 µs che non sono né maggioranza né giornale.** Lo standalone
+  della corsa B di [V-083](#v-083), con lo stesso carico, dichiarava **67 µs**. Il primario con
+  `w: 1` e senza giornale ne dichiara 644, cioè **9,6×**. Non c'è nessuno da aspettare: è quanto
+  costa **essere** un primario — l'oplog, il conteggio, il resto della macchina di replica — e vale
+  circa un ordine di grandezza. Il fattore 274 fra le due architetture non era tutto attesa.
+- **Esito, quinto punto — tolto il collo di bottiglia, il collo si sposta.** [V-083](#v-083) aveva
+  concluso che «il server non mette in coda niente», con 9,8 ms cumulativi di attesa per un ticket su
+  50 664 scritture. Con `w: 1` il primario accumula **308 413 µs** di coda in 31 535 scritture, cioè
+  **9,8 µs per scrittura** contro l'1,0 della corsa predefinita: trenta volte tanto. Resta l'1,5 %
+  della latenza media, quindi la conclusione di V-083 non si rovescia — ma la ragione per cui il
+  server non metteva in coda niente era che **non gli veniva chiesto di andare abbastanza forte**.
+  Era la maggioranza a fare da freno, non WiredTiger.
+- **Esito, sesto punto — le letture pagano il conto delle scritture.** Le stesse quattro letture
+  concorrenti riescono 26 370 volte nella corsa lenta e 13 976 in quella veloce. Non è un
+  peggioramento del server: è che gli otto scrittori, non dovendo più aspettare, competono per la
+  stessa CPU limitata. Un confronto di latenza di lettura fra due corse con write concern diversi
+  misura la contesa, non la lettura.
+- **Il prezzo, che va citato insieme al guadagno.** `w: 1` è la conferma del solo primario, e
+  [S-077](#s-077) dice cosa comporta: «Data can be rolled back if the primary steps down before the
+  write operations replicate to any of the secondaries.» Il 3,10× di resa si compra con la
+  possibilità di perdere le scritture confermate nell'istante di un failover — cioè esattamente lo
+  scenario che lo stack 02 esiste per mostrare.
+- **Riserve:** tre corse, una per configurazione, non tre ripetizioni per configurazione: la
+  variabilità fra corse identiche misurata in [V-083](#v-083) è del 20 % sulla resa, quindi il
+  fattore 1,38 della maggioranza è il meno solido dei tre numeri e andrebbe ripetuto prima di
+  portarlo in una slide. I 67 µs dello standalone vengono dalla sessione di [V-083](#v-083) e non da
+  questa: stessa giornata e stesso lab, ma non la stessa ora. Le tre corse hanno la stessa
+  **concorrenza offerta** (otto scrittori) e non lo stesso carico effettivo, quindi le latenze medie
+  non si sommano né si sottraggono: i rapporti riportati sono di resa, che è la grandezza a
+  concorrenza costante, e le latenze sono osservazioni accanto, non addendi.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0114
+
+---
+
+<a id="v-089"></a>
+### V-089 — Cinque scene dell'applicazione, registrate una volta ciascuna, e quattordici riproduzioni che coincidono
+
+- **Comandi:** `./tools/reset-demo.sh 02` prima di ciascuna, poi lo strumento del repository. Le
+  prime tre girano l'applicazione dentro la rete Compose attraverso i bersagli del `Makefile`, le
+  ultime due dall'host:
+
+```
+python3 tools/registra-terminale.py <file>.cast --titolo "…" -- make app-stats TARGET=rs
+python3 tools/registra-terminale.py <file>.cast --titolo "…" -- make -s app-watch TARGET=rs ARGS="--sink plain --duration 45"
+python3 tools/registra-terminale.py <file>.cast --titolo "…" --regia "docker compose " -- make -s app-demo TARGET=rs ARGS="--sink plain"
+uv run --directory app mongolab demo backup-live --target rs --sink plain
+uv run --directory app mongolab demo restore --target rs --sink plain --from /tmp/mongolab-backup --collection carico-20260904-184403
+```
+
+  Tutte con `--sink plain` e **senza** `--step`: è lo stesso codice della scena dal vivo, non una
+  variante per registrare. Una corsa per scena, il 4 settembre 2026, sullo stesso stack e di
+  seguito. La scena 11 ha ricevuto il guasto da uno script esterno (attesa 10 s, `stop
+  mongo-rs-1`, attesa 20 s, `start`), perché `watch` non annuncia niente e non c'è nulla che la
+  regia possa intercettare.
+
+- **Esito, primo punto — i numeri che le cinque scene portano.**
+
+| scena | durata | il numero |
+|---|---:|---|
+| 10 `stats` | 1,5 s | `mongod 7.0.40` · tre membri, un primario · `lab` 50 000 documenti · dati 5,8 MB, indici 1,4 MB |
+| 11 `watch` | 42,5 s | primario perso a `16:42:26.047`, `mongo-rs-2` eletto a `16:42:36.082`: **10 035 ms**; rientro di `mongo-rs-1` a `16:42:56.147` |
+| 12 `demo failover` | 53,3 s | interruzione **10 019 ms** · **0 scritture perse** · 31 952 confermate contro 31 955 ritrovate |
+| 13 `demo backup-live` | 11,4 s | ritmo 546/s prima, 539/s durante: **calo 1,3 %** · 5 886 documenti, 158 voci di oplog |
+| 14 `demo restore` | 3,2 s | 5 886 all'origine · 5 740 nella copia · **differenza 146** |
+
+- **Esito, secondo punto — la scena 12 ha eletto due volte, e la seconda non era nel copione.** La
+  prima elezione è quella provocata; la seconda avviene a `16:40:45`, otto secondi dopo che
+  `mongo-rs-1` è rientrato come secondario, quando si riprende il ruolo di primario. Nel tracciato
+  si legge come `ERRORE NotPrimaryError` seguito da `RITENTO tentativo 2 dopo 50 ms`: i tentativi
+  automatici del driver l'hanno assorbita, e le scritture perse restano zero anche lì. Non era
+  previsto e non è stato tolto.
+
+- **Esito, terzo punto — la fase `durante` ha il p95 più basso, e non è un miglioramento.** 13 786
+  scritture, tutte confermate, p95 **49,5 ms** contro i 61,0 della fase precedente e i 57,9 della
+  successiva. La fase dura venticinque secondi, i primi dieci non contengono nessuna scrittura, e i
+  quindici che restano girano contro un primario appena eletto e ancora scarico. Un p95 calcolato su
+  una fase che contiene un'interruzione descrive la coda, non il servizio.
+
+- **Esito, quarto punto — due scene su quattordici fanno il 99,9 % della cartella.** Le nove degli
+  stack pesano 31 K di testo; le tre dell'applicazione senza carico 4,8 K; la 12 e la 13 **6,3 M**.
+  Non è un difetto della registrazione: `PlainSink` scrive una riga per evento senza tagliare
+  niente, e trentaduemila scritture confermate sono sessantaquattromila righe. `gzip` le porta a
+  516 311 e 121 565 byte (10,2× e 8,9×), quindi nel pacchetto di git pesano ~640 K.
+
+- **Esito, quinto punto — la regola di normalizzazione scritta nell'indice era insufficiente.**
+  Tutte e quattordici le registrazioni sono state riprodotte dentro uno pseudo-terminale e
+  confrontate con il testo originale. Le dodici corte coincidevano con la regola vecchia (`\r\r\n`
+  → `\r\n`); le due lunghe no, e il confronto falliva a **66 354 byte**, dopo che due terzi del file
+  avevano coinciso. Il prefisso comune finisce dove la riproduzione ha `\r\r\n` e l'originale
+  `\r\n`; nella riproduzione compaiono anche **quattro** occorrenze di `\r\r\r\n`. Comprimendo
+  `\r+\n` in `\n` da tutt'e due le parti, tutte e quattordici coincidono e in tutte il titolo
+  compare.
+
+- **Esito, sesto punto — l'eco di `make` è indistinguibile dal comando annunciato.** La prima corsa
+  della scena 12 è ripartita da capo dentro se stessa: `make` stampa la ricetta prima di eseguirla,
+  la ricetta comincia con `docker compose ` esattamente come il comando che l'applicazione annuncia,
+  e la regia ha eseguito l'eco. Con `make -s` la scena è corretta. È il costo di riconoscere un
+  comando dal prefisso invece che da un canale separato, ed è dichiarato in
+  [ADR-0115](Decision.md#adr-0115).
+
+- **Riserve:** una corsa per scena, non tre. I tempi — 10 035 ms di elezione senza carico, 10 019
+  con — sono singole osservazioni e ballano come tutte le altre della cartella; le misure ripetute
+  del branch stanno altrove. Il calo dell'1,3 % della scena 13 è la differenza fra due finestre
+  della stessa corsa e non fra due corse, quindi dice che il dump non ha fermato il carico, non
+  quanto costa un dump in generale. La differenza di 146 documenti della scena 14 dipende da quanto
+  è durato il dump e dal ritmo del carico: è la dimostrazione che la finestra esiste, non la sua
+  misura. Le cinque scene sono girate una dopo l'altra sulla stessa macchina, quindi condividono
+  qualunque deriva della giornata.
+- **Data:** 2026-09-04
+- **Usata da:** ADR-0115, ADR-0116
+
+---
+
+<a id="v-090"></a>
+### V-090 — La riga del database dice 1 505 885 e le collezioni ne sommano 1 528 002: due contatori fermi a zero
+
+- **Comandi:** la fotografia nuova, contro i tre stack accesi insieme, e poi la caccia allo scarto
+  dal di dentro:
+
+
+```unknown
+make -s app-stats TARGET=standalone
+make -s app-stats TARGET=rs
+make -s app-stats TARGET=sharded
+```
+
+
+  e sullo stack 01, che non ha autenticazione, uno script che per ogni collezione di `lab` mette
+  accanto il contatore conservato e il conteggio vero:
+
+
+```unknown
+for (const nome of db.getCollectionNames()) {
+  const meta = db.getCollection(nome).stats().count;      // metadati
+  const vera = db.getCollection(nome).countDocuments({});  // scansione
+  if (meta !== vera) print(`${nome}: metadati ${meta}, contati ${vera}`);
+}
+```
+
+
+- **Ambiente:** MongoDB 7.0.40 su tutti e tre gli stack, portatile Apple Silicon, Docker Desktop,
+  i nove container accesi contemporaneamente. Gli stack 01 e 03 portavano i residui delle
+  registrazioni del 4 settembre e non erano stati azzerati; lo stack 02 era appena passato da
+  `./tools/reset-demo.sh 02`. Il container `mongo-standalone` era stato riavviato la mattina del 6
+  e il suo giornale dichiara `"Startup from clean shutdown?": true`: lo scarto **non** viene da
+  quell'avvio.
+
+- **Esito, primo punto — la fotografia distingue la collezione dal database, e i tre stack lo
+  mostrano subito.** Prima di questa riga `stats` stampava un totale solo, e quel totale è una
+  somma:
+
+| stack | `ordini` | collezioni in `lab` | totale del database |
+|---|---:|---:|---:|
+| 01 standalone | 50 000 | 38 | **1 505 885** |
+| 02 replica set | 50 000 | 2 | **55 386** |
+| 03 sharded | 20 000 | 12 | **99 699** |
+
+  Sullo stack 01 la vecchia riga diceva **un milione e mezzo** dove il runbook si aspettava
+  cinquantamila, e non c'era modo di sapere dallo schermo che i cinquantamila c'erano davvero: le
+  altre trentasette collezioni sono carichi dell'Atto III lasciati indietro dal 4 settembre.
+
+- **Esito, secondo punto — la somma delle collezioni e il totale del database non coincidono, su uno
+  standalone.** 1 528 002 contro 1 505 885: **22 117** di scarto, l'1,45 %. Non è sharding, non sono
+  orfani, non è una vista: `dbStats.objects` somma i `count` conservati per collezione, e **due**
+  collezioni dichiarano zero mentre contengono documenti.
+
+| collezione | metadati | contati |
+|---|---:|---:|
+| `carico-20260904-151041` | **0** | 14 270 |
+| `carico-20260904-151230` | **0** | 7 847 |
+
+  Sono le ultime due scritte quel giorno. 14 270 + 7 847 = 22 117, cioè tutto lo scarto: le altre
+  trentasei coincidono al documento.
+
+- **Esito, terzo punto — `validate()` rimette il contatore a posto, e non lo dice.** Su
+  `carico-20260904-151230`:
+
+
+```unknown
+prima  metadati 0 contati 7847
+validate: valid=true nrecords=7847 warnings=[]
+dopo   metadati 7847 contati 7847
+dbStats.objects: 1513732
+```
+
+
+  Risponde `valid: true` **senza un avviso**, e intanto il totale del database sale di 7 847. La
+  collezione non era corrotta: era stantio il numero, e nessuno lo segnalava. `carico-20260904-151041`
+  è stata lasciata così apposta, perché la differenza resti visibile a chi rifà la misura.
+
+- **Riserve:** la causa dello zero non è stata dimostrata, solo circoscritta. Il riavvio del 6
+  settembre è dichiarato pulito dal giornale di `mongod`, quindi il contatore era già zero prima; i
+  giornali del 4 settembre non ci sono più, perché `docker logs` conserva solo la corsa in corso, e
+  la spiegazione naturale — un arresto del container mentre quelle due collezioni erano appena state
+  scritte e il contatore non era ancora stato messo nel checkpoint — resta un'ipotesi. Ciò che è
+  misurato è il fatto, non il perché: il numero veloce può dire zero su una collezione che ne
+  contiene quattordicimila. Una osservazione sola, su un laboratorio, non tre corse.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0121
+
+---
+
+<a id="v-091"></a>
+### V-091 — Il dump sta nel container e non in un volume: i due rami del verdetto, e una frase da correggere
+
+- **Comandi:** che cosa c'è davvero nella cartella dopo la registrazione 13, poi le due
+  corse che mostrano i due rami del blocco nuovo, poi la domanda che nessuno aveva fatto:
+
+```bash
+docker exec mongo-rs-1 ls -1R /tmp/mongolab-backup
+./tools/reset-demo.sh 02          # primo ramo: la cartella c'è
+./tools/reset-demo.sh 02          # secondo ramo: non c'è più
+docker exec mongo-rs-1 mkdir -p /tmp/mongolab-backup/lab
+make down-02
+make up-02
+docker exec mongo-rs-1 ls -1 /tmp
+```
+
+- **Ambiente:** MongoDB 7.0.40, stack 02 in piedi con i tre membri sani e `mongo-rs-1`
+  primario, portatile Apple Silicon, Docker Desktop. La cartella conteneva il dump della
+  registrazione 13 del 6 settembre, cioè una sola corsa di `demo backup-live`.
+
+- **Esito, primo punto — il dump non è solo `lab`, ma il restore sì.** L'albero, per
+  intero:
+
+```
+/tmp/mongolab-backup:        admin  lab  oplog.bson  prelude.json
+/tmp/mongolab-backup/admin:  system.users.bson   system.users.metadata.json
+                             system.version.bson system.version.metadata.json
+/tmp/mongolab-backup/lab:    carico-20260906-114646.bson   carico-20260906-114646.metadata.json
+                             ordini.bson                   ordini.metadata.json
+```
+
+  Cinque `.bson` in tutto, ma sullo schermo ne tornano due: `argomenti_restore` passa
+  `--nsInclude lab.*`, quindi `admin/` e `oplog.bson` restano dove sono. Il numero che
+  vale, per chi guarda la scena, è quello dei `.bson` sotto `lab`.
+
+- **Esito, secondo punto — i due rami, dal vivo.** Prima corsa, con la cartella piena:
+
+```
+La cartella del dump, dentro il nodo
+  ✓ dump rimossi: 2 collezioni che il restore avrebbe rimesso in piedi
+```
+
+  Seconda corsa, subito dopo, senza toccare niente:
+
+```
+La cartella del dump, dentro il nodo
+  ✓ nessun dump da togliere
+```
+
+- **Esito, terzo punto — `down` la porta via, e la voce del registro di poche ore prima
+  diceva il contrario.** Quella voce dice «nessuno lo svuota, né `reset-demo.sh` né
+  `down`/`up`», e la seconda metà è falsa: era un ragionamento, non una misura. Messo un
+  marcatore con `mkdir`, fatto `make down-02` e `make up-02`, dentro `/tmp` resta questo:
+
+```
+mongodb-27017.sock
+```
+
+  Il motivo sta scritto nel compose: `mongo-rs-1` monta `keyfile` e `dati-1:/data/db` e
+  nient'altro, quindi `/tmp` è il livello scrivibile del container e `docker compose down`
+  rimuove il container. La cartella sopravviveva a ogni corsa di `reset-demo.sh` e a ogni
+  `restart` — non a `down`.
+
+- **Riserve:** la corsa di `down`/`up` è una sola, e il marcatore era una cartella vuota,
+  non un dump vero. Il fatto misurato è che il livello scrivibile si ricrea, non che
+  qualcuno «pulisca» il dump: sparisce perché sparisce il container che lo teneva. Del
+  conteggio dei `.bson` sotto `lab` si è visto un caso solo, a due collezioni; il numero
+  che il difetto aveva prodotto — sei — non è stato riprodotto apposta, perché per farlo
+  servirebbero cinque prove generali di fila.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0122
+
+---
+
+<a id="v-092"></a>
+### V-092 — Dodici skill importate: quante si accendono qui, e la riga che offre il comando vietato
+
+- **Comandi:** la copia e la sua verifica, il setaccio dei segreti, il censimento delle
+  descrizioni sul commit verbatim, e le tre suite di prove:
+
+```bash
+git clone --branch step/azure-policy/allineamento-e-fase-1 --depth 1 \
+  <URL del repository d'origine, privato> /tmp/origine
+diff -r /tmp/origine/.claude/skills .claude/skills
+python3 rimisura.py                       # legge da `git show 3f22d6f:<file>`
+bash .claude/skills/revisione-pr/tests/test-revisione.sh
+bash .claude/skills/changelog-di-chiusura/tests/test-changelog.sh
+bash .claude/skills/worktree-di-step/tests/test-step.sh
+```
+
+- **Ambiente:** portatile Apple Silicon, macOS 25.6, `git` di sistema, Python 3.13, nessuna
+  rete durante le prove. Il pacchetto misurato è quello del commit `3f22d6f` di
+  `release/1.0`, cioè la copia **prima** dell'adattamento: 33 file, 272 KB, 12 skill.
+  Il confronto `diff -r` contro il clone non ha prodotto alcuna riga: le due copie sono
+  identiche byte per byte.
+
+- **Esito, primo punto — la superficie che decide se una skill si accende.** Il campo
+  `description` del frontmatter è l'unica parte di una skill che non si può correggere da
+  fuori: è quella che il modello legge per stabilire se il caso è suo. Censite le dodici
+  descrizioni del pacchetto verbatim, distinguendo chi nomina il repository d'origine come
+  condizione da chi lo nomina per negazione:
+
+| Come nominano il repository d'origine | Quante | Quali |
+|---|---|---|
+| come **condizione** | 9 | `changelog-di-chiusura`, `decision-md`, `modello-dei-rami`, `project-memory`, `registro-di-sviluppo`, `revisione-pr`, `sources-md`, `workflow-conventions`, `worktree-di-step` |
+| per **negazione** («NOT the origin one») | 2 | `git-flow`, `github-flow` |
+| non lo nominano | 1 | `adr-brainstorm` |
+
+  Le nove della prima riga, importate così, non si sarebbero accese mai: la condizione che
+  chiedono qui è falsa. Le due della seconda si sarebbero accese **sempre**, perché la
+  condizione che chiedono è vera esattamente fuori dal repository d'origine. La dodicesima si
+  accende ma scrive gli ADR in `docs/adr/`, che qui non esiste.
+
+- **Esito, secondo punto — la riga che vale il rilievo.** `git-flow` è una delle due che si
+  accendono, e il suo file `references/comandi.md` elenca fra gli equivalenti AVH:
+
+```
+git flow feature finish <slug>
+```
+
+  È il comando che in questo repository è vietato da quando, sulla PR #1, chiuse un ramo
+  saltando la revisione. Il pericolo non è la presenza del testo — un repository può
+  benissimo ospitare la descrizione di un comando che non usa — ma la combinazione fra
+  quel testo e una descrizione che qui si accende da sola. Il modello dei rami di qui **ha
+  la forma** di Git Flow (`main`, `develop`, `feature/NN-nome`, `release/1.0`) e differisce
+  solo nella chiusura: è la somiglianza a rendere efficace la trappola.
+
+- **Esito, terzo punto — nomi di cartella.** Nel pacchetto verbatim ricorrono **95**
+  occorrenze di `Docs/` con la maiuscola, su 82 righe in 21 file: è la convenzione del
+  repository d'origine, dove le decisioni stanno in `Docs/Decision.md`. Qui la cartella è `docs/`,
+  minuscola. Su macOS il filesystem non distingue, su Linux sì — e la skill `git-flow`
+  dedica una sezione proprio a questo.
+
+- **Esito, quarto punto — il setaccio e le prove.** Il setaccio dei segreti di
+  `revisione-pr` passato sull'intero pacchetto ha prodotto **una** segnalazione, in una
+  fixture di prova: confrontata con la chiave vera per prefisso SHA-256, senza stampare né
+  l'una né l'altra, non coincide. Le tre suite, rilanciate **dopo** l'adattamento del
+  6 settembre:
+
+| Suite | Prove |
+|---|---|
+| `revisione-pr/tests/test-revisione.sh` | 53 passate, 0 fallite |
+| `changelog-di-chiusura/tests/test-changelog.sh` | 40 passate, 0 fallite |
+| `worktree-di-step/tests/test-step.sh` | 34 passati, 0 falliti |
+| **totale** | **127** |
+
+  Girano senza rete e senza spendere token: si costruiscono un repository temporaneo e
+  sostituiscono `gh`, `agy` e `codex` con dei finti.
+
+- **Riserve:** il censimento è **sintattico**. Legge il campo `description` e vi cerca la
+  stringa con il nome d'origine e la forma «NOT <quel nome>»; non prova che una descrizione così
+  scritta si accenda o non si accenda davvero in una sessione, perché quella decisione la
+  prende il modello e non è deterministica. Il verdetto «nove non si accendono mai» è
+  quindi una lettura del testo, non una misura di comportamento — solida perché il testo
+  dice esplicitamente «use when the repository in question is <il nome d'origine>», ma
+  una lettura.
+
+  Le 127 prove sono prove **degli script** della skill, non della loro applicabilità qui:
+  dicono che il codice è portabile, non che la skill sia adatta a questo repository. Il
+  `diff -r` è stato eseguito una volta sola, il giorno della copia; da lì in avanti le due
+  copie divergono per costruzione.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0123
+
+---
+
+---
+
+<a id="v-093"></a>
+### V-093 — La skill di revisione messa al lavoro sul serio: otto falsi positivi, e un revisore su due che non partiva
+
+- **Comandi:** la costruzione dei sei fascicoli della release, il setaccio su ciascuno, la prova a
+  vuoto, l'invio, e la suite dopo ogni correzione:
+
+```bash
+.claude/skills/revisione-pr/scripts/revisione.sh dossier-rami app-sorgenti main..HEAD app/src app/pyproject.toml
+.claude/skills/revisione-pr/scripts/revisione.sh segreti   app-sorgenti
+.claude/skills/revisione-pr/scripts/revisione.sh interroga app-sorgenti          # a vuoto
+.claude/skills/revisione-pr/scripts/revisione.sh interroga app-sorgenti --invia
+bash .claude/skills/revisione-pr/tests/test-revisione.sh
+```
+
+- **Ambiente:** portatile Apple Silicon, macOS 25.6, 6 settembre 2026. `codex-cli 0.153.4`
+  autenticato con ChatGPT, `agy 1.1.22` autenticato, modello `gemini-3.1-pro-high`. Repository
+  **privato** (`gh repo view --json isPrivate` → `true`), quindi l'invio è una pubblicazione verso
+  terzi che non si annulla. Intervallo revisionato: `main...HEAD` di `release/1.0`, merge-base
+  `1523ebf`, 213 file e 125 969 righe aggiunte in tutto.
+
+- **Esito, primo punto — l'intervallo non entra in un prompt, e va spezzato per aree.** Il diff
+  intero pesa 11 322 719 byte contro un limite d'invio di 700 000: oltre quella soglia il prompt non
+  entra più negli argomenti di un processo su macOS e `agy` lo riceverebbe **troncato in silenzio**.
+  Escluse le tre aree che non sono artefatto — i tre registri (1 738 597 byte: sono il verbale),
+  `docs/00-progetto` (i piani), `app/docs` (710 795 byte, sopra il limite da sola) e i due `.cast`
+  (tracciati di terminale illeggibili, 30 441 righe) — restano sei fascicoli:
+
+| fascicolo | percorsi | prompt (byte) | commit |
+|---|---|---|---|
+| `talk` | `docs/05-talk` senza i `.cast` | 91 255 | 9 |
+| `stack-docker` | `docker` | 232 200 | 20 |
+| `documentazione-tecnica` | `docs/01`…`docs/04` | 438 192 | 23 |
+| `app-sorgenti` | `app/src`, `app/pyproject.toml` | 456 168 | 19 |
+| `strumenti` | `tools`, `Makefile`, `README.md` | 518 821 | 60 |
+| `app-prove` | `app/tests` | 625 817 | 21 |
+
+  Il primo tentativo teneva `docker` e `tools` insieme: 718 038 byte, **oltre il limite**. È stato
+  il limite a decidere la partizione, non il gusto.
+
+- **Esito, secondo punto — il setaccio dei segreti si è fermato otto volte, e tutte e otto a
+  vuoto.** Due fascicoli su sei, `app-sorgenti` (1) e `app-prove` (7). Ogni valore segnalato è stato
+  confrontato con quelli dei due `.env` non versionati **per SHA-256, senza stampare né gli uni né
+  gli altri**: nessuna corrispondenza. Le forme erano tre sole:
+
+```
+password=credenziali.password,                    l'attributo di un oggetto
+password=PASSWORD_DI_PROVA,                       il nome di una costante
+password="non-e-un-segreto-e-non-lo-sara-mai"     una frase italiana in chiaro
+```
+
+  Il pattern che le trova è corretto e non è stato toccato: cerca un nome di credenziale seguito da
+  `=` e da almeno sedici caratteri buoni, e queste tre righe li hanno. La correzione sta dall'altra
+  parte, in `segreti.esclusioni`, ancorata alla forma del **valore** — mai al nome, che è la regola
+  scritta in testa a `segreti.pattern`. L'underscore obbligatorio nell'esclusione delle costanti è
+  ciò che le impedisce di spegnere anche `AKIAIOSFODNN7EXAMPLE`, e c'è una prova che lo verifica.
+
+- **Esito, terzo punto — la metà Gemini della revisione non partiva.** All'invio, `agy` è uscito
+  male su tutti e sei i fascicoli:
+
+```
+Error: --json-schema can only be used when --output-format is 'json' or 'stream-json'
+```
+
+  La skill chiedeva `--output-format text --json-schema`, combinazione che `agy 1.1.22` rifiuta.
+  Codex rispondeva regolarmente, quindi **il guasto non si presentava come un guasto**: si
+  presentava come «un revisore su due non ha trovato niente».
+
+- **Esito, quarto punto — perché 53 prove verdi non l'avevano visto.** La finta `agy` del banco
+  stampava il JSON nudo e accettava qualunque opzione. Riscritta fedele alla vera — legge le
+  opzioni, rifiuta la combinazione con lo stesso messaggio, avvolge la risposta nella stessa busta —
+  **sette prove sono diventate rosse: le tre nuove e quattro che passavano da sempre.** La busta
+  vera, verificata a mano su un prompt minuscolo prima di scrivere il doppio, è:
+
+```json
+{"conversation_id":"…","status":"SUCCESS","response":"…","structured_output":{…},"usage":{…}}
+```
+
+  Il primo oggetto bilanciato della risposta grezza è quindi la **busta**, non i rilievi: senza
+  sbustare, il foglio di triage avrebbe scritto «il JSON non contiene un elenco rilievi», di nuovo
+  indistinguibile da un revisore che non ha trovato niente. Verificato nello stesso passaggio che
+  `--effort high` con `gemini-3.1-pro-high` non fa conflitto, mentre `--effort low` sì.
+
+- **Verdetto.** La skill importata funziona nella struttura e falliva in due punti che solo l'uso
+  reale poteva mostrare: un setaccio tarato su un altro codice, e una riga di comando disallineata
+  dalla versione installata di `agy`. Entrambi corretti nel repository, entrambi con prove:
+  **98 passate, 0 fallite** contro le 53 di partenza.
+
+- **Riserve.** Il confronto SHA-256 dei valori segnalati copre le credenziali che stanno nei due
+  `.env` presenti sulla macchina al momento della misura: se un `.env` fosse cambiato dopo, la
+  verifica andrebbe rifatta. Le tre esclusioni sono ancorate alla forma e non al contesto: una riga
+  che contenesse insieme un segreto vero **e** una di quelle forme verrebbe scartata: è un limite
+  che il file delle esclusioni ha già per costruzione, non introdotto qui. Il collaudo di `agy` è
+  stato fatto su una versione sola, la 1.1.22: una versione successiva può cambiare di nuovo la
+  busta, e allora saranno le prove della sezione 19 a dirlo.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0124, ADR-0125
+
+---
+
+<a id="v-094"></a>
+### V-094 — Censimento dei riferimenti esterni prima della pubblicazione, e la giustezza dei documenti misurata invece che supposta
+
+- **Comandi:** il censimento, la sostituzione, il riavvolgimento e la riverifica:
+
+```bash
+git grep -c -i <nome del repository d'origine> -- .              # quante e dove, fra i tracciati
+grep -ril <nome del repository d'origine> . --exclude-dir=.git   # anche fra i non tracciati
+git grep -ohE "github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+" -- '*.md' | sort | uniq -c
+git grep -n "/Users/giulianolatini" -- .          # percorsi assoluti della macchina
+python3 anonimizza3.py --scrivi                   # frasi intere, poi regole a confine di parola
+python3 riavvolgi.py da-riavvolgere.txt --scrivi  # gli a capo rimessi al loro posto
+make docs-check
+```
+
+- **Ambiente:** portatile Apple Silicon, macOS 25.6, 6 settembre 2026. Ramo `release/1.0`,
+  albero pulito prima di cominciare. Repository ancora **privato**; la pubblicazione è
+  prevista al talk del 18 settembre, ed è irreversibile.
+
+- **Esito, primo punto — il censimento.** Il nome di un repository privato compare **84
+  volte in 28 file tracciati**: 21 file sotto `.claude/skills/` e 7 documenti sotto `docs/`.
+  Una di queste è un **URL di clonazione** completo, nel comando che riproduce il confronto
+  di [V-093](#v-093). Fuori dai tracciati ce ne sono altre **6**, in due fascicoli sotto
+  `.revisioni/`: quella cartella è gitignorata, ma `revisione.sh archivia --scrivi` **copia**
+  i fascicoli in `docs/revisioni/`, che si pubblica — quindi contano.
+
+- **Esito, secondo punto — che altro è esterno.** Nessun'altra sorpresa:
+
+| Che cosa | Dove | Quante | Verdetto |
+|---|---|---|---|
+| `github.com/giulianolatini/SqlStart2026` | README e tre documenti | 6 | è questo repository, resta |
+| altri `github.com/...` | citazioni bibliografiche | 15 | progetti pubblici di terzi, restano |
+| percorso assoluto della macchina | [`registro-operativo-sviluppo.md`](registro-operativo-sviluppo.md) | 1 | nomina `SqlStart2026-registrazioni`, cartella locale; l'utente è già pubblico nell'URL del repo |
+| nome del ramo d'origine | cinque documenti | 5 | nomina un ramo, non un repository: senza il nome del repo non è risolvibile |
+| indirizzi di posta | tre piani di feature | 3 | `noreply@anthropic.com`, la firma dei commit |
+
+- **Esito, terzo punto — la giustezza vera dei documenti.** La supposizione era 95 colonne.
+  Misurata, è **100**: su quattro documenti la moda sta fra 97 e 99, e le righe oltre 100
+  sono una minoranza dichiarata (144 su 6409 in `Decision.md`, 153 su 8129 in `Sources.md`,
+  172 su 6488 nel registro, 63 su 2443 nelle citazioni). La differenza non è accademica:
+  con la soglia sbagliata sarebbero stati riavvolti 28 paragrafi in più, senza motivo.
+
+- **Esito, quarto punto — tre passaggi automatici buttati, e perché.** Nessuno dei tre è
+  stato scoperto dalle prove: sono stati scoperti **rileggendo il diff**.
+
+  1. Sostituzioni di **sottostringa**: mordono dentro le parole. «chi nomina X» è diventato
+     «chi nominal…», perché la regola cercava «a X» e l'ha trovata dentro «nomina X».
+  2. Regole a confine di parola, ma con `\s+` fra preposizione e nome: `\s` comprende l'a
+     capo, e dove il nome cadeva a inizio riga la sostituzione ha **unito due righe**, da 85
+     a 183 colonne. Grammatica giusta, impaginazione rotta.
+  3. Lo stesso `\s+` dove l'a capo portava con sé il capo di una citazione (`> `), che
+     whitespace non è: lì la regola **non è scattata affatto**, e restava «In il repository
+     d'origine» spezzato su due righe — invisibile a qualunque `grep` di una riga sola.
+
+  La stesura buona ha un separatore che accetta sia spazi sia un a capo col suo capo di
+  riga, e lo **riscrive identico**: nessun file cambia numero di righe, e la preposizione si
+  articola comunque. Il controllo di quella proprietà è dentro lo script.
+
+- **Esito, quinto punto — dopo.** 84 → 0 nei tracciati, 6 → 0 nei fascicoli, 28 file
+  modificati, 146 righe aggiunte e 138 tolte. Nessun apice inverso orfano, nessuna
+  preposizione non articolata, nessuna riga portata oltre le 100 colonne che non ci fosse
+  già. `make docs-check` verde: citazioni e collegamenti coerenti.
+
+- **Riserve:** il censimento è **testuale**, e cerca un nome noto. Non trova ciò che allude
+  senza nominare, e non trova un nome scritto diversamente. Cerca inoltre solo dentro i file
+  di testo: la cronologia dei commit non è stata toccata, e chi cloni il repository troverà
+  il nome nei messaggi e nei diff precedenti a questa scheda — riscriverla è una decisione
+  diversa, con costi diversi, e non è stata presa qui. Infine: il comando di riproduzione di
+  [V-093](#v-093) ora contiene un segnaposto al posto dell'URL, quindi **non è più
+  eseguibile da fuori**; resta eseguibile da chi conosce il repository d'origine.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0125
+
+---
+
+<a id="v-095"></a>
+### V-095 — Un dump fallisce in due modi diversi, e la regola di pulizia ne conosceva uno solo
+
+- **Comandi:** una directory con dentro un backup finto, un `mongodump` che fallisce
+  sull'autenticazione, e i due controlli che il documento propone:
+
+```bash
+docker exec mongo-rs-1 mkdir -p /tmp/archivio-v095
+docker exec mongo-rs-1 touch /tmp/archivio-v095/backup-di-ieri.bson
+docker exec mongo-rs-1 mongodump --host rs0/localhost:27017 \
+  -u admin -p credenziale-sbagliata --authenticationDatabase admin \
+  --oplog --out /tmp/archivio-v095            # credenziale finta: mai la vera
+docker exec mongo-rs-1 ls -la /tmp/archivio-v095
+docker exec mongo-rs-1 rm -rf /tmp/archivio-v095   # la riga che il documento prescriveva
+docker exec mongo-rs-1 test -f /tmp/dump-v095/oplog.bson
+```
+
+- **Ambiente:** macOS 26.6.2 arm64 (build 25G83), Docker 29.7.2, immagine `mongo:7.0.40`,
+  `mongodump` **100.18.0**, stack 02 `mongo-rs-1/2/3` sani, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** un revisore esterno ha contestato la regola di pulizia scritta in
+  [`backup-restore.md`](03-amministrazione/backup-restore.md) §5 —
+  `mongodump … || { rm -rf "${DESTINAZIONE}"; exit 1; }` — sostenendo che cancella troppo. La
+  regola non era nata dal nulla: viene da [V-036](#v-036), dove un dump vero fallì **dopo** aver
+  scritto 1,8 GB, e in quel caso `rm -rf` toglie esattamente ciò che il comando aveva creato. La
+  domanda era se valesse anche quando il dump fallisce **prima** di scrivere.
+
+- **Esito, primo punto — un dump può fallire senza creare niente.** Con una credenziale sbagliata,
+  `mongodump` esce **1** e non tocca la destinazione:
+
+```
+Failed: can't create session: failed to connect to mongodb://localhost:27017/?replicaSet=rs0:
+connection() error occurred during connection handshake: auth error: unable to authenticate
+using mechanism "SCRAM-SHA-256": (AuthenticationFailed) Authentication failed.
+```
+
+  Il `ls` subito dopo mostra la directory **come prima**: `backup-di-ieri.bson`, e nient'altro.
+  L'errore arriva a livello di handshake, cioè prima che esista un solo byte da scrivere.
+
+- **Esito, secondo punto — la regola cancella allora ciò che non ha creato.** Applicato il
+  `rm -rf "${DESTINAZIONE}"` che il documento prescriveva, il backup preesistente sparisce con la
+  directory: `ls: cannot access '/tmp/archivio-v095': No such file or directory`. Il fallimento non
+  aveva prodotto niente da ripulire, e la pulizia ha preso l'unica cosa che c'era.
+
+- **Esito, terzo punto — la guardia proposta discrimina davvero.** Dopo lo stesso fallimento in una
+  destinazione nuova, `test -f /tmp/dump-v095/oplog.bson` esce **1**. È un controllo che non
+  interroga il server e non costa niente, e distingue il dump completo da tutto il resto: `--oplog`
+  scrive `oplog.bson` per ultimo, quindi la sua presenza è la firma della riuscita.
+
+- **Riserve:** provato **un solo** modo di fallire presto, l'autenticazione. Un disco pieno o una
+  connessione che cade a metà appartengono al caso di V-036 — creano file e poi si fermano — e per
+  quelli il `rm -rf` resta corretto: la correzione non toglie la pulizia, le mette davanti la
+  proprietà della directory (`mktemp -d`). Non è stato misurato il caso in cui `--out` punta a una
+  directory che il chiamante ha creato ma che contiene già un dump precedente della stessa data:
+  lì `mongodump` sovrascrive, e la perdita avviene prima di qualunque `rm`.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0126
+
+---
+
+<a id="v-096"></a>
+### V-096 — Chi si oscura e chi no: `mongosh`, `mongodump` e `mongorestore` a confronto su `argv`
+
+- **Comandi:** un `mongodump` verso un indirizzo irraggiungibile, tenuto vivo dal timeout di
+  selezione del server, e una fotografia della tabella dei processi mentre gira:
+
+```bash
+docker exec -d mongo-rs-1 mongodump --host 192.0.2.1:27017 \
+  -u admin -p SENTINELLA-NON-E-UNA-PASSWORD-VERA \
+  --authenticationDatabase admin --out /tmp/dump-v096
+docker exec mongo-rs-1 ps -eo args | grep mongodump | grep -v grep
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, immagine `mongo:7.0.40`, `mongodump`
+  **100.18.0**, 6 settembre 2026. `192.0.2.1` è di [RFC 5737](https://www.rfc-editor.org/rfc/rfc5737),
+  riservato alla documentazione: non risponde, e il processo resta in piedi il tempo di
+  fotografarlo. Il valore passato è una sentinella, non la credenziale vera.
+
+- **Che cosa si voleva sapere:** [M-025](../app/docs/Sources.md#m-025) aveva misurato
+  `mongorestore` — 16 campioni su 16 con la password in chiaro — e chiudeva dichiarando una
+  riserva: «Non è stato verificato se `mongodump` riscriva `argv` dopo l'avvio, come fanno alcuni
+  strumenti». [V-047](#v-047) intanto aveva misurato che `mongosh` 2.10.0 lo fa. Restava aperto
+  l'unico dei tre che nessuno aveva guardato, e con esso la domanda vera: se l'esposizione sia una
+  proprietà del protocollo o dello strumento.
+
+- **Esito — `mongodump` non si oscura.** La riga esce intera:
+
+```
+mongodump --host 192.0.2.1:27017 -u admin -p SENTINELLA-NON-E-UNA-PASSWORD-VERA
+  --authenticationDatabase admin --out /tmp/dump-v096
+```
+
+  Nessuna riscrittura, nessun `<credentials>`: il valore è leggibile da chiunque possa eseguire
+  `ps` dentro il container. La riserva di M-025 si chiude, e il quadro dei tre strumenti diventa:
+
+| strumento | versione | dentro il container | sull'host |
+|---|---|---|---|
+| `mongosh` | 2.10.0 | **oscurato** — `mongodb://<credentials>@…` ([V-047](#v-047)) | visibile nella riga del client `docker` |
+| `mongodump` | 100.18.0 | **in chiaro** (questa scheda) | visibile nella riga del client `docker` |
+| `mongorestore` | 100.18.0 | **in chiaro** — 16/16 ([M-025](../app/docs/Sources.md#m-025)) | visibile nella riga del client `docker` |
+
+- **Esito, secondo punto — la regola che se ne ricava.** Non «`-p` espone» e nemmeno «`-p` è
+  sicuro»: **dipende dallo strumento, e il modo di saperlo è provarlo.** Due binari della stessa
+  distribuzione MongoDB, invocati allo stesso modo, si comportano in modo opposto. Una pagina che
+  mostra un comando con `-p` deve dire quale dei due casi è, perché il lettore non può dedurlo.
+
+- **Riserve:** misurato su una sola versione di ciascuno strumento, e su Linux dentro il container.
+  Il comportamento di `argv` non è documentato da MongoDB come garanzia: può cambiare fra versioni
+  in entrambe le direzioni, e la tabella qui sopra va rimisurata quando il lab cambia immagine. Non
+  è stato provato se `mongodump` si oscuri in una fase più tarda della sua esecuzione: la
+  fotografia è stata presa durante la selezione del server, cioè prima della connessione. La colonna
+  «sull'host» non è stata rimisurata qui — viene da V-047, ed è una proprietà del client `docker`,
+  non dello strumento invocato.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0127
+
+---
+
+<a id="v-097"></a>
+### V-097 — Uno shard perduto: che cosa risponde ancora, con quale errore, e dopo quanti secondi
+
+- **Comandi:** la scena che il repository ha già, che ferma un membro e lo rialza da sé:
+
+```bash
+make guasto-03      # PROFILO=palco ./tools/demo-sharded.sh guasto
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, stack 03 nel profilo **palco** — un membro per
+  shard — immagine `mongo:7.0.40`, `lab.ordini` con 20 000 documenti, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** [`sharded-cluster.md`](02-architetture/sharded-cluster.md) diceva
+  due cose incompatibili. Il §1.2 parlava di risposte parziali restituite «senza dire al client che
+  l'altra parte non c'è»; il §6.4 diceva che le query sullo shard perduto falliscono. Nessuna delle
+  due era misurata, e la fonte citata dal §6.4 — [S-069](#s-069) — dice soltanto che «reads or
+  writes directed at the available shards can still succeed», cioè **non** dice niente sulle altre.
+
+- **Esito, primo punto — il client viene informato, e l'errore nomina lo shard.** Fermato
+  `shard1a`, il router risponde così:
+
+```
+• l'ordine su shard2rs: trovato: 3   [1 s]
+• l'ordine su shard1rs: ✗ FailedToSatisfyReadPreference: Could not find host matching
+    read preference { mode: "primary" } for set shard1rs   [16 s]
+• il conteggio totale:  ✗ FailedToSatisfyReadPreference: Could not find host matching
+    read preference { mode: "primary" } for set shard1rs   [16 s]
+```
+
+  Non c'è nessuna risposta mutilata e nessun silenzio: c'è un errore, e dentro c'è il nome del
+  replica set mancante. Il §1.2 era falso su tutti e due i punti che affermava.
+
+- **Esito, secondo punto — il costo vero è il tempo, non la silenziosità.** La query che passa
+  costa **1 s**; le due che non passano costano **16 s** ciascuna prima di dire che non passano. È
+  il router che cerca un primario per `shard1rs` finché la selezione del server non scade — e in
+  questo profilo non lo troverà mai, perché lo shard ha un membro solo e non c'è nessuno da
+  eleggere. Un'applicazione che chiama in sincrono se li prende tutti.
+
+- **Esito, terzo punto — il ritorno è rapido.** `docker compose start shard1a`, e il totale è di
+  nuovo 20 000 **3 s** dopo il comando. La scena si ripara da sé: ferma un container e lo rialza,
+  non distrugge dati (ADR-0119).
+
+- **Riserve:** un caso resta **ragionato e non provato** — una query in broadcast i cui documenti
+  stiano *tutti* sullo shard vivo. Deve fallire per costruzione, perché il router la manda a tutti
+  proprio in quanto non sa dove siano i documenti; ma il conteggio totale misurato qui li vuole
+  entrambi, quindi non discrimina il caso. I 16 secondi sono il valore predefinito di
+  `serverSelectionTimeoutMS` visto da `mongosh` in questo lab, non una costante: un client che lo
+  configuri diversamente vedrà un'attesa diversa. Infine, tutto questo è il profilo **palco**: con
+  tre membri per shard la stessa scena finisce con un'elezione invece che con un'attesa, ed è la
+  differenza che il profilo `completo` esiste per mostrare.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0128
+
+---
+
+<a id="v-098"></a>
+### V-098 — Chi vince sul nome del progetto Compose: la flag, l'ambiente, il `name:` del file
+
+- **Comandi:** lo stesso stack 02 acceso, interrogato con un ambiente ostile — una variabile che
+  qualcuno potrebbe avere nel proprio profilo di shell senza pensarci:
+
+```bash
+COMPOSE_PROJECT_NAME=altro docker compose \
+  --env-file tools/images.env --env-file docker/02-replicaset/.env \
+  -f docker/02-replicaset/compose.yaml config | grep -m1 '^name:'
+COMPOSE_PROJECT_NAME=altro docker compose … ps --format '{{.Name}}'
+COMPOSE_PROJECT_NAME=altro docker compose -p sqlstart-02-replicaset … ps --format '{{.Name}}'
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, stack 02 acceso con i tre membri, 6 settembre
+  2026.
+
+- **Che cosa si voleva sapere:** il rilievo C-4 della review generale osservava che i tre file
+  Compose dichiarano `name:` e che questo non basta a fissare il progetto. L'osservazione da sola
+  non dice niente di operativo: la domanda misurabile è **chi vince** quando i due si contraddicono,
+  e che cosa diventano i bersagli del Makefile quando a perdere è il file.
+
+- **Esito, primo punto — l'ambiente batte il file.** `config` risolve `name: altro`. Il `name:`
+  scritto dentro `compose.yaml` non è un'imposizione: è un valore predefinito, e
+  `COMPOSE_PROJECT_NAME` gli passa davanti senza avvisare.
+
+- **Esito, secondo punto — e allora `ps` non vede più niente.** Con l'ambiente ostile e senza `-p`,
+  l'elenco dei container è **vuoto**, mentre i tre membri sono accesi e `docker ps` li mostra. Non è
+  un errore: è una risposta corretta a una domanda su un progetto che non esiste. Un `down` lanciato
+  lì dentro sarebbe un nulla di fatto che esce 0 — la forma peggiore, perché somiglia alla riuscita.
+
+- **Esito, terzo punto — `-p` batte tutti e due.** Stesso ambiente ostile, `-p
+  sqlstart-02-replicaset` sulla riga di comando: `config` risolve `name: sqlstart-02-replicaset`, e
+  `ps` elenca `mongo-rs-1`, `mongo-rs-2`, `mongo-rs-3`.
+
+- **Esito, quarto punto — il danno non è uniforme, ed è questo che scagiona `reset-01`.** `reset-02`
+  è `down` seguito da `docker volume rm --force $(DATI_02)`, e `DATI_02` si costruisce da
+  `PROGETTO_02`: con l'ambiente ostile i volumi verrebbero cancellati **comunque**, per nome
+  letterale, mentre il `down` che avrebbe dovuto smontarli prima non ha fatto niente — cancellare i
+  volumi di container ancora accesi. `reset-01` invece è `down -v` e basta: `-v` segue la selezione
+  del progetto, quindi nell'ambiente ostile non cancella **niente**. Sbaglia per difetto, e per
+  difetto non fa danno. Il rilievo C-5 chiedeva di nominare i volumi anche in `reset-01`: sarebbe
+  stato portarlo dentro il difetto di `reset-02`, non toglierlo.
+
+- **Riserve:** misurato su Docker 29.7.2 con Compose v2; la precedenza flag > ambiente > file è
+  documentata e stabile, ma resta una scelta dell'implementazione, non una legge. Non è stato
+  provato `down` con l'ambiente ostile, e deliberatamente: lo stack 02 serviva acceso, e la
+  conseguenza si legge già in `ps`. Il caso in cui `COMPOSE_PROJECT_NAME` valga per caso proprio
+  uno dei tre nomi del lab non è stato costruito: lì non ci sarebbe niente da vedere.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0129
+
+---
+
+<a id="v-099"></a>
+### V-099 — Una guardia che valida un valore e nel farlo lo interpreta
+
+- **Comandi:** il meccanismo isolato dalla guardia che lo usa, e poi la guardia intera:
+
+```bash
+printf 'completo\npalco\nstrumenti\n' | grep -qx  -- 'palco[ ]*' ; echo $?
+printf 'completo\npalco\nstrumenti\n' | grep -qxF -- 'palco[ ]*' ; echo $?
+make profilo-03 PROFILO='palco[ ]*'
+make profilo-03 PROFILO="palco'; echo IRRUZIONE; #"
+make profilo-03 PROFILO=palco
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, GNU Make 3.81 di sistema, `grep` BSD di macOS, file Compose
+  `docker/03-sharded/compose.yaml` con i tre profili dichiarati, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** i rilievi G-2 e G-3 dicevano che la guardia del profilo interpolava
+  il valore dentro il testo della shell. Sono due difetti diversi con lo stesso indirizzo, e
+  valevano misurati separatamente: uno riguarda **che cosa può eseguire** un valore ostile, l'altro
+  **che cosa può far passare** un valore soltanto sciatto.
+
+- **Esito, primo punto — il metacarattere passava, ed è il difetto che nessun recensore aveva
+  visto.** `grep -qx` tratta ciò che riceve come espressione regolare: con `palco[ ]*` risponde
+  **0**, cioè valido, perché la regex descrive «palco seguito da zero o più spazi» e `palco` la
+  soddisfa. Con `-F` la stessa riga risponde **1**. Una guardia che accetta `palco[ ]*` non è
+  permissiva per un capello: accetta una famiglia infinita di stringhe che poi arrivano a Compose
+  come nomi di profilo letterali, e lì non corrispondono a niente.
+
+- **Esito, secondo punto — l'apice non chiude più niente.** `PROFILO="palco'; echo IRRUZIONE; #"`
+  arriva alla guardia e ne esce come dato: la parola `IRRUZIONE` **non compare** in nessun punto
+  dell'output, e il messaggio d'errore riporta il valore intero, apice compreso:
+
+```
+PROFILO=palco'; echo IRRUZIONE; # non è un profilo di docker/03-sharded/compose.yaml.
+Quelli dichiarati sono: completo palco strumenti
+```
+
+- **Esito, terzo punto — la guardia continua a fare il suo mestiere.** `PROFILO=palco` esce **0** e
+  non stampa niente; `PROFILO='palco[ ]*'` esce **1** con il messaggio che elenca i tre profili
+  veri. L'elenco non è scritto nel Makefile: viene da `config --profiles`, cioè dal file Compose,
+  che è l'unico posto dove quell'elenco è vero.
+
+- **Riserve:** `grep -qxF` confronta stringhe intere e non normalizza niente, quindi uno spazio
+  finale invisibile resta un valore diverso e viene respinto — corretto, ma il messaggio d'errore
+  non aiuta a vederlo, perché uno spazio in coda non si distingue a schermo. Il valore arriva alla
+  ricetta per ambiente: chi invocasse la guardia da un contesto che non esporta `PROFILO`
+  misurerebbe un'altra cosa. Non è stato cercato un valore che sopravviva a `-F` e faccia comunque
+  danno a valle: dopo la guardia il valore va solo a `--profile` di Compose, che lo tratta
+  come nome.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0130
+
+---
+
+<a id="v-100"></a>
+### V-100 — Una sonda che esce in rete proprio per diagnosticare che la rete non c'è, e che conta le porte di qualcun altro
+
+- **Comandi:** la stessa immagine assente chiesta nei due modi, cronometrata:
+
+```bash
+time docker run --rm mongo:immagine-che-non-esiste true
+time docker run --rm --pull=never mongo:immagine-che-non-esiste true
+docker ps --filter 'label=com.docker.compose.project' --format '{{.Label "com.docker.compose.project"}}'
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** due rilievi diversi sullo stesso strumento. C-6 diceva che
+  `preflight.sh` può scaricare; C-9 che il conteggio delle porte occupate guarda più in là del lab.
+  Il preflight esiste per una sola scena — la sala senza rete, mezz'ora prima del talk — e in quella
+  scena entrambi i difetti si pagano.
+
+- **Esito, primo punto — senza `--pull=never` la sonda esce dalla macchina.** Con l'immagine
+  assente, il comando impiega **1,011 s** e nel mezzo c'è una richiesta a `docker.io`. Con la flag
+  risponde «No such image» in **0,023 s** e non esce dalla macchina. Quarantatré volte più veloce è
+  il dettaglio meno interessante: il punto è che il caso da diagnosticare — «le immagini non ci
+  sono» — è esattamente il caso in cui la sonda andava a chiederle alla rete che non c'è, e lì i
+  1,011 s diventano il timeout di chi aspetta un server irraggiungibile.
+
+- **Esito, secondo punto — «le porte del lab» erano le porte di chiunque.** Il filtro
+  `label=com.docker.compose.project` seleziona **ogni** container avviato da Compose sulla macchina,
+  non i tre progetti di questo repository. Su una macchina di sviluppo con altri stack accesi il
+  preflight annunciava porte occupate che nessun bersaglio di questo `make` avrebbe mai chiesto, e
+  al tempo stesso non aveva modo di dire quale delle proprie porte fosse davvero contesa.
+
+- **Esito, terzo punto — l'elenco dei progetti non si scrive due volte.** Il rimedio nomina i tre
+  progetti nel preflight, e questo crea subito una seconda copia di una verità che sta nel Makefile.
+  La copia è tenuta onesta da una prova, `test_il_preflight_conosce_i_progetti_del_makefile`, che
+  legge i due elenchi dai due file e li confronta. I due lettori sono stati verificati:
+  restituiscono entrambi `['sqlstart-01-standalone', 'sqlstart-02-replicaset',
+  'sqlstart-03-sharded']`, cioè la prova non passa a vuoto su due liste vuote.
+
+- **Riserve:** i due tempi sono una misura sola per caso, su una macchina con rete funzionante: in
+  sala il ramo senza flag durerebbe quanto il timeout del client, non 1,011 s, e quindi la misura
+  qui **sottostima** il danno che descrive. Il conteggio per progetto resta cieco a una porta
+  occupata da un processo che non è un container: quella la vede solo chi prova ad aprirla.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0131
+
+---
+
+<a id="v-101"></a>
+### V-101 — Un valore atteso scritto in un commento non è una verifica, e uno spazio non è una distribuzione
+
+- **Comandi:** i controlli di `reset-demo.sh` staccati dallo script e provati su casi costruiti, più
+  un chunk vuoto spostato davvero su un database usa-e-getta:
+
+```bash
+./tools/prova-c8.sh          # il solo riconoscimento della risposta, su cinque casi
+mongosh --eval 'sh.moveChunk(…)'   # su un database usa-e-getta, non sul lab
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, stack 03 nel profilo **palco**, immagine
+  `mongo:7.0.40`, database usa-e-getta creato e distrutto nella stessa sessione, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** i rilievi C-7 e C-8 dicevano che `reset-demo.sh` stampa esiti che
+  non ha guardato. Sono due forme dello stesso difetto e valevano separate, perché la prima si vede
+  leggendo e la seconda no.
+
+- **Esito, primo punto — le tre pulizie stampavano il verde a comando dato, non a esito visto.** Le
+  collezioni venivano tolte e poi si annunciava che erano state tolte, senza rileggere. Se una
+  `drop` fosse fallita — o se una collezione fosse ricomparsa nel frattempo — lo script lo avrebbe
+  detto verde. Il rimedio rilegge `getCollectionNames()` dopo la rimozione e distingue tre risposte:
+  quelle andate via, `RESIDUI:` con i nomi di quelle rimaste, e la risposta vuota, che è il terzo
+  caso e prima non esisteva: un'interrogazione che non risponde non è una pulizia riuscita.
+
+- **Esito, secondo punto — l'impronta attesa era in un commento.** I 50 000 documenti e la loro
+  somma erano scritti accanto al codice come promemoria per chi legge, e nessuno li confrontava.
+  Ora sono due costanti, `IMPRONTA_50K` e `IMPRONTA_20K`, e il confronto è una funzione che stampa
+  l'atteso e l'ottenuto quando divergono. È la nota di metodo che ne è uscita: **un valore atteso
+  scritto in un commento non è una verifica, è una speranza documentata.**
+
+- **Esito, terzo punto — uno spazio non è una distribuzione, e il caso è stato costruito davvero.**
+  Il controllo che distingue uno sharded cluster da un replica set travestito cercava uno spazio
+  nella risposta. La risposta `shard1rs=0 shard2rs=5` ne ha uno: un chunk vuoto su uno shard e
+  cinque documenti sull'altro passavano per «documenti su entrambi gli shard». Il caso non è stato
+  immaginato: è stato costruito su un database usa-e-getta spostando un chunk vuoto sul secondo
+  shard, e la prima stesura del controllo l'ha dichiarato verde davanti alla misura. Il rimedio
+  conta i token `nome=numero` e chiede due cose insieme: almeno due shard letti, e tutti con
+  documenti.
+
+- **Esito, quarto punto — il riconoscimento provato in isolamento, su cinque casi.** Passa solo
+  `shard1rs=10000 shard2rs=10000`. Sono errori tutti e quattro gli altri: il falso verde originale
+  `shard1rs=0 shard2rs=5`, un solo shard, una risposta vuota, e un testo libero di errore. Provare
+  il riconoscitore staccato dallo script è ciò che ha reso possibile costruire i casi che sullo
+  stack vero non si sanno provocare senza rompere qualcosa.
+
+- **Riserve:** l'impronta è legata al seme dei dati di demo: se cambiano i documenti cambiano le due
+  costanti, e la prova diventa un promemoria da aggiornare — è il costo che si paga per avere un
+  confronto invece di un commento. Il conteggio dei token non verifica che gli shard nominati siano
+  quelli attesi, solo che siano almeno due e tutti popolati; nominare gli shard avrebbe legato lo
+  script al profilo. Il terzo caso, la risposta vuota, è provato in isolamento ma non è mai stato
+  osservato sullo stack vero.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0132
+
+---
+
+<a id="v-102"></a>
+### V-102 — L'eccezione localhost è un fermo di processo, e una sessione che si toglie l'utente non può verificare di averlo tolto
+
+- **Comandi:** tre misure su container usa-e-getta con `--auth` e **zero utenti**, che è la sola
+  condizione in cui l'eccezione localhost è aperta, e che sugli stack del lab non si verifica mai
+  perché l'init crea subito l'amministratore. Nessuna tocca il lab:
+
+```bash
+docker run -d --name c3-porta-aperta mongo@sha256:b6421fd6… --auth --bind_ip_all
+mongosh --host localhost --eval 'createUser → auth → dropUser → verifica'
+docker restart c3-latch      # e la stessa sonda, prima e dopo
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, immagine `mongo:7.0.40` fissata per digest,
+  container `c3-porta-aperta`, `c3-diagnosi`, `c3-latch`, `c3-finale`, tutti rimossi a fine misura,
+  6 settembre 2026.
+
+- **Che cosa si voleva sapere:** il rilievo C-3 diceva che la sonda dell'eccezione localhost in
+  `smoke-sharded.sh` può lasciare sullo shard un amministratore che non doveva esistere. Il rilievo
+  era giusto. La causa che proponeva — che `dropUser` potesse fallire — si è rivelata sbagliata, e
+  la causa cambia il rimedio.
+
+- **Esito, primo punto — l'utente viene rimosso, e la prima verifica lo negava.** La prima stesura
+  del rimedio verificava la rimozione con `admin.system.users.countDocuments(...)` subito dopo il
+  `dropUser`, nella stessa sessione. Misurato: `CREATO-VERIFICA-FALLITA: Unauthorized`. La prima
+  lettura — «il drop è fallito» — era **sbagliata**. La diagnosi passo per passo dice
+  `5 dropUser: OK` e mette il rosso solo sui passi successivi: togliendo l'utente con cui ci si è
+  autenticati si perdono nello stesso istante i privilegi per guardare se è andato via, e sia
+  `getUsers` sia `system.users` rispondono `Unauthorized`.
+
+- **Esito, secondo punto — la prova che una credenziale non c'è più è che non apre più.** Una
+  connessione nuova con la credenziale usa-e-getta risponde `MongoServerError: Authentication
+  failed.` — ed è l'unica verifica possibile, perché è l'unica che non ha privilegi da perdere. Per
+  fortuna è anche la più diretta: non chiede se il documento c'è, chiede se la porta si apre.
+
+- **Esito, terzo punto — anche il secondo controllo era invalido, e l'ha detto la misura.** Per
+  confermare la rimozione avevo rilanciato la sonda: «se il primo utente è sparito, la porta deve
+  essere di nuovo aperta». Non misura l'esistenza dell'utente. Costruito il caso apposta — creare
+  l'unico utente e toglierlo, poi chiedere — la risposta è `Unauthorized — eccezione CHIUSA` con
+  **zero utenti** nell'istanza. Dopo `docker restart`, la stessa domanda risponde
+  `CREATO — eccezione APERTA`. L'eccezione localhost è un **fermo di processo**: si chiude alla
+  creazione del primo utente e resta chiusa per la vita di quel `mongod`, indipendentemente da
+  quanti utenti restino.
+
+- **Esito, quarto punto — che cosa cambia per chi opera.** Un nodo che perde tutti i suoi
+  amministratori non è «aperto»: continua a rifiutare finché è acceso, e si riapre al riavvio. È il
+  contrario dell'intuizione, ed è la ragione per cui la nota della sonda dice di rimuovere a mano un
+  residuo **prima** del riavvio del nodo, non dopo.
+
+- **Esito, quinto punto — la forma finale provata sui due casi per cui esiste.** Porta aperta, su
+  container usa-e-getta: `TOLTO`, seguito da «la sua credenziale non apre più». Porta chiusa, sul
+  nodo vero `sh-shard1a`: `Unauthorized`, e **niente creato**. `make smoke-03` intero riporta le due
+  righe della sonda verdi.
+
+- **Riserve:** la password usa-e-getta transita nell'argv del client `docker` sull'host, che
+  [ADR-0054](Decision.md#adr-0054) tiene lontano dalla credenziale vera; è ammesso qui perché è
+  casuale, vive qualche millisecondo e appartiene a un utente che lo stesso comando cancella — ma
+  resta una deroga, non un modello da copiare. Il fermo di processo è misurato su MongoDB 7.0.40:
+  non è stato cercato nella documentazione se sia garantito o incidentale, e su un'altra versione
+  andrebbe rimisurato. Il ramo `NON-TOLTO` non è mai stato osservato: è provato per costruzione del
+  codice, non per esperimento.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0133
+
+---
+
+<a id="v-103"></a>
+### V-103 — Un file che sembra una registrazione e non lo è
+
+- **Comandi:** due copioni che sbagliano la riga di regia, provati contro la versione corretta e
+  contro la copia pre-rimedio presa da `HEAD`:
+
+```bash
+# riga con le virgolette aperte:      /bin/echo "non chiusa
+# riga che nomina un comando assente: /bin/comando-che-non-esiste
+uv run --directory tools pytest tools/tests/test_registra_terminale.py -q
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Python 3.13.15 di `uv`, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** il rilievo C-10 diceva che `registra-terminale.py` non gestisce una
+  riga di regia inanalizzabile. Restava da misurare che cosa succede davvero, perché la differenza
+  tra «esce con un errore brutto» e «lascia sul disco un file che mente» è tutta la differenza.
+
+- **Esito, primo punto — prima del rimedio, tre cose insieme.** Contro la copia di `HEAD`: uscita
+  **1**, un `Traceback` intero fino a `FileNotFoundError`, e sul disco un `.cast` di **192 byte**
+  che contiene la riga di regia e nessun marcatore. Il terzo è il danno vero: un file che ha
+  l'estensione giusta, l'intestazione giusta e nessun contenuto, e che chi lo trova più tardi non ha
+  modo di distinguere da una registrazione riuscita se non aprendolo.
+
+- **Esito, secondo punto — dopo il rimedio, le due scene escono 125.** Entrambi i casi escono
+  **125**, con il nome dell'eccezione nel messaggio (`ValueError`, `FileNotFoundError`) e **nessun**
+  traceback. Nel `.cast` la parola «ripartito» compare **zero** volte: la scena non riparte su un
+  comando che non è mai stato eseguito. Nessun processo resta appeso.
+
+- **Esito, terzo punto — 125 non è forma.** È il solo codice che distingue «è fallita la regia» da
+  «è fallito il comando registrato». Chi registra le scene ha bisogno della differenza, perché la
+  prima si ripara nel copione e la seconda no. Senza il rimedio l'eccezione saliva fino in cima e il
+  processo usciva **1**, cioè il codice che un comando registrato usa per dire di essere
+  andato male.
+
+- **Esito, quarto punto — il percorso buono non è cambiato.** Un copione che funziona esce **0** e
+  la scena riparte come prima. La suite di `tools` passa da 181 a **183** prove.
+
+- **Riserve:** il `.cast` continua a essere scritto anche quando la regia fallisce, ed è una scelta
+  — vedi [ADR-0132](Decision.md#adr-0132). Le due prove verificano il codice di uscita, l'assenza di
+  traceback e il contenuto del `.cast`, non il messaggio parola per parola: cambiare la formulazione
+  non le fa cadere, ed è voluto. Non sono stati cercati altri modi di far fallire `shlex.split` o
+  `subprocess.run` oltre a questi due: sono i due che `OSError` e `ValueError` coprono per
+  categoria, non per elenco.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0132
+
+---
+
+<a id="v-104"></a>
+### V-104 — La convenzione di questo repository, ricavata dai suoi 164 commit invece che dichiarata
+
+- **Comandi:** la storia interrogata, non la memoria:
+
+```bash
+git log --format=%s          # i 164 soggetti, poi contati per tipo, scope, maiuscola, lunghezza
+git log --merges --format='%h %s'
+git branch -a --format='%(refname:short)'
+git log --oneline -3 main
+```
+
+- **Ambiente:** `release/1.0` del repository al 6 settembre 2026, 164 commit dall'inizio.
+
+- **Che cosa si voleva sapere:** [ADR-0123](Decision.md#adr-0123) dichiara che questo repository non
+  ha una scheda che fissi il proprio modello dei rami, la strategia di merge o lo standard dei
+  messaggi di commit. Sei rilievi della review generale — C-1, C-2, G-1, G-5, G-6, G-7 — chiedono
+  cose diverse che poggiano tutte su quella sede mancante. Prima di scriverla bisognava sapere che
+  cosa il repository **fa già**, perché una convenzione dichiarata che contraddice
+  centosessantaquattro commit non è una convenzione: è un secondo problema.
+
+- **Esito, primo punto — cinque tipi, e la distribuzione dice a che cosa serve il repository.**
+  `docs` 77, `feat` 52, `fix` 22, `test` 5, `chore` 3. Centocinquantanove commit su 164 hanno la
+  forma `tipo: soggetto`; i cinque che non ce l'hanno sono i quattro merge di PR e il commit
+  iniziale. Che `docs` sia il tipo più frequente non è un'anomalia da correggere: questo è il
+  repository di un talk, e il materiale didattico è il prodotto quanto il codice.
+
+- **Esito, secondo punto — lo scope non si usa. Zero volte su 159.** Non «raramente», non «solo dove
+  serve»: mai. La parentesi di Conventional Commits non compare in nessun soggetto della storia.
+
+- **Esito, terzo punto — il soggetto è minuscolo, tranne quando comincia con qualcosa che si scrive
+  maiuscolo.** Ventinove soggetti su 159 cominciano con una maiuscola, e non sono eccezioni sparse:
+  tredici aprono con un identificatore del repository (`ADR-0123`, `V-090`, `PR`, `README`), sedici
+  con il designatore di un compito di piano (`Task 8 — le due morti di un primario…`). Nessuno dei
+  159 comincia con una parola comune maiuscola. La regola vera non è «minuscolo»: è «minuscolo,
+  e gli identificatori tengono le loro maiuscole».
+
+- **Esito, quarto punto — il soggetto non sta in 72 colonne, e nemmeno ci prova.** Cinquantaquattro
+  soggetti su 164 superano le 72 colonne, il più lungo ne ha **100**. Il limite di fatto è 100, lo
+  stesso del corpo dei documenti. Scrivere 72 in una scheda vorrebbe dire dichiarare fuori norma un
+  terzo della storia.
+
+- **Esito, quinto punto — quattro merge, tutti da PR, tutti in `develop`.** Le uniche fusioni della
+  storia sono `Merge pull request #2…#5`, una per feature, ciascuna con il nome del ramo d'origine
+  nel soggetto: `feature/01-stack-standalone`, `feature/02-stack-replicaset`,
+  `feature/03-stack-sharded`, `feature/04-app-python`. Nessun rebase sopra `develop`, nessuna
+  fusione fast-forward, nessun ramo chiuso fuori da una PR.
+
+- **Esito, sesto punto — `main` è fermo al commit iniziale.** Non è dimenticanza: è il modello. Il
+  lavoro vive su `develop`, i rami di feature entrano lì, e `main` riceve solo la release. Al 6
+  settembre 2026 `main` ha un commit solo, `1523ebf Initial commit`, e i rami che esistono sono
+  `main`, `develop`, `release/1.0`.
+
+- **Riserve:** questa è la convenzione **osservata**, non una che qualcuno abbia scelto in
+  anticipo — e la differenza conta, perché una regolarità può essere un'abitudine di chi ha scritto
+  finora invece di una decisione. Scriverla in una scheda la trasforma nella seconda, ed è
+  esattamente lo scopo. I quattro merge sono pochi per chiamarla strategia provata: dicono che
+  finora non se n'è usata un'altra, non che un'altra sia stata scartata. Il conteggio dei tipi vale
+  per la storia fino a qui: `refactor`, `style`, `perf`, `ci` e `build` non compaiono, ma non per un
+  divieto — semplicemente non è ancora capitato di averne bisogno.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0134
+
+---
+
+<a id="v-105"></a>
+### V-105 — La cronologia di `release/1.0` riscritta: gli invarianti che tengono, e le due righe che due passate di redazione non avevano visto
+
+- **Comandi:** la misura dell'esposizione, la riscrittura in un clone di lavoro, e gli invarianti
+  dopo. Il nome cercato è scritto col segnaposto di [V-094](#v-094): metterlo per esteso qui
+  rimetterebbe nel repository proprio ciò che questa verifica racconta di aver tolto.
+
+```bash
+git log --format=%B                                          # 5 messaggi, per 14 righe
+git log -p -U0 | grep -ci <nome del repository d'origine>    # 8 commit col diff sporco
+git grep -c -i <nome del repository d'origine> release/1.0   # e 2 nell'albero di oggi
+git show --numstat --format= <il commit della redazione>     # 28 file, +146/-138: pura redazione
+
+git clone --no-local .claude/worktrees/release-1.0 ../SqlStart2026-riscrittura
+git-filter-repo --refs 5ce4e5b..release/1.0 --prune-empty never \
+    --prune-degenerate never --blob-callback "$CB_BLOB" --commit-callback "$CB_COMMIT"
+
+git diff --numstat <vecchio>^ <vecchio>      # 23 volte, contro il gemello riscritto
+git merge-base --is-ancestor develop release/1.0
+uv run --directory app pytest -q && uv run --directory tools pytest -q && make docs-check
+```
+
+- **Ambiente:** portatile Apple Silicon, macOS 26.6, 7 settembre 2026. `git` di sistema e
+  `git-filter-repo` da Homebrew. Il lavoro si è svolto **in un clone**, mai nel repository:
+  `~/Sviluppo/GITHUB/SqlStart2026-riscrittura`, con i due `.env` raggiunti per collegamento
+  ([ADR-0083](Decision.md#adr-0083)). Repository ancora **privato**. Demone Docker **spento**:
+  le prove d'integrazione non erano misurabili, ed è dichiarato invece che aggirato.
+
+- **Che cosa si voleva sapere:** [ADR-0125](Decision.md#adr-0125) ha ripulito l'albero e ha lasciato
+  la cronologia com'era, dichiarando che riscriverla è una decisione del Product Owner. Il Product
+  Owner l'ha presa. Prima di eseguirla servivano tre risposte: **quanto** nome c'è davvero e dove;
+  **che cosa** deve restare identico perché la riscrittura sia una redazione e non un rifacimento;
+  e **come accorgersi** che qualcosa è cambiato per sbaglio, dato che il confronto ovvio —
+  l'albero finale — è proprio quello che una riscrittura sbagliata può lasciare intatto.
+
+- **Esito, primo punto — l'esposizione, e dov'è confinata.** Cinque messaggi di commit nominano il
+  repository d'origine, per **14 righe**; otto commit hanno il **diff** sporco; tutti stanno fra
+  `3f22d6f` e la scheda che li racconta, dentro `release/1.0`. `develop` e `main` sono puliti, il
+  che è la ragione per cui l'operazione è possibile oggi e non dopo il 16 settembre. Il nome compare
+  in due forme e in due misure diverse: **218 volte** con le maiuscole al loro posto, **6** tutto
+  minuscolo.
+
+- **Esito, secondo punto — la redazione era pura, e il conto lo dimostra.** Il commit che
+  l'applicò — `69321fd` nella storia riscritta, dove ormai è vuoto — toccava 28 file, e in
+  ognuno aggiungeva quasi esattamente quanto toglieva:
+  **+146 / −138**, otto righe di scarto in tutto, che sono i paragrafi allungati dalla perifrasi e
+  riavvolti. Non porta ADR-0125 con sé — quella scheda entra col commit dopo. È questo a rendere
+  lecito applicare la sua redazione **all'indietro**: quel commit non fa altro.
+
+- **Esito, terzo punto — tre regole, e 27 paragrafi presi verbatim.** I 48 blob che portano il nome
+  nella forma esatta si risolvono così: **28** coincidono con la versione pre-redazione, e prendono
+  la post-redazione così com'è; **5** accettano quella toppa per il loro percorso; **15**
+  vanno redatti a mano, per **44 occorrenze**. Dentro questi ultimi, dove il **paragrafo** di
+  partenza è identico a quello che la mano umana aveva davanti, si prende la sua resa letterale, a
+  capo compresi: **27 paragrafi su 40**. Riavvolgerli da capo avrebbe dato le stesse parole spezzate
+  in punti diversi, e ogni differenza di quel genere diventa rumore nel diff dei commit successivi.
+
+- **Esito, quarto punto — un paragrafo che si è mangiato una tabella.** La prima stesura della
+  redazione a mano ha prodotto, in `.claude/skills/workflow-conventions/SKILL.md`, una riga così:
+  `conflitto vince la scheda. | Decisione | Qui è già | Scheda | |---|---|---| | 1. Merge strategy`.
+  Il riavvolgimento aveva schiacciato una tabella dentro il paragrafo che la precede. La causa è di
+  una riga: la guardia che protegge le righe di struttura cercava le tabelle fra quelle che
+  cominciano con `|`, e **dentro un `> [!IMPORTANT]` le righe di tabella cominciano con `> |`**.
+  Nessuna prova l'ha trovato: è saltato fuori **guardando il diff**. Il rimedio ha due metà — la
+  guardia spoglia la riga dei capi di citazione prima di giudicarla, e un controllo nuovo pretende
+  che l'elenco delle righe di struttura sia identico prima e dopo.
+
+- **Esito, quinto punto — la verifica che non poteva vedere il difetto.** Il controllo che
+  confrontava la mia redazione con quella umana lavorava su paragrafi **normalizzati**, e la
+  normalizzazione butta via gli a capo: una tabella inghiottita gli passava davanti senza far
+  rumore. Rifatto anche sul testo letterale, ha subito segnalato **11 paragrafi** con le parole
+  giuste e gli a capo in punti diversi. Non sono stati corretti aggiustando il riavvolgitore, ma
+  togliendogli il lavoro: dove il paragrafo di partenza è identico, si copia la resa umana. Da
+  allora: 0 discordanze di parole, 0 di a capo.
+
+- **Esito, sesto punto — due righe minuscole, e chi ce le ha rimesse.** Le tre regole cercano il
+  nome **con le maiuscole al loro posto**, come faceva la redazione di ADR-0125. Il blocco comandi
+  di [V-094](#v-094) lo scrive **tutto minuscolo**, perché lì è l'argomento di una ricerca che il
+  caso non lo distingue. Nessuna delle due passate l'ha visto, e le due righe sono arrivate
+  **nell'albero di oggi**. L'ordine dei fatti è ciò che vale: la redazione ripulisce il testo, e
+  il commit **immediatamente successivo** — quello che scrive la scheda per raccontare la pulizia —
+  rimette dentro il nome, nel comando che l'aveva cercato. La clausola «84 → 0 nei tracciati» era
+  vera quando è stata misurata e falsa nel momento in cui è stata scritta. Le riserve di V-094 lo
+  avevano perfino previsto: «non trova un nome scritto diversamente». Cinque versioni storiche di
+  `docs/Sources.md` portano quelle righe, per **10 occorrenze**; tre di quelle versioni non erano
+  sporche in nessun altro modo, e nessuna delle tre regole le avrebbe mai toccate. Da qui la quarta
+  regola, e la decisione che ogni controllo di questa faccenda si faccia **senza guardare il caso**.
+
+- **Esito, settimo punto — le firme, e perché il taglio è parziale.** La riscrittura **non conserva
+  le firme GPG**. Il commit iniziale di `main` e il merge di testa di `develop` sono firmati
+  dall'interfaccia web di GitHub. Riscrivere tutta la storia le avrebbe tolte in silenzio, e avrebbe
+  cambiato l'SHA di `develop`, che smetterebbe di essere antenato: la fusione del 16 duplicherebbe
+  la storia invece di unirla. La base del taglio è quindi `5ce4e5b`, e i commit riscritti sono
+  **23 su 172**.
+
+- **Esito, ottavo punto — il conto che chiude, commit per commit.** Confrontare solo l'albero finale
+  non basta: un albero giusto raggiunto da diff sbagliati resta sbagliato per chi legge la storia.
+  Il confronto vero è il **diffstat di ogni commit, prima contro dopo**: file, righe aggiunte,
+  righe tolte, insieme dei percorsi. Su 23 commit ne differiscono **4**, e le differenze si sommano
+  esattamente alle otto righe che la perifrasi aggiunge: **+6** su `3f22d6f` (le sei skill),
+  **+1** su `e7fb19d`, **+1** su `72cd01b`, e la redazione che passa da 28 file a **zero**. È questo
+  controllo, e non il confronto degli alberi, ad aver scoperto il difetto del quarto punto: il
+  diffstat di `71f4e00` era passato da un uniforme +9/−1 su 12 file a +35/−22.
+
+- **Esito, nono punto — gli invarianti, misurati sull'esito.** L'albero del tip è identico
+  all'originale **tranne le due righe del sesto punto** — un file, due righe, ed è la correzione,
+  non un effetto collaterale. Sui rami locali: **982 blob distinti, 0 sporchi**; **172 commit, 0
+  messaggi sporchi**, e stavolta la domanda è posta senza guardare il caso. `develop` è ancora
+  antenato di `release/1.0`; `develop` resta a `b854e5f7db3c` e `main` a `1523ebfed54e`. I due
+  soggetti riscritti restano dentro le colonne d'uso: 90 e 57.
+
+- **Esito, decimo punto — le citazioni di SHA, e la trappola dei due per riga.** Ventitré commit
+  hanno un identificatore nuovo, e **13 siti in 5 file** li citavano. Due righe di
+  `docs/Decision.md` portano lo stesso SHA **due volte**: una dentro i backtick e una dentro l'URL
+  di GitHub. Una ricerca sulla sola forma con i backtick ne trova 10 e ne ripara metà, lasciando
+  l'altra rotta e l'impressione di aver finito. Riparati tutti, ricontati a **0**. I 22 candidati
+  che la forma pesca e la mappa non conosce sono estranei: 18 sono sole cifre — codici di log di
+  MongoDB, conteggi di byte, la data del talk — e 4 sono identificatori altrui, fra cui un commit
+  di `mongodb/mongo` e l'identificatore di un'immagine Docker.
+
+- **Esito, undicesimo punto — le suite.** `649/650` prove unitarie, `183/183` sugli strumenti,
+  `mypy` pulito su 67 sorgenti, `make docs-check` verde. L'unica rossa è
+  `test_un_nodo_scritto_a_mano_che_non_esiste_si_ferma_prima_del_carico`, e **fallisce allo stesso
+  modo nel worktree originale**: con il demone Docker spento lo stack `02` non è in piedi, l'elenco
+  dei nodi è vuoto, e Click emette l'errore d'uso prima che il messaggio dell'applicazione possa
+  nominare `mongo-rs-9`. È ambientale, non una regressione della riscrittura.
+
+- **Esito, dodicesimo punto — pubblicata, e che cosa resta sui server di GitHub.** Il Product Owner
+  ha eseguito la push il 7 settembre: `release/1.0` remota a `7916b29`, `develop` e `main` fermi, il
+  worktree riallineato. Rifatte sulla storia pubblicata, le misure tengono: **990 blob distinti e 0
+  sporchi, 174 commit e 0 messaggi sporchi**, sempre senza guardare il caso. Ma il force-push **non
+  cancella**: rende gli oggetti irraggiungibili dai rami, e GitHub continua a servirli per SHA
+  finché non passa la garbage collection — anche col prefisso di sette, verificato chiedendoli. Il
+  feed degli eventi del repository espone **10** SHA di `release/1.0`, **7** dei quali nessun ramo
+  raggiunge più; tutti e sette rispondono ancora, e **due portano il nome**: 3 occorrenze nel
+  messaggio e 21 nel diff restituito per uno, 3 e 4 per l'altro. E da un orfano si cammina ai
+  genitori: quei sette sono porte, non l'inventario di ciò che c'è dietro.
+
+- **Esito, tredicesimo punto — le schede che spiegano la redazione stavano pubblicando le chiavi.**
+  [ADR-0137](Decision.md#adr-0137), questa scheda e le citazioni nominavano cinque commit con l'SHA
+  che avevano **prima** della riscrittura, in **15 punti**. Sono due difetti nello stesso posto:
+  citazioni rotte, perché quei commit nella storia pubblicata non esistono più; e chiavi
+  funzionanti verso la storia non redatta, perché a GitHub il prefisso di sette basta. Riparati a
+  **0**. La regola che li ripara non è una sola: dove il riferimento serve a identificare un commit
+  si scrive l'SHA nuovo, che è anche l'unico vero; dove la frase descrive com'era il commit *prima*
+  della riscrittura si nomina la cosa invece del commit, perché un SHA nuovo lì direbbe il falso —
+  quel commit, oggi, è vuoto.
+
+- **Riserve:** le prove d'integrazione **non sono state misurate**, perché avrebbero richiesto di
+  accendere gli stack, e lo stack `01` non va ripulito ([V-090](#v-090)) né lo `03` azzerato. Finché
+  restano non misurate, l'invariante «le suite verdi» vale per due terzi. Il censimento è
+  **testuale** come quello di V-094, e la lezione del sesto punto è che «testuale» ha più modi di
+  fallire di quanti se ne prevedano: adesso guarda anche il minuscolo, ma non troverebbe il nome
+  spezzato da un a capo dentro una parola, né un'allusione che non nomina. In modalità parziale i
+  riferimenti `origin/*` del clone puntano ancora alla storia vecchia, quindi gli oggetti vecchi
+  esistono ancora e chiedere «esiste?» risponde di sì anche per uno SHA che nessun ramo raggiunge
+  più: la domanda giusta è «è raggiungibile?», ed è quella che le misure qui sopra pongono — ma la
+  risposta di GitHub non coincide con quella di `git`, ed è il dodicesimo punto. Che cosa farne è
+  stato deciso lo stesso giorno, due volte: [ADR-0138](Decision.md#adr-0138) chiedeva la garbage
+  collection all'assistenza, [ADR-0139](Decision.md#adr-0139) l'ha ritirata perché il requisito era
+  «non visibile», non «non recuperabile». Resta quindi vero, e per scelta, che la redazione è
+  completa nella storia che si clona e aggirabile da chi conosce quaranta caratteri, o sette — che
+  però il repository non scrive più da nessuna parte, ed è la condizione che rende la scelta
+  sostenibile. Questa scheda misura; che cosa farne dei numeri è una decisione, e sta altrove.
+
+- **Data:** 2026-09-07
+- **Usata da:** ADR-0137, ADR-0138, ADR-0139
+
+---
+
+<a id="s-078"></a>
+### S-078 — GitHub Docs: Removing sensitive data from a repository
+
+- **URL:** https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository
+- **Editore:** GitHub, Inc. — GitHub Docs
+- **Versione documentata:** free-pro-team / GitHub Enterprise Cloud (corrente)
+- **Consultata:** 2026-09-07
+- **Verdetto:** conferma il meccanismo su cui si appoggia [ADR-0138](Decision.md#adr-0138), e vi
+  aggiunge una condizione che questo caso potrebbe non soddisfare
+- **Perché è stata cercata.** Dopo il force-push del 7 settembre gli oggetti orfani erano ancora
+  serviti per SHA ([V-105](#v-105), dodicesimo punto). La strada scelta — chiedere all'assistenza
+  la garbage collection — poggiava su una convinzione diffusa e mai verificata da questo
+  repository. Andava letta la pagina, non ricordata.
+- **Cosa afferma, primo punto — riscrivere e spingere non basta, e la pagina lo dice per prima
+  cosa.** «If you only rewrite your history and force push it, the commits with sensitive data may
+  still be accessible elsewhere:» e ne elenca tre: «In any clones or forks of your repository»,
+  «Directly via their SHA-1 hashes in cached views on GitHub», «Through any pull requests that
+  reference them». È la conferma indipendente della misura del dodicesimo punto di V-105.
+- **Cosa afferma, secondo punto — che cosa fa l'assistenza, e a quali condizioni.** «If you have
+  successfully cleaned up all references other than PRs, and no forks have references to the
+  sensitive data, Support will then:» — «Dereference or delete any affected PRs on GitHub.», «Run a
+  garbage collection on the server to expunge the sensitive data from storage.», «Remove cached
+  views.» Le due precondizioni qui sono soddisfatte: **0 fork** e **0 PR coinvolte** (i cinque
+  `refs/pull/*/head` sono tutti antenati di `develop`, e i commit riscritti stanno tutti dopo).
+- **Cosa afferma, terzo punto — la condizione che può fermare tutto.** «GitHub Support won't remove
+  non-sensitive data, and will only assist in the removal of sensitive data in cases where we
+  determine that the risk can't be mitigated by rotating affected credentials.» La frase compare
+  **due volte** nella pagina, e non è una postilla: è il criterio con cui l'assistenza decide se
+  aiutare. Chi giudica è GitHub, non chi chiede.
+- **Cosa afferma, quarto punto — che cosa chiede il ticket.** «The owner and repository name in
+  question» e «The number of affected pull requests, found in the previous step. This is used by
+  Support to verify you understand how much will be affected.» Nessuno dei due campi chiede di
+  scrivere il dato da rimuovere.
+- **Riserve:** la pagina è scritta per le **credenziali** — la sua prima raccomandazione è
+  revocarle e ruotarle, e il criterio del terzo punto presuppone che il dato sia ruotabile. Il dato
+  di questo caso è il nome di un altro repository: non è una credenziale, e non si ruota. Può
+  quindi cadere fuori dal criterio da entrambi i lati, ed è il rischio che
+  [ADR-0138](Decision.md#adr-0138) assume esplicitamente. Le citazioni qui sopra vengono dal
+  **sorgente Markdown** della pagina (`github/docs`, `main`), non dalla resa HTML: la lettura
+  mediata restituiva un testo mutilo delle
+  parole funzione, che non si può citare. I segnaposto Liquid del sorgente — `{% raw %}{% data
+  variables.product.github %}{% endraw %}` — sono stati risolti in «GitHub».
+- **Data:** 2026-09-07
+- **Usata da:** ADR-0138, ADR-0139
+
+---
+
+<a id="v-106"></a>
+### V-106 — Registrare lo schermo di questo portatile: i dispositivi, le opzioni che il dispositivo accetta davvero, e un guasto che non c'era
+
+- **Comandi:** l'enumerazione dei dispositivi, sei acquisizioni brevi con opzioni diverse, e la
+  rilettura di ciò che ne è uscito.
+
+```bash
+ffmpeg -f avfoundation -list_devices true -i ""
+ffmpeg -f avfoundation -pixel_format uyvy422 -capture_cursor 1 -i "3:0" -t 3 \
+  -c:v h264_videotoolbox -b:v 6M -pix_fmt yuv420p -color_range mpeg -c:a aac -b:a 128k prova.mp4
+ffprobe -show_entries format=duration,size -show_entries stream=codec_type,nb_frames prova.mp4
+ffmpeg -i prova.mp4 -af volumedetect -f null -
+```
+
+- **Ambiente:** MacBook Pro Apple Silicon, macOS 26.6.2, 7 settembre 2026. `ffmpeg` e `ffprobe`
+  6.x da Homebrew (`/opt/homebrew/bin`), terminale iTerm, schermo interno. Demone Docker spento:
+  nessuno stack era acceso, e le acquisizioni hanno ripreso una finestra di terminale qualunque.
+- **Che cosa si voleva sapere:** la procedura dei filmati diceva «si registra lo schermo» e non
+  diceva con che cosa ([ADR-0016](Decision.md#adr-0016) chiede i `.mp4`,
+  [`preflight.sh`](../tools/preflight.sh) già li conta, e la cartella era vuota). Prima di
+  scrivere uno strumento servivano quattro risposte: quali dispositivi ci sono e come si nominano;
+  quali opzioni AVFoundation accetta davvero; quanto costa registrare mentre una scena misura sé
+  stessa; e come accorgersi che il microfono non ha inciso.
+
+- **Esito, primo punto — gli indici esistono, e si spostano.** `-list_devices true` elenca oggi
+  quattro ingressi video — `[0]` FaceTime HD Camera, `[1]` OBS Virtual Camera, `[2]` OBSBOT
+  Virtual Camera, `[3]` Capture screen 0 — e due audio: `[0]` MacBook Pro Microphone, `[1]`
+  Microsoft Teams Audio. L'indice dello schermo è `3` **su questa macchina oggi**: l'ordine è
+  quello di scoperta, e installare o togliere un'applicazione che espone una fotocamera virtuale
+  lo cambia. Uno strumento che scrivesse `3` nel comando un giorno registrerebbe la webcam del
+  relatore invece dello schermo, e lo scoprirebbe riguardando il filmato.
+
+- **Esito, secondo punto — i permessi sono un costo di prima corsa, e uno riavvia il terminale.**
+  Il primo tentativo di acquisizione **non è terminato**: è rimasto appeso oltre novanta secondi
+  in attesa della finestra di dialogo TCC, e i due processi sono stati uccisi a mano. Concedere
+  «Registrazione schermo» sblocca il video; concedere «Microfono» **ha fatto ripartire iTerm**,
+  riferito dall'operatore. Non è un difetto dello strumento e non si può eliminare: si può solo
+  pagare in anticipo. È la ragione per cui la pagina delle registrazioni lo dice in un riquadro.
+
+- **Esito, terzo punto — il formato d'ingresso si dichiara, o si ricevono cinque righe.** Lo
+  schermo offre `uyvy422, yuyv422, nv12, 0rgb, bgr0`. Senza `-pixel_format` prima di `-i`, ffmpeg
+  chiede `yuv420p` — che è il formato d'**uscita** — e stampa a ogni corsa cinque righe che
+  elencano i formati e annunciano `Overriding selected pixel format to use uyvy422 instead`, per
+  poi produrre lo stesso file. Il comportamento è quello documentato in [S-079](#s-079); la
+  scelta di dichiararlo è per chi legge l'output, non per il file.
+
+- **Esito, quarto punto — `-framerate 30` è inerte, e la sua assenza non cambia niente.** Con e
+  senza, `-t 3` produce **2,966667** e **2,966668** secondi, 87 e 88 fotogrammi, e in tutti e due
+  i casi `r_frame_rate=30/1`. AVFoundation lo dichiara da sé nella riga
+  `Configuration of video device failed, falling back to default.`, che compare **anche senza
+  nessuna opzione d'ingresso** — provato. Da notare che il predefinito documentato di `-framerate`
+  è `ntsc`, cioè 30000/1001 ([S-079](#s-079)): chiedere «30» e ottenere 30/1 non è l'opzione
+  che funziona, è il dispositivo che ignora la richiesta e impone la propria cadenza.
+
+- **Esito, quinto punto — il guasto che non c'era, ed è il risultato più utile della sessione.**
+  Lo strumento annunciava **1,0 s** per una registrazione da 2 e **2,0 s** per una da 3, e la
+  prima spiegazione plausibile era che `-framerate 30` falsasse i tempi. Non era così: `ffprobe`
+  sul file diceva `duration=2.966668` e `nb_frames=88`. Il file era giusto; sbagliato era il
+  numero che lo raccontava. `ffprobe` scrive la durata **col punto**, sempre, perché è un formato
+  dati; `awk` con `LC_NUMERIC=it_IT.UTF-8` legge quel punto come fine del numero e ne ricava `2`.
+  Misurato in isolamento: `echo 2.966668 | awk '{printf "%.1f", $1}'` dà **2,0** in locale
+  italiana e **3.0** con `LC_ALL=C`. La correzione è leggere alla maniera dei dati e scrivere alla
+  maniera di chi legge, che sono due cose diverse. Controllato per la stessa causa anche
+  [`preflight.sh`](../tools/preflight.sh), che formatta la memoria della VM: lì il valore in
+  ingresso è un intero puro e le soglie confrontano interi, quindi il punto decimale non compare
+  mai e il difetto non si presenta.
+
+- **Esito, sesto punto — quanto costa comprimere, e perché si sceglie il chip.**
+  `libx264 -crf 23` produce circa **107 KB/s** e `h264_videotoolbox -b:v 6M` circa **920 KB/s**
+  alla stessa scena e alla stessa risoluzione, cioè un filmato di quattro minuti da ~25 MB contro
+  uno da ~220 MB. Il fattore otto va a favore del software, e la scelta è comunque l'hardware: le
+  scene di questo talk **si misurano mentre si girano** — un failover dichiara la propria
+  interruzione in millisecondi — e un encoder software che occupa i core durante la ripresa falsa
+  il numero che la scena esiste per mostrare. Duecento megabyte su un disco costano meno di una
+  cifra sbagliata su uno schermo. Resta comunque vero che **i tempi di un filmato non sono la
+  misura**: le mediane stanno in [V-029](#v-029) e [V-031](#v-031), e un filmato le illustra.
+
+- **Esito, settimo punto — che il microfono abbia inciso si verifica, non si spera.** Con la voce:
+  una traccia `aac`, 48 000 Hz, mono; `volumedetect` dà **mean −49,5 dB / max −35,7 dB** su una
+  stanza silenziosa e **mean −46,2 dB / max −27,6 dB** su una in cui si parlava. Il silenzio
+  digitale sarebbe −91 dB: fra «ha inciso l'ambiente» e «non ha inciso niente» la differenza si
+  legge a colpo d'occhio. Con `AUDIO=no`: `ffprobe -select_streams a` non restituisce **nessuna**
+  traccia. Sono i due esiti che lo strumento controlla da sé alla fine di ogni corsa, e su cui
+  esce con errore se non corrispondono a quello che gli era stato chiesto.
+
+- **Riserve:** tutto questo è misurato su **una** macchina, e gli indici dei dispositivi sono la
+  parte che scade per prima — è il motivo per cui lo strumento li cerca a ogni corsa invece di
+  ricordarli. Le acquisizioni sono di due o tre secondi: dicono che il meccanismo funziona, non
+  come si comporta su una ripresa di quattro minuti, che nessuno ha ancora girato. Il costo dei
+  permessi è stato osservato una volta sola, e per costruzione non è ripetibile.
+- **Data:** 2026-09-07
+- **Usata da:** ADR-0140
+
+---
+
+<a id="s-079"></a>
+### S-079 — FFmpeg Devices Documentation: il dispositivo d'ingresso AVFoundation
+
+- **URL:** https://ffmpeg.org/ffmpeg-devices.html
+- **Editore:** FFmpeg Project
+- **Versione documentata:** documentazione corrente del ramo `master`
+- **Consultata:** 2026-09-07
+- **Verdetto:** conferma parziale — descrive le opzioni usate dallo strumento e il modo di
+  nominare i dispositivi, ma non copre la cattura dello schermo né l'ordine degli argomenti
+- **Perché è stata cercata.** Lo strumento di registrazione mette nel comando cinque opzioni
+  d'ingresso, e ognuna andava sostenuta da qualcosa di più della corsa che l'aveva vista
+  funzionare ([V-106](#v-106)).
+- **Cosa afferma, primo punto — i dispositivi si nominano per nome o per indice.** «All available
+  devices can be enumerated using `-list_devices true`, listing all device names and
+  corresponding indices», e uno stream «can be specified by device name or device index shown by
+  the device list». La sintassi del nome di ingresso è `-i "[[VIDEO]:[AUDIO]]"`, dove «the first
+  entry selects the video input while the latter selects the audio input».
+- **Cosa afferma, secondo punto — `-pixel_format` è una richiesta, non un obbligo.** L'opzione
+  «Request the video device to use a specific pixel format», e se «the specified format is not
+  supported, a list of available formats is given and the first one in this list is used
+  instead». È esattamente il comportamento osservato: cinque righe di elenco e un
+  `Overriding selected pixel format to use uyvy422 instead`.
+- **Cosa afferma, terzo punto — i due predefiniti che vanno cambiati o conosciuti.**
+  `-capture_cursor`: «Capture the mouse pointer. Default is 0» — il puntatore va quindi chiesto,
+  e per una registrazione didattica serve. `-framerate`: «Set the grabbing frame rate. Default is
+  `ntsc`, corresponding to a frame rate of `30000/1001`» — cioè il predefinito **non** è 30, e
+  ottenere `30/1` senza chiederlo è il segno che a decidere è stato il dispositivo.
+- **Riserve, due, e contano.** *Primo:* la pagina **non enuncia** la regola per cui le opzioni
+  d'ingresso devono precedere `-i`; la mostra in ogni esempio senza dichiararla, e la regola vera
+  appartiene alla sintassi generale di `ffmpeg`, dove ogni opzione si applica al file che segue.
+  Lo strumento la rispetta, ma questa pagina non è la fonte che la stabilisce. *Secondo:* la
+  sezione **non nomina la cattura dello schermo**: «Capture screen 0» non compare, e che il
+  dispositivo dello schermo si presenti nell'elenco insieme alle fotocamere è un fatto osservato
+  qui ([V-106](#v-106)), non documentato lì. Anche la resa in testo della pagina è risultata
+  mutila in alcune righe d'esempio: le citazioni riportate sopra vengono tutte dalle
+  **descrizioni delle opzioni**, non dagli esempi.
+- **Data:** 2026-09-07
+- **Usata da:** ADR-0140
+
+---
+
+<a id="v-107"></a>
+### V-107 — Fabbricare un filmato da una registrazione di terminale: due modi di uscirne più corti, e nessuno dei due si vede guardando
+
+- **Comandi:** due rese della stessa scena con e senza il limite di inattività, e la rilettura di
+  quello che ne è uscito; poi il montaggio di più scene in un filmato solo, contato contro la somma
+  delle sue parti.
+
+```bash
+agg -q --font-size 14 --fps-cap 10 08-guasto-shard-palco.cast 08-predefinito.gif
+agg -q --font-size 14 --fps-cap 10 --idle-time-limit 3600 08-guasto-shard-palco.cast 08-intero.gif
+ffprobe -v error -show_entries format=duration,size -of csv=p=0:nk=1 08-predefinito.gif
+ffmpeg -y -f concat -safe 0 -i elenco.txt -c copy 05-guasto-shard-nei-due-profili-muto.mp4
+```
+
+- **Ambiente:** MacBook Pro Apple Silicon, macOS 26.6.2, 17 settembre 2026. `agg` 1.9.0 da Homebrew
+  ([S-080](#s-080)), `ffmpeg` e `ffprobe` 6.x, encoder `h264_videotoolbox`. Nessuno stack acceso e
+  nessuno necessario: le quattordici registrazioni erano già in archivio.
+- **Che cosa si voleva sapere:** se i `.cast` archiviati bastassero a produrre i filmati di riserva
+  invece di rigirare le scene dal vivo — e, prima ancora, se il filmato che ne esce racconti la
+  stessa cosa della scena che sostituisce.
+
+- **Esito, primo punto — il predefinito accorcia le attese, e l'attesa è la scena.** `agg` ha un
+  `--idle-time-limit` che vale **5 secondi** se non glielo si dice, e comprime a cinque ogni pausa
+  più lunga. Sulla scena 8, che dura **40,10 s** contati sull'ultimo evento del `.cast`, la resa
+  predefinita dà **21,35 s**: meno della metà. Con `--idle-time-limit 3600` dà **43,09 s**, cioè
+  40,10 più i 3 s di fermo immagine finale che `agg` aggiunge di suo. La resa è esatta al
+  centesimo; è il predefinito a non esserlo per questo uso. Un valore «spento» non è documentato, e
+  alzare il limite a un'ora è il modo di ottenerne l'effetto.
+
+- **Esito, secondo punto — perché quel predefinito è sbagliato proprio qui.** In una registrazione
+  di questo archivio la pausa non è tempo morto: nella scena 8 i quindici secondi prima dell'errore
+  **sono** la risposta alla domanda, ed è la stessa ragione per cui la riproduzione dei `.cast`
+  rispetta i tempi invece di scorrere. Il numero misurato dà a
+  [ADR-0116](Decision.md#adr-0116) una conferma letterale: una riserva che dura la metà della scena
+  che sostituisce non è la riserva di quella scena — qui la metà è 21,35 su 40,10.
+
+- **Esito, terzo punto — il montaggio perde secondi, e lo dice in una riga che scorre via.** Unendo
+  più scene con `ffmpeg -f concat -c copy`, due filmati su tre sono usciti corti: il **05**
+  (scene 8 e 9) ha dato **47,1 s** invece di 52,5, e il **06** (scene 5, 6 e 7) **31,9 s** invece di
+  33,6; il **02**, di due sole scene, era esatto. La causa è a monte: una GIF ha fotogrammi a durata
+  variabile, il `.mp4` che ne nasce eredita timestamp fuori ordine, e il montaggio scarta ciò che
+  non sa incastrare avvisando con `Non-monotonic DTS … This may result in incorrect timestamps`,
+  cioè un avviso fra decine di righe di avanzamento.
+
+- **Esito, quarto punto — la cura è a monte, e recupera anche una cosa che si stava perdendo.**
+  Ricodificando ogni scena a passo costante (`-r 15 -fps_mode cfr`) prima di unirle, tutti e tredici
+  i file coincidono con la somma delle loro scene entro un decimo. In più, il fermo immagine finale
+  **ricompare**: prima della cura la conversione GIF→`.mp4` lo perdeva — la scena 8 usciva 40,1 s
+  invece di 42,1 — perché l'ultimo fotogramma non ha un successore che ne dichiari la durata.
+
+- **Esito, quinto punto — costa poco, ed è questo che cambia la decisione.** Rendere la scena 8 a
+  corpo 28 richiede **0,45 s** e produce una GIF da 354 KB; i tredici filmati completi occupano
+  **48 MB** e si rifanno da capo in meno di un minuto, senza accendere nessuno stack. Rigirare le
+  stesse scene dal vivo costerebbe due stack, uno scambio di `.env` e un pomeriggio, per ottenere
+  comunque una esecuzione diversa da quella misurata.
+
+- **Riserve:** i due guasti sono stati osservati su una macchina, una versione di `agg` e un
+  encoder; il secondo in particolare dipende da come `ffmpeg` scrive i timestamp di un `.mp4` nato
+  da GIF, e una versione diversa potrebbe comportarsi altrimenti — motivo per cui lo strumento
+  **conta** invece di fidarsi della cura. Le durate dei `.cast` sono lette sull'istante dell'ultimo
+  evento, che è la definizione usata anche dal riproduttore: una registrazione che finisse con una
+  pausa senza output risulterebbe più corta di come è stata vissuta. Nessun filmato è stato
+  confrontato fotogramma per fotogramma con la scena originale: si è confrontata la durata, che è
+  ciò che i due guasti alteravano.
+- **Data:** 2026-09-17
+- **Usata da:** ADR-0141
+
+---
+
+<a id="s-080"></a>
+### S-080 — `agg`, il convertitore da asciicast a GIF: il manuale e i suoi predefiniti
+
+- **URL:** https://docs.asciinema.org/manual/agg/
+- **Editore:** asciinema (progetto)
+- **Versione documentata:** `agg` 1.9.0, letta dall'aiuto dell'eseguibile installato
+- **Consultata:** 2026-09-17
+- **Verdetto:** conferma — l'aiuto del programma dichiara i predefiniti che contano, compreso
+  quello che accorcia le scene
+- **Perché è stata cercata.** Cinque dei sei filmati di riserva potevano nascere dalle
+  registrazioni già archiviate invece che da una nuova ripresa, ma solo se la resa rispettava i
+  tempi originali. Prima di produrre qualcosa serviva sapere che cosa il programma fa **quando non
+  gli si dice niente** ([V-107](#v-107)).
+- **Che cos'è.** *asciicast to GIF converter*: legge un file `.cast` — lo stesso formato versione 2
+  che questo repository archivia — e ne disegna una GIF animata. Un solo eseguibile, GPL-3.0-or-later,
+  senza dipendenze di esecuzione; su macOS si installa con `brew install agg` (16,2 MB, 8 file).
+- **Cosa afferma, primo punto — il predefinito che va cambiato.** `--idle-time-limit <SECONDI>`:
+  «Limit idle time to max number of seconds **[default: 5]**». È dichiarato, non nascosto: chi non
+  legge l'aiuto ottiene scene accorciate senza nessun avviso, perché il programma sta facendo
+  esattamente quello che promette.
+- **Cosa afferma, secondo punto — i tempi si compongono, e l'ordine è dichiarato.** Di
+  `--last-frame-duration` l'aiuto precisa: «Times are on the adjusted output timeline, after
+  `--idle-time-limit` and `--speed`». Cioè il fermo immagine finale si somma a una linea del tempo
+  **già** compressa, e non basta guardarne il valore per sapere quanto durerà il filmato.
+- **Cosa afferma, terzo punto — gli altri predefiniti che questo repository sposta o accetta.**
+  `--font-size` vale 16 e qui diventa 28, perché una registrazione a 100 colonne va letta dal fondo
+  di una sala; `--fps-cap` vale 30 e qui diventa 15, perché un terminale non ha niente da mostrare
+  a trenta fotogrammi al secondo; `--speed` vale 1 e resta 1, che è tutto il punto; `--theme`
+  offre tredici temi e qui resta `asciinema`, lo stesso colore delle registrazioni riprodotte.
+- **Riserve:** le affermazioni qui sopra sono lette dall'aiuto dell'eseguibile **installato**, che
+  è la fonte più vicina al comportamento osservato ma non è la pagina del manuale in linea: se le
+  due divergessero, vale quella dell'eseguibile, ed è quella che il repository usa. La pagina in
+  linea documenta il programma in generale e non è stata consultata riga per riga. Non è stato
+  verificato il comportamento su `.cast` di versione 1, che questo archivio non contiene.
+- **Data:** 2026-09-17
+- **Usata da:** ADR-0141
+
+---
+
+<a id="v-108"></a>
+### V-108 — La ripresa della scena 4: la prova era in campo, e insieme a lei tutto il resto dello schermo
+
+- **Comandi:** la rilettura dei tre file usciti dalla ripresa, e l'estrazione di singoli fotogrammi
+  per guardare che cosa ci fosse davvero dentro l'inquadratura.
+
+```bash
+ffprobe -v error -show_entries format=duration,size \
+  -show_entries stream=index,codec_type,width,height,avg_frame_rate,nb_frames \
+  -of default=noprint_wrappers=1 04-avvio-offline-muto.mp4
+ffmpeg -ss 68 -i 04-avvio-offline-muto.mp4 -frames:v 1 -vf "crop=1500:64:1524:0" barra.png
+ffmpeg -ss 49 -i 04-avvio-offline-muto-2.mp4 -frames:v 1 ritagliato.png
+```
+
+- **Ambiente:** MacBook Pro Apple Silicon, macOS 26.6.2, 17 settembre 2026, `ffmpeg` e `ffprobe`
+  6.x. La scena è `make up-02` seguito da `make smoke-02` sul replica set, girata con
+  `make filmato NOME=04-avvio-offline-muto AUDIO=no` con Wi-Fi spento e cavo Ethernet staccato.
+- **Che cosa si voleva sapere:** se la ripresa fosse muta come richiesto, se durasse quanto la
+  scena, e — la domanda che conta — se la **prova** della scena, l'icona del Wi-Fi barrata nella
+  barra dei menu, fosse effettivamente dentro l'inquadratura.
+
+- **Che cosa si è misurato.** Tre file, dalla stessa ripresa:
+
+  | file | inquadratura | durata | tracce audio | byte |
+  |---|---|---|---|---|
+  | `04-avvio-offline-muto.mp4` | schermo intero, 3024×1964, 29,79 fps | 70,53 s | **0** | 52 780 589 |
+  | `04-avvio-offline-muto-2.m4v` | finestra, 1662×1080, 60 fps | 50,62 s | **0** | 43 268 444 |
+  | `04-avvio-offline-muto-2.mp4` | finestra, 1662×1080, 30 fps | 50,63 s | **0** | 4 299 236 |
+
+  I due file `-2` sono il primo, ritagliato sulla finestra del terminale e accorciato di 19,9 s.
+  Nessuno dei tre ha una traccia audio: `AUDIO=no` ha fatto quello che promette.
+
+- **La prova c'è, e sta dove ci si aspettava.** Nel fotogramma a 68 s dello schermo intero, la
+  barra dei menu mostra l'icona del Wi-Fi **barrata**; il terminale, nello stesso fotogramma,
+  chiude con `Superati: 42 · Errori: 0` e con il prompt sul ramo `release/1.0`. La scena riesce, e
+  riesce senza rete: le due cose stanno nella stessa immagine, che è esattamente il motivo per cui
+  questa scena non era fabbricabile da un `.cast` ([ADR-0141](Decision.md#adr-0141)).
+
+- **Nella stessa immagine, però, c'è dell'altro.** Il fotogramma a 5 s dello schermo intero
+  contiene: una sessione di Claude Code aperta con dentro l'elenco dei passi in esecuzione, la
+  barra delle schede del terminale con i nomi di **altri progetti**, e una finestra del Finder con
+  nomi di documenti. Nel ritagliato non c'è niente di tutto questo — e non c'è nemmeno la barra
+  dei menu, perché la barra sta in alto e il ritaglio comincia sotto.
+
+- **Che cosa se ne ricava.** Le due cose si escludono con la geometria, non con la buona volontà:
+  la prova della scena e il materiale da non pubblicare abitano **la stessa striscia di schermo**,
+  quella fuori dalla finestra del terminale. Un ritaglio che salva la privacy toglie la prova; una
+  ripresa che tiene la prova pubblica una scrivania. Se ne esce prima di premere `registra`,
+  preparando lo schermo — non dopo, tagliando. È la misura che sta sotto
+  [ADR-0142](Decision.md#adr-0142).
+
+- **Riserve:** i tre file vengono da **una** ripresa, e i secondi che riportano sono quelli di
+  quella esecuzione, non una mediana su più giri: le misure del replica set stanno in
+  [V-045](#v-045). La lettura dei fotogrammi è visiva — l'icona barrata si riconosce guardandola,
+  non c'è un numero che la certifichi — e l'elenco di ciò che c'era sullo schermo è quello che si
+  vede in due fotogrammi su 2101, non un inventario dell'intera ripresa.
+- **Data:** 2026-09-17
+- **Usata da:** ADR-0142

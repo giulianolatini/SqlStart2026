@@ -1,0 +1,732 @@
+"""Le coerenze fra due file che nessuno dei due può controllare da solo.
+
+Gli altri moduli di prova esercitano uno strumento su dati costruiti apposta, e vanno bene
+così: provano una regola, non il repository. Questo modulo fa l'opposto — legge i file
+**veri** e verifica che due posti diversi continuino a dire la stessa cosa.
+
+Nasce da due debiti segnati in [ADR-0049] e chiusi eseguendo, non ragionando: l'elenco
+delle porte di `tools/preflight.sh` era scritto a mano e slegato dai file Compose, e il
+`Makefile` non sapeva quali profili il file Compose dichiarasse. Nessuno dei due era
+sbagliato il giorno in cui li si è misurati: erano sbagliabili in silenzio, che è la
+proprietà che questi controlli tolgono.
+"""
+
+import ast
+import pathlib
+import re
+
+import pytest
+import yaml
+
+RADICE = pathlib.Path(__file__).resolve().parents[2]
+
+COMPOSE = (
+    RADICE / "docker/01-standalone/compose.yaml",
+    RADICE / "docker/02-replicaset/compose.yaml",
+    RADICE / "docker/03-sharded/compose.yaml",
+)
+
+PREFLIGHT = RADICE / "tools/preflight.sh"
+MAKEFILE = RADICE / "Makefile"
+SCARICA_IMMAGINI = RADICE / "tools/pull-images.sh"
+IMMAGINI_PINNATE = RADICE / "tools/images.env"
+
+# `${NOME:-valore}` e `${NOME:?spiegazione}`. Qui interessa solo la prima forma, perché è
+# quella con cui i file Compose scrivono le porte: il valore predefinito è la porta della
+# mappa del design, e la variabile serve a chi vuole spostarla senza toccare il file.
+INTERPOLAZIONE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::([-?])([^}]*))?\}")
+
+
+def senza_interpolazione(testo):
+    """Sostituisce `${NOME:-valore}` con il suo valore predefinito.
+
+    Non si passa da `docker compose config` apposta: quello richiede i file `.env` che
+    stanno fuori dal repository (ADR-0014), e un controllo che non gira su un clone appena
+    fatto è un controllo che non gira.
+    """
+
+    def sostituisci(trovato):
+        return trovato.group(3) if trovato.group(2) == "-" else ""
+
+    return INTERPOLAZIONE.sub(sostituisci, testo)
+
+
+def porte_pubblicate():
+    """Le porte dell'host che i tre file Compose espongono, con chi le espone.
+
+    Restituisce `{porta: ["stack/servizio", ...]}`: il valore serve a far dire al
+    fallimento **quale** servizio ha portato una porta nuova, che è l'informazione con cui
+    si corregge `preflight.sh` in dieci secondi invece che in dieci minuti.
+    """
+    trovate = {}
+    for percorso in COMPOSE:
+        stack = percorso.parent.name
+        documento = yaml.safe_load(percorso.read_text(encoding="utf-8"))
+        for nome, servizio in (documento.get("services") or {}).items():
+            for voce in servizio.get("ports") or []:
+                if isinstance(voce, dict):
+                    lato_host = str(voce.get("published", ""))
+                else:
+                    pezzi = senza_interpolazione(str(voce)).split(":")
+                    lato_host = pezzi[-2] if len(pezzi) >= 2 else ""
+                if lato_host:
+                    trovate.setdefault(int(lato_host), []).append(f"{stack}/{nome}")
+    return trovate
+
+
+def porte_di_preflight():
+    """L'elenco `PORTE=(...)` di `tools/preflight.sh`, nell'ordine in cui è scritto."""
+    riga = re.search(
+        r"^PORTE=\(([^)]*)\)", PREFLIGHT.read_text(encoding="utf-8"), re.MULTILINE
+    )
+    assert riga, "in tools/preflight.sh non c'è più una riga PORTE=(...)"
+    return [int(porta) for porta in riga.group(1).split()]
+
+
+def test_ogni_porta_pubblicata_dai_compose_e_controllata_da_preflight():
+    # Il verso che conta la mattina del talk. Una porta pubblicata e non controllata è un
+    # `up` che fallisce in sala per un processo che occupava quella porta da ieri sera, e
+    # `preflight` che poco prima aveva detto che era tutto a posto.
+    mancanti = {
+        porta: chi for porta, chi in porte_pubblicate().items()
+        if porta not in set(porte_di_preflight())
+    }
+    assert not mancanti, (
+        "porte pubblicate dai file Compose e non controllate da preflight.sh: "
+        f"{mancanti} — aggiungerle all'elenco PORTE di tools/preflight.sh"
+    )
+
+
+def test_preflight_non_controlla_porte_che_nessuno_pubblica():
+    # Il verso opposto costa meno ma mente lo stesso: una porta rimasta nell'elenco dopo
+    # che il servizio è stato tolto fa fallire il preflight di chi ha quella porta occupata
+    # per motivi suoi, e nessuno riesce a capire quale servizio del lab la vorrebbe.
+    eccedenti = sorted(set(porte_di_preflight()) - set(porte_pubblicate()))
+    assert not eccedenti, (
+        f"porte controllate da preflight.sh che nessun file Compose pubblica: {eccedenti} "
+        "— toglierle dall'elenco PORTE, o è cambiato un file Compose"
+    )
+
+
+def test_l_elenco_delle_porte_e_ordinato_e_senza_ripetizioni():
+    # Non è pedanteria tipografica: quindici numeri su una riga sola si leggono solo se
+    # sono in ordine, e un doppione non dà nessun errore — dà un controllo eseguito due
+    # volte e un altro dimenticato, senza che si veda.
+    elencate = porte_di_preflight()
+    assert elencate == sorted(elencate), "l'elenco PORTE non è in ordine crescente"
+    doppie = sorted({p for p in elencate if elencate.count(p) > 1})
+    assert not doppie, f"porte ripetute nell'elenco PORTE: {doppie}"
+
+
+def bersagli_del_makefile():
+    """`{nome: (prerequisiti, righe della ricetta)}` per i bersagli del Makefile.
+
+    Un parser minimo e volutamente ottuso: una riga che comincia a colonna zero con un
+    nome seguito da `:` apre un bersaglio, le righe che cominciano con una tabulazione ne
+    sono la ricetta. Non gestisce le regole con più bersagli né i nomi calcolati con una
+    variabile, e non deve: qui servono i bersagli scritti a mano.
+    """
+    intestazione = re.compile(r"^([A-Za-z][A-Za-z0-9_.-]*)\s*:(?!=)\s*(.*)$")
+    bersagli = {}
+    corrente = None
+    for riga in MAKEFILE.read_text(encoding="utf-8").splitlines():
+        if riga.startswith("\t"):
+            if corrente:
+                bersagli[corrente][1].append(riga)
+            continue
+        trovato = intestazione.match(riga)
+        if trovato:
+            corrente = trovato.group(1)
+            prerequisiti = trovato.group(2).split("##")[0].split()
+            bersagli[corrente] = (prerequisiti, [])
+        elif riga.strip() and not riga.startswith("#"):
+            corrente = None
+    return bersagli
+
+
+def test_ogni_bersaglio_che_usa_il_profilo_dichiara_il_guardiano():
+    # Compose accetta qualunque stringa dopo `--profile`. Con un refuso seleziona i soli
+    # servizi che non dichiarano `profiles:` — uno — e l'avvio muore accusando il keyfile
+    # di essere uscito 0, senza mai nominare il profilo (V-069). Il guardiano `profilo-03`
+    # trasforma quel messaggio in una frase che dice qual è il problema, ma vale solo per i
+    # bersagli che se lo dichiarano: questo controllo è ciò che rende difficile scordarlo
+    # al prossimo bersaglio.
+    senza_guardiano = sorted(
+        nome
+        for nome, (prerequisiti, ricetta) in bersagli_del_makefile().items()
+        if nome != "profilo-03"
+        and any("$(PROFILO)" in riga for riga in ricetta)
+        and "profilo-03" not in prerequisiti
+    )
+    assert not senza_guardiano, (
+        f"bersagli che usano $(PROFILO) senza dipendere da profilo-03: {senza_guardiano} "
+        "— aggiungere profilo-03 ai loro prerequisiti"
+    )
+
+
+def test_il_guardiano_chiede_i_profili_al_file_compose():
+    # La tentazione, la prossima volta che qualcuno tocca questa riga, è scrivere
+    # `palco|completo` e chiudere la questione. Sarebbe il debito di prima con un nome
+    # nuovo: un terzo profilo nel file Compose resterebbe rifiutato dal Makefile, e il
+    # messaggio d'errore direbbe con sicurezza una cosa falsa.
+    guardiano = bersagli_del_makefile().get("profilo-03")
+    assert guardiano, "il bersaglio profilo-03 non esiste più nel Makefile"
+    ricetta = "\n".join(guardiano[1])
+    assert "config --profiles" in ricetta, (
+        "profilo-03 non chiede più i profili al file Compose con «config --profiles»"
+    )
+    for scritto_a_mano in ("palco", "completo"):
+        assert scritto_a_mano not in ricetta, (
+            f"profilo-03 nomina «{scritto_a_mano}» nella ricetta: l'elenco dei profili "
+            "validi deve venire dal file Compose, non dal Makefile"
+        )
+
+
+@pytest.mark.parametrize("percorso", COMPOSE, ids=lambda p: p.parent.name)
+def test_i_file_compose_letti_dai_controlli_esistono(percorso):
+    # Se un file Compose venisse spostato, i controlli qui sopra non fallirebbero: il
+    # dizionario delle porte pubblicate si svuoterebbe e l'unico a protestare sarebbe
+    # quello sulle porte eccedenti, con un messaggio che accusa preflight.sh di un
+    # difetto che non ha.
+    assert percorso.is_file(), f"file Compose atteso e non trovato: {percorso}"
+
+
+def immagini_dello_script():
+    """`{NOME: riferimento}` dall'array `IMMAGINI` di `tools/pull-images.sh`.
+
+    L'array è l'elenco di ciò che il lab scarica; `tools/images.env` è l'elenco di ciò
+    che il lab ha già. Sono due file diversi perché il secondo è **generato**, e la
+    generazione è il momento in cui i due possono divergere senza che nessuno se ne
+    accorga: si aggiunge un'immagine allo script, non si riesegue lo scaricamento, e il
+    file pinnato resta indietro. Nessuno protesta finché Compose non chiede
+    un'interpolazione che non c'è — la mattina del talk.
+    """
+    testo = SCARICA_IMMAGINI.read_text(encoding="utf-8")
+    corpo = testo.split("declare -a IMMAGINI=(", 1)[1].split(")", 1)[0]
+    trovate = {}
+    for riga in corpo.splitlines():
+        riga = riga.strip().strip('"')
+        if riga and not riga.startswith("#") and "=" in riga:
+            nome, _, riferimento = riga.partition("=")
+            trovate[nome] = riferimento
+    return trovate
+
+
+def immagini_pinnate():
+    """`{NOME: riferimento@digest}` da `tools/images.env`."""
+    trovate = {}
+    for riga in IMMAGINI_PINNATE.read_text(encoding="utf-8").splitlines():
+        riga = riga.strip()
+        if riga and not riga.startswith("#") and "=" in riga:
+            nome, _, riferimento = riga.partition("=")
+            trovate[nome] = riferimento
+    return trovate
+
+
+def test_ogni_immagine_dello_script_e_pinnata_in_images_env():
+    dichiarate = immagini_dello_script()
+    assert dichiarate, "l'array IMMAGINI di pull-images.sh non si legge più"
+    pinnate = immagini_pinnate()
+    mancanti = sorted(set(dichiarate) - set(pinnate))
+    assert not mancanti, (
+        f"pull-images.sh dichiara {mancanti} ma tools/images.env non le pinna: "
+        "eseguire «make images-pull NOMI=" + " ".join(mancanti) + "» con la rete"
+    )
+
+
+def test_nessun_pin_orfano_in_images_env():
+    # Il verso opposto, e serve quanto il primo: un digest che nessuno scarica più resta
+    # nel file, `preflight.sh` continua a pretenderlo in cache, e chi arriva da un clone
+    # nuovo si vede chiedere un'immagine che il lab non usa.
+    orfane = sorted(set(immagini_pinnate()) - set(immagini_dello_script()))
+    assert not orfane, (
+        f"tools/images.env pinna {orfane}, che pull-images.sh non dichiara più"
+    )
+
+
+def test_ogni_riferimento_pinnato_e_un_digest_dello_stesso_nome():
+    # `MONGO_IMAGE=mongo:7.0` nello script e `MONGO_IMAGE=redis@sha256:…` nel file sarebbe
+    # coerente per i due controlli qui sopra e falso: il nome dell'immagine deve essere lo
+    # stesso, il tag lascia il posto al digest.
+    dichiarate = immagini_dello_script()
+    for nome, pinnata in sorted(immagini_pinnate().items()):
+        atteso = dichiarate[nome].rsplit(":", 1)[0]
+        assert "@sha256:" in pinnata, (
+            f"{nome}: «{pinnata}» non è pinnata per digest"
+        )
+        assert pinnata.split("@", 1)[0] == atteso, (
+            f"{nome}: lo script scarica «{atteso}» e images.env pinna "
+            f"«{pinnata.split('@', 1)[0]}»"
+        )
+
+
+# --- L'applicazione in container (Task 12) ---------------------------------------------
+
+
+def servizio_app(percorso):
+    """Il servizio `app` di uno dei tre file Compose, letto come YAML."""
+    documento = yaml.safe_load(percorso.read_text(encoding="utf-8"))
+    return documento.get("services", {}).get("app")
+
+
+def versione_del_progetto():
+    """La versione dichiarata in `app/pyproject.toml`, senza importare tomllib.
+
+    La suite degli strumenti gira in `tools/`, che è un progetto uv distinto e non
+    conosce `mongolab`. Leggere la riga con una regex costa meno che aggiungere una
+    dipendenza a un progetto per leggere il numero di versione di un altro.
+    """
+    testo = (RADICE / "app/pyproject.toml").read_text(encoding="utf-8")
+    trovato = re.search(r'^version\s*=\s*"([^"]+)"', testo, re.MULTILINE)
+    assert trovato, "app/pyproject.toml non dichiara più una versione"
+    return trovato.group(1)
+
+
+@pytest.mark.parametrize("percorso", COMPOSE, ids=lambda p: p.parent.name)
+def test_ogni_stack_dichiara_il_servizio_dell_applicazione(percorso):
+    # `make app-stats TARGET=…` esegue `run --rm app` sullo stack scelto: uno stack senza
+    # quel servizio fallisce con «no such service», che è chiaro solo per chi sa già.
+    assert servizio_app(percorso) is not None, (
+        f"{percorso.parent.name} non dichiara il servizio «app»"
+    )
+
+
+def test_i_tre_stack_dichiarano_la_stessa_immagine():
+    # Tre tag diversi vorrebbero dire tre immagini, di cui `make app-image` ne costruisce
+    # una sola: gli altri due stack fallirebbero con `pull_policy: never` e un messaggio
+    # che parla del registro, non del tag sbagliato.
+    dichiarate = {p.parent.name: servizio_app(p)["image"] for p in COMPOSE}
+    assert len(set(dichiarate.values())) == 1, (
+        f"i tre stack chiedono immagini diverse: {dichiarate}"
+    )
+
+
+def test_il_tag_dell_immagine_e_la_versione_del_progetto():
+    # Un tag fisso mentre la versione avanza è peggio di un tag mancante: l'immagine
+    # vecchia c'è, si avvia, e mostra in sala il codice del mese scorso.
+    atteso = f"mongolab:{versione_del_progetto()}"
+    for percorso in COMPOSE:
+        scritta = servizio_app(percorso)["image"]
+        assert scritta == atteso, (
+            f"{percorso.parent.name} chiede «{scritta}», ma app/pyproject.toml "
+            f"dichiara la versione {versione_del_progetto()}: atteso «{atteso}»"
+        )
+
+
+def test_ogni_servizio_dell_applicazione_guarda_dalla_rete():
+    # È la riga che distingue le due fotografie di ADR-0012: senza di lei il container
+    # userebbe il punto di vista predefinito, cioè `localhost`, e dentro la rete Compose
+    # `localhost` è il container stesso. Il fallimento sarebbe una connessione rifiutata,
+    # che si legge come «il database è giù» e non come «il punto di vista è sbagliato».
+    for percorso in COMPOSE:
+        ambiente = servizio_app(percorso).get("environment", {})
+        assert ambiente.get("MONGOLAB_PUNTO_DI_VISTA") == "rete", (
+            f"{percorso.parent.name}: il servizio «app» non dichiara "
+            "MONGOLAB_PUNTO_DI_VISTA=rete"
+        )
+
+
+def test_preflight_ritrova_il_tag_dell_applicazione():
+    # `preflight.sh` estrae il tag dal file Compose con una `sed`, e una `sed` che non
+    # trova più niente non protesta: restituisce la stringa vuota. Senza questo controllo
+    # il preflight direbbe «nessun servizio con immagine mongolab:» il giorno in cui
+    # qualcuno indenta diversamente quella riga, e sembrerebbe un difetto del Compose.
+    estrazione = re.search(
+        r"immagine_app=\"\$\(sed -n '([^']+)'", PREFLIGHT.read_text(encoding="utf-8")
+    )
+    assert estrazione, "preflight.sh non estrae più il tag dell'immagine con una sed"
+    # La sed è `s|^ *image: *\(mongolab:[^ ]*\).*|\1|p`: qui si riproduce la sola parte
+    # che può rompersi, cioè il modello, tradotto nella sintassi di Python. La traduzione
+    # non è letterale in un punto, e la differenza l'ha trovata questa prova al primo
+    # colpo: `sed` lavora una riga per volta, quindi il suo `[^ ]*` non può attraversare
+    # un a capo, mentre in Python la stessa classe se ne mangia quanti ne trova. Da qui
+    # `[^ \n]*`, che è ciò che `sed` fa davvero.
+    modello = re.compile(r"^ *image: *(mongolab:[^ \n]*).*$", re.MULTILINE)
+    trovati = modello.findall(COMPOSE[0].read_text(encoding="utf-8"))
+    assert trovati, (
+        f"la sed di preflight.sh non trova più il tag in {COMPOSE[0].parent.name}: "
+        f"«{estrazione.group(1)}»"
+    )
+    assert trovati[0] == servizio_app(COMPOSE[0])["image"], (
+        f"la sed di preflight.sh estrae «{trovati[0]}» invece di "
+        f"«{servizio_app(COMPOSE[0])['image']}»"
+    )
+
+
+# --- Il Makefile e la mappa dei bersagli -----------------------------------------------
+
+
+def bersagli_dell_applicazione():
+    """`{nome: cartella dello stack}` letto da `mongolab.infrastructure.bersagli`.
+
+    Si legge con `ast` e non con un `import`: `tools/` è un progetto uv distinto, che non
+    ha `mongolab` fra le dipendenze e non deve averlo — la suite degli strumenti prova gli
+    strumenti, e un import la farebbe fallire per un errore di sintassi dell'applicazione.
+    `ast.literal_eval` sui soli argomenti che servono evita di eseguire alcunché.
+    """
+    sorgente = (RADICE / "app/src/mongolab/infrastructure/bersagli.py").read_text(
+        encoding="utf-8"
+    )
+    albero = ast.parse(sorgente)
+    for nodo in ast.walk(albero):
+        if not isinstance(nodo, ast.AnnAssign):
+            continue
+        if not (isinstance(nodo.target, ast.Name) and nodo.target.id == "BERSAGLI"):
+            continue
+        assert isinstance(nodo.value, ast.Dict), "BERSAGLI non è più un dizionario"
+        trovati = {}
+        for chiave, valore in zip(nodo.value.keys, nodo.value.values):
+            nome = ast.literal_eval(chiave)
+            cartelle = [
+                ast.literal_eval(argomento.value)
+                for argomento in valore.keywords
+                if argomento.arg == "stack"
+            ]
+            assert cartelle, f"il bersaglio «{nome}» non dichiara più uno stack"
+            trovati[nome] = cartelle[0]
+        return trovati
+    raise AssertionError("BERSAGLI non si trova più in bersagli.py")
+
+
+def mappa_del_makefile():
+    """`{nome: variabile Compose}` dalle righe `COMPOSE_DI_<nome> = $(COMPOSE_NN)`."""
+    modello = re.compile(r"^COMPOSE_DI_([a-z0-9_]+)\s*=\s*\$\(([A-Za-z0-9_]+)\)", re.MULTILINE)
+    return dict(modello.findall(MAKEFILE.read_text(encoding="utf-8")))
+
+
+def file_delle_variabili_compose():
+    """`{COMPOSE_NN: cartella dello stack}` dalle definizioni `COMPOSE_NN := docker compose …`."""
+    modello = re.compile(
+        r"^(COMPOSE_[A-Z0-9_]+)\s*:?=.*?-f docker/([^/]+)/compose\.yaml",
+        re.MULTILINE | re.DOTALL,
+    )
+    trovate = {}
+    testo = MAKEFILE.read_text(encoding="utf-8")
+    # Le definizioni possono continuare su più righe con `\`: si riuniscono prima, o il
+    # `-f` di COMPOSE_03_BASE — che sta sulla riga dopo — resterebbe invisibile.
+    for nome, cartella in modello.findall(testo.replace("\\\n", " ")):
+        trovate.setdefault(nome, cartella)
+    return trovate
+
+
+def test_la_mappa_del_makefile_ha_gli_stessi_nomi_dei_bersagli():
+    # `make app-stats TARGET=nuovo` con un nome che il Makefile non conosce espande
+    # `$(COMPOSE_DI_nuovo)` a stringa vuota, e la ricetta diventa `run --rm app …`: un
+    # comando senza `docker compose` davanti, che si lamenta di `run` come se fosse un
+    # programma. Il guardiano CHIEDI_TARGET lo intercetta prima, ma solo perché anche lui
+    # elenca i nomi a mano — ed è la terza copia della stessa lista.
+    assert set(mappa_del_makefile()) == set(bersagli_dell_applicazione()), (
+        f"COMPOSE_DI_* nel Makefile: {sorted(mappa_del_makefile())}; "
+        f"BERSAGLI in bersagli.py: {sorted(bersagli_dell_applicazione())}"
+    )
+
+
+def test_ogni_voce_della_mappa_punta_al_file_dello_stack_giusto():
+    # Il difetto che questa prova cerca non fa rumore: `COMPOSE_DI_rs = $(COMPOSE_03_BASE)`
+    # è una riga valida che accende un container e si collega. Allo stack sbagliato.
+    variabili = file_delle_variabili_compose()
+    bersagli = bersagli_dell_applicazione()
+    for nome, variabile in sorted(mappa_del_makefile().items()):
+        assert variabile in variabili, (
+            f"COMPOSE_DI_{nome} usa «{variabile}», che il Makefile non definisce con un -f"
+        )
+        assert variabili[variabile] == bersagli[nome], (
+            f"COMPOSE_DI_{nome} punta a docker/{variabili[variabile]}, ma il bersaglio "
+            f"«{nome}» dichiara lo stack {bersagli[nome]}"
+        )
+
+
+def test_il_guardiano_del_target_accetta_esattamente_i_bersagli():
+    # La lista scritta a mano dentro `case` è la copia che invecchia per prima: un
+    # bersaglio nuovo in bersagli.py verrebbe rifiutato dal Makefile con un messaggio che
+    # dice, sicurissimo, che quello stack non esiste in questo repository.
+    testo = MAKEFILE.read_text(encoding="utf-8")
+    ramo = re.search(r"CHIEDI_TARGET\s*=.*?\n\s*([a-z0-9|]+)\)", testo, re.DOTALL)
+    assert ramo, "CHIEDI_TARGET non elenca più i target in un ramo di case"
+    assert set(ramo.group(1).split("|")) == set(bersagli_dell_applicazione()), (
+        f"CHIEDI_TARGET accetta {sorted(ramo.group(1).split('|'))}, "
+        f"BERSAGLI dichiara {sorted(bersagli_dell_applicazione())}"
+    )
+
+
+# --- Le scene dell'applicazione e i bersagli che le girano ------------------------------
+
+CLI = RADICE / "app/src/mongolab/cli.py"
+BERSAGLI = RADICE / "app/src/mongolab/infrastructure/bersagli.py"
+RESET_DEMO = RADICE / "tools/reset-demo.sh"
+
+
+def scene_della_cli():
+    """I nomi dei sottocomandi di `mongolab demo`, letti con `ast` da `cli.py`.
+
+    Il nome non è sempre quello della funzione: `@demo.command(name="backup-live")` lo
+    riscrive, ed è la forma che si digita. Si legge con `ast` per la stessa ragione di
+    `bersagli_dell_applicazione`: `tools/` è un progetto uv distinto e non ha `mongolab`
+    fra le dipendenze.
+    """
+    trovate = set()
+    for nodo in ast.walk(ast.parse(CLI.read_text(encoding="utf-8"))):
+        if not isinstance(nodo, ast.FunctionDef):
+            continue
+        for decoratore in nodo.decorator_list:
+            if not isinstance(decoratore, ast.Call):
+                continue
+            funzione = decoratore.func
+            if not (isinstance(funzione, ast.Attribute) and funzione.attr == "command"):
+                continue
+            if not (isinstance(funzione.value, ast.Name) and funzione.value.id == "demo"):
+                continue
+            detto = [chiave.value for chiave in decoratore.keywords if chiave.arg == "name"]
+            trovate.add(
+                ast.literal_eval(detto[0]) if detto else nodo.name.replace("_", "-")
+            )
+    return trovate
+
+
+def scene_del_makefile():
+    """`{scena: bersaglio che la gira}` dalle ricette che invocano `… demo <scena> …`."""
+    bersaglio = None
+    trovate = {}
+    intestazione = re.compile(r"^([a-zA-Z0-9_-]+):")
+    invocazione = re.compile(r"\bdemo ([a-z][a-z-]*)\b")
+    for riga in MAKEFILE.read_text(encoding="utf-8").splitlines():
+        if not riga.startswith("\t"):
+            nome = intestazione.match(riga)
+            if nome:
+                bersaglio = nome.group(1)
+            continue
+        trovata = invocazione.search(riga)
+        if trovata and bersaglio:
+            trovate.setdefault(trovata.group(1), bersaglio)
+    return trovate
+
+
+def test_ogni_scena_dell_applicazione_ha_un_bersaglio_nel_makefile():
+    # Il difetto che questa prova toglie non rompe niente: rende il copione bilingue. Con
+    # una scena sola nel Makefile, le altre tre si dicono in `uv run --directory app
+    # mongolab demo …`, e chi legge il runbook sotto pressione cambia registro a metà
+    # Atto III senza che nulla gli spieghi perché.
+    assert set(scene_del_makefile()) == scene_della_cli(), (
+        f"il Makefile gira {sorted(scene_del_makefile())}; "
+        f"la CLI dichiara {sorted(scene_della_cli())}"
+    )
+
+
+def valore_di(percorso, nome):
+    """Il valore di un'assegnazione a livello di modulo, letto con `ast`.
+
+    Legge `NOME = "..."` e `NOME: Final = "..."`, e risolve una f-string i cui pezzi sono
+    costanti o nomi già noti. Non importa niente: `tools/` è un progetto uv distinto e
+    `mongolab` non è fra le sue dipendenze, quindi un `import` qui non gira su un clone
+    appena fatto — che è la proprietà per cui questi controlli esistono.
+    """
+    noti = {}
+    for nodo in ast.walk(ast.parse(percorso.read_text(encoding="utf-8"))):
+        if isinstance(nodo, ast.Assign) and len(nodo.targets) == 1:
+            bersaglio, valore = nodo.targets[0], nodo.value
+        elif isinstance(nodo, ast.AnnAssign) and nodo.value is not None:
+            bersaglio, valore = nodo.target, nodo.value
+        else:
+            continue
+        if not isinstance(bersaglio, ast.Name):
+            continue
+        if isinstance(valore, ast.Constant) and isinstance(valore.value, str):
+            noti[bersaglio.id] = valore.value
+    if nome in noti:
+        return noti[nome]
+    for nodo in ast.walk(ast.parse(percorso.read_text(encoding="utf-8"))):
+        if isinstance(nodo, ast.AnnAssign) and isinstance(nodo.target, ast.Name):
+            if nodo.target.id == nome and isinstance(nodo.value, ast.JoinedStr):
+                return "".join(
+                    pezzo.value
+                    if isinstance(pezzo, ast.Constant)
+                    else noti[pezzo.value.id]
+                    for pezzo in nodo.value.values
+                )
+    raise AssertionError(f"{nome} non si trova in {percorso.name}")
+
+
+def database_del_ripristino():
+    """Il nome del database che `demo restore` costruisce: `lab_ripristinato`.
+
+    Composto da due file — `DATABASE` sta in `bersagli.py`, il suffisso in `cli.py` — e
+    per questo si risolve invece di scriverlo qui: una prova che ripetesse la stringa
+    passerebbe anche il giorno in cui il database cambia nome, cioè il giorno in cui
+    servirebbe.
+    """
+    noti = {"DATABASE": valore_di(BERSAGLI, "DATABASE")}
+    for nodo in ast.walk(ast.parse(CLI.read_text(encoding="utf-8"))):
+        if (
+            isinstance(nodo, ast.AnnAssign)
+            and isinstance(nodo.target, ast.Name)
+            and nodo.target.id == "DATABASE_RIPRISTINO"
+            and isinstance(nodo.value, ast.JoinedStr)
+        ):
+            return "".join(
+                pezzo.value if isinstance(pezzo, ast.Constant) else noti[pezzo.value.id]
+                for pezzo in nodo.value.values
+            )
+    raise AssertionError("DATABASE_RIPRISTINO non si trova in cli.py")
+
+
+def blocco_del_ripristino() -> str:
+    """Il pezzo di `reset-demo.sh` che toglie il database costruito dal ripristino.
+
+    Si guarda un blocco e non le singole righe perché il nome, il `dropDatabase` e il
+    verdetto stanno su righe diverse: cercarli sulla stessa riga legava la prova a una
+    stesura invece che al comportamento, e infatti si è rotta appena il verdetto ha
+    smesso di fidarsi di `dropped`.
+    """
+    testo = RESET_DEMO.read_text(encoding="utf-8")
+    apertura = 'titolo "Il database che il ripristino costruisce"'
+    assert apertura in testo, "il blocco del ripristino non c'è più in reset-demo.sh"
+    return testo.split(apertura)[1].split('titolo "Dataset"')[0]
+
+
+def test_reset_demo_toglie_anche_il_database_che_il_ripristino_costruisce():
+    """Il difetto che questa prova toglie è costato una scena, e si vedeva solo alla
+    seconda corsa: `demo restore` costruisce `lab_ripristinato`, `reset-demo.sh` puliva le
+    collezioni di `lab` e non guardava gli altri database, e `down`/`up` conservano i
+    volumi. Alla corsa dopo `mongorestore` ritrova i documenti già lì, li conta come
+    falliti ed esce zero: 6 766 ripristinati e 55 740 persi, misurato il 6 settembre.
+    Cioè la prova generale rompeva la replica del giorno dopo.
+    """
+    nome = database_del_ripristino()
+    blocco = blocco_del_ripristino()
+
+    assert nome in blocco and "dropDatabase" in blocco, (
+        f"reset-demo.sh non toglie {nome}: il blocco che dovrebbe farlo non lo nomina "
+        f"insieme a dropDatabase. Chi prova l'Atto III due volte senza azzerare i volumi "
+        f"vede la seconda corsa fallire con RestoreIncompleto."
+    )
+
+
+def test_il_verdetto_del_drop_non_si_fida_del_campo_dropped():
+    """`dropDatabase` risponde `dropped` anche per un database che non e' mai esistito.
+
+    Misurato sullo stack 02 il 6 settembre, mongod 7.0.40, dal primario:
+    `db.getSiblingDB("lab_inesistente_0906").dropDatabase()` risponde
+    `{"ok":1,"dropped":"lab_inesistente_0906"}` esattamente come per un database pieno.
+    La prima stesura di questo blocco leggeva quel campo per decidere fra «rimosso» e
+    «non c'era», e diceva sempre «rimosso»: un'uscita che si legge sotto pressione la
+    sera prima del talk, e che avrebbe raccontato una pulizia mai avvenuta.
+
+    Chi c'era davvero lo sa solo l'elenco dei database, chiesto **prima** del drop.
+    """
+    blocco = blocco_del_ripristino()
+    assert ".dropped" not in blocco, (
+        "il verdetto legge `esito.dropped`, che e' presente anche quando il database "
+        "non c'era: misurato, risponde `dropped` per un nome inventato"
+    )
+    assert "getDBNames" in blocco, (
+        "per dire se il database c'era serve l'elenco, chiesto prima del drop"
+    )
+
+
+def cartella_del_dump() -> str:
+    """Dove il dump atterra dentro il nodo: `DESTINAZIONE_DUMP`, letta da `cli.py`.
+
+    Non passa da `valore_di` perché la costante è avvolta in `Path(...)`: nel codice è un
+    percorso, qui serve la stringa che finisce scritta dentro `reset-demo.sh`.
+    """
+    for nodo in ast.walk(ast.parse(CLI.read_text(encoding="utf-8"))):
+        if (
+            isinstance(nodo, ast.AnnAssign)
+            and isinstance(nodo.target, ast.Name)
+            and nodo.target.id == "DESTINAZIONE_DUMP"
+            and isinstance(nodo.value, ast.Call)
+            and nodo.value.args
+            and isinstance(nodo.value.args[0], ast.Constant)
+        ):
+            return nodo.value.args[0].value
+    raise AssertionError("DESTINAZIONE_DUMP non si trova in cli.py")
+
+
+def blocco_del_dump() -> str:
+    """Il pezzo di `reset-demo.sh` che svuota la cartella in cui il dump atterra."""
+    testo = RESET_DEMO.read_text(encoding="utf-8")
+    apertura = 'titolo "La cartella del dump, dentro il nodo"'
+    assert apertura in testo, "il blocco della cartella del dump non c'è in reset-demo.sh"
+    return testo.split(apertura)[1].split('titolo "Dataset"')[0]
+
+
+def test_reset_demo_svuota_anche_la_cartella_del_dump():
+    """La copia non è un database e non è un volume: è una cartella dentro `mongo-rs-1`,
+    e `mongodump --out` non la svuota prima di scriverci — ci aggiunge. Alla quinta prova
+    generale la cartella tiene cinque dump, e `demo restore` li rimette in piedi tutti:
+    misurato il 6 settembre, **sei** collezioni ripristinate invece di una, elencate una
+    per riga su uno schermo proiettato.
+
+    È l'unico pezzo di stato della demo che non sta né in un database né in un volume, e
+    per questo era l'unico che nessuno toglieva.
+    """
+    cartella = cartella_del_dump()
+    blocco = blocco_del_dump()
+
+    assert cartella in blocco and "rm -rf" in blocco, (
+        f"reset-demo.sh non svuota {cartella}: chi ripete l'Atto III ritrova nella copia "
+        f"le collezioni di tutte le corse precedenti"
+    )
+
+
+def test_il_verdetto_della_cartella_guarda_prima_di_togliere():
+    """`rm -rf` esce zero sia se la cartella c'era sia se non c'era.
+
+    È lo stesso difetto del `dropDatabase` di due blocchi più su, con un altro comando:
+    un verdetto che si fida dell'esito racconta una pulizia che non ha fatto. Qui la
+    domanda si fa prima, con un `ls` che serve anche a dire **quanti** dump c'erano — che
+    è l'informazione per cui questo blocco esiste.
+    """
+    # I soli comandi: il commento qui sopra il blocco spiega perché `rm -rf` non basta, e
+    # quindi lo nomina prima del `ls` che invece lo precede davvero. Misurare l'ordine sul
+    # testo intero avrebbe accusato la spiegazione al posto del codice.
+    comandi = "\n".join(
+        riga for riga in blocco_del_dump().splitlines() if not riga.lstrip().startswith("#")
+    )
+
+    assert "ls " in comandi, (
+        "per dire se la cartella c'era serve guardarla: `rm -rf` non lo dice"
+    )
+    assert comandi.index("ls ") < comandi.index("rm -rf"), (
+        "la cartella si guarda **prima** di toglierla: dopo non c'è più niente da contare"
+    )
+
+
+def progetti_del_makefile() -> list[str]:
+    """I tre `PROGETTO_0N :=` del Makefile, nell'ordine in cui sono dichiarati."""
+    trovati = re.findall(
+        r"^PROGETTO_0\d\s*:=\s*(\S+)\s*$", MAKEFILE.read_text(encoding="utf-8"), re.M
+    )
+    assert len(trovati) == 3, f"nel Makefile ci sono {len(trovati)} nomi di progetto, non 3"
+    return trovati
+
+
+def progetti_del_preflight() -> list[str]:
+    """L'array `PROGETTI_LAB` di `preflight.sh`, quello con cui il controllo delle porte
+    distingue un container del lab da un container qualsiasi del demone."""
+    corpo = re.search(
+        r"^\s*PROGETTI_LAB=\(([^)]*)\)", PREFLIGHT.read_text(encoding="utf-8"), re.M
+    )
+    assert corpo, "PROGETTI_LAB non si trova in preflight.sh"
+    return corpo.group(1).split()
+
+
+def test_il_preflight_conosce_i_progetti_del_makefile():
+    """Due elenchi degli stessi tre nomi, in due file che non si leggono a vicenda.
+
+    Il controllo delle porte perdona una porta occupata quando è un container **del lab**
+    a tenerla, e per sapere quali lo sono legge l'etichetta `com.docker.compose.project`
+    che Compose scrive su ogni container. Quei nomi sono gli stessi che il Makefile impone
+    con `-p`: se il Makefile ne cambia uno, il preflight smette di riconoscere i propri
+    container e chiama estranee otto porte che sono sue.
+
+    Nasce misurando il difetto opposto — prima della correzione il preflight guardava le
+    porte di **tutti** i container del demone, e uno estraneo che pubblicava la 27152 gli
+    faceva contare nove porte «del lab» invece di otto (V-100, ADR-0131). Il rimedio ha
+    creato questa seconda copia dell'elenco, e questo test è il prezzo che paga.
+    """
+    assert sorted(progetti_del_preflight()) == sorted(progetti_del_makefile()), (
+        f"preflight.sh conosce {progetti_del_preflight()}, il Makefile impone "
+        f"{progetti_del_makefile()}: il controllo delle porte scambierebbe per estranei "
+        f"i container del lab"
+    )

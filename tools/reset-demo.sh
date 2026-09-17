@@ -1,0 +1,513 @@
+#!/usr/bin/env bash
+# Riporta uno stack allo stato da cui una demo comincia, SENZA ricostruirlo da zero.
+#
+#   ./tools/reset-demo.sh 01
+#   ./tools/reset-demo.sh 02
+#   ./tools/reset-demo.sh 03          # profilo palco
+#   PROFILO=completo ./tools/reset-demo.sh 03
+#
+# Non è `reset-01` / `reset-02`: quelli fermano lo stack e cancellano i volumi, e
+# ricostruire da zero costa mezzo minuto. Questo serve al caso opposto — la prova
+# generale in cui la stessa scena si ripete tre volte di fila — e lavora sui container
+# in piedi. Il debito viene da feature/01, dove ci si era accorti che fra una prova e
+# l'altra si finiva a rifare l'intero stack per rimettere a posto due collezioni.
+#
+# Lo stack è un ARGOMENTO e non un ramo dentro il codice: feature/03 ha aggiunto il suo
+# caso qui sotto invece di scriversi il proprio script, e il diff di quel commit è un
+# ramo in più — le funzioni condivise, i tempi di attesa e il verdetto finale sono gli
+# stessi per tutti e tre.
+#
+# Che cosa rimette a posto, in ordine:
+#   1. i container fermati a mano durante una demo di failover — li riavvia;
+#   2. la topologia — aspetta che i tre membri siano sani e che ci sia un primario, e
+#      che sia tornato quello con priorità 2, perché la scena successiva comincia da lì;
+#   3. le collezioni che la demo ha lasciato in giro — in `lab` sopravvive solo `ordini`.
+#      Dal Task 15 `ordini` non è più intoccata: `mongolab demo sharding` ci scrive dentro
+#      apposta, perché è la collezione distribuita (ADR-0106). Quei documenti si
+#      riconoscono dall'`_id`, che è un ObjectId mentre il seed usa interi, e li porta via
+#      il punto 4 — che la collezione la ricostruisce da zero. Qui si contano soltanto,
+#      perché un residuo silenzioso è un residuo che qualcuno prima o poi attribuirà al seed;
+#   4. il dataset — ricaricato, così l'impronta torna quella di V-013.
+#
+# Niente `set -e`: come per gli smoke, deve dire tutto quello che non va in una volta
+# sola invece di costringere a tre giri.
+set -uo pipefail
+
+RADICE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+AMBIENTE="${RADICE}/tools/images.env"
+
+# Quanto si aspetta prima di dichiarare che qualcosa non torna. Generosi: su una
+# macchina carica un membro può metterci parecchio a diventare sano, e uno script che
+# si arrende troppo presto durante una prova generale è peggio di uno lento.
+ATTESA_SALUTE=90     # secondi, per container
+ATTESA_PRIMARIO=60   # secondi, perché l'elezione dopo un `docker kill` costa ~10 s (V-029)
+ATTESA_PRIORITA=45   # secondi, per il rientro del membro a priorità 2
+
+if [[ -t 1 ]]; then
+  VERDE=$'\033[32m'; ROSSO=$'\033[31m'; GRIGIO=$'\033[90m'; NEUTRO=$'\033[0m'
+else
+  VERDE=''; ROSSO=''; GRIGIO=''; NEUTRO=''
+fi
+
+ERRORI=0
+ok()     { printf '  %s✓%s %s\n' "${VERDE}" "${NEUTRO}" "$1"; }
+errore() { printf '  %s✗%s %s\n' "${ROSSO}" "${NEUTRO}" "$1"; ERRORI=$((ERRORI + 1)); }
+nota()   { printf '    %s%s%s\n' "${GRIGIO}" "$1" "${NEUTRO}"; }
+titolo() { printf '\n%s\n' "$1"; }
+
+# Un ✓ si stampa dopo aver guardato l'esito, non dopo aver ricevuto una stringa, e la
+# distinzione non è formale: `set -o pipefail` è attivo, quindi quando
+# l'interrogazione fallisce lo stato della pipeline è 1 — ma la sostituzione di
+# comando restituisce una stringa VUOTA, e nessuno guardava né l'uno né l'altra. La
+# prima stesura stampava «✓ database rimosso: » con il nome vuoto e «✓ collezioni
+# rimosse: nessuna» per una pulizia mai avvenuta: misurato riproducendo le tre forme
+# con un container inesistente (V-101, ADR-0132).
+ha_risposto() {
+  local descrizione="$1" valore="$2"
+  if [[ -z "${valore}" ]]; then
+    errore "${descrizione}: l'interrogazione non ha risposto"
+    return 1
+  fi
+  return 0
+}
+
+# La pulizia dichiara che cosa ha tolto solo dopo aver riguardato: `via` è l'elenco di
+# ciò che si VOLEVA togliere, calcolato prima dei `drop()`, e un `drop()` che fallisce
+# non toglie la collezione dall'elenco. La seconda lettura sta nel JS e arriva qui con
+# il prefisso `RESIDUI:`.
+verdetto_pulizia() {
+  local descrizione="$1" risposta="$2"
+  ha_risposto "${descrizione}" "${risposta}" || return
+  if [[ "${risposta}" == RESIDUI:* ]]; then
+    errore "${descrizione}: sono rimaste in piedi — ${risposta#RESIDUI: }"
+  else
+    ok "${descrizione}: ${risposta}"
+  fi
+}
+
+# Stessa forma dei tre smoke. Il valore atteso stava in un COMMENTO, e un valore
+# atteso scritto in un commento non è una verifica: il ripristino poteva finire con un
+# dataset sbagliato e dichiararsi riuscito lo stesso.
+confronta() {
+  local descrizione="$1" atteso="$2" ottenuto="$3"
+  if [[ "${ottenuto}" == "${atteso}" ]]; then
+    ok "${descrizione}: ${ottenuto}"
+  else
+    errore "${descrizione}: attesa «${atteso}», ottenuta «${ottenuto}»"
+  fi
+}
+
+# Le due impronte del dataset: la terna dei due stack grandi (V-013) e quella dello
+# stack 03, che usa i primi 20 000 documenti dello stesso generatore (V-058).
+IMPRONTA_50K="50000 124861860.70 150281"
+IMPRONTA_20K="20000 50083417.93 60278"
+
+uso() {
+  printf 'Uso: %s <stack>\n' "$(basename "$0")" >&2
+  printf '  01  istanza singola\n' >&2
+  printf '  02  replica set a tre membri\n' >&2
+  printf '  03  sharded cluster (PROFILO=palco predefinito, oppure completo)\n' >&2
+  exit 2
+}
+
+[[ $# -eq 1 ]] || uso
+STACK="$1"
+
+# --- Riavvia i container fermati a mano ----------------------------------------------
+#
+# `docker start` su un container già in piedi non è un errore e non fa niente, quindi
+# non serve chiedere prima com'è messo. Su uno che non esiste, invece, sì: e in quel
+# caso il rimedio non è questo script, è `make up-0N`.
+rialza() {
+  local nome="$1"
+  local stato
+  stato="$(docker inspect "${nome}" --format '{{.State.Status}}' 2>/dev/null)"
+  if [[ -z "${stato}" ]]; then
+    errore "il container ${nome} non esiste — questo script non ricostruisce lo stack, usa «make up-${STACK}»"
+    return 1
+  fi
+  if [[ "${stato}" == "running" ]]; then
+    ok "${nome} era già in piedi"
+    return 0
+  fi
+  nota "${nome} era ${stato}, lo riavvio"
+  if docker start "${nome}" > /dev/null 2>&1; then
+    ok "${nome} riavviato"
+  else
+    errore "${nome} non è ripartito"
+    return 1
+  fi
+}
+
+attendi_salute() {
+  local nome="$1" i salute
+  for ((i = 0; i < ATTESA_SALUTE; i++)); do
+    salute="$(docker inspect "${nome}" --format '{{.State.Health.Status}}' 2>/dev/null)"
+    [[ "${salute}" == "healthy" ]] && { ok "${nome} è sano"; return 0; }
+    sleep 1
+  done
+  errore "${nome} non è diventato sano in ${ATTESA_SALUTE} s (ultimo stato: «${salute:-nessuno}»)"
+  return 1
+}
+
+# --- Stack 01 — istanza singola -------------------------------------------------------
+if [[ "${STACK}" == "01" ]]; then
+  COMPOSE="${RADICE}/docker/01-standalone/compose.yaml"
+  compose() { docker compose --env-file "${AMBIENTE}" -f "${COMPOSE}" "$@"; }
+
+  titolo "Container"
+  rialza mongo-standalone && attendi_salute mongo-standalone
+
+  titolo "Collezioni lasciate in giro dalla demo"
+  # `ordini` è il dataset; tutto il resto è residuo. Il conto delle collezioni tolte
+  # si stampa perché una demo che non lascia niente e una che lascia sei collezioni
+  # sono due situazioni diverse, e chi sta provando vuole saperlo.
+  tolte="$(compose exec -T mongo-standalone mongosh --quiet lab --eval '
+    const superstiti = ["ordini"];
+    const via = db.getCollectionNames().filter(n => !superstiti.includes(n));
+    via.forEach(n => db.getCollection(n).drop());
+    const rimaste = db.getCollectionNames().filter(n => !superstiti.includes(n));
+    print(rimaste.length > 0 ? "RESIDUI: " + rimaste.join(", ")
+                             : (via.length === 0 ? "nessuna" : via.join(", ")));
+  ' 2>/dev/null | tail -1 | tr -d '\r')"
+  verdetto_pulizia "collezioni rimosse" "${tolte}"
+
+  titolo "Dataset"
+  compose exec -T mongo-standalone \
+    mongosh --quiet --file /docker-entrypoint-initdb.d/10-dati-demo.js > /dev/null 2>&1 \
+    || errore "il seed non è andato a buon fine"
+  # La stessa terna che sorvegliano i due smoke (V-013), e si CONFRONTA, non si
+  # stampa: il seed qui sopra può fallire in modi che non fermano lo script.
+  impronta="$(compose exec -T mongo-standalone mongosh --quiet lab --eval \
+    'const a = db.ordini.aggregate([{$group:{_id:null, n:{$sum:1}, tot:{$sum:"$importo"}, righe:{$sum:"$righe"}}}]).toArray()[0]; print(a ? a.n + " " + a.tot.toFixed(2) + " " + a.righe : "collezione vuota")' \
+    2>/dev/null | tail -1 | tr -d '\r')"
+  confronta "impronta di lab.ordini" "${IMPRONTA_50K}" "${impronta}"
+
+# --- Stack 02 — replica set -----------------------------------------------------------
+elif [[ "${STACK}" == "02" ]]; then
+  COMPOSE="${RADICE}/docker/02-replicaset/compose.yaml"
+  SEGRETI="${RADICE}/docker/02-replicaset/.env"
+
+  if [[ ! -f "${SEGRETI}" ]]; then
+    printf 'Manca %s.\n' "${SEGRETI}" >&2
+    printf 'Contiene la password dell'\''amministratore e sta fuori dal repository (ADR-0014).\n' >&2
+    exit 1
+  fi
+  set -a; . "${SEGRETI}"; set +a
+  UTENTE="${UTENTE_AMMINISTRATORE:-admin}"
+  PASSWORD="${PASSWORD_AMMINISTRATORE:-}"
+  REPLICA="${NOME_REPLICA:-rs0}"
+  PREFERITO="mongo-rs-1"   # il membro a priorità 2: la scena comincia con lui primario
+
+  compose() { docker compose --env-file "${AMBIENTE}" --env-file "${SEGRETI}" -f "${COMPOSE}" "$@"; }
+
+  # Sul PRIMARIO, chiunque sia. Dopo un failover non è più `mongo-rs-1`, e uno script
+  # che lo desse per scontato fallirebbe raccontando la cosa sbagliata.
+  sul_primario() {
+    compose exec -T mongo-rs-1 mongosh --quiet --host "${REPLICA}/localhost:27017" \
+      --username "${UTENTE}" --password "${PASSWORD}" --authenticationDatabase admin \
+      lab --eval "$1" 2>/dev/null | tail -1 | tr -d '\r'
+  }
+
+  # Chiede a un membro preciso chi è il primario secondo lui. Il membro deve essere
+  # vivo: se è quello appena riavviato, la risposta arriva quando è pronto.
+  chi_primario() {
+    local membro="$1"
+    docker exec "${membro}" mongosh --quiet --host localhost \
+      --username "${UTENTE}" --password "${PASSWORD}" --authenticationDatabase admin \
+      --eval 'const h = db.getSiblingDB("admin").hello(); print(h.primary || "nessuno")' \
+      2>/dev/null | tail -1 | tr -d '\r'
+  }
+
+  titolo "Container"
+  for membro in mongo-rs-1 mongo-rs-2 mongo-rs-3; do
+    rialza "${membro}"
+  done
+  for membro in mongo-rs-1 mongo-rs-2 mongo-rs-3; do
+    attendi_salute "${membro}"
+  done
+
+  titolo "Topologia"
+  primario=""
+  for ((i = 0; i < ATTESA_PRIMARIO; i++)); do
+    primario="$(chi_primario mongo-rs-2)"
+    [[ -n "${primario}" && "${primario}" != "nessuno" ]] && break
+    sleep 1
+  done
+  if [[ -z "${primario}" || "${primario}" == "nessuno" ]]; then
+    errore "nessun primario dopo ${ATTESA_PRIMARIO} s — la maggioranza non si è formata"
+  else
+    ok "primario: ${primario}"
+    # Il rientro del membro a priorità 2 non è immediato: deve raggiungere gli altri
+    # nell'oplog prima di poter vincere un'elezione. Se non torna, NON è un errore
+    # dello stack — è un'informazione, e chi sta provando decide se aspettare ancora.
+    if [[ "${primario}" != "${PREFERITO}:27017" ]]; then
+      nota "aspetto che ${PREFERITO} (priorità 2) si riprenda il ruolo"
+      for ((i = 0; i < ATTESA_PRIORITA; i++)); do
+        primario="$(chi_primario mongo-rs-2)"
+        [[ "${primario}" == "${PREFERITO}:27017" ]] && break
+        sleep 1
+      done
+      if [[ "${primario}" == "${PREFERITO}:27017" ]]; then
+        ok "${PREFERITO} è tornato primario"
+      else
+        errore "dopo ${ATTESA_PRIORITA} s il primario è ancora ${primario} invece di ${PREFERITO}:27017"
+        nota "non è rotto: ${PREFERITO} sta probabilmente ancora recuperando l'oplog. Rilanciare fra poco."
+      fi
+    fi
+  fi
+
+  titolo "Collezioni lasciate in giro dalla demo"
+  tolte="$(sul_primario '
+    const superstiti = ["ordini"];
+    const via = db.getCollectionNames().filter(n => !superstiti.includes(n));
+    via.forEach(n => db.getCollection(n).drop({ writeConcern: { w: "majority", wtimeout: 10000 } }));
+    const rimaste = db.getCollectionNames().filter(n => !superstiti.includes(n));
+    print(rimaste.length > 0 ? "RESIDUI: " + rimaste.join(", ")
+                             : (via.length === 0 ? "nessuna" : via.join(", ")));
+  ')"
+  verdetto_pulizia "collezioni rimosse" "${tolte}"
+
+  titolo "Il database che il ripristino costruisce"
+  # `demo restore` costruisce `lab_ripristinato`, e fino al 6 settembre non lo toglieva
+  # nessuno: la riga qui sopra pulisce le collezioni **dentro `lab`** e non guarda gli
+  # altri database, e `down`/`up` conservano i volumi. Alla corsa dopo `mongorestore`
+  # ritrova i documenti gia' li', li conta come falliti ed esce zero — 6 766 ripristinati
+  # e 55 740 persi, misurato — e l'Atto III muore con `RestoreIncompleto`. Cioe' la prova
+  # generale della vigilia rompeva la replica del giorno del talk.
+  #
+  # Solo qui, e non sugli stack 01 e 03: `demo restore` rifiuta un bersaglio che non sia
+  # un replica set, quindi la' quel database non puo' esistere e una riga che lo cercasse
+  # direbbe sempre «nessuno», cioe' aggiungerebbe rumore a un'uscita che si legge sotto
+  # pressione. Il nome sta scritto qui e in `cli.py`: a tenerli allineati e' la prova
+  # `test_reset_demo_toglie_anche_il_database_che_il_ripristino_costruisce`.
+  #
+  # Distinguere «tolto» da «non c'era» dice a chi prova la vigilia se l'Atto III era
+  # gia' girato su questo stack, e costa una interrogazione in piu'. Deve costarla:
+  # `dropDatabase()` risponde `dropped` **anche per un database che non e' mai
+  # esistito** — misurato il 6 settembre su mongod 7.0.40, un nome inventato risponde
+  # `{"ok":1,"dropped":"lab_inesistente_0906"}` come uno pieno. La prima stesura si
+  # fidava di quel campo e diceva sempre «rimosso»: una pulizia mai avvenuta,
+  # raccontata a chi la legge sotto pressione. Chi c'era lo sa solo l'elenco, chiesto
+  # **prima**. La regressione la vieta
+  # `test_il_verdetto_del_drop_non_si_fida_del_campo_dropped`.
+  ripristino="$(sul_primario '
+    const nome = "lab_ripristinato";
+    const c_era = db.getMongo().getDBNames().includes(nome);
+    db.getSiblingDB(nome).dropDatabase({ writeConcern: { w: "majority", wtimeout: 10000 } });
+    print(c_era ? nome : "nessuno");
+  ')"
+  if ! ha_risposto "il database del ripristino" "${ripristino}"; then
+    :
+  elif [[ "${ripristino}" == "nessuno" ]]; then
+    ok "nessun database di ripristino da togliere"
+  else
+    ok "database rimosso: ${ripristino}"
+  fi
+
+  titolo "La cartella del dump, dentro il nodo"
+  # L'unico pezzo di stato della demo che non sta ne' in un database ne' in un volume, e
+  # per questo era l'unico che non toglieva nessuno. `demo backup-live` scrive in
+  # `/tmp/mongolab-backup` **dentro** `mongo-rs-1` — il primo nodo e non il primario,
+  # perche' il restore deve ritrovare la copia nello stesso container qualche minuto dopo
+  # (`_nodo_degli_strumenti` in `cli.py`) — e `mongodump --out` non svuota la
+  # destinazione: ci aggiunge. Alla quinta prova generale la cartella tiene cinque dump e
+  # `demo restore` li rimette in piedi tutti: misurato il 6 settembre, sei collezioni
+  # ripristinate invece di una, elencate una per riga davanti alla sala.
+  #
+  # Il percorso sta scritto qui e in `cli.py`: a tenerli allineati e' la prova
+  # `test_reset_demo_svuota_anche_la_cartella_del_dump`. Il `ls` prima del `rm` non e'
+  # prudenza, e' l'unico modo di sapere che cosa c'era — `rm -rf` esce zero tanto se la
+  # cartella c'era quanto se non c'era, esattamente come `dropDatabase` risponde
+  # `dropped` in tutti e due i casi.
+  #
+  # Si contano i `.bson` sotto `lab` e non tutto l'albero: il dump porta anche `admin/` e
+  # `oplog.bson`, che il restore non rimette in piedi perche' li esclude
+  # (`--nsInclude lab.*`, `argomenti_restore` in `backup.py`). Il numero da dire e' quello
+  # che ricompare sullo schermo, non quello dei file.
+  copie="$(compose exec -T mongo-rs-1 ls -1 /tmp/mongolab-backup/lab 2>/dev/null \
+    | grep -c '\.bson$' || true)"
+  if ! compose exec -T mongo-rs-1 rm -rf /tmp/mongolab-backup; then
+    errore "la cartella del dump non si è potuta togliere da mongo-rs-1"
+  elif [[ "${copie}" -eq 0 ]]; then
+    ok "nessun dump da togliere"
+  else
+    ok "dump rimossi: ${copie} collezioni che il restore avrebbe rimesso in piedi"
+  fi
+
+  titolo "Dataset"
+  # Lo STESSO servizio che semina all'avvio, con RICARICA=1. Una sorgente sola.
+  if ! compose run --rm -e RICARICA=1 rs-init > /dev/null 2>&1; then
+    errore "il seed non è andato a buon fine — «make logs-02» per il motivo"
+  fi
+  # La stessa terna che sorvegliano i due smoke (V-013), confrontata e non stampata.
+  impronta="$(sul_primario 'const a = db.ordini.aggregate([{$group:{_id:null, n:{$sum:1}, tot:{$sum:"$importo"}, righe:{$sum:"$righe"}}}]).toArray()[0]; print(a ? a.n + " " + a.tot.toFixed(2) + " " + a.righe : "collezione vuota")')"
+  confronta "impronta di lab.ordini" "${IMPRONTA_50K}" "${impronta}"
+
+# --- Stack 03 — sharded cluster -------------------------------------------------------
+#
+# Le differenze dal caso 02 sono tre, e nessuna cambia la forma. La prima: i container
+# da rialzare dipendono dal PROFILO, perché in `palco` gli altri sei non esistono e
+# chiederne lo stato darebbe sei errori veri su una situazione sana. La seconda: qui non
+# si aspetta un primario preferito. La scena del guasto (`make guasto-03`) rimette in
+# piedi da sé il nodo che ha fermato, e nel profilo del talk non c'è nessun ruolo da
+# spostare perché ogni shard ha un membro solo: si aspetta che i due shard risultino
+# registrati, che è la condizione da cui il Blocco 3 riparte. La terza: il verdetto
+# sui dati non è solo l'impronta, è anche che i documenti stiano su ENTRAMBI gli shard,
+# perché una demo che li lascia tutti su uno è esattamente il guasto che il Blocco 3
+# vuole scongiurare.
+elif [[ "${STACK}" == "03" ]]; then
+  COMPOSE="${RADICE}/docker/03-sharded/compose.yaml"
+  SEGRETI="${RADICE}/docker/03-sharded/.env"
+  PROFILO="${PROFILO:-palco}"
+
+  if [[ ! -f "${SEGRETI}" ]]; then
+    printf 'Manca %s.\n' "${SEGRETI}" >&2
+    printf 'Contiene la password dell'"'"'amministratore e sta fuori dal repository (ADR-0014).\n' >&2
+    exit 1
+  fi
+  set -a; . "${SEGRETI}"; set +a
+  UTENTE="${UTENTE_AMMINISTRATORE:-admin}"
+  PASSWORD="${PASSWORD_AMMINISTRATORE:-}"
+
+  case "${PROFILO}" in
+    palco)    MONGOD=(sh-cfg1 sh-shard1a sh-shard2a); ROUTER=(sh-mongos) ;;
+    completo) MONGOD=(sh-cfg1 sh-cfg2 sh-cfg3
+                      sh-shard1a sh-shard1b sh-shard1c
+                      sh-shard2a sh-shard2b sh-shard2c)
+              ROUTER=(sh-mongos sh-mongos2) ;;
+    *) printf 'Profilo sconosciuto: «%s». Sono «palco» e «completo».\n' "${PROFILO}" >&2; exit 2 ;;
+  esac
+
+  compose() {
+    docker compose --env-file "${AMBIENTE}" --env-file "${SEGRETI}" \
+      -f "${COMPOSE}" --profile "${PROFILO}" "$@"
+  }
+
+  # Tutto passa dal router, che è il punto in cui il client parla al cluster. Chiedere
+  # a un mongod direttamente adesso funzionerebbe — da ADR-0071 ogni shard ha un
+  # amministratore locale con le stesse credenziali — e risponderebbe male: uno shard
+  # conosce solo la propria metà dei documenti e non ha l'anagrafe del cluster
+  # (V-067). Fino a quel commit non entrava nemmeno, e l'errore faceva da chiavistello
+  # (V-058); adesso il chiavistello non c'è e la regola resta.
+  dal_router() {
+    compose exec -T mongos \
+      mongosh --quiet --host localhost \
+        --username "${UTENTE}" --password "${PASSWORD}" --authenticationDatabase admin \
+        lab --eval "$1" 2>/dev/null | tail -1 | tr -d '\r'
+  }
+
+  titolo "Container (profilo ${PROFILO})"
+  for nodo in "${MONGOD[@]}" "${ROUTER[@]}"; do
+    rialza "${nodo}"
+  done
+  for nodo in "${MONGOD[@]}" "${ROUTER[@]}"; do
+    attendi_salute "${nodo}"
+  done
+
+  titolo "Topologia"
+  registrati=""
+  for ((i = 0; i < ATTESA_PRIMARIO; i++)); do
+    registrati="$(dal_router 'print(db.getSiblingDB("config").shards.countDocuments({state: 1}))')"
+    [[ "${registrati}" == "2" ]] && break
+    sleep 1
+  done
+  if [[ "${registrati}" == "2" ]]; then
+    ok "due shard registrati e attivi"
+  else
+    errore "shard attivi: «${registrati:-nessuna risposta}» invece di 2 dopo ${ATTESA_PRIMARIO} s"
+  fi
+  # Il balancer si può spegnere per sbaglio da mongosh durante una prova, e da spento
+  # non dà nessun segnale finché non serve. Rimetterlo acceso fa parte del riportare
+  # lo stack allo stato da cui la demo comincia.
+  if [[ "$(dal_router 'print(sh.getBalancerState())')" == "true" ]]; then
+    ok "balancer attivo"
+  else
+    nota "balancer spento, lo riaccendo"
+    dal_router 'sh.startBalancer()' > /dev/null
+    if [[ "$(dal_router 'print(sh.getBalancerState())')" == "true" ]]; then
+      ok "balancer riacceso"
+    else
+      errore "il balancer non si è riacceso"
+    fi
+  fi
+
+  titolo "Collezioni lasciate in giro dalla demo"
+  tolte="$(dal_router '
+    const superstiti = ["ordini"];
+    const via = db.getCollectionNames().filter(n => !superstiti.includes(n));
+    via.forEach(n => db.getCollection(n).drop({ writeConcern: { w: "majority", wtimeout: 10000 } }));
+    const rimaste = db.getCollectionNames().filter(n => !superstiti.includes(n));
+    print(rimaste.length > 0 ? "RESIDUI: " + rimaste.join(", ")
+                             : (via.length === 0 ? "nessuna" : via.join(", ")));
+  ')"
+  verdetto_pulizia "collezioni rimosse" "${tolte}"
+
+  # `ordini` sopravvive alla riga sopra, ma dal Task 15 non è più intatta: il Blocco 3 ci
+  # scrive dentro perché è la collezione distribuita, ed è l'unico posto in cui il seed e
+  # l'applicazione condividono una collezione (ADR-0106). Non si toglie niente qui — il
+  # seed qui sotto la ricostruisce — ma il numero si stampa, perché è la differenza fra
+  # «la demo è girata» e «il seed ha caricato più del previsto».
+  aggiunti="$(dal_router 'print(db.ordini.countDocuments({_id: {$type: "objectId"}}))')"
+  if [[ "${aggiunti}" =~ ^[0-9]+$ && "${aggiunti}" != "0" ]]; then
+    nota "in lab.ordini ci sono ${aggiunti} documenti scritti dalle scene: li toglie il seed qui sotto"
+  fi
+
+  titolo "Dataset"
+  # Lo STESSO servizio che semina all'avvio, con RICARICA=1: una sorgente sola, e
+  # `sh.shardCollection()` dentro lo script è idempotente, quindi la collezione resta
+  # distribuita anche se la demo l'aveva lasciata cadere. Con RICARICA la `drop` è
+  # incondizionata, ed è ciò che porta via i documenti contati poco sopra.
+  if ! compose run --rm -e RICARICA=1 seed > /dev/null 2>&1; then
+    errore "il seed non è andato a buon fine — «make logs-03» per il motivo"
+  fi
+  # Ventimila, non cinquantamila: lo stack 03 usa i primi 20 000 del dataset (ADR-0064),
+  # quindi l'impronta è diversa da quella di V-013 e deve esserlo (V-058).
+  impronta="$(dal_router 'const a = db.ordini.aggregate([{$group:{_id:null, n:{$sum:1}, tot:{$sum:"$importo"}, righe:{$sum:"$righe"}}}]).toArray()[0]; print(a ? a.n + " " + a.tot.toFixed(2) + " " + a.righe : "collezione vuota")')"
+  confronta "impronta di lab.ordini" "${IMPRONTA_20K}" "${impronta}"
+
+  # L'unico controllo che distingue uno sharded cluster da un replica set travestito —
+  # e per farlo deve guardare i numeri, non la punteggiatura. La prima stesura
+  # cercava uno spazio nella risposta: `shard1rs=0 shard2rs=5` ne ha uno, e veniva
+  # dichiarato «documenti su entrambi gli shard». Il caso è stato costruito davvero,
+  # su un database usa-e-getta, spostando un chunk vuoto sul secondo shard (V-101).
+  distribuzione="$(dal_router '
+    const per = {};
+    db.getSiblingDB("admin").aggregate([{$shardedDataDistribution: {}}])
+      .toArray()
+      .filter(d => d.ns === "lab.ordini")
+      .forEach(d => d.shards.forEach(s => { per[s.shardName] = s.numOwnedDocuments; }));
+    const nomi = Object.keys(per).sort();
+    print(nomi.length === 0 ? "nessun dato" : nomi.map(n => n + "=" + per[n]).join(" "));
+  ')"
+  ha_risposto "la distribuzione" "${distribuzione}" && {
+    con_documenti=0
+    shard_letti=0
+    for coppia in ${distribuzione}; do
+      if [[ "${coppia}" != *=* || ! "${coppia#*=}" =~ ^[0-9]+$ ]]; then
+        shard_letti=0
+        break
+      fi
+      shard_letti=$((shard_letti + 1))
+      (( ${coppia#*=} > 0 )) && con_documenti=$((con_documenti + 1))
+    done
+    if (( shard_letti >= 2 && con_documenti == shard_letti )); then
+      ok "documenti su entrambi gli shard: ${distribuzione}"
+    else
+      errore "i documenti non sono distribuiti su due shard: ${distribuzione}"
+    fi
+  }
+
+else
+  printf 'Stack sconosciuto: «%s».\n' "${STACK}" >&2
+  uso
+fi
+
+printf '\n'
+if (( ERRORI == 0 )); then
+  printf 'Stack %s riportato allo stato di partenza.\n' "${STACK}"
+  exit 0
+fi
+printf 'Stack %s: %d cose non tornano. Se insistono, «make reset-%s» ricostruisce da zero.\n' \
+  "${STACK}" "${ERRORI}" "${STACK}"
+exit 1

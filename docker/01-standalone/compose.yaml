@@ -1,0 +1,183 @@
+# Stack 01 — istanza singola.
+#
+# È il più semplice dei tre e il meno interessante da guardare: il suo valore non è
+# tecnico, è narrativo. Mostra cosa si ottiene con un solo mongod e — soprattutto —
+# cosa non si ottiene, che è la domanda a cui rispondono gli altri due stack.
+#
+# Gira DELIBERATAMENTE senza autenticazione. Non è una svista da correggere: è
+# l'esempio negativo di ADR-0005, e chiunque copi questo file per usarlo altrove
+# deve leggere prima docs/02-architetture/standalone.md.
+#
+# Verificato da `make stack-check`, che applica a questo file le otto regole degli
+# ADR di feature/00 (tools/check_stack.py).
+
+name: sqlstart-01-standalone
+
+services:
+  mongo-standalone:
+    # Il digest arriva da tools/images.env, generato da `make images-pull`. La forma
+    # `:?` fa fallire Compose subito e dicendo cosa manca, invece di avviare un
+    # container con un'immagine vuota.
+    image: ${MONGO_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+    container_name: mongo-standalone
+    # Nome host esplicito, mai indirizzi IP: ADR-0021. Qui non serve ancora a
+    # nessuno, ma la buona abitudine si prende sullo stack in cui non costa nulla.
+    hostname: mongo-standalone
+    # `never` fisso, non parametrico: l'immagine non viene mai scaricata, e se
+    # manca dalla cache locale l'avvio fallisce subito invece di aprire una
+    # connessione che in sala non c'è. Il prezzo è che `make images-pull` va
+    # eseguito una volta, a casa, con la rete. ADR-0039.
+    pull_policy: never
+    restart: unless-stopped
+
+    mem_limit: 1024m
+    cpus: 1.0
+
+    command:
+      - mongod
+      # NESSUN --logpath, ed è una scelta misurata, non una dimenticanza.
+      # L'aiuto del binario dice «Log file to send write to INSTEAD OF stdout»:
+      # è una redirezione, non una duplicazione. Misurato in V-010 — con
+      # --logpath il file ha 65 righe e `docker logs` ne ha zero. Attivarlo
+      # spegnerebbe `docker compose logs`, cioè il modo più naturale di mostrare
+      # i log dal palco. Il design §5.3 ipotizzava un doppio canale: non esiste.
+      # 0.25 GiB = 256 MiB di cache dentro 1024 MiB di limite. Il valore è dichiarato
+      # a mano non perché mongod non sappia leggere il proprio cgroup — lo legge, ed
+      # è misurato in V-009 — ma perché questo file è materiale didattico e il calcolo
+      # deve vedersi. Nessuno controlla che la cache stia sotto il mem_limit: mongod
+      # accetta senza un avviso una cache più grande della memoria che avrà.
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+
+    ports:
+      # Porta 27017 come da mappa del design §5.2. Gli altri due stack usano intervalli
+      # diversi apposta: i tre progetti devono poter convivere senza collisioni.
+      - "${PORTA_HOST:-27017}:27017"
+
+    volumes:
+      # Volume NOMINATO, non bind mount: su macOS un bind mount di /data/db paga il
+      # filesystem condiviso a ogni scrittura, e la demo sulle prestazioni misurerebbe
+      # VirtioFS invece di WiredTiger.
+      - dati:/data/db
+      # L'entrypoint ufficiale esegue questi script SOLO se /data/db è vuota. Su un
+      # volume già popolato non succede niente, e non lo dice nessuno: nessun
+      # avviso, nessuna riga di log. Vedi V-014 e
+      # docs/02-architetture/trappole-mongodb-in-docker.md.
+      - ./init:/docker-entrypoint-initdb.d:ro
+
+    # Se i log stanno su stdout, ruotarli non è più affare di mongod: è affare
+    # del runtime. Il driver json-file NON ruota niente per impostazione
+    # predefinita — misurato in V-011, LogConfig vuoto — e la demo sulle
+    # prestazioni scrive una riga per ogni connessione aperta e una per ogni
+    # connessione chiusa. Senza questi due limiti il file cresce finché c'è
+    # disco. 10 MiB per tre file: 30 MiB al massimo, più di quanto serva a
+    # qualunque demo e molto meno di un disco pieno a metà talk.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      # `mongosh` è nell'immagine (2.10.0) e un ping è l'unica prova onesta che
+      # il nodo serva: una porta in ascolto non vuol dire pronta a rispondere.
+      # Costa circa 300 ms a esecuzione (V-012), ogni 10 secondi, dentro 1 CPU.
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # Senza `start_period` i primi tentativi falliti contano come guasti e il
+      # container risulta «unhealthy» mentre sta semplicemente ancora partendo.
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # L'APPLICAZIONE, DENTRO LA RETE.
+  #
+  # `mongolab` gira anche sull'host — `uv run --directory app mongolab stats
+  # --target standalone` — e su questo stack le due strade portano allo stesso
+  # posto. Sugli altri due no, ed è per quello che questo servizio esiste: da
+  # fuori la rete Compose il client non può scoprire i membri di un replica set,
+  # perché i nomi che il set gli restituisce sono nomi di servizi Compose che
+  # l'host non risolve (M-019, ADR-0012). Da qui dentro sì.
+  #
+  # Il servizio è scritto uguale in tutti e tre gli stack apposta: la differenza
+  # fra le tre architetture deve stare negli stack, non nel modo di interrogarli.
+  # ---------------------------------------------------------------------------
+
+  app:
+    # Nome e versione sono quelli di app/pyproject.toml, e qui non c'è digest.
+    # Non perché non esista — con l'archivio immagini di containerd ne esiste uno
+    # anche per ciò che nessuno ha pubblicato, misurato in M-037 — ma perché
+    # sarebbe un digest che nessun registro ha mai servito e che cambia a ogni
+    # ricostruzione: scriverlo qui prometterebbe una verificabilità che non c'è.
+    # La promessa di ADR-0009 non salta, si sposta: `check_stack.py` va a leggere
+    # le righe `FROM` del Dockerfile e pretende che siano pinnate per digest e
+    # note a tools/images.env (ADR-0093).
+    image: mongolab:0.1.0
+
+    build:
+      # Relativo a QUESTA cartella e non alla radice: Compose risolve il contesto
+      # dalla posizione del file, qualunque sia la cartella da cui si esegue.
+      context: ../../app
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+        UV_IMAGE: ${UV_IMAGE:?assente — eseguire «make images-pull», oppure passare --env-file tools/images.env}
+
+    # Vale anche per un servizio che si costruisce: `never` dice che l'immagine
+    # non si va a cercare in un registro nemmeno se manca. Se manca, la risposta
+    # giusta è `make app-image`, non una connessione (ADR-0039).
+    pull_policy: never
+
+    # Il profilo tiene questo servizio fuori da `make up-01`: lo stack è fatto di
+    # database, l'applicazione è uno strumento che si invoca. Senza profilo, `up
+    # -d --wait` avvierebbe anche lei, che eseguirebbe `--help` e uscirebbe
+    # subito — e `--wait` aspetterebbe la salute di un container già finito.
+    # `docker compose run` invece attiva da sé il profilo del servizio che nomina.
+    profiles: ["strumenti"]
+
+    # NIENTE container_name, ed è l'unico servizio del repository a non averlo.
+    # `run` crea un container nuovo a ogni invocazione: con un nome fisso, due
+    # comandi lanciati insieme — la cronaca in una finestra, il carico in
+    # un'altra, che è esattamente la scena del Blocco 2 — collidono sul nome.
+
+    # Un interprete Python con pymongo sta in una sessantina di MiB; il resto è
+    # margine per i documenti che `workload` tiene in volo, che sono `--writers`
+    # per `--doc-size`. Chi alza quei due numeri alza anche MEMORIA_APP.
+    mem_limit: ${MEMORIA_APP:-512m}
+    cpus: ${CPU_APP:-1.0}
+
+    # Non riparte da sola: è un comando, non un servizio. Un `unless-stopped` qui
+    # rieseguirebbe `stats` all'infinito ogni volta che finisce.
+    restart: "no"
+
+    environment:
+      # La riga per cui tutto questo esiste. `mongolab` legge questa variabile e
+      # cambia indirizzi: non più `localhost:27017` ma `mongo-standalone:27017`,
+      # il nome del servizio qui sopra (mongolab.infrastructure.bersagli).
+      MONGOLAB_PUNTO_DI_VISTA: rete
+      # Nessuna credenziale, perché questo stack non autentica: è l'esempio
+      # negativo di ADR-0005, e si vede anche da qui.
+
+    volumes:
+      # Il sorgente dell'host montato sopra quello dell'immagine, in SOLA
+      # LETTURA. L'immagine installa il progetto in modo modificabile e il
+      # collegamento punta a /app/src: montarci sopra i file dell'host significa
+      # che una modifica si prova subito, senza ricostruire niente (§6.5 del
+      # design). `ro` perché il container non ha nessuna ragione di scrivere nel
+      # repository, e l'immagine dichiara PYTHONDONTWRITEBYTECODE per non
+      # provarci nemmeno con i .pyc.
+      - ../../app/src:/app/src:ro
+
+    # Niente `depends_on`. Sarebbe comodo e sarebbe sbagliato: `run` avvia da sé
+    # le dipendenze dichiarate, quindi `make app-stats` accenderebbe lo stack
+    # invece di dire che è spento. Che lo stack sia in piedi lo si chiede a `make
+    # up-01`, e se non lo è la risposta giusta è un errore di connessione.
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  dati:

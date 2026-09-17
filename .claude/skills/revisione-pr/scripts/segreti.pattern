@@ -1,0 +1,35 @@
+# Pattern di ricerca dei segreti, uno per riga, sintassi grep -E.
+# Le righe che cominciano con # e le righe vuote vengono scartate prima dell'uso.
+#
+# La regola che governa questo file: si cercano VALORI, non NOMI. Il repository
+# nomina apposta le sue credenziali (INSTALL-ENV.md le elenca tutte per poterle
+# revocare), e un controllo che si accende sul nome direbbe "segreto trovato"
+# ogni volta che si tocca quel documento. Un controllo che grida al lupo viene
+# spento, e allora non protegge piu' niente.
+
+# --- chiavi private e certificati ---
+-----BEGIN [A-Z ]*PRIVATE KEY-----
+
+# --- prefissi noti dei fornitori ---
+sk-[A-Za-z0-9_-]{20,}
+sk-ant-[A-Za-z0-9_-]{20,}
+pplx-[A-Za-z0-9]{20,}
+ghp_[A-Za-z0-9]{30,}
+gho_[A-Za-z0-9]{30,}
+ghu_[A-Za-z0-9]{30,}
+ghs_[A-Za-z0-9]{30,}
+ghr_[A-Za-z0-9]{30,}
+github_pat_[A-Za-z0-9_]{20,}
+AIza[0-9A-Za-z_-]{30,}
+ya29\.[0-9A-Za-z_-]{20,}
+xox[baprs]-[A-Za-z0-9-]{10,}
+AKIA[0-9A-Z]{16}
+glpat-[A-Za-z0-9_-]{15,}
+ctx7sk-[A-Za-z0-9_-]{10,}
+
+# --- assegnazioni con un valore lungo attaccato ---
+# Il nome da solo non basta: ci vuole = oppure : e poi una stringa lunga.
+(api[_-]?key|apikey|secret|token|passwd|password)["' ]*[:=][ ]*["']?[A-Za-z0-9/+_.-]{16,}
+
+# --- credenziali dentro un URL ---
+[a-z][a-z0-9+.-]*://[^/[:space:]:@]+:[^/[:space:]@]{6,}@

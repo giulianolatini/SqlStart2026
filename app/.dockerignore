@@ -1,0 +1,27 @@
+# Che cosa NON entra nel contesto di costruzione.
+#
+# Il contesto è `app/`, e `app/.venv` è l'ambiente dell'host: centinaia di MiB di
+# pacchetti compilati per macOS arm64, inutili dentro un'immagine Linux e dannosi se ci
+# finissero — `uv sync` ne creerebbe un altro accanto e l'immagine porterebbe due
+# ambienti, uno dei quali non eseguibile. Senza questo file il tempo di costruzione se ne
+# va nel trasferimento del contesto al demone, prima ancora che cominci un `RUN`.
+.venv/
+__pycache__/
+*.pyc
+
+# Le cache degli strumenti: hanno percorsi assoluti dell'host dentro, quindi in un
+# container sono peggio che inutili — sono sbagliate.
+.mypy_cache/
+.pytest_cache/
+
+# Le prove non entrano nell'immagine: il container esegue l'applicazione, non la
+# verifica. `make app-test` e `make app-test-integration` girano sull'host, dove hanno
+# il repository intero e il socket Docker che le prove di integrazione usano per
+# accendere gli stack (ADR-0020).
+tests/
+
+# La documentazione dell'applicazione sta accanto al codice per scelta (ADR-0081) e non
+# ha niente da fare in un'immagine di esecuzione.
+docs/
+Dockerfile
+.dockerignore
