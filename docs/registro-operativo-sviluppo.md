@@ -7994,3 +7994,71 @@ YouTube, mentre dentro le slide va il muto ([ADR-0140](Decision.md#adr-0140)).
 
 Stato aggiornato: decisioni fino ad **ADR-0141**, verifiche fino a **V-107**, fonti fino a
 **S-080**, misure dell'applicazione fino a **M-064**, note di metodo fino alla **264**.
+
+---
+
+## 2026-09-17 — La scena 4 girata: la prova era in campo, e la scrivania anche
+
+L'unica scena non fabbricabile è stata girata dal vivo dal PO, con Wi-Fi spento e cavo Ethernet
+staccato. Ha funzionato: `make up-02` e `make smoke-02` riescono senza rete, e l'icona del Wi-Fi
+barrata è nella stessa immagine del `Superati: 42 · Errori: 0`. Poi la ripresa è stata riguardata,
+ed è emerso quello che la procedura non prevedeva.
+
+### Deciso
+
+- **La scena 4 si pubblica ritagliata sulla finestra del terminale, e il Wi-Fi spento si dichiara
+  a voce** ([ADR-0142](Decision.md#adr-0142)). La ripresa a schermo intero non si pubblica e non
+  resta nella cartella che `make preflight` conta.
+- **La procedura di ripresa comincia da un passo che prima non aveva: si prepara lo schermo**, e
+  viene prima del reset dello stack. La [pagina delle
+  registrazioni](05-talk/registrazioni/README.md#schermo-intero) dice che cosa significa in
+  pratica — nascondere le altre applicazioni, spegnere le notifiche, guardare i nomi delle schede,
+  sgombrare la scrivania — e perché non si rimedia dopo.
+- **La tabella dei filmati dice ciò che il file contiene, non ciò che doveva contenere.** La riga
+  4 prometteva «dimostra che il lab è offline davvero»: il file pubblicato non lo dimostra, e la
+  riga ora lo ammette invece di lasciarlo credere.
+
+### Misurato ([V-108](Sources.md#v-108))
+
+- **Tre file dalla stessa ripresa**, tutti e tre con **zero tracce audio**: lo schermo intero
+  3024×1964 di 70,53 s (52,8 MB), l'intermedio `.m4v` 1662×1080 a 60 fps di 50,62 s (43,3 MB), e
+  il ritagliato `.mp4` 1662×1080 a 30 fps di 50,63 s (4,3 MB). I due `-2` sono il primo, ritagliato
+  sulla finestra e accorciato di 19,9 s.
+- **La prova c'era.** Nel fotogramma a 68 s dello schermo intero l'icona del Wi-Fi è barrata, e il
+  terminale nello stesso fotogramma chiude con `Superati: 42 · Errori: 0` sul ramo `release/1.0`.
+- **E nello stesso schermo c'era dell'altro.** Il fotogramma a 5 s contiene una sessione di lavoro
+  aperta con dentro l'elenco dei passi in corso, la barra delle schede con i nomi di altri
+  progetti, e una finestra del Finder con nomi di documenti.
+- **`make preflight`** conterebbe **15** `.mp4`: i tredici fabbricati più le due riprese. Tolta la
+  ripresa integrale dalla cartella, tornano i **14** attesi.
+
+### Note di metodo
+
+265. **Il confine che rende una cosa impossibile da fabbricare è lo stesso che la rende difficile
+     da pubblicare.** [ADR-0141](Decision.md#adr-0141) l'aveva tracciato una volta sola, e in una
+     direzione: ciò che vive dentro il terminale si fabbrica da un `.cast`, ciò che vive fuori va
+     girato. Girandolo si scopre l'altro lato della stessa linea — «fuori dal terminale» vuol dire
+     «il tuo schermo», e il tuo schermo non è materiale preparato, è materiale che c'era. La prova
+     e il segreto abitavano la stessa striscia di pixel, e ritagliare l'una toglie l'altra. Vale
+     oltre i filmati: ogni dimostrazione che per essere credibile deve mostrare il **contesto**
+     mostra un contesto che nessuno ha revisionato.
+
+266. **Quando il rimedio non esiste a valle, il costo va speso a monte o non va speso.** Qui i
+     rimedi dopo la ripresa erano tre, e nessuno regge: il ritaglio toglie la prova; la maschera a
+     riquadri copre ciò che c'era quando la piazzi, non la notifica del minuto dopo, e per
+     accorgersene bisogna riguardare settanta secondi fotogramma per fotogramma; la composizione
+     conserva tutto ma produce un'immagine assemblata, e chi la nota si chiede che altro sia stato
+     composto. L'unico intervento efficace costava cinque minuti **prima**. La regola operativa:
+     quando si scrive una procedura, i passi di preparazione non sono preamboli — sono gli unici
+     punti in cui certi difetti si possono ancora togliere.
+
+### Prossimo passo
+
+**Del PO, in ordine:** spostare la ripresa integrale e l'intermedio `.m4v` fuori dalla cartella dei
+filmati e rinominare il ritagliato togliendogli il `-2`; poi la **fusione di `release/1.0` in
+`main`** e la pubblicazione del repository. Le passate parlate dei cinque filmati fabbricati
+restano non urgenti: servono a YouTube, mentre dentro le slide va il muto
+([ADR-0140](Decision.md#adr-0140)).
+
+Stato aggiornato: decisioni fino ad **ADR-0142**, verifiche fino a **V-108**, fonti fino a
+**S-080**, misure dell'applicazione fino a **M-064**, note di metodo fino alla **266**.

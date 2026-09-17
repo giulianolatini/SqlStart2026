@@ -11064,3 +11064,64 @@ ffmpeg -y -f concat -safe 0 -i elenco.txt -c copy 05-guasto-shard-nei-due-profil
   verificato il comportamento su `.cast` di versione 1, che questo archivio non contiene.
 - **Data:** 2026-09-17
 - **Usata da:** ADR-0141
+
+---
+
+<a id="v-108"></a>
+### V-108 — La ripresa della scena 4: la prova era in campo, e insieme a lei tutto il resto dello schermo
+
+- **Comandi:** la rilettura dei tre file usciti dalla ripresa, e l'estrazione di singoli fotogrammi
+  per guardare che cosa ci fosse davvero dentro l'inquadratura.
+
+```bash
+ffprobe -v error -show_entries format=duration,size \
+  -show_entries stream=index,codec_type,width,height,avg_frame_rate,nb_frames \
+  -of default=noprint_wrappers=1 04-avvio-offline-muto.mp4
+ffmpeg -ss 68 -i 04-avvio-offline-muto.mp4 -frames:v 1 -vf "crop=1500:64:1524:0" barra.png
+ffmpeg -ss 49 -i 04-avvio-offline-muto-2.mp4 -frames:v 1 ritagliato.png
+```
+
+- **Ambiente:** MacBook Pro Apple Silicon, macOS 26.6.2, 17 settembre 2026, `ffmpeg` e `ffprobe`
+  6.x. La scena è `make up-02` seguito da `make smoke-02` sul replica set, girata con
+  `make filmato NOME=04-avvio-offline-muto AUDIO=no` con Wi-Fi spento e cavo Ethernet staccato.
+- **Che cosa si voleva sapere:** se la ripresa fosse muta come richiesto, se durasse quanto la
+  scena, e — la domanda che conta — se la **prova** della scena, l'icona del Wi-Fi barrata nella
+  barra dei menu, fosse effettivamente dentro l'inquadratura.
+
+- **Che cosa si è misurato.** Tre file, dalla stessa ripresa:
+
+  | file | inquadratura | durata | tracce audio | byte |
+  |---|---|---|---|---|
+  | `04-avvio-offline-muto.mp4` | schermo intero, 3024×1964, 29,79 fps | 70,53 s | **0** | 52 780 589 |
+  | `04-avvio-offline-muto-2.m4v` | finestra, 1662×1080, 60 fps | 50,62 s | **0** | 43 268 444 |
+  | `04-avvio-offline-muto-2.mp4` | finestra, 1662×1080, 30 fps | 50,63 s | **0** | 4 299 236 |
+
+  I due file `-2` sono il primo, ritagliato sulla finestra del terminale e accorciato di 19,9 s.
+  Nessuno dei tre ha una traccia audio: `AUDIO=no` ha fatto quello che promette.
+
+- **La prova c'è, e sta dove ci si aspettava.** Nel fotogramma a 68 s dello schermo intero, la
+  barra dei menu mostra l'icona del Wi-Fi **barrata**; il terminale, nello stesso fotogramma,
+  chiude con `Superati: 42 · Errori: 0` e con il prompt sul ramo `release/1.0`. La scena riesce, e
+  riesce senza rete: le due cose stanno nella stessa immagine, che è esattamente il motivo per cui
+  questa scena non era fabbricabile da un `.cast` ([ADR-0141](Decision.md#adr-0141)).
+
+- **Nella stessa immagine, però, c'è dell'altro.** Il fotogramma a 5 s dello schermo intero
+  contiene: una sessione di Claude Code aperta con dentro l'elenco dei passi in esecuzione, la
+  barra delle schede del terminale con i nomi di **altri progetti**, e una finestra del Finder con
+  nomi di documenti. Nel ritagliato non c'è niente di tutto questo — e non c'è nemmeno la barra
+  dei menu, perché la barra sta in alto e il ritaglio comincia sotto.
+
+- **Che cosa se ne ricava.** Le due cose si escludono con la geometria, non con la buona volontà:
+  la prova della scena e il materiale da non pubblicare abitano **la stessa striscia di schermo**,
+  quella fuori dalla finestra del terminale. Un ritaglio che salva la privacy toglie la prova; una
+  ripresa che tiene la prova pubblica una scrivania. Se ne esce prima di premere `registra`,
+  preparando lo schermo — non dopo, tagliando. È la misura che sta sotto
+  [ADR-0142](Decision.md#adr-0142).
+
+- **Riserve:** i tre file vengono da **una** ripresa, e i secondi che riportano sono quelli di
+  quella esecuzione, non una mediana su più giri: le misure del replica set stanno in
+  [V-045](#v-045). La lettura dei fotogrammi è visiva — l'icona barrata si riconosce guardandola,
+  non c'è un numero che la certifichi — e l'elenco di ciò che c'era sullo schermo è quello che si
+  vede in due fotogrammi su 2101, non un inventario dell'intera ripresa.
+- **Data:** 2026-09-17
+- **Usata da:** ADR-0142

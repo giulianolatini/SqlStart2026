@@ -3889,3 +3889,32 @@ La contromisura non è leggere meglio: è **contare**. Lo strumento del reposito
 filmato con la somma delle scene che lo compongono e si ferma se non torna, perché una riserva che
 dura la metà della scena che sostituisce non è la riserva di quella scena — e questo, davanti a un
 pubblico, si scopre troppo tardi per rimediare.
+
+---
+
+### La prova e il segreto abitavano la stessa striscia di schermo
+
+> Cinque filmati su sei si potevano fabbricare dalle registrazioni di terminale. Il sesto no, e il
+> motivo era netto: la sua prova non stava nel terminale, stava nell'icona del Wi-Fi barrata in
+> barra dei menu. Girato a schermo intero, il filmato conteneva la prova — e insieme una sessione
+> di lavoro aperta, i nomi di altri progetti, una finestra del Finder. Ritagliato per pubblicarlo,
+> ha perso esattamente la cosa per cui era stato girato. **Non è una coincidenza: sono la stessa
+> striscia di schermo.** Tutto ciò che una registrazione di terminale non contiene è anche tutto
+> ciò che non hai scelto di far vedere.
+
+Fonte: [V-108](Sources.md#v-108), ultimo punto; [ADR-0142](Decision.md#adr-0142).
+
+**Perché una slide:** perché il confine si scopre due volte, e la seconda fa male. La prima volta
+lo trovi mentre decidi *che cosa si può fabbricare*: ciò che vive dentro il terminale sì, ciò che
+vive fuori no. La seconda volta lo ritrovi mentre decidi *che cosa si può pubblicare*, ed è la
+stessa linea vista dall'altro lato — perché «fuori dal terminale» vuol dire «il tuo schermo», e il
+tuo schermo non è materiale che hai preparato: è materiale che c'era. Qualsiasi dimostrazione che
+per essere credibile ha bisogno di mostrare il contesto, ha bisogno di mostrare un contesto che
+nessuno ha revisionato.
+
+La contromisura non arriva dopo. Un ritaglio toglie la scrivania e con lei la prova; una maschera
+a riquadri copre ciò che c'era quando l'hai piazzata, non la notifica che compare al minuto dopo.
+Si paga prima — cinque minuti di scrivania sgombra e notifiche spente — oppure si paga in
+dimostrazione: qui il filmato si pubblica ritagliato, e che la rete fosse spenta lo deve dire una
+voce. Una prova detta a parole è più debole di una prova che si vede, e vale la pena ammetterlo
+invece di far finta che il filmato la contenga ancora.

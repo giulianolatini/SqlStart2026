@@ -329,7 +329,7 @@ importanza dentro ciascun blocco:
 | 1 | il failover con `docker kill` | scena 2 | `make filmati` | è la scena del talk. Se salta questa, salta il blocco |
 | 2 | le due varianti a confronto, `kill` e terminazione | scene 2 e 3 | `make filmati` | il confronto è il punto, non le due scene separate |
 | 3 | la maggioranza persa | scena 4 | `make filmati` | risponde alla domanda che il pubblico fa sempre |
-| 4 | `make up-02` da zero, con la rete disattivata | — | `make filmato`, dal vivo | dimostra che il lab è offline davvero, e apre il talk |
+| 4 | `make up-02` da zero, con la rete disattivata | — | `make filmato`, dal vivo | apre il talk. Ma leggi la nota qui sotto: il file pubblicato non mostra la rete spenta |
 | 5 | il guasto di uno shard nei due profili | scene 8 e 9 | `make filmati` | è la scena del Blocco 3, e dal vivo costa due stack e uno scambio di `.env` |
 | 6 | il Blocco 3 per intero: avvio, `sh.status()`, distribuzione | scene 5, 6 e 7 | `make filmati` | se il cluster non parte in sala non c'è modo di raccontarlo a voce |
 
@@ -337,6 +337,20 @@ Cinque su sei escono dalle registrazioni di terminale già archiviate. Il quarto
 istruttivo: **la sua prova sta fuori dal terminale.** Un `.cast` contiene quello che il terminale
 ha scritto, non l'icona del Wi-Fi spenta nella barra dei menu — e quella icona *è* la
 dimostrazione. Va girato dal vivo.
+
+> **Girato il 17 settembre 2026 — e il filmato che si pubblica quella icona non ce l'ha.** Fuori
+> dalla finestra del terminale, nella stessa striscia di schermo dov'era la barra dei menu, c'era
+> anche una scrivania che non si poteva pubblicare. Il file è ritagliato sulla finestra, e che la
+> rete fosse spenta lo dichiara il relatore a voce ([ADR-0142](../../Decision.md#adr-0142),
+> [V-108](../../Sources.md#v-108)). Il confine che rende questa scena non fabbricabile è lo stesso
+> che la rende difficile da pubblicare, e non è una coincidenza: è la stessa striscia di schermo.
+> Chi la rigirerà legga prima [«Lo schermo intero è anche quello che non vuoi
+> pubblicare»](#schermo-intero) — cinque minuti di preparazione la restituiscono intera.
+
+**Per costruire le slide c'è una pagina a parte:** [«I filmati di riserva — che cosa mostra
+ognuno, e come intitolarlo»](titoli-per-le-slide.md) elenca tutti e quattordici i file prodotti,
+con durata, titolo proposto per la slide, il numero che ognuno porta e che cosa dire mentre scorre.
+Una copia sta anche in `~/SqlStart2026-registrazioni/TOC.md`, accanto ai file.
 
 ### Due strade, e non sono intercambiabili
 
@@ -450,20 +464,50 @@ come ripiego.
 
 ### Procedura, quando si gira
 
-1. `./tools/reset-demo.sh 02` — o `03`, secondo il blocco — e si aspetta l'impronta del dataset.
-2. Un terminale a 100×30, come le registrazioni di terminale, così le due specie di riserva
+1. **Si prepara lo schermo**, e viene prima dello stack — vedi [qui sotto](#schermo-intero).
+2. `./tools/reset-demo.sh 02` — o `03`, secondo il blocco — e si aspetta l'impronta del dataset.
+3. Un terminale a 100×30, come le registrazioni di terminale, così le due specie di riserva
    mostrano la stessa cosa.
-3. `make filmato NOME=<scena>-muto AUDIO=no`, si esegue la scena, si preme `q`. Si riguarda.
-4. `make filmato NOME=<scena>`, si rifà la stessa scena parlandoci sopra, si preme `q`.
-5. Il file parlato va sul canale YouTube del relatore **e** resta in `~/SqlStart2026-registrazioni`,
+4. `make filmato NOME=<scena>-muto AUDIO=no`, si esegue la scena, si preme `q`. Si riguarda.
+5. `make filmato NOME=<scena>`, si rifà la stessa scena parlandoci sopra, si preme `q`.
+6. Il file parlato va sul canale YouTube del relatore **e** resta in `~/SqlStart2026-registrazioni`,
    con lo stesso nome della scena corrispondente e l'estensione `.mp4`.
-6. `make preflight`: l'avviso sui filmati diventa `filmati locali disponibili: N`.
-7. Il collegamento a YouTube torna in questa pagina, nella colonna che oggi non c'è.
+7. `make preflight`: l'avviso sui filmati diventa `filmati locali disponibili: N`.
+8. Il collegamento a YouTube torna in questa pagina, nella colonna che oggi non c'è.
 
 Le tre righe di rumore che `ffmpeg` stampa a ogni corsa — `NSKVONotifying_AVCaptureScreenInput`,
 `Configuration of video device failed` e `not enough frames to estimate rate` — sono attese e non
 sono guasti: la ragione di ognuna sta nei commenti dello strumento, misurata in
 [V-106](../../Sources.md#v-106).
+
+<a id="schermo-intero"></a>
+
+#### Lo schermo intero è anche quello che non vuoi pubblicare
+
+`registra-schermo.sh` riprende **lo schermo**, non la finestra. È voluto — la scena 4 esiste
+proprio perché la sua prova sta fuori dal terminale, nell'icona del Wi-Fi barrata in barra dei
+menu — ma significa che finisce nel file anche tutto il resto: le notifiche che arrivano, i nomi
+delle altre schede del terminale, le finestre aperte dietro, la scrivania con i suoi documenti. Il
+17 settembre 2026 è successo davvero, e la ripresa della scena 4 conteneva una sessione di lavoro
+aperta, i nomi di altri progetti e una finestra del Finder ([V-108](../../Sources.md#v-108)).
+
+**Non si rimedia dopo.** Un ritaglio che toglie la scrivania toglie anche la barra dei menu, cioè
+la prova; una maschera a riquadri copre quello che c'era quando l'hai piazzata, non quello che
+compare al minuto dopo. **Cinque minuti prima di premere `registra`:**
+
+- si chiude o si nasconde tutto ciò che non è la scena — `Cmd`+`Opt`+`H` nasconde le altre
+  applicazioni in un colpo;
+- si spengono le notifiche («Non disturbare»), che sono l'unica cosa che compare *mentre* giri e
+  quindi l'unica che nessun controllo preventivo intercetta;
+- si guarda la **barra delle schede** del terminale: i nomi delle schede sono nomi di progetti;
+- si sgombra la scrivania, o si registra in uno Spazio nuovo che ne è privo.
+
+Poi si riguarda il file **prima** di caricarlo, e si guarda intorno alla scena, non la scena.
+
+La scena 4 di questo talk è l'eccezione che spiega la regola: era già girata quando ce ne si è
+accorti, e si pubblica ritagliata, senza la prova del Wi-Fi, che il relatore dichiara a voce
+([ADR-0142](../../Decision.md#adr-0142)). Chi rigirerà quella scena la prepari prima, e la
+pubblichi intera.
 
 ---
 

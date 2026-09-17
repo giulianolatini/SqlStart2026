@@ -9194,7 +9194,7 @@ controllare.
 <a id="adr-0141"></a>
 ## ADR-0141 — I filmati di riserva si fabbricano dalle registrazioni, e chi li fabbrica conta i secondi
 
-**Data:** 2026-09-17 · **Stato:** Accettata
+**Data:** 2026-09-17 · **Stato:** Accettata — **estesa da [ADR-0142](#adr-0142)**, che tratta la sola scena rimasta fuori e scopre che il suo confine è anche quello della privacy
 
 **Contesto:** [ADR-0140](#adr-0140) ha dato al repository uno strumento per registrare lo schermo, e
 la [pagina delle registrazioni](05-talk/registrazioni/README.md#filmati) elencava sei filmati da
@@ -9262,3 +9262,69 @@ resta, e resta necessario, per tutto ciò che vive fuori dal terminale.
   visto.
 
 **Fonti:** [V-107](Sources.md#v-107), [S-080](Sources.md#s-080)
+
+---
+
+<a id="adr-0142"></a>
+## ADR-0142 — La scena che ha bisogno di tutto lo schermo è la stessa che non può mostrarlo
+
+**Data:** 2026-09-17 · **Stato:** Accettata
+
+**Contesto:** [ADR-0141](#adr-0141) ha lasciato scoperta una sola scena, la quarta — `make up-02`
+da zero con la rete spenta — e ne ha detto il motivo: la sua prova non è ciò che il terminale
+scrive, è l'icona del Wi-Fi spenta nella barra dei menu, che un `.cast` non contiene. Girata il 17
+settembre 2026 con `make filmato`, la ripresa ha fatto il suo lavoro: l'icona barrata c'è, e nello
+stesso fotogramma il terminale chiude con `Superati: 42 · Errori: 0`
+([V-108](Sources.md#v-108)). Insieme all'icona, però, `tools/registra-schermo.sh` ha ripreso
+**tutto il resto dello schermo**: una sessione di lavoro aperta accanto con dentro l'elenco dei
+passi in corso, la barra delle schede del terminale con i nomi di altri progetti, e una finestra
+del Finder con nomi di documenti. Questo repository diventa pubblico il 18 settembre, e le passate
+parlate di questi filmati vanno su YouTube.
+
+**Decisione:** la scena 4 si pubblica **ritagliata sulla finestra del terminale**, e il fatto che
+la rete sia spenta si **dichiara a voce** dal palco. La ripresa a schermo intero non si pubblica e
+non resta nella cartella che `make preflight` conta.
+
+**Conseguenze.**
+
+- Il filmato di riserva della scena 4 dimostra **meno** di quanto la ripresa contenesse: mostra che
+  `make up-02` e `make smoke-02` riescono, non che riescono senza rete. La differenza la copre il
+  relatore parlando, ed è una copertura più debole di un'immagine — chi guarderà il filmato senza
+  la voce non avrà la prova, e il repository lo dice invece di lasciarlo credere.
+- **È il rovescio esatto di [ADR-0141](#adr-0141).** Là il confine fra fabbricare e girare passava
+  dove la prova esce dal terminale. Qui si scopre che quel confine è anche dove comincia la
+  privacy: tutto ciò che un `.cast` non contiene è anche tutto ciò che non si è **scelto** di far
+  vedere. Le due cose non si somigliano per caso — sono la stessa striscia di schermo.
+- La procedura di ripresa acquista un passo che prima non aveva, ed è il primo: **si prepara lo
+  schermo**, non solo lo stack. Sta nella [pagina delle
+  registrazioni](05-talk/registrazioni/README.md), perché è lì che qualcuno andrà a cercarla il
+  giorno in cui rigirerà una di queste scene.
+- Il filmato della scena 4 ha un **aspetto diverso** dagli altri dodici: quelli nascono da `agg` e
+  mostrano solo il testo, questo mostra la finestra del terminale con le sue decorazioni. La
+  differenza è visibile, non si corregge, e si spiega.
+
+**Alternative scartate.**
+
+- *Pubblicare la ripresa integrale.* Conserva la prova e costa la pubblicazione di una sessione di
+  lavoro, dei nomi di altri progetti e dei nomi di documenti di terzi. Non è una questione di
+  imbarazzo: è materiale che non è mio da pubblicare.
+- *Oscurare a riquadri le zone private, tenendo lo schermo intero.* Tecnicamente riesce, e
+  conserverebbe l'icona. Ma i riquadri si piazzano a coordinate fisse, cioè **per ipotesi** che
+  nulla si muova in settanta secondi: basta una notifica che compaia in un angolo non previsto
+  perché la maschera non la copra, e accorgersene richiede di riguardare il filmato fotogramma per
+  fotogramma. Una protezione che dipende dall'attenzione di chi riguarda è il difetto che
+  [ADR-0116](#adr-0116) insegna a non accettare — con la differenza che qui, quando lo si scopre,
+  il file è già pubblico.
+- *Comporre: ritagliare la striscia della barra dei menu e sovrapporla al filmato della finestra.*
+  Conserva la prova, viene dagli stessi fotogrammi e dagli stessi istanti, quindi non mente. Costa
+  però un montaggio in più e produce un'immagine **assemblata**, uno schermo che non è mai esistito
+  in quella forma. Per un filmato che esiste per convincere, una composizione è più fragile di una
+  frase detta a voce: chi la nota non si chiede solo se quella sia vera, si chiede che altro sia
+  stato composto.
+- *Rigirare la scena su una scrivania preparata.* È la strada giusta, ed è la raccomandazione per
+  chiunque rifarà questi filmati. Il 17 settembre, con il talk il giorno dopo, costa una seconda
+  ripresa completa più il tempo di sgombrare la macchina; il tempo del relatore, quella sera, era
+  meglio speso sulle slide. Vale la pena scriverlo così com'è: questa decisione è figlia della
+  data, non del ragionamento, e chi la rilegge a mente fredda dovrebbe rigirare la scena.
+
+**Fonti:** [V-108](Sources.md#v-108)
