@@ -25,6 +25,7 @@ from typing import Iterator, Mapping, Protocol, Sequence, runtime_checkable
 
 from mongolab.domain.eventi import Evento
 from mongolab.domain.modelli import (
+    ContoCollezione,
     DescrizioneTopologia,
     Distribuzione,
     Documento,
@@ -90,6 +91,25 @@ class ClusterInspector(Protocol):
         ...
 
     def db_stats(self) -> Mapping[str, object]: ...
+
+    def collection_counts(self) -> tuple[ContoCollezione, ...]:
+        """Quanti documenti in ciascuna collezione del database, per nome.
+
+        **Perche' non basta `db_stats`.** Quella risponde per database, e il campo
+        `objects` e' una somma: sul `lab` di uno stack gia' usato comprende le collezioni
+        di carico che l'Atto III lascia indietro. Le due domande sono diverse e vanno
+        chieste tutte e due — «di che cosa e' fatto» e «quanto fa in tutto» — perche' e'
+        la prima a dire se lo stack e' nello stato che il copione si aspetta.
+
+        **In ordine di nome**, e non per numero di documenti decrescente: un elenco che si
+        riordina da solo a ogni corsa non si confronta a colpo d'occhio con quello di
+        prima, e questa fotografia esiste per essere confrontata con uno stato atteso
+        scritto su carta.
+
+        **Tupla e non mappa**, come `Distribuzione.conti`: l'ordine e' parte della
+        risposta, e un `dict` lo conserverebbe per caso invece che per contratto.
+        """
+        ...
 
     def shard_distribution(self, collezione: str) -> Distribuzione:
         """Dove stanno davvero i documenti **di questa collezione**.

@@ -2819,3 +2819,298 @@ DumpTroppoLungo: …/sonda-tetto/finto_dump.py ha superato il tetto di 2 secondi
   Il limite dichiarato in `SubprocessBackup` vale anche qui e la sonda non lo tocca: quando il
   comando è `docker exec ...`, il `kill` uccide il **client** `docker` e lo strumento dentro il
   container tira dritto. Il tetto libera la scena, non il cluster.
+
+
+<a id="m-060"></a>
+
+### M-060 — Il lettore che cammina in avanti per sempre, e 650 prove che restano verdi
+
+- **Data:** 2026-09-06
+- **Comando:** in produzione si toglie il modulo da `pagina_ciclica`, cioè si introduce
+  esattamente il difetto che la prova dichiara di impedire. Con quel difetto in piedi la suite
+  unitaria gira due volte: la prima con la stesura di partenza della prova, la seconda con
+  quella riscritta.
+
+```
+# app/src/mongolab/application/workload.py
+-    salta=(ordine % PAGINE_LETTE) * PAGINA
++    salta=ordine * PAGINA
+
+uv run --directory app pytest tests/unit -q     # con la prova di partenza
+uv run --directory app pytest tests/unit -q     # con la prova riscritta
+```
+
+- **Output:**
+
+```
+$ uv run --directory app pytest tests/unit -q     # con la prova di partenza
+650 passed in 5.61s
+
+$ uv run --directory app pytest tests/unit -q     # con la prova riscritta
+E       assert (0, 20, 40, 60, 80, 100, ...) == (0, 20, 40, 60, 80, 100, ...)
+FAILED tests/unit/test_workload.py::test_il_lettore_predefinito_gira_dentro_una_finestra
+1 failed, 649 passed in 5.35s
+
+$ # produzione ripristinata
+650 passed in 5.32s
+```
+
+- **Che cosa dimostra:** che la prova di partenza non sorvegliava niente. Si chiamava
+  «gira dentro una finestra» e calcolava l'atteso con `(ordine % PAGINE_LETTE) * PAGINA`,
+  cioè con la stessa espressione che stava verificando: confrontava la produzione con una
+  propria copia della produzione, e quando la produzione ha smesso di girare la copia ha
+  smesso insieme a lei. Nessuna delle 650 se n'è accorta.
+
+  La stesura riscritta non ricalcola: chiede a un doppio quali pagine si è visto chiedere.
+  L'argomento passato a `find_page` è la cosa da osservare, e un argomento si osserva solo
+  registrandolo — è ciò che fa `ArchivioCheAnnotaLePagine`. Con lo stesso difetto in
+  produzione, la prova diventa rossa. Vedi
+  [ADR-0135](../../docs/Decision.md#adr-0135).
+- **Riserve:** il difetto scelto è uno solo, quello che la docstring nomina. Un difetto
+  diverso — per esempio una finestra della dimensione sbagliata — non è stato provato, anche
+  se le asserzioni sul massimo salto e sulla dimensione di pagina lo prenderebbero.
+
+
+<a id="m-061"></a>
+
+### M-061 — «Restaura, poi conta»: l'ordine invertito, e nessuna prova che se ne accorga
+
+- **Data:** 2026-09-06
+- **Comando:** in `ScenarioRestore.esegui` i due `count()` si spostano **prima** della
+  chiamata al restore. La promessa scritta nella docstring diventa falsa. Poi la suite
+  unitaria, prima con le prove di partenza e poi con quelle riscritte:
+
+```
+# app/src/mongolab/application/scenari.py — i due count() spostati prima del restore
+
+uv run --directory app pytest tests/unit -q     # con le prove di partenza
+uv run --directory app pytest tests/unit -q     # con le prove riscritte
+```
+
+- **Output:**
+
+```
+$ uv run --directory app pytest tests/unit -q     # con le prove di partenza
+650 passed in 5.35s
+
+$ uv run --directory app pytest tests/unit -q     # con le prove riscritte
+FAILED tests/unit/test_scenari.py::test_i_due_conteggi_si_accostano_e_la_differenza_e_un_numero
+        - AssertionError: assert 0 == 7
+FAILED tests/unit/test_scenari.py::test_un_restore_che_ritrova_tutto_combacia
+        - AssertionError: assert 10 == 0
+2 failed, 648 passed in 5.41s
+
+$ # produzione ripristinata
+650 passed in 5.30s
+```
+
+- **Che cosa dimostra:** che l'ordine fra restore e conteggio non era verificato da nessuno,
+  e la ragione è nel doppio. `FakeBackup` restituisce avanzamenti e **non scrive niente**
+  nella destinazione: se la destinazione è già piena prima di cominciare, contarla prima o
+  contarla dopo dà lo stesso numero, e la promessa diventa invisibile. `ScenarioRestore` non
+  è guidato da nessuna prova di integrazione, quindi non c'era una seconda rete.
+
+  `BackupCheRiempie` mette i documenti nella destinazione **mentre** l'iteratore scorre, che è
+  quando li mette `mongorestore`. Da lì in poi i due momenti danno numeri diversi e le due
+  prove diventano rosse. Vedi [ADR-0135](../../docs/Decision.md#adr-0135).
+- **Riserve:** il doppio riempie in un colpo solo alla fine degli avanzamenti, non a ogni
+  avanzamento. Basta a distinguere il prima dal dopo; non riproduce il riempimento
+  progressivo, e una prova che volesse guardare i conteggi *intermedi* non troverebbe qui il
+  doppio che le serve.
+
+
+<a id="m-062"></a>
+
+### M-062 — Un marcatore che nessuno legge: `-m "not stack03"` lasciava dentro la prova del cluster
+
+- **Data:** 2026-09-06
+- **Comando:** si chiede a `pytest` che cosa selezionerebbe escludendo il marcatore `stack03`,
+  prima e dopo la riscrittura. Poi, per sapere se chiedere la fixture ha reso cieca la prova,
+  si rimette in produzione il difetto di [M-053](#m-053) — `self._scopri()` tolto da
+  `_e_sharded` — e si esegue la prova sola.
+
+```
+uv run --directory app pytest tests/integration/test_inspector.py \
+  -m "not stack03" --collect-only -q
+
+uv run --directory app pytest \
+  tests/integration/test_inspector.py::test_la_prima_domanda_a_un_client_appena_aperto_non_nega_il_cluster -q
+```
+
+- **Output:**
+
+```
+$ … --collect-only -q     # stesura di partenza
+tests/integration/test_inspector.py::test_la_prima_domanda_a_un_client_appena_aperto_non_nega_il_cluster
+12/18 tests collected (6 deselected) in 0.03s
+
+$ … --collect-only -q     # stesura riscritta
+11/18 tests collected (7 deselected) in 0.03s
+
+$ # in produzione: `self._scopri()` tolto da `_e_sharded`
+    assert False
+     +  where False = Distribuzione(collezione='ordini', distribuita=False, primario=None,
+                                    conti=()).in_un_cluster
+AssertionError: il cluster è acceso, e il client lo deve scoprire
+1 failed in 0.05s
+
+$ # produzione ripristinata
+1 passed in 0.06s
+```
+
+- **Che cosa dimostra:** due cose separate.
+
+  **Il marcatore non si scrive: si deriva.** In questo repository `pytest_collection_modifyitems`
+  guarda i `fixturenames` di ogni prova e applica `stackNN` a chi chiede la fixture `stackNN` —
+  proprio perché nessuno se ne dimentichi. La fixture è quindi due cose insieme: l'accensione e
+  la dichiarazione. Questa prova non la chiedeva, e per una ragione buona, scritta nella sua
+  docstring: apriva il proprio client apposta, perché quello della fixture è caldo per
+  costruzione e su un client caldo il difetto di M-053 non si riproduce. Ma raggiungere lo
+  stack per un'altra strada l'ha portata fuori dal meccanismo: niente fixture, niente
+  marcatore, e `-m "not stack03"` — il comando con cui la suite gira quando lo sharded è spento
+  — la lasciava dentro. La prima riga dell'output è il suo nome, in un elenco che avrebbe
+  dovuto non contenerlo. Chiedendo la fixture i deselezionati passano da 6 a 7 e il nome
+  sparisce.
+
+  **Chiedere la fixture non l'ha resa cieca**, ed era il rischio: la fixture apre un client e
+  quel client scopre la topologia, quindi si poteva temere che la prova stesse guardando un
+  cluster già scaldato. Non è così, perché la scoperta è per oggetto `MongoClient`: la prova
+  ne costruisce uno nuovo, e con il difetto di M-053 rimesso in produzione torna rossa con la
+  frase che ha in `assert`. Vedi [ADR-0136](../../docs/Decision.md#adr-0136).
+- **Riserve:** i numeri 18, 6 e 7 valgono per `test_inspector.py` da solo. Sull'intera cartella
+  `tests/integration` cambiano, perché nel frattempo è nato `test_ambiente.py`: quel confronto
+  non isolerebbe il rilievo.
+
+
+<a id="m-063"></a>
+
+### M-063 — Due sessioni sullo stesso stack: la seconda cancellava il lavoro della prima
+
+- **Data:** 2026-09-06
+- **Comando:** due processi distinti, come due `pytest` avviati insieme. Il figlio è la
+  sessione A: apre il suo database usa-e-getta, ci scrive cinque documenti e resta fermo. Il
+  padre è la sessione B: parte adesso e chiama `spazza`, che è ciò che ogni sessione fa quando
+  si accende. Poi A guarda che cosa gli è rimasto. La stessa sonda gira due volte, con la
+  stesura di `ambiente.py` di partenza e con quella riscritta:
+
+```
+uv run --directory app python c5-due-sessioni.py
+```
+
+- **Output:**
+
+```
+$ …     # spazzata di partenza
+A (pid 87433) sta lavorando su mongolab_prove_85ed52d9c008
+B (pid 87432) parte adesso e spazza
+B: `spazza` ha tolto 1 database
+A: documenti rimasti: 0
+A: il mio database c'è ancora: False
+
+$ …     # spazzata riscritta
+A (pid 87438) sta lavorando su mongolab_prove_87438_fe45878ffd18
+B (pid 87437) parte adesso e spazza
+B: `spazza` ha tolto 0 database
+A: documenti rimasti: 5
+A: il mio database c'è ancora: True
+```
+
+- **Che cosa dimostra:** che il prefisso `mongolab_prove_` distingueva le prove da `lab` e non
+  distingueva **una sessione dall'altra**. Ogni sessione spazza appena parte e prende tutto
+  ciò che porta il prefisso: la seconda cancellava i database che la prima stava usando, e la
+  prima se ne accorgeva come di un conteggio che non torna — cinque documenti diventati zero,
+  senza un errore, in una prova che parla d'altro.
+
+  Il rimedio è nel nome. `mongolab_prove_87438_fe45878ffd18` porta il `pid` di chi l'ha creato,
+  e un `pid` si può **interrogare**: `os.kill(pid, 0)` chiede al kernel se quel processo esiste
+  ancora. La spazzata risparmia ciò che appartiene a una sessione viva e prende tutto il resto,
+  compresi i nomi vecchi che una sessione non la dichiarano. Un `uuid` avrebbe distinto le
+  sessioni senza rispondere alla domanda che serve. Vedi
+  [ADR-0136](../../docs/Decision.md#adr-0136).
+- **Riserve:** il `pid` è interrogabile finché le sessioni girano sulla stessa macchina degli
+  stack, che è il caso di questo laboratorio — Compose in locale. Due macchine diverse contro
+  lo stesso MongoDB si scambierebbero i numeri, e l'errore sarebbe possibile in tutte e due le
+  direzioni. Con `pytest-xdist` funziona senza aggiunte, perché ogni worker è un processo.
+
+  Un `pid` riciclato firma un residuo con un numero vivo, e quel residuo resta: lo prende la
+  sessione dopo, che ha quasi sempre un numero diverso. È il prezzo scelto, e la ragione della
+  scelta sta in `spazza`.
+
+
+<a id="m-064"></a>
+
+### M-064 — Il conteggio del seed è verde nel guasto che sorveglia: 50 000 prima e 50 000 dopo
+
+- **Data:** 2026-09-06
+- **Comando:** si toglie `--nsInclude` da `argomenti_restore`, cioè si rimette il difetto che
+  [M-024](#m-024) ha già misurato: un restore che riscrive `lab` sopra sé stessa. Poi si esegue
+  la prova che esiste per impedirlo. Siccome il primo tentativo si ferma prima, si ripete
+  zittendo anche `RestoreIncompleto`, per vedere che cosa resta a sorvegliare. In coda, una
+  sonda separata per la metà `admin` della promessa:
+
+```
+# app/src/mongolab/infrastructure/backup.py
+-            "--nsInclude",
+-            f"{self._database}.*",
+# e, nella seconda corsa, anche:
+-        if sommario is not None and sommario[1] > 0:
+-            raise RestoreIncompleto(eseguibile, sommario[0], sommario[1])
+
+uv run --directory app pytest tests/integration/test_backup.py -q -k restore_isolato
+uv run --directory app python c6-utente.py
+```
+
+- **Output:**
+
+```
+$ … -k restore_isolato     # con il solo `--nsInclude` tolto
+mongolab.infrastructure.backup.RestoreIncompleto: mongorestore è uscito con codice 0 dopo
+aver ripristinato 100001 documenti e averne persi 101680: il conteggio è il verdetto, non
+l'uscita
+ERROR tests/integration/test_backup.py::test_il_restore_isolato_non_tocca_il_database_del_laboratorio
+9 deselected, 1 error in 23.30s
+
+$ … -k restore_isolato     # con anche `RestoreIncompleto` zittita
+    assert stack02["lab"]["ordini"].count_documents({}) == DOCUMENTI_DEL_SEED     # passa
+>   assert traccia not in stack02["lab"].list_collection_names(), (
+E   AssertionError: il restore ha rimesso in `lab` una collezione tolta dopo il dump
+E   assert 'mongolab_prove_84057_sentinella' not in ['ordini', 'mongolab_prove_84057_sentinella']
+1 failed, 9 deselected in 19.04s
+
+$ uv run --directory app python c6-utente.py
+prima del dump, l'utente c'è: True
+dopo il dump e la rimozione, l'utente c'è: False
+DOPO IL RESTORE, l'utente c'è: True
+```
+
+- **Che cosa dimostra:** che l'asserzione `lab.ordini == DOCUMENTI_DEL_SEED` era **verde nel
+  guasto per cui esisteva**. La seconda corsa lo mostra nero su bianco: `lab` era stata
+  riscritta — la collezione sentinella è lì, in un elenco che non doveva contenerla — e il
+  conteggio, letto nella stessa esecuzione e due righe più su, è passato. La ragione la dice
+  M-024: `mongorestore` **inserisce** e non aggiorna, quindi cinquantamila chiavi duplicate
+  lasciano il conteggio esattamente dov'era, e con uscita 0.
+
+  Una traccia che cambia di valore avrebbe lo stesso difetto: il documento esiste già, la sua
+  chiave collide, il restore lo lascia com'è. Si vede solo ciò che al momento del dump c'era e
+  al momento del restore **non c'è più**: allora la chiave è libera, l'inserimento riesce, e la
+  traccia riappare. Vale per la collezione e vale per l'utente — l'ultima sonda mostra i tre
+  stati in fila, `True`, `False`, `True`.
+
+  I numeri della prima corsa tornano tutti. **100 001 ripristinati** sono i 100 000 del
+  laboratorio più la sentinella, che è l'unico documento con la chiave libera. **101 680 persi**
+  sono `lab.ordini` (50 000) più `lab_ripristinato.ordini` (50 000) e la sua collezione di
+  carico (1 680): tutte chiavi che esistevano già, e infatti dopo la corsa quei tre conteggi
+  sono identici a prima.
+- **Riserve:** il difetto è preso, ma **non da questa prova**: lo prende il contatore
+  dell'adattatore, e lo segnala come errore di fixture con un messaggio che parla di documenti
+  persi e non nomina `lab`. La seconda corsa è un doppio mutante — `--nsInclude` tolta *e*
+  `RestoreIncompleto` zittita — e serve a isolare che cosa sorveglia questa prova quando il
+  restore non si lamenta da sé. Il rilievo resta accolto: un'asserzione verde nel proprio
+  guasto non sorveglia, anche quando qualcun altro sorveglia al posto suo. Vedi
+  [ADR-0135](../../docs/Decision.md#adr-0135).
+
+  La sonda dell'utente crea un utente usa-e-getta in `admin` con una password casuale che non
+  viene mai stampata e non attraversa nessuna riga di comando — `createUser` viaggia sulla
+  connessione, come vuole [ADR-0054](../../docs/Decision.md#adr-0054). Dopo le corse lo stack 02
+  è stato riletto: `lab.ordini` a 50 000, la sola collezione `ordini`, il solo utente `admin`,
+  nessun database di prova residuo.

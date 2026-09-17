@@ -9,6 +9,10 @@ Serve a chi amministra o sviluppa su MongoDB e vuole vedere, non sentir racconta
 cambia fra le tre architetture: chi risponde quando un nodo cade, cosa costa un backup a
 caldo, come si comporta la latenza quando le connessioni concorrenti crescono.
 
+> **Vuoi solo vederlo girare?** → **[Guida rapida: da clone a tutto acceso](docs/guida-rapida.md)**
+> I tre stack accesi con le loro prove, l'applicazione lanciata contro tutte e tre le
+> architetture, le scene e il comando per registrare un filmato. Comandi e output atteso.
+
 ## Il talk
 
 **SqlStart 2026** — Ancona, venerdì 18 settembre 2026. Sessanta minuti, di cui circa metà
@@ -56,9 +60,11 @@ Il repository è in costruzione fino a metà settembre 2026. Questo è quello ch
 
 L'applicazione Python `mongolab` è in `app/`, sviluppata su `feature/04-app-python`:
 genera carico, osserva la topologia mentre cambia, e mette in scena il failover, il backup a
-caldo e il ripristino. I comandi di uso più frequente hanno un bersaglio nel `Makefile`
-(`make app-stats`, `app-watch`, `app-workload`, `app-demo`); l'elenco completo lo dà
-`mongolab --help`. La sua documentazione sta in [`app/docs/`](app/docs/README.md), e
+caldo e il ripristino. Ogni comando ha un bersaglio nel `Makefile` — `make app-stats`, `app-watch`,
+`app-workload` e le quattro scene: `app-demo` (failover), `app-backup`, `app-restore`,
+`app-sharding` ([ADR-0120](docs/Decision.md#adr-0120)). `make help` li elenca con le variabili che
+accettano; le opzioni per esteso le dà `uv run --directory app mongolab --help`. La sua
+documentazione sta in [`app/docs/`](app/docs/README.md), e
 [`docs/06-sviluppo/architettura-app.md`](docs/06-sviluppo/architettura-app.md) la racconta a
 chi non aprirà i sorgenti.
 
@@ -125,16 +131,64 @@ file versionato, dove sopravvive alla demo e viene copiata altrove insieme al re
 
 Chi salta il passo non rompe niente e non resta senza indizi: `make up-02` e `make up-03` si
 fermano prima di toccare Docker e stampano quale file manca e come crearlo, invece di lasciare a
-Compose un «env file not found» che non spiega perché quel file non c'è. Il resto di `.env.example` ha già i
-valori del lab: **l'unica riga da riempire è la password**.
+Compose un «env file not found» che non spiega perché quel file non c'è. Il resto di
+`.env.example` ha già i valori del lab: **l'unica riga da riempire è la password**.
 
-Fatto quello, il replica set si accende come l'istanza singola:
+Fatto quello, gli altri due si accendono come l'istanza singola:
 
 ```bash
 make up-02     # due comandi in uno: il secondo attende che la replica esista davvero
 make smoke-02  # quarantadue controlli end-to-end
 make down-02   # ferma conservando i dati e il keyfile
+
+make up-03     # lo sharded cluster: avvia e attende che il cluster risponda
+make smoke-03
+make down-03
 ```
+
+### Lo sharded cluster ha due taglie
+
+`PROFILO=palco`, il predefinito, accende un membro per shard: è quello che entra in un
+portatile, ed è quello che si mostra dal vivo ([ADR-0010](docs/Decision.md#adr-0010)).
+`PROFILO=completo` accende tre membri per ogni componente — undici container — e mostra
+l'architettura vera, ma vuole 12 GiB assegnati alla VM Docker.
+
+```bash
+make up-03 PROFILO=completo
+make smoke-03 PROFILO=completo
+make down-03 PROFILO=completo
+```
+
+La variabile va ripetuta su **ogni** comando dello stack 03, `down` compreso: è il file Compose
+che cambia, e un `down` col profilo sbagliato lascerebbe in piedi i container dell'altro.
+
+### L'applicazione, contro tutte e tre
+
+Con gli stack accesi, `mongolab` si lancia dal `Makefile`. Due variabili: `TARGET` sceglie
+contro quale stack — `standalone`, `rs`, `sharded`, e non ha predefinito perché l'applicazione
+si rifiuta di indovinarlo — e `DOVE` sceglie da dove guarda.
+
+```bash
+# Una fotografia per architettura: topologia, versione, collezioni, distribuzione.
+make app-stats TARGET=standalone
+make app-stats TARGET=rs
+make app-stats TARGET=sharded
+
+# La scena del failover: carico attivo, il primario cade, l'elezione, i due numeri.
+make app-demo TARGET=rs ARGS="--step --sink plain"
+
+# La stessa fotografia, ma dal portatile invece che dentro la rete Compose.
+make app-stats TARGET=rs DOVE=host
+```
+
+`DOVE=rete` è il predefinito ed è il punto di vista che il talk mostra: il client gira **dentro**
+la rete Compose, scopre i membri del replica set coi nomi che loro stessi si danno e parla col
+primario. `DOVE=host` esegue la stessa riga con `uv run` sul portatile — comodo mentre si
+sviluppa, ma dall'esterno la topologia non è la stessa ([ADR-0012](docs/Decision.md#adr-0012)).
+
+`make help` elenca tutti i bersagli con le variabili che accettano; le opzioni per esteso le dà
+`uv run --directory app mongolab --help`. Il giro completo, con gli output attesi e cosa fare
+quando un numero non torna, sta nella [guida rapida](docs/guida-rapida.md).
 
 Senza avviare niente, quello che si può eseguire su qualunque clone è l'impianto
 documentale:

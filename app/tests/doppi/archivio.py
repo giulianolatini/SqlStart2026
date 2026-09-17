@@ -379,3 +379,40 @@ class ArchivioCheNonLegge:
 
     def aggregate(self, pipeline: Sequence[Documento]) -> tuple[Documento, ...]:
         return self._dentro.aggregate(pipeline)
+
+
+class ArchivioCheAnnotaLePagine:
+    """Un `DocumentStore` che delega tutto e **annota che pagina gli è stata chiesta**.
+
+    Gli altri doppi di questo file guardano il risultato: questo guarda la domanda. Serve
+    quando la promessa da verificare non è «che cosa mi torna indietro» ma «che cosa hai
+    chiesto» — e il lettore ciclico è esattamente quel caso, perché una finestra che gira
+    e una che cammina in avanti per sempre restituiscono la stessa pagina finché
+    l'archivio ha abbastanza documenti. La differenza sta tutta in `salta`, cioè in un
+    argomento, e un argomento si osserva solo registrandolo.
+    """
+
+    def __init__(self, dentro: DocumentStore) -> None:
+        self._dentro = dentro
+        self.pagine: list[tuple[int, int]] = []
+        """Le coppie `(salta, quanti)` chieste, in ordine di richiesta."""
+
+    @property
+    def salti(self) -> tuple[int, ...]:
+        """I soli `salta`, che sono ciò su cui si asserisce quasi sempre."""
+        return tuple(salta for salta, _ in self.pagine)
+
+    def insert_many(self, documenti: Sequence[Documento]) -> int:
+        return self._dentro.insert_many(documenti)
+
+    def find_page(
+        self, filtro: Documento, salta: int = 0, quanti: int = 20
+    ) -> tuple[Documento, ...]:
+        self.pagine.append((salta, quanti))
+        return self._dentro.find_page(filtro, salta, quanti)
+
+    def count(self, filtro: Documento) -> int:
+        return self._dentro.count(filtro)
+
+    def aggregate(self, pipeline: Sequence[Documento]) -> tuple[Documento, ...]:
+        return self._dentro.aggregate(pipeline)

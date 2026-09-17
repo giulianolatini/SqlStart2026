@@ -7205,3 +7205,910 @@ Stato aggiornato: decisioni fino ad **ADR-0119**, verifiche fino a **V-089**, mi
 **647**, `make app-check` (mypy `--strict`, 66 file) e `make docs-check` verdi. I quattro rilievi
 della review di `codex` sono chiusi. Prossimo passo: la fusione della PR #5, che è del Product
 Owner.
+
+## 2026-09-06 — `release/1.0` aperta in anticipo, e il runbook scritto per essere usato prima di essere discusso
+
+Il Product Owner aveva lasciato aperta, la sera del 4, la scelta fra chiudere i punti rimasti e
+anticipare la release. Il 6 ha cambiato ordine alle due cose, e la ragione vale più della
+decisione: **prima il runbook, poi la discussione sui sospesi**, perché «preferisco vedere dal vero
+cosa funziona e cosa no e poi discutere cosa risolvere e come mettere le priorità». Il runbook non
+è il consuntivo del lavoro fatto: è lo strumento che misura che cosa manca davvero, e lo misura in
+sala invece che in tabella.
+
+`release/1.0` è aperta il **6 settembre**, dieci giorni prima della data del §10 del design, con lo
+stesso ordine di apertura dei branch di feature — worktree in `.claude/worktrees/release-1.0`,
+branch spinto subito su `origin` perché la PR sia un comando solo, i due `.env` degli stack
+raggiunti per symlink ([ADR-0083](Decision.md#adr-0083)). Il prefisso e il punto di partenza sono
+quelli che `.git/config` dichiara per `release/`: parte da `develop`, ha `main` per genitore.
+
+**Il runbook è `docs/05-talk/runbook-demo.md`, ed è l'unico documento del talk**
+([ADR-0015](Decision.md#adr-0015)). La struttura è quella promessa dal §9 del design — preflight e
+stato atteso dei dati, copione minuto per minuto, piano delle registrazioni, tabella sintomo →
+azione, criteri di rinuncia in appendice A, comandi di emergenza in appendice B — e la sola cosa
+che è stata aggiunta è una §1.5 sulla disposizione dei terminali. Non è decorazione: nell'Atto II
+l'applicazione gira **dentro** la rete Compose, perché la cronaca dell'elezione esiste solo da lì
+([M-019](../app/docs/Sources.md#m-019)), e da lì non ha il socket del demone. Allora annuncia il
+comando e aspetta un Invio. Sono due finestre, e chi non lo sa prima se ne accorge sul palco.
+
+**Ogni «output atteso» del copione è un numero misurato, non stimato.** Vengono dalle quattordici
+registrazioni e dalle verifiche che le hanno prodotte: `mongod 7.0.40` e tre membri per la
+fotografia, **10 019 ms** e **0 scritture perse** per il failover, **546/s → 539/s** cioè l'1,3 %
+per il backup a caldo, **5 886 contro 5 740** per il restore, **9 860 + 10 140 = 20 000** per la
+distribuzione. Il documento dice anche che cosa sono: un metro per capire se la scena sta andando
+come deve, non una promessa. Uno scarto del venti per cento non è un problema; un ordine di
+grandezza manda alla §4.
+
+**Una cosa scritta e poi tolta.** Nella prima stesura il punto 3 del Blocco 3 mostrava il comando
+sbagliato — `make app-demo TARGET=sharded` — annotato con un «NO, vedi sotto», e sotto quello
+giusto. È un espediente didattico che funziona in una pagina che si studia e non in una che si
+legge sotto pressione: chi copia una riga da un runbook copia la prima che vede. È rimasta la frase
+in prosa, che dice che `demo sharding` non ha un target nel Makefile e perché.
+
+**Due debiti dichiarati in coda al documento**, invece che taciuti. Il primo: i tempi della §2 sono
+quelli del design, coerenti con le durate delle registrazioni ma **mai cronometrati parlando
+sopra** — è ciò che la prova generale del 17 deve produrre. Il secondo: aprire la release in
+anticipo **non** sposta l'appuntamento di [ADR-0058](Decision.md#adr-0058) sulla 8.0.30, che è del
+16 settembre perché è l'ultimo momento utile per ripinnare e rigirare le registrazioni, non perché
+coincideva con la release.
+
+### Note di metodo
+
+243. **Un runbook si giudica da quanto poco lascia da decidere al momento.** Ogni volta che il
+    documento diceva «se serve», «a discrezione» o «valutare», la riga è stata riscritta con un
+    numero o con un ordine: trenta secondi prima di passare alla registrazione, T+18 come soglia
+    per aprire i criteri di rinuncia, la scala dei tagli in quattro gradini numerati. Il numero non
+    è preciso perché qualcuno l'abbia misurato — trenta secondi sono lunghi davanti a cento persone
+    e brevi per un container — è preciso perché così non lo si sceglie sul palco. La regola
+    pratica: in un documento operativo, un aggettivo di quantità è un lavoro rimandato al momento
+    peggiore.
+244. **Scrivere il documento che usa il lavoro è il modo più economico di sapere se il lavoro è
+    finito.** Mettere in fila i comandi dei tre blocchi ha fatto emergere in un pomeriggio cose che
+    nessuna lettura della tabella dei punti aperti aveva fatto emergere: che l'Atto II vuole due
+    finestre e l'Atto III una terza, che `demo sharding` è l'unico comando del copione senza un
+    target nel Makefile, che i tempi non sono mai stati presi parlando. Nessuna delle tre era in
+    tabella, e tutte e tre sono operative. La regola pratica: quando si deve decidere che cosa
+    chiudere di un lavoro quasi finito, il consuntivo più affidabile non è l'elenco dei debiti — è
+    provare a usarlo.
+
+Stato aggiornato: decisioni fino ad **ADR-0119**, verifiche fino a **V-089**, misure fino a
+**M-059**, note di metodo fino alla **244**. Controlli: `make docs-check` verde. Prossimo passo: il
+primo giro del Product Owner con il runbook in mano, e la discussione sui sospesi **dopo**, con in
+mano quello che il giro avrà trovato.
+
+## 2026-09-06 — Quattro scene, quattro bersagli, e tre guasti che solo l'esecuzione ha mostrato
+
+Il Product Owner ha fatto accendere i tre stack per il suo primo giro col runbook, e ha posto una
+domanda sul copione: perché `demo sharding` è l'unico comando senza un bersaglio nel `Makefile`, e
+non si può aggiungerlo. La prima risposta è che **non era l'unico: erano tre** — `backup-live`,
+`restore` e `sharding`. La nota di metodo 244, scritta ieri, dice «l'unico» perché chi l'ha scritta
+ha contato a mente invece di contare col codice; il conteggio l'ha fatto la prova, ed è rossa con i
+tre nomi in chiaro. La seconda risposta è che sì, si può, e il modo è
+[ADR-0120](Decision.md#adr-0120): quattro bersagli per quattro scene, `CHIEDI_SOLO_HOST` per le due
+dell'Atto III che il socket del demone non ce l'hanno, `ESEMPIO_TARGET` perché il suggerimento del
+guardiano non mandi `app-sharding` contro `TARGET=rs`, e la legenda delle variabili in coda a
+`make help`, che prima esistevano solo nei commenti del `Makefile`.
+
+Il conteggio a mano non serve più: `test_ogni_scena_dell_applicazione_ha_un_bersaglio_nel_makefile`
+legge i decoratori `@demo.command` con `ast` e le ricette del `Makefile`, e confronta gli insiemi.
+Scritta prima, rossa, verde dopo.
+
+**Poi si è provato, ed è lì che il pomeriggio ha reso.** Tre cose che nessuna rilettura del runbook
+aveva mostrato, tutte e tre nell'Atto III.
+
+1. **La riga del `restore` nel copione era incompleta.** Diceva `demo restore --target rs --step
+   --sink plain`, senza `--collection`. Senza quell'opzione il comando parte lo stesso e conta
+   `lab.ordini`, cinquantamila documenti da tutte e due le parti: i numeri attesi dal runbook —
+   5 886 · 5 740 · 146 — non sarebbero mai usciti. La collezione di carico ha la data nel nome e la
+   stampa la scena precedente, già completa: è l'unica riga del copione che **non** passa da `make`,
+   e ora il runbook dice perché.
+2. **`lab_ripristinato` non lo toglie nessuno.** `demo restore` lo costruisce; `reset-demo.sh 02`
+   ripulisce le collezioni di `lab` e non guarda gli altri database; `down`/`up` conservano i
+   volumi. Alla seconda corsa `mongorestore` ritrova i documenti già lì, li conta come falliti ed
+   esce **zero** — la perdita silenziosa di [M-024](../app/docs/Sources.md#m-024) — e
+   `RestoreIncompleto` ferma la scena. Misurato: **6 766 ripristinati, 55 740 persi**, dove 55 740 è
+   esattamente `ordini` più il carico del 4 settembre; la prova che era quello e non altro è una
+   corsa con `--into lab_prova_0906`, zero falliti. Sul palco vuol dire che **la prova generale
+   rompe la replica**: chi prova l'Atto III il 17 e non azzera, il 18 lo vede morire. Il runbook ora
+   lo dice nello stato atteso e nella tabella dei guasti; se `reset-demo.sh` debba togliere anche
+   quel database è una decisione del PO, non una svista da tappare di nascosto.
+3. **L'1,3 % dell'Atto III non si riproduce.** Quattro corse: **48,1 %** con Docker appena acceso e
+   `lab` sporca, **16,2 %** con la resa Rich e tre stack accesi, **15,4 %** con `--sink plain` e
+   tre stack, **11,9 %** col solo 02. La resa non c'entra, la contesa fra stack vale tre o quattro
+   punti: l'1,3 % della registrazione 13 era una corsa fortunata. L'atteso del runbook è diventato
+   un intervallo, 10–20 %, con la riga che conta: la percentuale non si annuncia prima di averla
+   letta. Le quattro misure restano qui e nel runbook, e **non** in `Sources.md`: una verifica nuova
+   dev'essere citata da un ADR per non restare orfana, e adottare un intervallo al posto del numero
+   registrato è una decisione, non una misura.
+
+Di passaggio, un quarto: lo stato atteso della §1.4 diceva «`ordini`, 50 000, si verifica con
+`make app-stats`», ma `stats` stampa il totale del **database**, non della collezione. Con le
+collezioni di carico delle prove dentro diceva **62 602**, e chi controllava avrebbe letto un guasto
+dove non c'era.
+
+Il laboratorio è rimasto pulito: `make reset-02`, `make up-02`, `smoke-02` a **42 · 0**, e
+`reset-demo.sh 02` alla fine per togliere le tre collezioni di carico delle prove. `lab.ordini` è a
+**50 000** e la sua impronta è quella del seed.
+
+### Note di metodo
+
+245. **Il primo dubbio da togliere è quello che costa meno, non quello che convince di più.** Il
+    calo del 48 % aveva una spiegazione elegante e pronta — tre stack che si contendono la CPU — e
+    verificarla voleva dire spegnere e riaccendere due stack, quattro minuti. L'ipotesi noiosa era
+    che la resa Rich costasse: trenta secondi per riprovare con `--sink plain`. Si è cominciato da
+    lì, e ha risposto no; poi si è fatta l'altra, e ha risposto «tre o quattro punti su undici». Due
+    misure hanno lasciato in piedi una sola spiegazione — che il numero di partenza fosse fortunato
+    — e nessuna delle due era quella che sembrava più promettente. La regola pratica: ordinare le
+    ipotesi per costo della verifica, non per plausibilità.
+246. **Una domanda del committente su una riga di documentazione va seguita fino a dove porta.** La
+    domanda era piccola e legittima: perché quel comando non ha un bersaglio. Rispondere voleva dire
+    aprire il `Makefile`, che ha mostrato che le scene scoperte erano tre; scrivere la prova, che ha
+    mostrato che una era il `restore`; provare il `restore`, che ha mostrato la riga incompleta, il
+    database che sopravvive e l'atteso che non si riproduce. Nessuna delle tre stava nella domanda,
+    e nessuna si sarebbe vista rileggendo. La regola pratica: quando chi commissiona indica un
+    punto, quel punto è un capo di filo — la risposta breve è quasi sempre corretta e quasi sempre
+    incompleta.
+
+Stato aggiornato: decisioni fino ad **ADR-0120**, verifiche fino a **V-089**, misure fino a
+**M-059**, note di metodo fino alla **246**. Controlli: `make docs-check` verde, `make tools-test`
+**176 passate**. Prossimo passo: il giro del PO con gli stack accesi, e la discussione sui sospesi
+con dentro le tre cose di oggi — se `reset-demo.sh` debba togliere `lab_ripristinato`, se la
+registrazione 13 vada rigirata, e con quale priorità rispetto a ciò che era già in lista.
+
+## 2026-09-06 — Tre decisioni del PO eseguite, e tre numeri che mentivano
+
+Il Product Owner ha risposto ai tre sospesi di stamattina in una volta: sì al drop di
+`lab_ripristinato` in `reset-demo.sh`; l'ADR che adotta un intervallo per l'Atto III, con la
+registrazione 13 rigirata accettando il numero che verrà; e `stats` che stampa il dettaglio per
+collezione e poi il totale, «così da avere una fotografia chiara e verificabile». Tutte e tre fatte.
+Tutte e tre hanno mostrato, **eseguendo**, qualcosa che nessuna delle tre domande conteneva.
+
+**1. Il drop c'era, il verdetto mentiva.** La prova rossa scritta stamattina verificava che il nome
+`lab_ripristinato` fosse scritto nello script accanto a `dropDatabase`, e quello era vero. Alla
+prima corsa dal vivo lo script ha detto «database rimosso: lab_ripristinato», giusto — il database
+c'era davvero. Alla seconda l'ha detto di nuovo, e non poteva. `dropDatabase()` risponde `dropped`
+**anche per un database che non è mai esistito**: misurato, `lab_inesistente_0906` risponde
+`{"ok":1,"dropped":"lab_inesistente_0906"}` come uno pieno. Il ramo «non c'era» non poteva accadere
+mai, e lo script raccontava a chi prova la vigilia una pulizia che non aveva fatto. Ora la domanda
+si fa prima, con `getDBNames().includes(nome)`, e le due facce sono state provate tutte e due dal
+vivo. La regressione la vieta `test_il_verdetto_del_drop_non_si_fida_del_campo_dropped`; l'altra
+prova cercava il nome e `dropDatabase` sulla **stessa riga** ed è saltata appena la stesura è
+cambiata — era legata al testo, non al comportamento. Adesso leggono lo stesso blocco.
+
+**2. La fotografia per collezione ha trovato due contatori fermi a zero.**
+[ADR-0121](Decision.md#adr-0121): riga `collezioni` con un `countDocuments` per collezione in ordine
+di nome, poi la riga `database` come prima. Il dettaglio **sopra** la somma, perché un totale
+stampato sopra i suoi addendi si legge come il primo di essi — ed è precisamente l'errore di lettura
+da cui la decisione viene. Le viste non si contano, `system.views` sì: è la collezione vera in cui
+il database tiene le definizioni, e togliere una riga per far pulizia romperebbe l'unica proprietà
+che rende la fotografia verificabile.
+
+Girata contro i tre stack, ha detto subito a che cosa serviva: `ordini` 50 000 su 01 e 02, 20 000 su
+03, e i totali dei database a **1 505 885** (01, trentotto collezioni), **55 386** (02) e **99 699**
+(03) — residui delle registrazioni del 4 settembre. Poi il conto non è tornato: sullo **stack 01**,
+che è uno standalone, le collezioni sommano **1 528 002** e `dbStats.objects` ne dichiara
+**1 505 885**. Non è sharding, non sono orfani, non è una vista. Lo scarto — **22 117** — sta tutto
+in due collezioni che nei metadati risultano a **zero** mentre contengono 7 847 e 14 270 documenti.
+`validate()` su una delle due risponde **`valid: true`, zero avvisi**, e intanto rimette il
+contatore a 7 847. La collezione non era corrotta: era stantio il numero, e nessuno lo segnalava.
+L'altra è stata lasciata così apposta, perché chi rifà la misura veda la differenza.
+[V-090](Sources.md#v-090). La causa dello zero è circoscritta e **non** dimostrata: il riavvio del 6
+è dichiarato pulito dal giornale di `mongod`, e i giornali del 4 non ci sono più.
+
+Due frasi scritte per prudenza sono diventate misure e sono state riscritte: la docstring
+dell'ispettore diceva «la stima, dopo un arresto sporco, *può* restare indietro», e la prova
+d'integrazione diceva «fuori da uno sharded cluster i due numeri **devono** coincidere» — una
+generalizzazione fatta su sedici documenti, che il laboratorio ha smentito con un milione e mezzo.
+La prova resta buona, perché lavora su un database appena creato; è la sua docstring che prometteva
+troppo.
+
+**3. La registrazione 13 è stata rigirata, ed è uscito −1,9 %.** Il ritmo è **salito** mentre il
+dump girava: 506/s prima, 516/s durante. Prima di rassegnarsi al numero si è fatta una corsa di
+controllo, e ha dato **−14,2 %**. A quel punto l'ipotesi «il portatile balla» non bastava più, e la
+risposta era dentro il `.cast`, negli istanti delle fasi: la fase `carico` dura **dieci secondi** e
+raccoglie cinquemila scritture, la fase `dump` dura **mezzo secondo** e ne raccoglie
+duecentocinquanta. `lab` pesa 5,8 MB e `mongodump` la copia in meno di un secondo. La percentuale è
+il rapporto fra una media su dieci secondi — che comprende l'avvio a freddo del client, primi
+inserimenti a 65 ms contro i 6 di regime — e una media su mezzo secondo. Nove corse fra il 4 e il 6
+danno da **−14,2 %** a **+53,7 %**, con tre valori negativi: non è rumore attorno a un valore, è un
+rapporto fra due cose non confrontabili.
+
+Quindi l'ADR che adotta un intervallo **non è stata scritta**, e la ragione va detta: un intervallo
+che contiene −14 % e +54 % non è un atteso, è la confessione che la misura non misura. Il runbook
+adesso dice che cosa non varia — le scritture non si fermano e sono tutte confermate, 275 su 275
+nella registrazione attuale — e che la percentuale si legge sullo schermo qualunque sia. Rendere le
+due finestre confrontabili, confrontando la **coda** della fase di carico lunga quanto il dump
+invece dei dieci secondi interi, è una modifica alla scena e la decisione è del PO.
+
+**Di passaggio, un quarto.** `/tmp/mongolab-backup` sta *dentro* `mongo-rs-1` e accumula un dump per
+corsa, e non lo svuota `reset-demo.sh`. (La prima stesura di questa riga aggiungeva «né
+`down`/`up`»: è falso, ed era un ragionamento e non una misura — `down` rimuove il container e
+`/tmp` non è un volume, misurato poche ore dopo in [V-091](Sources.md#v-091).) Alla prima ripresa della scena 14 il
+`mongorestore` ha rimesso in piedi **sei** collezioni di carico invece di una, e su uno schermo
+proiettato è rumore. Tolto a mano per registrare, scritto nel runbook, e se debba entrare in
+`reset-demo.sh` è la stessa domanda di stamattina su `lab_ripristinato`: la decide il PO.
+
+Registrazioni rigirate: la **10** (2,3 s, `ordini · 50 000` e `lab · 50 000` sullo stack pulito), la
+**13** (11,3 s, 506/s → 516/s, −1,9 %) e la **14** (3,7 s, 5 386 all'origine · 5 295 nella copia ·
+differenza 91), che non poteva restare ferma perché conta ciò che la 13 ha copiato. Tutte e tre
+riprodotte con `--riproduci` prima di dichiararle buone. Le due pagine che citano la vecchia uscita
+di `stats` e la voce [V-089](Sources.md#v-089) **non** sono state toccate: sono verbali datati, non
+descrizioni dello strumento di oggi.
+
+### Note di metodo
+
+247. **Una prova che legge il file non sostituisce una corsa che legge il server, e va programmata
+    nello stesso compito.** La prova rossa del drop verificava un'affermazione vera — il nome è
+    scritto nello script — mentre la cosa che contava, il verdetto, era falsa. Non è una prova
+    scritta male: è una prova che non poteva sapere. Il difetto stava in una risposta del server, e
+    solo il server poteva darla. La regola pratica: quando la prova può affermare solo sull'artefatto,
+    la corsa dal vivo fa parte dello stesso compito, non del giro dopo — e le corse sono **due**, una
+    per faccia del ramo.
+248. **Prima di spiegare perché un rapporto varia, si controlla che i due termini siano
+    confrontabili.** Del calo dell'Atto III si sono cercate le cause fuori — la resa Rich, la contesa
+    fra stack, il portatile carico — per quattro corse. La risposta stava dentro, negli istanti delle
+    fasi già scritti nel `.cast`: dieci secondi contro mezzo secondo. Leggerli è costato trenta
+    secondi. La regola pratica: un rapporto fra due medie non si interpreta prima di aver guardato
+    quanto dura, e quanto contiene, ciascuna delle due.
+249. **Le parole «deve» e «sempre» in una docstring sono un debito, e si paga quando i dati
+    crescono.** «Fuori da uno sharded cluster i due numeri devono coincidere» era vero per la prova
+    che lo scriveva, sedici documenti in un database appena creato, e falso sullo stesso stack con un
+    milione e mezzo. Una docstring che generalizza dal caso di prova promette a nome di un dominio
+    che non ha autorizzato nessuno. La regola pratica: se la frase dice «deve», o c'è la misura che
+    lo regge o si scrive che cosa vale **qui**.
+
+Stato aggiornato: decisioni fino ad **ADR-0121**, verifiche fino a **V-090**, misure fino a
+**M-059**, note di metodo fino alla **249**. Controlli: `make docs-check` verde, `make tools-test`
+**178 passate**, `pytest` dell'applicazione **711 passate**, `mypy` pulito su 66 file. Prossimo
+passo: le due decisioni che restano al PO — se rendere confrontabili le due finestre dell'Atto III,
+e se `reset-demo.sh` debba svuotare anche `/tmp/mongolab-backup` — e la discussione sulle priorità,
+che aspetta il suo giro con gli stack accesi.
+
+## 2026-09-06 — La cartella che nessuno nominava
+
+Il Product Owner ha risposto anche alla seconda domanda aperta: sì, `reset-demo.sh` deve svuotare
+anche `/tmp/mongolab-backup`. Fatto — [ADR-0122](Decision.md#adr-0122), verificato in
+[V-091](Sources.md#v-091) — e come le tre di prima ha lasciato per strada qualcosa che la domanda
+non conteneva, stavolta una frase scritta poche ore prima in questo stesso registro.
+
+**Il criterio di ADR-0088 si legge in avanti.** Quella decisione aveva dato la pulizia a
+`reset-demo` con un criterio scritto dentro un database: «spazza tutto ciò che non è `ordini`». Ha
+retto finché la demo lasciava in giro solo collezioni. La copia del backup non è una collezione e
+non è un volume: è una cartella nel livello scrivibile di `mongo-rs-1`, e per questo non la toglieva
+nessuno — non perché qualcuno avesse deciso di lasciarla, ma perché **nessuna delle regole scritte
+la nominava**. Adesso lo script la toglie, e il criterio dice ciò che vuol dire: `reset-demo`
+riporta allo stato da cui la scena comincia, e lo stato è tutto quello che una corsa lascia dietro.
+
+**Il verdetto guarda prima, di nuovo.** `rm -rf` esce zero tanto se la cartella c'era quanto se non
+c'era: è il difetto del `dropDatabase` di stamattina con un altro comando, e la prova
+`test_il_verdetto_della_cartella_guarda_prima_di_togliere` lo vieta chiedendo che il `ls` stia prima
+del `rm`. Il numero che lo script dice conta i `.bson` sotto `lab` e non i file del dump: nella
+copia ci sono anche `admin/` e `oplog.bson`, che il restore esclude con `--nsInclude lab.*`, e il
+numero da dire è quello che ricompare sullo schermo. Due rami, due corse dal vivo: «dump rimossi: 2
+collezioni che il restore avrebbe rimesso in piedi» e, subito dopo, «nessun dump da togliere».
+
+**E la frase sbagliata.** La voce di stamattina diceva che quella cartella «non la svuota nessuno,
+né `reset-demo.sh` né `down`/`up`». La prima metà era misurata, la seconda no: era un'inferenza
+detta con lo stesso tono. Misurata adesso — marcatore con `mkdir`, `make down-02`, `make up-02` — in
+`/tmp` resta solo `mongodb-27017.sock`. `mongo-rs-1` monta `keyfile` e `dati-1:/data/db` e
+nient'altro, quindi `/tmp` è il livello scrivibile del container e `docker compose down` il
+container lo rimuove. La riga è stata corretta sul posto, dicendo che era stata corretta: un
+registro che si riscrive in silenzio non è più un registro.
+
+### Note di metodo
+
+250. **Una frase che nasce da un ragionamento e una che nasce da una misura si scrivono uguali, e
+    per questo bisogna scriverle diverse.** «Non lo svuota né `reset-demo.sh` né `down`/`up`»: la
+    prima metà veniva da una corsa, la seconda da un'idea di come funzionano i container, e nel
+    periodo stavano fianco a fianco con lo stesso tono. La regola pratica: quando un elenco mette
+    insieme cose viste e cose dedotte, o si misura anche il resto o si spezza la frase — accanto a
+    ciò che è misurato ci sta il comando, accanto al resto ci sta «probabilmente».
+251. **Una prova che misura l'ordine dentro un file misura anche i commenti.** L'asserzione
+    «il `ls` viene prima del `rm`» è fallita sul blocco appena scritto, e il blocco era giusto: a
+    nominare `rm -rf` per primo era il commento che spiega perché `rm -rf` da solo non basta. La
+    prova accusava la spiegazione al posto del codice. La regola pratica: se la proprietà riguarda i
+    comandi, il testo su cui si misura sono i comandi — le righe di commento si tolgono prima, e la
+    prova lo dice nel proprio corpo perché nessuno le rimetta.
+
+Stato aggiornato: decisioni fino ad **ADR-0122**, verifiche fino a **V-091**, misure fino a
+**M-059**, note di metodo fino alla **251**. Controlli: `make docs-check` verde, `make tools-test`
+**180 passate**, `pytest` dell'applicazione **711 passate**. Resta aperta **una** decisione del PO:
+se rendere confrontabili le due finestre dell'Atto III. Poi la discussione sulle priorità, che
+aspetta il suo giro con gli stack accesi.
+
+## 2026-09-06 — Dodici skill da un altro repository, e undici che qui non funzionavano
+
+Il Product Owner ha chiesto di riprendere dal repository d'origine, ramo
+`step/azure-policy/allineamento-e-fase-1`, il contenuto di `.claude/skills` e di
+`Docs/Concetti-Generali`, e di incorporarlo nella release. Sembrava un trasporto di file. Era una
+misura — [ADR-0123](Decision.md#adr-0123), verificata in [V-092](Sources.md#v-092).
+
+**Una skill non è documentazione.** È l'unica cosa che entra in un repository e poi si accende da
+sola: durante una sessione, quando il modello giudica che il caso sia suo, e da quel momento
+indirizza il lavoro. Il campo che decide se si accende è la `description` del frontmatter, ed è
+l'unica parte che non si può correggere da fuori — un blocco in testa, una nota nella pagina di
+provenienza, una scheda: tutto arriva **dopo** che la skill si è già presentata.
+
+**Undici su dodici, verbatim, erano o mute o fuori bersaglio.** Nove nominano il repository
+d'origine come condizione, e qui non si sarebbero accese mai. Due lo nominano **per negazione** —
+«use when the repository is NOT the origin one» — e quelle qui si accendono sempre, cioè
+esattamente dove non dovrebbero. Una è generica e scrive gli ADR in `docs/adr/`, che qui non
+esiste. Il censimento è sintattico e legge il testo, non il comportamento: la riserva sta scritta
+in V-092.
+
+**Il pericolo aveva la forma giusta.** Fra le due che si accendono c'è `git-flow`, e il suo
+`references/comandi.md` elenca `git flow feature finish`: il comando vietato qui da quando, sulla
+PR #1, chiuse un ramo saltando la revisione. Il modello dei rami di questo repository **ha la forma**
+di Git Flow — `main`, `develop`, `feature/NN-nome`, `release/1.0` — e differisce solo nella
+chiusura. Una skill che si accende da sola e propone quel comando non è un testo di riferimento
+sbagliato di poco: è una trappola che somiglia alla verità.
+
+**Verbatim prima, adattamento dopo.** Il pacchetto è entrato byte per byte in `3f22d6f`, verificato
+con `diff -r` contro il clone e passato al setaccio dei segreti — una segnalazione, una fixture,
+esclusa confrontando i prefissi SHA-256 senza stampare né l'una né l'altra. L'adattamento è il
+commit successivo, `71f4e00`: dieci righe per file, 108 in tutto, la `description` e un blocco in
+testa. **I corpi restano quelli del repository d'origine**, e non per pigrizia: con i corpi
+intatti un miglioramento fatto a monte si riporta con un diff, con i corpi riscritti si riporta
+con una fusione a mano. È il prezzo che il runbook d'origine dichiara, e conviene tenerlo basso.
+
+**La regola che rende innocuo tutto il resto sta in dodici posti.** In conflitto fra una skill e una
+scheda accettata di `docs/Decision.md`, vince la scheda — ripetuta nel blocco in testa a ognuna, non
+solo nella pagina di provenienza, perché una skill si presenta in mezzo a un lavoro e la regola
+deve stare dove arriva l'interruzione.
+
+**Poi i tre documenti**, in `docs/06-sviluppo/concetti-generali/`. Due intatti; il runbook adattato
+perché citava undici schede del repository d'origine con collegamenti relativi che qui puntano nel
+vuoto, e un rimando che si apre sulla pagina sbagliata è peggio di nessun rimando. Il README nuovo
+è la pagina che i dodici blocchi già citavano: provenienza, regola di precedenza, divergenze
+misurate, verdetto per skill, e il prezzo dichiarato.
+
+**Il vuoto che l'import ha scoperto.** Questo repository **non ha una scheda** che fissi il proprio
+modello dei rami, la strategia di merge o lo standard dei messaggi di commit. La pratica c'è, è
+coerente, ed è scritta in
+[`worktree-e-branch-di-lavoro.md`](06-sviluppo/worktree-e-branch-di-lavoro.md) — ma non è mai stata
+registrata come decisione, e in centoventitré schede nessuno se n'era accorto. Se n'è accorto adesso
+un pacchetto importato che quelle decisioni le pretende: `git flow feature finish` è vietato, e
+cercando la scheda che lo vieta non c'è.
+
+### Note di metodo
+
+252. **Ciò che si accende da sola va misurato prima di installarlo, e la misura è il suo testo di
+    innesco.** Dodici skill sono arrivate come file, e la domanda ovvia era se funzionassero: le
+    prove dicono di sì, 127 passate. La domanda giusta era un'altra — se si accendessero **qui** — e
+    la risposta stava in dodici righe di frontmatter, non nelle 127 prove. La regola pratica: quando
+    si importa materiale attivo, si legge per primo il campo che decide quando si attiva; il
+    collaudo prova che il codice è portabile, non che sia pertinente.
+253. **Un verdetto negativo scritto vale quanto uno positivo, e costa una riga.** Sette skill su
+    dodici qui non governano, e la scelta era fra toglierle e tenerle con scritto sopra che non
+    governano. Toglierle costa una ricerca il giorno che serviranno; tenerle mute costa un dubbio
+    ogni volta che qualcuno le apre. Tenerle **con il verdetto in testa** costa una tabella. La
+    regola pratica: quando si scarta qualcosa che potrebbe tornare utile, si scarta per iscritto e
+    nel posto dove verrà riletto — «non governa qui, ed ecco perché» è informazione, il silenzio no.
+254. **Una somiglianza forte è più pericolosa di una differenza.** `git-flow` non è stato pericoloso
+    perché descriva un modello estraneo, ma perché ne descrive uno quasi identico al nostro: stessi
+    nomi di ramo, stesse direzioni di merge, una sola differenza — la chiusura. Un testo palesemente
+    fuori contesto lo si scarta a colpo d'occhio; uno che combacia per il 90% lo si segue fino al
+    10% che non combacia. La regola pratica: quando si importa un modello simile al proprio, si
+    documenta la differenza, non l'affinità.
+
+Stato aggiornato: decisioni fino ad **ADR-0123**, verifiche fino a **V-092**, misure fino a
+**M-059**, note di metodo fino alla **254**. Controlli: `make docs-check` verde, `make tools-test`
+**180 passate**, `make app-test` **650 passate** (più le 61 di integrazione, che chiedono Docker:
+711 in tutto), le tre suite delle skill **127 passate**. Resta aperta **una** decisione del PO: se
+rendere confrontabili le due finestre dell'Atto III. Poi la discussione sulle priorità, che aspetta
+il suo giro con gli stack accesi, e la review generale della release, chiesta e non ancora fatta.
+
+
+## 2026-09-06 — La review generale, sospesa a metà: quarantacinque rilievi chiusi e sette correzioni misurate
+
+La review della release è stata chiesta con due strumenti nominati — `codex` e `agy` —
+e la prima cosa da fare era la meno interessante: verificare che ci fossero e fossero
+autenticati. C'erano. Poi sono partiti sei dossier, uno per perimetro, per un totale di
+**72 rilievi**.
+
+Quarantacinque sono chiusi con verdetto scritto: `talk` 17, `stack-docker` 7,
+`app-sorgenti` 12, `documentazione-tecnica` 9. Il dossier `strumenti` (18) è **misurato
+per intero ma senza verdetti scritti**, e `app-prove` (9) non è ancora stato aperto. La
+sessione si ferma qui per esaurimento del limite, non per un ostacolo tecnico.
+
+### Deciso
+
+Che i rilievi di un recensore esterno si arbitrano **eseguendo**, e che un rilievo respinto
+si motiva con la stessa cura di uno accolto. Sette dei diciotto rilievi di `strumenti`
+toccavano codice e sono corretti nel commit `b2677a9`; uno — C-5 — è respinto, e la
+motivazione è più utile della correzione che chiedeva: `reset-01` usa `down -v`, che segue
+la selezione del progetto ed è quindi **immune** al difetto di C-4. Applicare il rimedio
+proposto — nominare i volumi — avrebbe *introdotto* in `reset-01` il difetto che C-4
+segnalava altrove. Un rimedio giusto nel posto sbagliato è un difetto nuovo.
+
+Che sei rilievi su diciotto — C-1, C-2, G-1, G-5, G-6, G-7 — non sono sei problemi ma uno:
+puntano tutti alla sede che [ADR-0123](Decision.md#adr-0123) ha già dichiarato mancante,
+la scheda che fissa il modello dei rami, la strategia di merge e lo standard dei messaggi
+di commit di questo repository. Una decisione sola li chiude tutti e sei.
+
+### Misurato
+
+Ogni correzione prima di essere scritta. `COMPOSE_PROJECT_NAME` nell'ambiente ha davvero
+la precedenza sul `name:` del file Compose, e con il progetto dirottato `down` diventa un
+nulla di fatto mentre `reset-02` cancella comunque i volumi per nome. La sonda
+dell'immagine del preflight, senza `--pull=never`, va davvero in rete nel caso che deve
+diagnosticare: 1,011 s e una richiesta a `docker.io` contro 0,023 s e nessuna uscita dalla
+macchina. Un container estraneo che pubblica la 27152 faceva davvero contare al preflight
+nove porte «del lab» invece di otto. Con l'interrogazione che fallisce, `reset-demo.sh`
+stampava davvero «✓ database rimosso: » con il nome vuoto.
+
+E due volte la misura ha **corretto chi la faceva**. La prima: avevo previsto che il pty a
+100 colonne di `registra-terminale.py` avvolgesse una riga lunga e ne spezzasse le
+virgolette. Non succede — l'avvolgimento è una faccenda di resa, non del flusso di byte, e
+l'ipotesi è registrata come confutata invece di essere lasciata cadere in silenzio. La
+seconda: la prima riproduzione di C-7 girava con un `bash` qualsiasi e riportava «stato
+dell'interrogazione: 0», che avrebbe descritto male il repository. Gli strumenti usano
+`set -uo pipefail` — pipefail sì, errexit no, e deliberatamente — e rifatta con le stesse
+opzioni la misura dà **1**, con le tre righe verdi identiche. Lo stato c'era: nessuno lo
+guardava.
+
+Il rilievo C-8 ha chiesto di costruire il caso invece di descriverlo: su un database
+usa-e-getta dello stack 03, `DISTRIBUZIONE: shard1rs=0 shard2rs=5`. Il controllo cercava
+uno spazio nella risposta, e quella risposta uno spazio ce l'ha.
+
+### Note di metodo
+
+255. **Un valore atteso scritto in un commento non è una verifica.** In `reset-demo.sh`
+     l'impronta del dataset — `50000 124861860.70 150281` — stava in un commento sopra la
+     riga che la stampava, e non veniva confrontata con niente: il ripristino poteva finire
+     con il dataset sbagliato e dichiararsi riuscito. È lo stesso difetto che
+     [ADR-0126](Decision.md#adr-0126) ha nominato stamattina in un'altra forma, ed è il
+     terzo punto di C-7, che il recensore non aveva visto. La regola pratica: se un numero
+     atteso è scritto da qualche parte, o è in un confronto o è decorazione.
+
+256. **Un rilievo giusto può avere la causa sbagliata, e la causa cambia il rimedio.** G-3
+     segnalava che un `PROFILO` con uno spazio passa la guardia. Vero — ma non per il
+     motivo dichiarato, e non con la conseguenza dichiarata. Passa perché `grep -qx` tratta
+     il valore come **espressione regolare**, un terzo difetto sulla stessa riga che nessuno
+     aveva segnalato; e non «passa argomenti imprevisti allo script», perché lo script non
+     parte proprio: `/bin/sh` risponde `]*: command not found` ed esce 127. Verificare la
+     causa invece di fidarsi ha trasformato due rimedi separati in una riscrittura sola che
+     chiude tutti e tre i difetti. La regola pratica: prima di correggere un rilievo, si
+     riproduce il meccanismo, non solo il sintomo.
+
+### Prossimo passo
+
+Scrivere le fonti e le decisioni che i commenti appena committati **già citano** e che
+ancora non esistono: V-098…V-101 e ADR-0129…ADR-0132. È un debito aperto di proposito e va
+chiuso per primo, perché fino ad allora quei commenti rimandano a schede assenti. Poi i 18
+verdetti di `strumenti`, i tre rilievi di codice ancora scoperti — C-3 su
+`tools/smoke-sharded.sh`, C-10 su `tools/registra-terminale.py` — e il dossier `app-prove`,
+che non è stato aperto.
+
+Stato aggiornato: decisioni fino ad **ADR-0128**, verifiche fino a **V-097**, note di
+metodo fino alla **256**. Controlli: `make tools-test` **181 passate** (una in più: la
+coerenza fra i tre nomi di progetto del `Makefile` e quelli che `preflight.sh` riconosce).
+Restano aperte le decisioni del PO già in coda, e la review sospesa a due dossier dalla
+fine.
+
+## 2026-09-06 — La review generale chiusa: 72 rilievi su 72, e cinque prove che non sorvegliavano niente
+
+La review ripresa dal punto in cui il limite di sessione l'aveva fermata, e portata in
+fondo. I 18 verdetti di `strumenti` scritti, il dossier `app-prove` aperto, misurato e
+chiuso, e i sei fascicoli archiviati in [`docs/revisioni/`](revisioni/2026-09-06-talk.md).
+**72 rilievi su 72 hanno un verdetto motivato**: 50 accolti, 22 respinti.
+
+L'ultimo dossier è quello che ha insegnato di più, e non per i difetti che ha trovato nel
+codice: per il modo in cui si dimostra che un difetto c'è. Nove rilievi dicevano tutti la
+stessa cosa in nove forme diverse — «questa prova non verifica ciò che il suo nome
+dichiara». Non c'è modo di stabilirlo leggendola. Si stabilisce **mettendo in produzione
+esattamente il difetto che la prova dichiara di impedire**, e guardando se la suite se ne
+accorge. Tre volte su tre non se n'è accorta.
+
+### Deciso
+
+Che un rilievo su una prova si arbitra **mutando la produzione**, e che una prova verde
+sotto il proprio difetto non si rattoppa asserendo di più: si riscrive perché guardi
+un'altra cosa ([ADR-0135](Decision.md#adr-0135)). Le tre forme sono poche e ricorrenti — si
+registra ciò che il codice *chiede* a un collaboratore invece di ricalcolarlo; si dà al
+doppio l'effetto collaterale vero, quando la promessa è un **ordine** fra due passi; si
+mette nel sistema una traccia che il guasto, e solo lui, fa riapparire. Il sorgente mutato
+si rimette a posto nella stessa sessione, ma la misura resta: è l'unica prova che la prova
+serva. Fra le alternative scartate stanno `mutmut` e `cosmic-ray`, che questo lavoro
+farebbero in automatico — **da portare al PO**, non da adottare in silenzio.
+
+Che ciò su cui un meccanismo automatico deve decidere va scritto **dove quel meccanismo
+legge** ([ADR-0136](Decision.md#adr-0136)). Due rilievi di argomento diverso — un marcatore
+di `pytest` e la pulizia dei database di prova — misurati si sono rivelati lo stesso
+errore: l'informazione esisteva, ma stava dove chi decide non guarda. La selezione legge
+`fixturenames`; la spazzata legge il **nome** del database. Una dichiarazione fuori da lì è
+un promemoria per umani, e nessuno la esegue.
+
+Che due delle nove accuse non riguardavano il codice ma **le istruzioni che avevo dato ai
+revisori**, e che una regola che produce rilievi falsi si corregge prima della revisione
+successiva, non dopo. La riga sui segreti accusava una sentinella — un valore che non apre
+niente e lo dichiara nel proprio nome — che esiste per servire la guardia secondo cui la
+credenziale vera non compare mai: segnalarla spinge a togliere la guardia. La riga sui
+percorsi temporanei chiedeva la prevedibilità e non chiedeva **chi vince la corsa**.
+
+### Misurato
+
+Le cinque riparazioni, ognuna provata sotto il mutante che l'aveva rivelata:
+
+- **Il lettore ciclico** ([M-060](../app/docs/Sources.md#m-060)). Tolto `% PAGINE_LETTE`
+  dalla produzione, il lettore cammina in avanti per sempre: **650 prove su 650 restano
+  verdi**, compresa quella che porta il difetto nel nome. La prova ricalcolava dentro di sé
+  la formula della produzione, e una copia non si accorge che l'originale è cambiato.
+- **«Restaura, poi conta»** ([M-061](../app/docs/Sources.md#m-061)). Invertito l'ordine in
+  produzione: 650 su 650 verdi. Il doppio non riempiva mai la destinazione, quindi contare
+  prima o dopo dava lo stesso numero.
+- **Il marcatore che nessuno scrive** ([M-062](../app/docs/Sources.md#m-062)).
+  `-m "not stack03"` selezionava **12 prove su 18**; dopo la riparazione **11 su 18**. La
+  prova esclusa si collegava allo sharded cluster dentro il comando che dichiara di
+  escluderlo. E chiedere la fixture non le toglie l'oggetto: con `_scopri()` rimosso
+  fallisce ancora, perché la scoperta della topologia è per `MongoClient`, non per stack.
+- **Due sessioni sullo stesso stack** ([M-063](../app/docs/Sources.md#m-063)). Due `pytest`
+  genuinamente separati: prima, il secondo ha rimosso **1 database** del primo e i cinque
+  documenti su cui stava lavorando sono diventati **zero**, senza un errore, dentro una
+  prova che parlava d'altro. Dopo: **0 database rimossi**, niente perso.
+- **Il conteggio del seed** ([M-064](../app/docs/Sources.md#m-064)). Il caso più chiaro,
+  perché è successo dentro una sola corsa: mentre la prova falliva dimostrando che il
+  database della demo era stato riscritto, l'asserzione sul suo conteggio — **due righe più
+  su, nella stessa esecuzione** — passava. `mongorestore` inserisce e non aggiorna:
+  cinquantamila chiavi duplicate lasciano il numero dov'era, con uscita 0. I conti tornano
+  tutti: 100 001 documenti ripristinati sono 100 000 del laboratorio più la sentinella,
+  l'unica chiave libera; 101 680 persi sono 50 000 più 50 000 più i 1 680 del carico. Sul
+  fronte utenti, misurato con una sonda a sé: `True / False / True`.
+
+I 72 rilievi, per provenienza ed esito: Codex 45, Gemini Pro 27; **50 accolti, 22
+respinti**. E il numero che vale più di tutti: **14 dei 22 respinti non parlavano del
+repository ma del prompt** che avevo scritto io. Undici sono lo stesso rilievo
+sull'«ambito obbligatorio» dei commit, sollevato da entrambi i revisori in tutti e sei i
+fascicoli.
+
+Controlli alla chiusura: **650 unitarie**, **66 di integrazione**, **183 sugli strumenti**,
+`mypy` verde su **67 file**, `make docs-check` verde con i sei fascicoli dentro `docs/`.
+
+### Note di metodo
+
+257. **La copertura misura le righe eseguite, non le promesse verificate.** Tutte e tre le
+     prove cieche di oggi erano «coperte»: le righe che il mutante ha cambiato venivano
+     eseguite da ciascuna. Eseguire una riga e verificarne l'effetto sono due cose diverse,
+     e la distanza fra loro è esattamente lo spazio in cui vive una prova inutile. La
+     regola pratica: finché non è stata vista fallire, una prova è una speranza.
+
+258. **Un'asserzione può passare nella stessa corsa in cui la prova fallisce, e la cosa va
+     guardata.** Nel caso del restore, la prova era rossa — ma sulla sentinella nuova,
+     mentre il conteggio che il rilievo accusava passava due righe più su. Se non avessi
+     letto *quale* asserzione era scattata avrei archiviato «la prova coglie il difetto» e
+     lasciato in piedi quella cieca. La regola pratica: quando una prova ha più
+     asserzioni, sotto il mutante non basta che sia rossa; bisogna sapere **quale** riga
+     l'ha resa rossa.
+
+259. **Prima di arbitrare un rilievo, guarda se la regola che cita esiste nel repository o
+     solo nelle istruzioni che hai dato tu.** Quattordici rilievi su 72 — e 14 dei 22
+     respinti — nascevano dal prompt di revisione, non dal codice. Che due revisori
+     indipendenti concordino non è una controprova: se leggono lo stesso prompt, l'accordo
+     misura la fonte comune. La regola pratica: la convergenza fra revisori vale come
+     indizio solo se le loro istruzioni differiscono.
+
+260. **Un collegamento relativo è valido rispetto a dove il file finirà, non a dove è stato
+     scritto.** `archivia` appiattisce sei cartelle in una sola, e quattro collegamenti che
+     funzionavano nella cartella di lavoro si sono rotti al primo `docs-check` dopo
+     l'archiviazione: un rimando fra fascicoli e tre ancore interne in forma corta, che
+     GitHub non genera. Le ancore giuste le ho calcolate con la `slug` di
+     `tools/check_links.py` — cioè con la stessa funzione che poi giudica — invece di
+     indovinarle. La regola pratica: quando un passo di pubblicazione sposta i file, si
+     archivia **prima** e si lascia parlare il controllore, invece di ragionare sui percorsi
+     a mente.
+
+### Prossimo passo
+
+**Il rapporto al PO è stato consegnato** a fine sessione, e conteneva ciò che va
+**segnalato e non riparato**: il falso allarme di
+WiredTiger nello smoke degli stack accesi da molte ore — `mongod` fa scorrere la riga
+`cache_size` fuori da un log `json-file 10m 3` in circa nove ore, quindi il controllo non
+la trova più ed è un difetto d'ambiente, non dello stack; i difetti della skill importata
+che meritano di risalire a monte; le due proposte registrate come alternative scartate ma
+che valgono una decisione sua — adottare `mutmut`/`cosmic-ray`, e spostare la spazzata dei
+database orfani su un bersaglio `make` esplicito; e il fatto che il guasto sorvegliato da
+C-6 è intercettato **anche** dal contatore dell'adattatore, ma come errore di fixture e con
+un messaggio che non nomina mai `lab`.
+
+Restano aperte, in attesa del PO: se rendere confrontabili le finestre dell'Atto III; la
+scelta a due vie di `talk` G-7 e `stack-docker` C-2; e se riscrivere la storia dei commit
+per togliere il nome del repository d'origine. La discussione sulle priorità resta ferma
+per sua richiesta, fino alla sua passata a mano con il runbook. Nota a margine non ancora
+inseguita: l'appuntamento di [ADR-0058](Decision.md#adr-0058) riguarda MongoDB 8.0.30 e
+resta il **16 settembre**; i tre stack oggi dicono tutti `mongod 7.0.40`.
+
+**La sessione si sospende qui, su richiesta del PO** — «sono troppo stanco per decidere,
+riprendiamo domani». Non c'è lavoro a metà: albero pulito, `release/1.0` allineata a
+`origin` su `d4134fe`, 650 unitarie, 66 di integrazione, 183 sugli strumenti, `mypy` e
+`docs-check` verdi. **Si riprende dalle decisioni**, che sono tutte sue e nessuna urgente
+tranne una: il repository diventa pubblico fra dodici giorni, quindi la scelta se
+riscrivere la storia dei commit per togliere il nome del repository d'origine ha una
+scadenza, le altre no.
+
+Stato aggiornato: decisioni fino ad **ADR-0136**, verifiche fino a **V-104**, misure
+dell'applicazione fino a **M-064**, note di metodo fino alla **260**.
+
+## 2026-09-07 — Tre lacune trovate leggendo il repository da estraneo, e un guasto che non c'era
+
+Il PO ha riletto il repository mettendosi nei panni di chi lo apre la prima volta, e ha
+segnalato tre cose che non si trovavano: come si avvia lo sharded cluster, come si lancia
+l'applicazione contro le tre architetture vedendone i risultati da terminale, e con quale
+comando si registrano i filmati `.mp4` da tenere in `~/SqlStart2026-registrazioni`. Le prime
+due **c'erano già** — nel runbook, in `make help`, nelle pagine di architettura: mancava il
+punto d'ingresso, non il contenuto. La terza non esisteva affatto.
+
+### Deciso
+
+Che lo schermo si registra con uno strumento del repository, e che **la passata muta è la
+prima delle due** ([ADR-0140](Decision.md#adr-0140)). `tools/registra-schermo.sh` più
+`make filmato NOME=… [AUDIO=no] [DURATA=…]`: gli indici dei dispositivi AVFoundation si
+scoprono a ogni corsa perché cambiano quando si installa o si toglie un'applicazione, il
+codificatore è quello hardware perché le scene di questo talk **si misurano mentre si
+girano** e un encoder software falserebbe il numero, e a fine corsa lo strumento rilegge il
+file e si ferma con un errore se la voce era richiesta e la traccia non c'è. Fra le
+alternative scartate, OBS — installato, ma la sua configurazione vive nelle preferenze
+dell'operatore e non in un file che si possa rivedere in una PR — e `screencapture -v`, che
+il microfono non lo prende affatto.
+
+Che le tre lacune si chiudono con un **punto d'ingresso**, non con una copia:
+[`docs/guida-rapida.md`](guida-rapida.md) sta fra il README e il runbook, e rimanda invece di
+duplicare. L'«Avvio rapido» del README arriva ora allo sharded cluster con le sue due taglie
+e all'applicazione lanciata contro tutte e tre.
+
+### Misurato
+
+[V-106](Sources.md#v-106), sette punti su questa macchina, e il quinto è il risultato che
+vale la sessione. Lo strumento annunciava «2,0 s» per un filmato da tre secondi, e la prima
+spiegazione plausibile incolpava `-framerate 30`. Misurata, quell'opzione è **inerte**: con e
+senza, `-t 3` dà 2,966667 e 2,966668 secondi e in tutti e due i casi 30 fps. Il guasto stava
+nella riga che *stampava* la durata: `ffprobe` scrive `duration=2.966668` col punto, sempre,
+perché è un formato dati, e `awk` in locale italiana legge quel punto come fine del numero.
+In isolamento, `echo 2.966668 | awk '{printf "%.1f", $1}'` dà **2,0** in italiano e **3.0**
+con `LC_ALL=C`. Il file era giusto; sbagliato era il numero che lo raccontava. La stessa
+causa è stata cercata in `preflight.sh`, che usa l'identico idioma: là il valore in ingresso è
+un intero puro e le soglie confrontano interi, quindi non si presenta.
+
+La correzione è stata provata dal vero a fine sessione, con il PO presente: cinque secondi
+muti, annunciati **5,0 s** dallo strumento e misurati `4.966668` da `ffprobe`, 147 fotogrammi
+a 30 fps, **zero** tracce audio con `AUDIO=no`, 3 757 432 byte. Prima della correzione quella
+stessa riga avrebbe scritto «4,0 s».
+
+### Note di metodo
+
+261. **Lo strumento che misura è sospetto quanto l'oggetto misurato.** L'ipotesi
+     sull'acquisizione era ragionevole, citava un'opzione vera e spiegava il sintomo; ha
+     retto finché non si è guardato **il file** invece del suo resoconto. Il punto e la
+     virgola non sono un dettaglio tipografico: `2.966668` è un dato, «2,966668» è una
+     frase, e una locale che le confonde falsa i numeri senza sbagliare una riga di codice.
+     La regola pratica: si legge alla maniera dei dati e si scrive alla maniera di chi
+     legge, e quando un numero sorprende si verifica prima chi lo ha stampato.
+
+262. **«È già documentato» non chiude un rilievo di visibilità.** Due lacune su tre erano
+     coperte da pagine esistenti e ben scritte, e restavano lacune. Un repository esaustivo
+     per scelta paga questo prezzo: più cresce, più è facile che una cosa scritta bene
+     diventi introvabile. La regola pratica: quando manca qualcosa, cercarla prima di
+     riscriverla — se esiste, la consegna è un punto d'ingresso che rimanda, così la fonte
+     resta una sola e non nascono due versioni che divergono.
+
+### Prossimo passo
+
+**Domani si esegue il runbook del talk**, per volontà del PO. È la passata a mano che era
+rimasta in sospeso, e adesso ha accanto due strumenti che prima non c'erano: la guida rapida,
+che dice cosa accendere e cosa aspettarsi, e `make filmato`, che permette di girare la
+passata muta di ogni scena prima di raccontarla. Da tenere presente durante l'esecuzione: il
+falso allarme di WiredTiger sugli stack accesi da molte ore, e l'appuntamento di
+[ADR-0058](Decision.md#adr-0058) sul **16 settembre** per MongoDB 8.0.30.
+
+Restano aperte, e sono tutte del PO: `stack-docker` G-1, C-2 e C-4; `talk` G-7; la riserva di
+[ADR-0098](Decision.md#adr-0098) sull'Atto III; l'adozione di `mutmut`/`cosmic-ray`
+([ADR-0135](Decision.md#adr-0135)) e il bersaglio `make` per la spazzata dei database orfani
+([ADR-0136](Decision.md#adr-0136)); la segnalazione a monte dei due difetti della skill
+importata ([ADR-0124](Decision.md#adr-0124)); e la fusione del 16 settembre con il tag `v1.0`.
+
+**La sessione si chiude qui, su richiesta del PO.** Non c'è lavoro a metà: albero pulito,
+`release/1.0` allineata a `origin`, `docs-check` verde e 196 prove sugli strumenti.
+
+Stato aggiornato: decisioni fino ad **ADR-0140**, verifiche fino a **V-106**, fonti fino a
+**S-079**, misure dell'applicazione fino a **M-064**, note di metodo fino alla **262**.
+
+---
+
+## 2026-09-17 — Cinque filmati di riserva erano già nel repository, e uno di loro durava la metà
+
+Il PO stava preparando le slide e ha chiesto i filmati di riserva delle demo, da mettere dentro
+la presentazione, ricordando che dal palco userà il profilo `palco` mentre il `completo` resta a
+chi prenderà il lab da GitHub. La preoccupazione dei due profili si è sciolta da sé: cinque dei
+sei filmati elencati nella pagina delle registrazioni non contengono niente che stia fuori dal
+terminale, e le loro scene erano già archiviate come registrazioni `.cast`. Riprodurle non
+accende nessun container — il profilo `palco`, acceso e sano, non è stato toccato.
+
+### Deciso
+
+- **I filmati che stanno dentro un terminale si fabbricano, non si girano**
+  ([ADR-0141](Decision.md#adr-0141)). `agg` ridisegna il `.cast` rispettando i tempi originali,
+  `ffmpeg` ne fa un `.mp4` muto, e lo strumento del repository confronta ogni filmato con la
+  somma delle scene che lo compongono. Rigirarle dal vivo sarebbe costato due stack, uno scambio
+  di `.env` e un pomeriggio, per ottenere una esecuzione **diversa** da quella misurata.
+- **Il confronto delle durate è un errore, non un avviso.** Un filmato più corto della scena che
+  sostituisce si apre, scorre e sembra riuscito: è precisamente il guasto che non si vede
+  guardando. Un avviso in mezzo a tredici barre di avanzamento è la forma in cui il difetto si
+  era già presentato senza essere visto.
+- **`agg` è la seconda e ultima installazione richiesta**, e va detto insieme a quello che
+  *non* comporta: né `ffmpeg` né `agg` servono per eseguire il lab o per riprodurre una
+  registrazione in sala. Quello resta `registra-terminale.py --riproduci`, che non chiede niente
+  — un piano B che richiede un `brew install` non è un piano B.
+- **La scena 4 resta da girare dal vivo**, e il motivo disegna il confine fra i due strumenti:
+  la sua prova non è ciò che il terminale scrive, è l'icona del Wi-Fi spenta nella barra dei
+  menu. Procedura consegnata al PO, che la esegue lui: la rete della sua macchina non si spegne
+  da qui.
+
+### Misurato
+
+[V-107](Sources.md#v-107), e le due misure che contano sono state prese **prima** di produrre
+qualsiasi cosa, leggendo l'aiuto del programma invece di lanciarlo e guardare.
+
+- **Il limite di inattività predefinito di `agg` vale cinque secondi**, e comprime a cinque ogni
+  pausa più lunga. Sulla scena 8, che dura 40,10 s contati sull'ultimo evento del `.cast`, la
+  resa predefinita dà **21,35 s**. È ADR-0116 confermato alla lettera, con il numero sotto: una
+  riserva che dura la metà della scena che sostituisce non è la riserva di quella scena. Con
+  `--idle-time-limit 3600` la resa dà 43,09 s, cioè 40,10 più il fermo immagine finale: esatta
+  al centesimo.
+- **Il montaggio `-c copy` toglieva secondi ai filmati composti da più scene.** Il 05 usciva
+  47,1 s invece di 52,5, il 06 31,9 invece di 33,6; il 02, di due sole scene, era esatto —
+  abbastanza da far sembrare il metodo sano. La causa sta a monte: una GIF ha fotogrammi a
+  durata variabile, il `.mp4` che ne nasce eredita timestamp fuori ordine, e `ffmpeg` scarta ciò
+  che non sa incastrare avvisando in una riga che scorre via. Ricodificando a passo costante
+  (`-r 15 -fps_mode cfr`) tutti e tredici i file coincidono entro un decimo — e ricompare il
+  fermo immagine finale, che la conversione stava perdendo senza dirlo.
+- **Costa poco, ed è questo che ha cambiato la decisione.** Rendere la scena 8 a corpo 28
+  richiede 0,45 s; i tredici filmati occupano 48 MB e si rifanno da capo in meno di un minuto.
+- **`make preflight`** è passato da «nessun filmato» a **«filmati locali disponibili: 13»**:
+  10 superati, 0 avvisi, 0 errori. L'avviso diventa errore bloccante domani, 18 settembre.
+
+### Note di metodo
+
+263. **Un predefinito non è una scelta neutra: è la scelta di qualcun altro, presa per un altro
+     caso d'uso.** Il limite di inattività di `agg` è giusto per chi pubblica una GIF in un
+     `README` e la vuole corta, ed è sbagliato qui, dove l'attesa è il contenuto. Non era
+     nascosto — l'aiuto lo dichiara, e il programma faceva esattamente quello che prometteva.
+     A sbagliare sarebbe stato chi non gliel'aveva chiesto. La regola pratica: di uno strumento
+     nuovo si leggono i predefiniti **prima** della prima corsa, chiedendosi per chi sono stati
+     scelti.
+
+264. **Fabbricare introduce guasti che girare non ha, e si trovano contando, non guardando.**
+     Tutt'e due i difetti producevano file che si aprono, scorrono e sembrano riusciti: nessuno
+     guarda un filmato con il cronometro in mano. La contromisura non è rivedere meglio il
+     codice — nessuno dei due si vedeva leggendolo — ma dare allo strumento un numero atteso
+     contro cui confrontarsi. Vale in generale: quando si automatizza la produzione di qualcosa
+     che prima si faceva a mano, la prima cosa da scrivere non è il produttore, è il metro.
+
+### Prossimo passo
+
+Il runbook del talk, che era il passo previsto e resta tale, più le due cose che questa sessione
+lascia in mano al PO: **girare il filmato 4** con il Wi-Fi spento (procedura consegnata: reset a
+rete accesa, Wi-Fi giù, `make filmato NOME=04-avvio-offline-muto AUDIO=no`, `make up-02` e
+`make smoke-02` in una seconda finestra, poi Wi-Fi su e `make reset-demo-02`), e **la fusione di
+`release/1.0` in `main`** prima di rendere pubblico il repository.
+
+Le passate parlate dei cinque filmati fabbricati non esistono e non sono urgenti: servono a
+YouTube, mentre dentro le slide va il muto ([ADR-0140](Decision.md#adr-0140)).
+
+Stato aggiornato: decisioni fino ad **ADR-0141**, verifiche fino a **V-107**, fonti fino a
+**S-080**, misure dell'applicazione fino a **M-064**, note di metodo fino alla **264**.
+
+---
+
+## 2026-09-17 — La scena 4 girata: la prova era in campo, e la scrivania anche
+
+L'unica scena non fabbricabile è stata girata dal vivo dal PO, con Wi-Fi spento e cavo Ethernet
+staccato. Ha funzionato: `make up-02` e `make smoke-02` riescono senza rete, e l'icona del Wi-Fi
+barrata è nella stessa immagine del `Superati: 42 · Errori: 0`. Poi la ripresa è stata riguardata,
+ed è emerso quello che la procedura non prevedeva.
+
+### Deciso
+
+- **La scena 4 si pubblica ritagliata sulla finestra del terminale, e il Wi-Fi spento si dichiara
+  a voce** ([ADR-0142](Decision.md#adr-0142)). La ripresa a schermo intero non si pubblica e non
+  resta nella cartella che `make preflight` conta.
+- **La procedura di ripresa comincia da un passo che prima non aveva: si prepara lo schermo**, e
+  viene prima del reset dello stack. La [pagina delle
+  registrazioni](05-talk/registrazioni/README.md#schermo-intero) dice che cosa significa in
+  pratica — nascondere le altre applicazioni, spegnere le notifiche, guardare i nomi delle schede,
+  sgombrare la scrivania — e perché non si rimedia dopo.
+- **La tabella dei filmati dice ciò che il file contiene, non ciò che doveva contenere.** La riga
+  4 prometteva «dimostra che il lab è offline davvero»: il file pubblicato non lo dimostra, e la
+  riga ora lo ammette invece di lasciarlo credere.
+
+### Misurato ([V-108](Sources.md#v-108))
+
+- **Tre file dalla stessa ripresa**, tutti e tre con **zero tracce audio**: lo schermo intero
+  3024×1964 di 70,53 s (52,8 MB), l'intermedio `.m4v` 1662×1080 a 60 fps di 50,62 s (43,3 MB), e
+  il ritagliato `.mp4` 1662×1080 a 30 fps di 50,63 s (4,3 MB). I due `-2` sono il primo, ritagliato
+  sulla finestra e accorciato di 19,9 s.
+- **La prova c'era.** Nel fotogramma a 68 s dello schermo intero l'icona del Wi-Fi è barrata, e il
+  terminale nello stesso fotogramma chiude con `Superati: 42 · Errori: 0` sul ramo `release/1.0`.
+- **E nello stesso schermo c'era dell'altro.** Il fotogramma a 5 s contiene una sessione di lavoro
+  aperta con dentro l'elenco dei passi in corso, la barra delle schede con i nomi di altri
+  progetti, e una finestra del Finder con nomi di documenti.
+- **`make preflight`** conterebbe **15** `.mp4`: i tredici fabbricati più le due riprese. Tolta la
+  ripresa integrale dalla cartella, tornano i **14** attesi.
+
+### Note di metodo
+
+265. **Il confine che rende una cosa impossibile da fabbricare è lo stesso che la rende difficile
+     da pubblicare.** [ADR-0141](Decision.md#adr-0141) l'aveva tracciato una volta sola, e in una
+     direzione: ciò che vive dentro il terminale si fabbrica da un `.cast`, ciò che vive fuori va
+     girato. Girandolo si scopre l'altro lato della stessa linea — «fuori dal terminale» vuol dire
+     «il tuo schermo», e il tuo schermo non è materiale preparato, è materiale che c'era. La prova
+     e il segreto abitavano la stessa striscia di pixel, e ritagliare l'una toglie l'altra. Vale
+     oltre i filmati: ogni dimostrazione che per essere credibile deve mostrare il **contesto**
+     mostra un contesto che nessuno ha revisionato.
+
+266. **Quando il rimedio non esiste a valle, il costo va speso a monte o non va speso.** Qui i
+     rimedi dopo la ripresa erano tre, e nessuno regge: il ritaglio toglie la prova; la maschera a
+     riquadri copre ciò che c'era quando la piazzi, non la notifica del minuto dopo, e per
+     accorgersene bisogna riguardare settanta secondi fotogramma per fotogramma; la composizione
+     conserva tutto ma produce un'immagine assemblata, e chi la nota si chiede che altro sia stato
+     composto. L'unico intervento efficace costava cinque minuti **prima**. La regola operativa:
+     quando si scrive una procedura, i passi di preparazione non sono preamboli — sono gli unici
+     punti in cui certi difetti si possono ancora togliere.
+
+### Prossimo passo
+
+**Del PO, in ordine:** spostare la ripresa integrale e l'intermedio `.m4v` fuori dalla cartella dei
+filmati e rinominare il ritagliato togliendogli il `-2`; poi la **fusione di `release/1.0` in
+`main`** e la pubblicazione del repository. Le passate parlate dei cinque filmati fabbricati
+restano non urgenti: servono a YouTube, mentre dentro le slide va il muto
+([ADR-0140](Decision.md#adr-0140)).
+
+Stato aggiornato: decisioni fino ad **ADR-0142**, verifiche fino a **V-108**, fonti fino a
+**S-080**, misure dell'applicazione fino a **M-064**, note di metodo fino alla **266**.
+
+## 2026-09-17 — Due voci del catalogo, un file solo: i doppioni tolti prima delle slide
+
+Montando le slide il PO si è accorto che la cartella dei filmati conteneva quattro file per due
+contenuti: `01-failover-docker-kill-muto.mp4` e `scena-02-failover-docker-kill-muto.mp4`,
+`03-maggioranza-persa-muto.mp4` e `scena-04-maggioranza-persa-muto.mp4`. Non somigliavano: erano
+**identici byte per byte**. Il catalogo di `tools/filmati-da-registrazioni.sh` li produceva
+entrambi, perché i montaggi `01` e `03` contengono **una scena sola** e la voce «scena singola»
+chiedeva quella stessa scena.
+
+### Deciso
+
+- **Restano i numerati, spariscono gli `scena-`.** La prima idea era l'opposto — tenere gli
+  `scena-*` perché il nome dice che cosa contengono — ed è stata rovesciata per un motivo che si
+  vede solo dal palco: i numeri `01`…`06` sono **l'ordine del talk**, corrispondono alla tabella
+  «Che cosa filmare» e alle slide già montate, mentre uno `scena-*` esiste per un caso preciso,
+  «questa slide deve mostrare un pezzo solo di un montaggio». Per le scene 2 e 4 quel caso non
+  esiste: il montaggio **è** la scena.
+- **Cancellarli non bastava.** Stavano nel catalogo, e `make filmati` li avrebbe rifatti al primo
+  giro. Le due righe sono state tolte da lì, e il commento sopra il catalogo dice adesso perché
+  quei due nomi non ci sono — altrimenti il prossimo lettore li rimette credendo a una svista.
+- **Niente ADR.** Non è una decisione nuova: è [ADR-0141](Decision.md#adr-0141) applicata fino in
+  fondo. Il vincolo è finito dove vale di più, in una prova.
+
+### Misurato
+
+- **Le due coppie erano identiche**, `shasum -a 256` alla mano:
+  `97d67077…a1c6bb` per la prima, `1df74904…c1f88e` per la seconda.
+- **Catalogo da 13 voci a 11**, filmati sul disco **da 14 a 12**, `make preflight`
+  «filmati locali disponibili: **12**» · «Superati: 10 · Avvisi: 0 · Errori: 0» · «Pronto».
+- **`make tools-test` da 213 a 214**: la prova in più è quella che vieta il doppione. Verificata
+  **in rosso** contro il catalogo del commit precedente, dove segnala esattamente le due coppie.
+
+### Note di metodo
+
+267. **Il doppione non era un errore di battitura: era implicito nella forma del catalogo.** Un
+     filmato lì dentro è «un nome più una lista di scene», e da quella forma discende che due voci
+     con la stessa lista *sono* lo stesso file — nessuno l'aveva scritto, e quindi nessuno se n'era
+     accorto finché non si trattava di scegliere una slide. La prova nuova non nomina i due file
+     colpevoli, vieta la classe: «due voci con le stesse scene danno due file identici». Quando un
+     difetto è la conseguenza di una struttura, la difesa va scritta sulla struttura, perché i
+     nomi cambiano e la struttura resta. Un commento avrebbe spiegato l'assenza; solo una prova
+     impedisce il ritorno.
+
+### Prossimo passo
+
+Invariato e del PO: la **fusione di `release/1.0` in `main`** e la pubblicazione del repository.
+
+Stato aggiornato: decisioni fino ad **ADR-0142**, verifiche fino a **V-108**, fonti fino a
+**S-080**, misure dell'applicazione fino a **M-064**, note di metodo fino alla **267**.

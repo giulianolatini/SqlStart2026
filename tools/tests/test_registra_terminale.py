@@ -359,3 +359,51 @@ def test_la_regia_su_una_riproduzione_si_ferma_invece_di_non_fare_niente(tmp_pat
 
     assert esito.returncode != 0
     assert "seconda finestra" in esito.stderr
+
+
+def test_una_riga_annunciata_con_le_virgolette_aperte_e_regia_fallita(tmp_path):
+    """Il primo dei due modi in cui una riga annunciata è sbagliata prima di partire.
+
+    `shlex.split` alza `ValueError` su una riga che apre una virgoletta e non la chiude, e
+    l'eccezione arriva **prima** che esista un codice di uscita da restituire. Senza il
+    blocco che la raccoglie saliva fino in cima: la scena non veniva abbattuta, il
+    processo usciva **1** invece di 125, e sul disco restava un `.cast` di poche centinaia
+    di byte con dentro la riga di regia e nessun marcatore — un file che sembra una
+    registrazione e non lo è.
+
+    1 e 125 non sono lo stesso guasto detto in due modi: 1 vuol dire «il comando
+    registrato è andato male», 125 vuol dire «è andata male la regia». Chi registra le
+    scene ha bisogno della differenza, perché la seconda si ripara nel copione.
+
+    Rilievo C-10 della review generale di `release/1.0`, 6 settembre 2026 (V-103).
+    """
+    scena = copione(tmp_path, '  /bin/echo "non chiusa')
+    destinazione = tmp_path / "prova.cast"
+
+    esito = esegui(str(destinazione), "--regia", "/bin/echo", "--", sys.executable, str(scena))
+
+    assert esito.returncode == 125, "una riga inanalizzabile è regia fallita, non uscita 1"
+    assert "Traceback" not in esito.stderr, "un guasto previsto non si racconta con un traceback"
+    assert "ValueError" in esito.stderr, "chi registra deve sapere **perché** non è partita"
+    _, testo = intestazione_e_testo(destinazione)
+    assert "ripartito" not in testo, "la scena non deve ripartire su un comando mai eseguito"
+
+
+def test_una_riga_annunciata_che_nomina_un_comando_assente_e_regia_fallita(tmp_path):
+    """Il secondo modo, e quello che capita davvero: il comando non c'è.
+
+    Un copione scritto su una macchina e girato su un'altra annuncia percorsi che di là
+    non esistono. `subprocess.run` risponde `FileNotFoundError` — cioè `OSError`, ed è per
+    questo che il blocco cattura la classe e non la sottoclasse: `PermissionError` e
+    `NotADirectoryError` sono lo stesso guasto con un altro nome, e finirebbero fuori.
+    """
+    scena = copione(tmp_path, "  /bin/comando-che-non-esiste")
+    destinazione = tmp_path / "prova.cast"
+
+    esito = esegui(str(destinazione), "--regia", "/bin/", "--", sys.executable, str(scena))
+
+    assert esito.returncode == 125, "un comando assente è regia fallita, non uscita 1"
+    assert "Traceback" not in esito.stderr, "un guasto previsto non si racconta con un traceback"
+    assert "FileNotFoundError" in esito.stderr
+    _, testo = intestazione_e_testo(destinazione)
+    assert "ripartito" not in testo, "la scena non deve ripartire su un comando mai eseguito"

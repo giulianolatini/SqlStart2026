@@ -236,12 +236,23 @@ Un dump riuscito ha `oplog.bson` e `prelude.json` in cima alla cartella. Questo 
 nessuno dei due: sul disco resta un oggetto che pesa come un backup, si apre come un backup, e non è
 coerente rispetto a nessun istante. **L'unico segnale è il codice di uscita 1.**
 
-Da cui la regola, che sta in due righe di script:
+Da cui la regola. Sta in quattro righe di script, e la prima è quella che rende lecite le altre:
 
 ```bash
+DESTINAZIONE="$(mktemp -d)"   # cartella nuova: `rm -rf` è lecito solo su ciò che si è creato
 mongodump --oplog --out "${DESTINAZIONE}" || { rm -rf "${DESTINAZIONE}"; exit 1; }
-test -f "${DESTINAZIONE}/oplog.bson" || { echo "dump senza oplog.bson"; exit 1; }
+test -f "${DESTINAZIONE}/oplog.bson" || { rm -rf "${DESTINAZIONE}"; exit 1; }
+mv "${DESTINAZIONE}" "${ARCHIVIO}/lab-$(date +%F)"   # si pubblica solo dopo il controllo
 ```
+
+Le due righe di mezzo le ha insegnate il guasto qui sopra. La prima e l'ultima le ha insegnate una
+revisione, ed è un errore che vale la pena vedere: `rm -rf` su una destinazione **scelta da chi
+chiama** cancella anche ciò che il dump non ha creato. Provato — con una credenziale sbagliata
+`mongodump` esce con 1 **prima di scrivere un solo file**, e la regola nella forma a due righe si
+portava via il backup del giorno prima che stava nella stessa cartella
+([V-095](../Sources.md#v-095)). Una cartella nata da `mktemp -d` non ha il problema per costruzione:
+cancellarla ricorsivamente è lecito perché prima non c'era. E finché manca `oplog.bson` il dump non è
+un backup, quindi non deve prendere il posto di quello buono: si sposta dopo il controllo, non prima.
 
 ### Perché rimpicciolire l'oplog non basta
 
@@ -368,16 +379,20 @@ collezione vuota, poi `mongorestore` — che è lo stesso ordine con cui lo stac
 Dallo stack già in piedi (`make up-02`), con la password letta da `docker/02-replicaset/.env`:
 
 ```bash
-# 1. dump a caldo, mentre lo stack lavora
+# 1. dump a caldo, mentre lo stack lavora, in una cartella che parte vuota
+docker exec mongo-rs-1 rm -rf /tmp/dump-02
 docker exec mongo-rs-1 mongodump \
   --host "rs0/mongo-rs-1:27017,mongo-rs-2:27017,mongo-rs-3:27017" \
   -u admin -p "${PASSWORD_AMMINISTRATORE}" --authenticationDatabase admin \
   --oplog --out /tmp/dump-02
 
-# 2. la perdita
-docker exec mongo-rs-1 mongosh --quiet --host rs0/localhost:27017 \
-  -u admin -p "${PASSWORD_AMMINISTRATORE}" --authenticationDatabase admin \
-  --eval 'db.getSiblingDB("lab").dropDatabase()'
+# 2. la perdita — ma solo se il passo 1 ha prodotto un backup ripristinabile.
+#    L'`&&` non è ornamentale: senza, un incolla tira dritto anche su un dump
+#    fallito, cancella l'originale e lascia in mano il guasto del §5.
+docker exec mongo-rs-1 test -f /tmp/dump-02/oplog.bson \
+  && docker exec mongo-rs-1 mongosh --quiet --host rs0/localhost:27017 \
+       -u admin -p "${PASSWORD_AMMINISTRATORE}" --authenticationDatabase admin \
+       --eval 'db.getSiblingDB("lab").dropDatabase()'
 
 # 3. il ripristino
 docker exec mongo-rs-1 mongorestore \
@@ -388,6 +403,21 @@ docker exec mongo-rs-1 mongorestore \
 # 4. la verifica, che è il passo che conta
 make smoke-02
 ```
+
+Sui `-p "${PASSWORD_AMMINISTRATORE}"` di questi comandi: qui la password **si legge davvero** nella
+tabella dei processi del container, perché `mongodump` e `mongorestore` non riscrivono il proprio
+`argv` — misurato su tutti e due ([V-096](../Sources.md#v-096),
+[M-025](../../app/docs/Sources.md#m-025)). `mongosh` invece lo riscrive e mostra `<credentials>`
+([V-047](../Sources.md#v-047)): la stessa precauzione serve o non serve a seconda dello strumento, e
+il modo di saperlo è provarlo. Su tutti e tre la password resta in chiaro **sull'host**, nell'`argv`
+del client `docker`. Il [§8](#8-le-stesse-due-cose-come-scena-demo-backup-live-e-demo-restore) mostra
+come fa l'applicazione, che `-p` non lo passa affatto.
+
+Il passo 2 è l'unico con una guardia perché è l'unico irreversibile. Qui non costa niente —
+`make reset-demo-02` rimette tutto — ma questa pagina la si copia altrove, e altrove il passo 2 senza
+guardia è il modo in cui si perde un database avendo in mano una cartella che sembra un backup.
+Misurato: dopo un `mongodump` fallito, `test -f /tmp/dump-02/oplog.bson` esce con 1
+([V-095](../Sources.md#v-095)).
 
 A fine prova, `make reset-demo-02` riporta lo stack allo stato di partenza e
 `docker exec mongo-rs-1 rm -rf /tmp/dump-02` toglie il dump da dentro il container.
@@ -407,6 +437,10 @@ uv run --directory app mongolab demo restore --target rs --collection carico-…
 ```
 
 La seconda riga non si scrive: la stampa la prima, già completa, nome della collezione compreso.
+
+Tutte e due hanno un bersaglio — `make app-backup TARGET=rs` e `make app-restore TARGET=rs`
+([ADR-0120](../Decision.md#adr-0120)) — e qui restano per esteso apposta: è la forma che la prima
+riga stampa e che si incolla, e i due bersagli girano comunque solo dall'host.
 
 ### Che cosa mostra, e in che ordine
 

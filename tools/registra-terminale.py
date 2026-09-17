@@ -99,9 +99,35 @@ def seconda_finestra(riga: str, canale: int) -> int:
     il comando è riuscito. Quando non lo è, di quell'uscita si stampa anche il
     contenuto: senza, chi registra sa che è andata male e non perché.
 
-    Restituisce il codice di uscita del comando annunciato.
+    Restituisce il codice di uscita del comando annunciato, oppure `REGIA_FALLITA`
+    se la riga non si è nemmeno potuta eseguire.
     """
-    esito = subprocess.run(shlex.split(riga), capture_output=True, text=True)
+    # Prima che esista un codice di uscita da restituire ci sono due modi di
+    # sbagliare, e tutti e due arrivano fin qui come eccezione: virgolette che non si
+    # chiudono, che `shlex.split` respinge con `ValueError`, e un comando che non
+    # esiste, che `subprocess.run` respinge con `FileNotFoundError` — cioè `OSError`.
+    # Senza questo blocco l'eccezione sale fino in cima: la scena **non** viene
+    # abbattuta, il processo esce **1** invece di 125, e sul disco resta un `.cast` di
+    # poche centinaia di byte che contiene la riga di regia e nessun marcatore — un
+    # file che sembra una registrazione e non lo è (V-103, ADR-0132).
+    #
+    # 125 non è un dettaglio di forma: è il solo codice che distingue «è fallita la
+    # regia» da «è fallito il comando registrato», e chi registra le scene ha bisogno
+    # della differenza, perché la prima si ripara nel copione e la seconda no.
+    try:
+        esito = subprocess.run(shlex.split(riga), capture_output=True, text=True)
+    except (OSError, ValueError) as guasto:
+        print(
+            "regia: la riga annunciata non si è potuta eseguire — %s: %s"
+            % (type(guasto).__name__, guasto),
+            file=sys.stderr,
+        )
+        print(
+            "regia: la scena non riparte e la registrazione si ferma qui — un Invio "
+            "adesso racconterebbe un guasto che non è avvenuto",
+            file=sys.stderr,
+        )
+        return REGIA_FALLITA
     print("regia: %s · uscita %d" % (riga, esito.returncode), file=sys.stderr)
     if esito.returncode != 0:
         for flusso in (esito.stdout, esito.stderr):

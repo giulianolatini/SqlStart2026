@@ -50,6 +50,7 @@ from mongolab.application.scenari import (
 from mongolab.application.topologia import Interruzione
 from mongolab.application.workload import Latenze, Riepilogo
 from mongolab.domain.modelli import (
+    ContoCollezione,
     ContoShard,
     DescrizioneServer,
     DescrizioneTopologia,
@@ -128,6 +129,7 @@ def rapporto(
     # costruito, però, quell'attimo è l'avvio: letta per prima, la topologia di uno
     # standalone sanissimo si legge `sconosciuta`. Misurato eseguendo, non dedotto.
     stato = ispettore.server_status()
+    conti = ispettore.collection_counts()
     statistiche = ispettore.db_stats()
     distribuzione = ispettore.shard_distribution(collezione)
     vista = ispettore.topology()
@@ -135,6 +137,10 @@ def rapporto(
     linee = [titolo]
     linee += _topologia(vista)
     linee += _server(stato)
+    # Il dettaglio **prima** della somma: la riga del database è un totale, e un
+    # totale stampato sopra i suoi addendi si legge come il primo di essi. È
+    # precisamente l'errore di lettura da cui questa riga viene (ADR-0121).
+    linee += _collezioni(conti)
     linee += _database(statistiche)
     linee += _shard(distribuzione)
     return "\n".join(tronca(linea, larghezza) for linea in linee)
@@ -381,6 +387,29 @@ def _server(stato: Mapping[str, object]) -> list[str]:
             f"connessioni {IGNOTO if connessioni is None else connessioni}",
         )
     ]
+
+
+def _collezioni(conti: Sequence[ContoCollezione]) -> list[str]:
+    """Una riga per collezione, e una riga che dichiara il vuoto quando non ce ne sono.
+
+    La regola del vuoto è quella di `_shard`, e per la stessa ragione: su uno stack appena
+    acceso, prima che il seed sia passato, la domanda «e le collezioni?» è legittima, e una
+    voce assente si legge come una dimenticanza del programma invece che come una risposta
+    del database.
+
+    Le righe di continuazione usano `_sotto` come fa `_topologia`: l'etichetta si scrive
+    una volta e le voci si incolonnano sotto, perché sei collezioni con sei etichette
+    uguali a sinistra sono sei volte la stessa parola e una volta sola l'informazione.
+    """
+    if not conti:
+        return [_voce("collezioni", "nessuna")]
+    righe = [
+        (_voce("collezioni", conto.nome, f"{conto.documenti} documenti"))
+        if indice == 0
+        else _sotto(conto.nome, f"{conto.documenti} documenti")
+        for indice, conto in enumerate(conti)
+    ]
+    return righe
 
 
 def _database(statistiche: Mapping[str, object]) -> list[str]:

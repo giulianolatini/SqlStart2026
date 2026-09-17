@@ -5,16 +5,28 @@
 .PHONY: help docs-check tools-test images-pull images-verify preflight stack-check \
         app-demo app-test app-check app-test-integration \
         app-stats app-watch app-workload app-image \
+        app-backup app-restore app-sharding \
         up-01 down-01 reset-01 logs-01 seed-01 smoke-01 reset-demo-01 \
         up-02 down-02 reset-02 logs-02 seed-02 smoke-02 reset-demo-02 \
         failover-02 failover-02-termina failover-02-maggioranza \
         up-03 down-03 reset-03 logs-03 seed-03 smoke-03 reset-demo-03 profilo-03 \
-        stato-03 distribuzione-03 guasto-03
+        stato-03 distribuzione-03 guasto-03 \
+        filmato filmati filmati-elenco
 
 # `--env-file tools/images.env` porta MONGO_IMAGE, che nei file Compose è dichiarato
 # nella forma `${MONGO_IMAGE:?...}`: senza, Compose si ferma subito dicendo cosa manca
 # invece di avviare un container con un'immagine vuota.
-COMPOSE_01 := docker compose --env-file tools/images.env -f docker/01-standalone/compose.yaml
+# Il nome del progetto Compose si FISSA con `-p`, e non è la ripetizione inutile del
+# `name:` che i tre file dichiarano: è ciò che rende vere le righe di `reset-02` e
+# `reset-03`, che cancellano i volumi per nome. `COMPOSE_PROJECT_NAME` nell'ambiente di
+# chi lancia `make` ha la precedenza sul `name:` del file — misurato, V-098 — e senza
+# `-p` un `reset-02` fermerebbe il progetto dell'ambiente e cancellerebbe i volumi di
+# questo. `-p` sulla riga di comando ha la precedenza su tutti e due (ADR-0129).
+PROGETTO_01 := sqlstart-01-standalone
+PROGETTO_02 := sqlstart-02-replicaset
+PROGETTO_03 := sqlstart-03-sharded
+
+COMPOSE_01 := docker compose -p $(PROGETTO_01) --env-file tools/images.env -f docker/01-standalone/compose.yaml
 STACK_01   := docker/01-standalone/compose.yaml
 STACK_02   := docker/02-replicaset/compose.yaml
 STACK_03   := docker/03-sharded/compose.yaml
@@ -27,6 +39,16 @@ STACK_03   := docker/03-sharded/compose.yaml
 help: ## Elenca i target disponibili
 	@grep -E '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+	@printf '\n  Variabili, che i bersagli qui sopra nominano fra parentesi:\n'
+	@printf '    \033[36m%-8s\033[0m %s\n' \
+		TARGET  'quale stack: standalone | rs | sharded — obbligatoria, nessun predefinito' \
+		DOVE    'da dove gira: rete (dentro la rete Compose, predefinito) | host (uv run)' \
+		ARGS    'opzioni girate alla CLI, per esempio ARGS="--step --sink plain"' \
+		PROFILO 'la taglia dello stack 03: palco (predefinito) | completo' \
+		NOMI    'quali immagini riscaricare: NOMI="PYTHON_IMAGE UV_IMAGE"' \
+		NOME    'la scena da girare, o il filmato da rifabbricare: esce come <NOME>.mp4' \
+		AUDIO   'la voce nel filmato: si (predefinito) | no, per la passata muta' \
+		DURATA  'quanti secondi dura il filmato; se manca, si ferma con «q»'
 
 tools-test: ## Esegue la suite degli strumenti di repository
 	uv run --directory tools pytest -q
@@ -75,9 +97,15 @@ app-test-integration: ## Esegue la suite di integrazione dell'applicazione (acce
 # L'uscita è 2, la stessa con cui Typer respinge un parametro sbagliato: dal punto di
 # vista di chi legge un CI, sbagliare la riga di `make` e sbagliare la riga di `mongolab`
 # sono lo stesso errore, e meritano lo stesso codice.
+# L'esempio che il messaggio mostra quando `TARGET` manca. `rs` va bene per quasi
+# tutti i bersagli, e per il Blocco 3 no: `app-sharding TARGET=rs` supererebbe questo
+# guardiano per andare a sbattere contro il rifiuto della CLI due secondi dopo. Un
+# suggerimento che non funziona costa più del silenzio.
+ESEMPIO_TARGET = rs
+
 CHIEDI_TARGET = @case "$(TARGET)" in \
 		standalone|rs|sharded) ;; \
-		"") echo "manca TARGET: make $@ TARGET=rs (standalone, rs, sharded)" >&2; exit 2 ;; \
+		"") echo "manca TARGET: make $@ TARGET=$(ESEMPIO_TARGET) (standalone, rs, sharded)" >&2; exit 2 ;; \
 		*) echo "TARGET=«$(TARGET)» non è uno stack di questo repository: standalone, rs, sharded." >&2; exit 2 ;; \
 	esac
 
@@ -92,6 +120,19 @@ DOVE ?= rete
 CHIEDI_DOVE = @case "$(DOVE)" in \
 		rete|host) ;; \
 		*) echo "DOVE=«$(DOVE)» non esiste: «rete» esegue dentro la rete Compose, «host» sul portatile." >&2; exit 2 ;; \
+	esac
+
+# Le due scene dell'Atto III non hanno un `DOVE` da offrire, ed è l'inverso del
+# failover: `mongodump` non è nell'immagine dell'applicazione (M-044) e quel container
+# non ha il socket del demone Docker, quindi non può entrare in un nodo a cercarcelo.
+# La CLI le rifiuta da dentro la rete (`_solo_dall_host`), e il bersaglio le porta
+# sull'host da sé senza chiedere niente. Se però `DOVE` è scritto a mano diverso da
+# `host`, il bersaglio si ferma invece di eseguire altrove: obbedire a metà è il modo
+# peggiore di essere comodi. `$(origin DOVE)` distingue il predefinito di questo file
+# dalla riga di comando, ed è la ragione per cui il guardiano guarda due cose.
+CHIEDI_SOLO_HOST = @case "$(origin DOVE)/$(DOVE)" in \
+		file/*|default/*|*/host) ;; \
+		*) echo "questa scena si gira solo dall'host: mongodump non è nell'immagine dell'applicazione (M-044) e il container non ha il socket del demone Docker. Togli DOVE, oppure scrivi DOVE=host." >&2; exit 2 ;; \
 	esac
 
 # La mappa fra il nome del bersaglio e il file Compose che lo descrive. Con `=` e non
@@ -111,7 +152,8 @@ COMPOSE_DI_sharded = $(COMPOSE_03_BASE)
 # nessuna costruzione a sorpresa la sera del talk — sta altrove, e sta meglio: il servizio
 # scrive `pull_policy: never` nel file (ADR-0039) e `tools/preflight.sh` verifica la
 # mattina che l'immagine ci sia, dicendo `make app-image` se manca.
-ESEGUI = $(if $(filter host,$(DOVE)),uv run --directory app mongolab,$(COMPOSE_DI_$(TARGET)) run --rm app)
+DALL_HOST = uv run --directory app mongolab
+ESEGUI = $(if $(filter host,$(DOVE)),$(DALL_HOST),$(COMPOSE_DI_$(TARGET)) run --rm app)
 
 # `ARGS` è la valvola: `--sink plain`, `--writers 16`, `--duration 30` passano di lì senza
 # che il Makefile debba conoscerli. Un target per opzione invecchierebbe a ogni opzione
@@ -144,6 +186,29 @@ app-demo: ## La scena del failover: make app-demo TARGET=rs [DOVE=host] [ARGS="-
 	$(CHIEDI_TARGET)
 	$(CHIEDI_DOVE)
 	$(ESEGUI) demo failover --target $(TARGET) $(ARGS)
+
+# Le due scene dell'Atto III. `--target rs` non è cablato qui, e la tentazione c'era:
+# la CLI controlla la **proprietà** del bersaglio e non il suo nome
+# (`_solo_da_un_replica_set`), e il giorno in cui il repository avesse un secondo
+# replica set la riga giusta funzionerebbe da sé. Un `--target rs` scritto qui la
+# spegnerebbe, e in cambio di due parole risparmiate.
+app-backup: ## L'Atto III, il backup a caldo, solo dall'host: make app-backup TARGET=rs [ARGS="--step --sink plain"]
+	$(CHIEDI_TARGET)
+	$(CHIEDI_SOLO_HOST)
+	$(DALL_HOST) demo backup-live --target $(TARGET) $(ARGS)
+
+app-restore: ## L'Atto III, la copia rimessa altrove, solo dall'host: make app-restore TARGET=rs [ARGS="--step --sink plain"]
+	$(CHIEDI_TARGET)
+	$(CHIEDI_SOLO_HOST)
+	$(DALL_HOST) demo restore --target $(TARGET) $(ARGS)
+
+# Il Blocco 3, che un `DOVE` invece ce l'ha davvero: il router risponde da tutti e due
+# i posti, e il piano che `explain()` riporta è lo stesso.
+app-sharding: ESEMPIO_TARGET = sharded
+app-sharding: ## Il Blocco 3, i chunk e la chiave di shard: make app-sharding TARGET=sharded [DOVE=host] [ARGS="--step --sink plain"]
+	$(CHIEDI_TARGET)
+	$(CHIEDI_DOVE)
+	$(ESEGUI) demo sharding --target $(TARGET) $(ARGS)
 
 # La costruzione passa per Compose e non per un `docker build` scritto qui: gli argomenti
 # con cui si pinna la base — PYTHON_IMAGE, UV_IMAGE — sono già dichiarati nel servizio
@@ -225,12 +290,12 @@ reset-demo-01: ## Riporta lo stack 01 allo stato di partenza senza ricostruirlo
 # DUE `--env-file`, e il secondo non è ridondante: la flag non aggiunge un file, prende
 # il posto del `.env` implicito. Passandone uno solo, il `.env` che sta accanto al file
 # indicato con `-f` NON viene letto benché sia lì accanto (S-056, misurato in V-025).
-COMPOSE_02 := docker compose --env-file tools/images.env --env-file docker/02-replicaset/.env -f docker/02-replicaset/compose.yaml
+COMPOSE_02 := docker compose -p $(PROGETTO_02) --env-file tools/images.env --env-file docker/02-replicaset/.env -f docker/02-replicaset/compose.yaml
 AMBIENTE_02 := docker/02-replicaset/.env
 
-# I volumi dei dati, uno per membro. Il nome vero è il nome del progetto Compose
-# (`name:` in cima al file) più quello dichiarato in `volumes:`.
-PROGETTO_02 := sqlstart-02-replicaset
+# I volumi dei dati, uno per membro. Il nome vero è il nome del progetto Compose più
+# quello dichiarato in `volumes:`, e il progetto è quello che `-p` impone in cima al
+# file, non quello che l'ambiente potrebbe suggerire (ADR-0129).
 DATI_02 := $(PROGETTO_02)_dati-1 $(PROGETTO_02)_dati-2 $(PROGETTO_02)_dati-3
 
 # Regola su un FILE, non su un target fittizio: se il file esiste, make la considera
@@ -327,10 +392,16 @@ failover-02-maggioranza: ## Demo: due membri su tre giù, il superstite va in so
 # vuole 12 GiB assegnati alla VM Docker (ADR-0025) e su un portatile da 8 non parte.
 PROFILO ?= palco
 
+# `export` non è un dettaglio: è ciò che permette alla guardia qui sotto di leggere il
+# valore dall'AMBIENTE invece di vederselo interpolare dentro il testo della shell.
+# Interpolato, un valore con un apice chiudeva la stringa e faceva eseguire ciò che
+# seguiva, e uno con uno spazio si spezzava in due parole (V-099, ADR-0130).
+export PROFILO
+
 # La forma senza `--profile`, che serve a due cose: comporre le altre due senza ripetere
 # tre righe identiche, e interrogare il file Compose su quali profili dichiari — domanda
 # che non ha senso porre già filtrando per uno di essi.
-COMPOSE_03_BASE := docker compose --env-file tools/images.env --env-file docker/03-sharded/.env \
+COMPOSE_03_BASE := docker compose -p $(PROGETTO_03) --env-file tools/images.env --env-file docker/03-sharded/.env \
               -f docker/03-sharded/compose.yaml
 
 COMPOSE_03 := $(COMPOSE_03_BASE) --profile $(PROFILO)
@@ -353,8 +424,8 @@ AMBIENTE_03 := docker/03-sharded/.env
 # qui la stessa ragione dello stack 02, cioè che rigenerarlo significa un segreto nuovo.
 # `addprefix` invece di nove nomi scritti a mano perché nove nomi scritti a mano sono
 # nove occasioni di scriverne uno sbagliato, e un volume mancato da `reset-03` non dà
-# errore: dà dati vecchi al giro dopo, che è molto peggio.
-PROGETTO_03 := sqlstart-03-sharded
+# errore: dà dati vecchi al giro dopo, che è molto peggio. Il progetto è quello che
+# `-p` impone in cima al file, non quello dell'ambiente (ADR-0129).
 DATI_03 := $(addprefix $(PROGETTO_03)_dati-, \
              cfg1 cfg2 cfg3 shard1a shard1b shard1c shard2a shard2b shard2c)
 
@@ -381,9 +452,9 @@ $(AMBIENTE_03):
 # valido qui senza che nessuno si ricordi di aggiornare il Makefile, ed è la stessa ragione
 # per cui `DATI_03` si costruisce con `addprefix` invece che con nove nomi a mano.
 profilo-03: $(AMBIENTE_03)
-	@$(COMPOSE_03_BASE) config --profiles | grep -qx '$(PROFILO)' || { \
+	@$(COMPOSE_03_BASE) config --profiles | grep -qxF -- "$$PROFILO" || { \
 		printf 'PROFILO=%s non è un profilo di docker/03-sharded/compose.yaml.\n' \
-			'$(PROFILO)' >&2; \
+			"$$PROFILO" >&2; \
 		printf 'Quelli dichiarati sono: %s\n' \
 			"$$($(COMPOSE_03_BASE) config --profiles | tr '\n' ' ')" >&2; \
 		printf 'Senza questo controllo Compose non protesta: sceglie i soli servizi senza\n' >&2; \
@@ -455,3 +526,51 @@ distribuzione-03: profilo-03 ## Mostra dove stanno davvero i documenti di lab.or
 # un failover non può avvenire, e chiamarlo così prometterebbe quello che non fa.
 guasto-03: profilo-03 ## Ferma il primario di uno shard 03 e misura che cosa risponde ancora (~40 s)
 	PROFILO=$(PROFILO) ./tools/demo-sharded.sh guasto
+
+# --- Le registrazioni ------------------------------------------------------------------
+#
+# `registra-terminale.py` e `registra-schermo.sh` sono le due metà della stessa cosa, e
+# non si sostituiscono a vicenda: il primo conserva quello che il terminale ha fatto, in
+# un `.cast` che si rilegge riga per riga e si riesegue (ADR-0016, ADR-0050); il secondo
+# conserva quello che il pubblico avrebbe visto, in un `.mp4` che si carica su YouTube e
+# si allega alla presentazione. Un `.cast` non mostra la finestra di Compass né il
+# grafico che si muove mentre parla; un `.mp4` non si riesegue. Servono tutt'e due.
+#
+# LE DUE PASSATE, che sono il motivo per cui `AUDIO=no` esiste. Prima si gira il muto e
+# lo si guarda: una elezione dura i secondi che dura, non quelli che ci si ricorda, e
+# vedere la scena prima di commentarla è ciò che permette di commentarla. Poi si rigira
+# la stessa scena parlandoci sopra, sapendo già dove stanno le pause. Il muto non si
+# butta: è il filmato da mettere DENTRO la presentazione, dove una voce registrata che
+# si sovrappone a quella di chi parla dal vivo è un difetto, non un di più.
+#
+# La prima corsa chiede a macOS i permessi «Registrazione schermo» e «Microfono», e
+# concedere il secondo RIAVVIA il terminale. È un costo da pagare una volta, e si paga
+# adesso: la sera prima del talk è il momento sbagliato per scoprire una finestra di
+# dialogo. Dove finiscono i file lo decide `DEMO_VIDEOS_DIR`, lo stesso che legge
+# `preflight` per contarli (predefinito: `~/SqlStart2026-registrazioni`).
+
+CHIEDI_NOME = @case "$(NOME)" in \
+	"") echo "manca NOME: make filmato NOME=02-failover [AUDIO=no] [DURATA=20]" >&2; exit 2 ;; \
+	*/*) echo "NOME=«$(NOME)» contiene una barra: è il nome di una scena, non un percorso." >&2; exit 2 ;; \
+	esac
+
+filmato: ## Gira un .mp4 dello schermo: make filmato NOME=02-failover [AUDIO=no] [DURATA=20]
+	$(CHIEDI_NOME)
+	@AUDIO=$(AUDIO) ./tools/registra-schermo.sh $(NOME) $(DURATA)
+
+# La terza via, e la più economica: i `.cast` già archiviati sono esecuzioni vere, con i
+# tempi che hanno avuto, e `agg` li ridisegna fotogramma per fotogramma. Rigirare quelle
+# stesse scene dal vivo costerebbe due stack, uno scambio di `.env` e un pomeriggio, per
+# ottenere comunque una esecuzione diversa da quella misurata. Quello che di qui non può
+# uscire è ciò che vive fuori dal terminale — la scena 4, che dimostra l'avvio offline
+# mostrando l'icona del Wi-Fi spenta, resta lavoro di `filmato`.
+#
+# Chiede `agg` (`brew install agg`), che è la seconda e ultima installazione richiesta da
+# questo repository dopo `ffmpeg`. Nessuna delle due serve per eseguire il lab né per
+# riprodurre le registrazioni in sala: servono a fabbricare le riserve, non a usarle.
+
+filmati: ## Fabbrica i .mp4 di riserva dalle registrazioni: make filmati [NOME=<filmato>]
+	@./tools/filmati-da-registrazioni.sh $(NOME)
+
+filmati-elenco: ## Che cosa produrrebbe `make filmati`, senza produrlo
+	@./tools/filmati-da-registrazioni.sh --elenco

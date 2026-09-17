@@ -24,6 +24,7 @@ serve che lo strumento giri abbastanza a lungo da poterlo guardare, e un dump di
 cinquantamila documenti dura cinquanta millesimi di secondo.
 """
 
+import secrets
 import subprocess
 import threading
 from pathlib import Path
@@ -43,7 +44,7 @@ from mongolab.infrastructure.backup import (
 from mongolab.infrastructure.generatore import DataGenerator
 from mongolab.infrastructure.store import PymongoStore
 
-from tests.integration.ambiente import PREFISSO_PROVE, STACK, credenziali_di
+from tests.integration.ambiente import STACK, credenziali_di, nome_di_prova
 
 CONTENITORE = "mongo-rs-1"
 """Il `container_name` del primo membro, fissato in `docker/02-replicaset/compose.yaml`."""
@@ -74,7 +75,7 @@ def laboratorio(
     stack02: MongoClient[dict[str, Any]],
 ) -> Iterator[tuple[str, PymongoStore]]:
     """Un database usa-e-getta con abbastanza documenti da rendere il restore osservabile."""
-    nome = f"{PREFISSO_PROVE}backup"
+    nome = nome_di_prova("backup")
     stack02.drop_database(nome)
     archivio = PymongoStore(stack02[nome]["ordini"])
     generatore = DataGenerator()
@@ -104,8 +105,41 @@ def strumento(laboratorio: tuple[str, PymongoStore]) -> SubprocessBackup:
 
 
 @pytest.fixture(scope="module")
+def sentinelle(stack02: MongoClient[dict[str, Any]]) -> Iterator[str]:
+    """Due tracce **fuori** dal laboratorio, messe prima del dump: una collezione e un utente.
+
+    Servono a `test_il_restore_isolato_non_tocca_il_database_del_laboratorio`, e la ragione
+    per cui non basta contare è misurata in [M-064](../../docs/Sources.md#m-064): togliendo
+    `--nsInclude`, `mongorestore` riscrive `lab` sopra sé stessa e **inserisce**, non
+    aggiorna, quindi ogni `_id` collide e il conteggio resta identico al seed. Un conteggio
+    che non cambia nel guasto che sorveglia non è una sorveglianza
+    ([ADR-0135](../../../docs/Decision.md#adr-0135)).
+
+    Una traccia che cambia di **valore** avrebbe lo stesso difetto: il documento esiste già,
+    la sua chiave collide, il restore lo lascia com'è. Ciò che si vede è solo ciò che al
+    momento del dump c'era e al momento del restore **non c'è più**: allora la chiave è
+    libera, l'inserimento riesce, e la traccia riappare. Le due tracce coprono le due metà
+    della promessa — `lab`, e gli utenti di `admin`, che `mongodump` porta via insieme al
+    resto perché `--oplog` non ammette `--db`.
+
+    La password dell'utente è casuale, non viene restituita e non attraversa nessuna riga di
+    comando: `createUser` viaggia sulla connessione, come vuole
+    [ADR-0054](../../../docs/Decision.md#adr-0054).
+    """
+    traccia = nome_di_prova("sentinella")
+    stack02["lab"][traccia].insert_one({"_id": traccia})
+    stack02["admin"].command("createUser", traccia, pwd=secrets.token_urlsafe(24), roles=[])
+    try:
+        yield traccia
+    finally:
+        _togli_sentinelle(stack02, traccia)
+
+
+@pytest.fixture(scope="module")
 def dump(
-    strumento: SubprocessBackup, laboratorio: tuple[str, PymongoStore]
+    strumento: SubprocessBackup,
+    laboratorio: tuple[str, PymongoStore],
+    sentinelle: str,
 ) -> Iterator[tuple[Path, list[Progress]]]:
     """Un dump vero, fatto una volta sola, e la cronaca che ha prodotto.
 
@@ -123,6 +157,24 @@ def dump(
         _dentro("rm", "-rf", str(destinazione))
 
 
+@pytest.fixture(scope="module")
+def sentinelle_tolte(
+    stack02: MongoClient[dict[str, Any]],
+    dump: tuple[Path, list[Progress]],
+    sentinelle: str,
+) -> str:
+    """Toglie le tracce **fra** il dump e il restore. È l'ordine a renderle visibili.
+
+    Chiedere `dump` non serve al valore restituito: serve a fissare il momento. Se le tracce
+    sparissero prima del dump non finirebbero nell'archivio e nessun restore potrebbe
+    riportarle; se sparissero dopo il restore, il restore le troverebbe già lì e non
+    lascerebbe segno. La finestra è una sola, e una fixture di modulo interposta fra le due
+    è il modo di dichiararla al posto di sperarla.
+    """
+    _togli_sentinelle(stack02, sentinelle)
+    return sentinelle
+
+
 @pytest.fixture
 def destinazione(stack02: MongoClient[dict[str, Any]]) -> Iterator[str]:
     """Un database di destinazione **nuovo** per ogni restore, e la ragione è misurata.
@@ -132,7 +184,7 @@ def destinazione(stack02: MongoClient[dict[str, Any]]) -> Iterator[str]:
     due prove non le renderebbe indipendenti — renderebbe la seconda un caso di
     fallimento travestito da caso normale.
     """
-    nome = f"{PREFISSO_PROVE}ripristino_{uuid4().hex[:8]}"
+    nome = nome_di_prova(f"ripristino_{uuid4().hex[:8]}")
     try:
         yield nome
     finally:
@@ -143,6 +195,7 @@ def destinazione(stack02: MongoClient[dict[str, Any]]) -> Iterator[str]:
 def restore_fatto(
     strumento: SubprocessBackup,
     dump: tuple[Path, list[Progress]],
+    sentinelle_tolte: str,
     stack02: MongoClient[dict[str, Any]],
 ) -> Iterator[tuple[str, list[Progress]]]:
     """Un restore pulito, fatto una volta sola: due prove ne guardano due proprietà diverse.
@@ -151,7 +204,7 @@ def restore_fatto(
     aggiungere niente — ciò che le due prove verificano è del risultato, e il risultato è
     lo stesso.
     """
-    nome = f"{PREFISSO_PROVE}ripristino_condiviso"
+    nome = nome_di_prova("ripristino_condiviso")
     stack02.drop_database(nome)
     origine, _ = dump
     avanzamenti = list(strumento.restore(origine, nome))
@@ -159,6 +212,28 @@ def restore_fatto(
         yield nome, avanzamenti
     finally:
         stack02.drop_database(nome)
+
+
+def _utente_c_e(client: MongoClient[dict[str, Any]], nome: str) -> bool:
+    """C'è un utente con questo nome in `admin`?
+
+    `usersInfo` risponde con una lista vuota se non c'è, mentre `dropUser` su un utente
+    assente è un errore: chiedere prima è ciò che rende ripetibile la rimozione.
+    """
+    risposta: dict[str, Any] = client["admin"].command("usersInfo", nome)
+    return bool(risposta["users"])
+
+
+def _togli_sentinelle(client: MongoClient[dict[str, Any]], traccia: str) -> None:
+    """Toglie le due tracce, e si può chiamare due volte.
+
+    La chiama `sentinelle_tolte` quando è il momento, e la richiama la fixture `sentinelle`
+    a fine modulo: la seconda volta non deve trovare niente da fare, perché una prova che
+    fallisce non deve anche lasciare in giro un utente.
+    """
+    client["lab"].drop_collection(traccia)
+    if _utente_c_e(client, traccia):
+        client["admin"].command("dropUser", traccia)
 
 
 def _dentro(*argomenti: str) -> subprocess.CompletedProcess[str]:
@@ -331,6 +406,7 @@ def test_il_restore_rimette_gli_stessi_documenti_in_un_altro_database(
 
 def test_il_restore_isolato_non_tocca_il_database_del_laboratorio(
     restore_fatto: tuple[str, list[Progress]],
+    sentinelle_tolte: str,
     stack02: MongoClient[dict[str, Any]],
 ) -> None:
     """`--nsFrom/--nsTo` da soli rinominano e lasciano passare il resto.
@@ -342,14 +418,30 @@ def test_il_restore_isolato_non_tocca_il_database_del_laboratorio(
     ([M-024](../../docs/Sources.md#m-024)). Questa prova esiste perché quella terza opzione
     non sparisca in un riordino.
 
-    Il conteggio di `lab` si legge **dopo** il restore e si confronta con quello del seed
-    dichiarato in `smoke-02`: leggerlo prima, dentro questa prova, non direbbe niente,
-    perché il restore che potrebbe averlo rovinato è già avvenuto nella fixture.
+    **Il conteggio del seed non lo dimostra**, ed è il rilievo C-6 della review, misurato in
+    [M-064](../../docs/Sources.md#m-064). Proprio M-024 dice perché: quel restore inserisce
+    e non aggiorna, quindi cinquantamila chiavi duplicate lo lasciano **esattamente** a
+    cinquantamila documenti, e con uscita 0. L'asserzione era verde nel guasto che
+    sorvegliava. Ciò che la rende falsificabile sono le sentinelle: una collezione di `lab` e
+    un utente di `admin` che al momento del dump c'erano e al momento del restore non ci sono
+    più. Se il restore tocca quelle due parti, la chiave è libera e la traccia riappare.
+
+    Il conteggio resta, e adesso è un secondo controllo invece che l'unico: dice che il
+    restore non ha nemmeno **aggiunto** documenti a `lab`.
     """
     nome, _ = restore_fatto
+    traccia = sentinelle_tolte
 
     assert stack02[nome]["ordini"].count_documents({}) == QUANTI
     assert stack02["lab"]["ordini"].count_documents({}) == DOCUMENTI_DEL_SEED
+    assert traccia not in stack02["lab"].list_collection_names(), (
+        "il restore ha rimesso in `lab` una collezione tolta dopo il dump: sta riscrivendo "
+        "il database della demo"
+    )
+    assert not _utente_c_e(stack02, traccia), (
+        "il restore ha ricreato un utente di `admin` tolto dopo il dump: sta riscrivendo gli "
+        "utenti dello stack"
+    )
 
 
 def test_un_secondo_restore_sulla_stessa_destinazione_perde_tutto_ed_esce_zero(

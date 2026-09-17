@@ -55,7 +55,6 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Final
-from uuid import uuid4
 
 import pytest
 from pymongo import MongoClient
@@ -69,11 +68,11 @@ from mongolab.infrastructure.bersagli import (
 )
 from tests.integration.ambiente import (
     IMMAGINE,
-    PREFISSO_PROVE,
     STACK,
     Scena,
     immagine_in_cache,
     nel_container,
+    nome_di_prova,
     rimetti_in_piedi,
     scena_nel_container,
 )
@@ -366,8 +365,8 @@ def test_l_atto_iii_esce_dallo_stack_vero(
     servizio, che è la cosa che l'Atto III esiste per far vedere.
     """
     _aspetta_che_torni_primario(stack02)
-    dump = f"/tmp/{PREFISSO_PROVE}{uuid4().hex[:12]}"
-    ripristinato = f"{PREFISSO_PROVE}{uuid4().hex[:12]}"
+    dump = f"/tmp/{nome_di_prova()}"
+    ripristinato = nome_di_prova()
     collezione: str | None = None
     try:
         codice, backup = _dall_host(

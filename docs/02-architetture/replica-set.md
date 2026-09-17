@@ -488,6 +488,14 @@ $ make down-02
 $ make reset-02
 ```
 
+Sul `-p "$PASSWORD"` di quella riga conviene essere precisi, perché il posto dove la password si
+legge non è quello che sembra. Dentro il container **non** si legge: `mongosh` 2.10.0 riscrive il
+proprio `argv`, e `ps` mostra `mongodb://<credentials>@…`. Si legge **sull'host**, nella riga di
+comando del client `docker`, che nessuno oscura ([V-047](../Sources.md#v-047)). Su una macchina
+condivisa è lì che si guarda, ed è la ragione per cui [ADR-0054](../Decision.md#adr-0054) chiede che
+chi mostra il comando descriva l'esposizione vera invece di quella verosimile. Qui resta una password
+di laboratorio, in un file fuori dal repository ([ADR-0040](../Decision.md#adr-0040)).
+
 Lo smoke fa 42 controlli e ne dedica uno alla scena che conta: ferma un membro, verifica che il set
 continui a scrivere con la maggioranza, e lo rimette a posto ([V-028](../Sources.md#v-028)).
 

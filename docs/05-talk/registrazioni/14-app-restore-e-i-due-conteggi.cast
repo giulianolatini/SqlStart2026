@@ -1,7 +1,9 @@
-{"version": 2, "width": 100, "height": 30, "timestamp": 1788540273, "env": {"SHELL": "/bin/zsh", "TERM": "xterm-256color"}, "title": "feature/04 — mongolab demo restore: la copia rientra altrove, e i due conteggi (Blocco 2, Atto III)"}
-[0.222203, "o", "restore da /tmp/mongolab-backup in mongo-rs-1 · lab.carico-20260904-184403 → lab_ripristinato.carico-20260904-184403\r\n  docker compose --env-file tools/images.env --env-file docker/02-replicaset/.env -f docker/02-replicaset/compose.yaml exec -T mongo-rs-1 mongorestore --host rs0/mongo-rs-1:27017,mongo-rs-2:27017,mongo-rs-3:27017 --username admin --authenticationDatabase admin --nsInclude lab.* --nsFrom lab.* --nsTo lab_ripristinato.* /tmp/mongolab-backup\r\n"]
-[0.222447, "o", "18:44:34.129  FASE       da /tmp/mongolab-backup verso il database lab_ripristinato\r\n"]
-[1.102571, "o", "18:44:35.010  BACKUP     lab_ripristinato.carico-20260904-184403 5740/5740 (100.0%) — finished rest…\r\n"]
-[3.198934, "o", "18:44:37.106  BACKUP     lab_ripristinato.ordini 50000/50000 (100.0%) — finished restoring `lab_rip…\r\n"]
-[3.224845, "o", "18:44:37.132  FASE       quanti ce n'erano, quanti ne sono tornati\r\n"]
-[3.23907, "o", "restore     5886 all'origine · 5740 nella copia · differenza 146\r\n            /tmp/mongolab-backup → lab_ripristinato\r\n            146 scritti mentre il dump era in corso: stanno nell'oplog, che il restore non riapplica\r\n            finished restoring `lab_ripristinato.ordini` (50000 documents, 0 failures)\r\nfasi        restore · verifica\r\n"]
+{"version": 2, "width": 100, "height": 30, "timestamp": 1788688033, "env": {"SHELL": "/bin/zsh", "TERM": "xterm-256color"}, "title": "feature/04 — mongolab demo restore: la copia rientra altrove, e i due conteggi (Blocco 2, Atto III)"}
+[0.246769, "o", "restore da /tmp/mongolab-backup in mongo-rs-1 · lab.carico-20260906-114646 → lab_ripristinato.carico-20260906-114646\r\n  docker compose --env-file tools/images.env --env-file docker/02-replicaset/.env -f docker/02-replicaset/compose.yaml exec -T mongo-rs-1 mongorestore --host rs0/mongo-rs-1:27017,mongo-rs-2:27017,mongo-rs-3:27017 --username admin --authenticationDatabase admin --nsInclude lab.* --nsFrom lab.* --nsTo lab_ripristinato.* /tmp/mongolab-backup\r\n"]
+[0.247009, "o", "11:47:13.936  FASE       da /tmp/mongolab-backup verso il database lab_ripristinato\r\n"]
+[0.936697, "o", "11:47:14.626  BACKUP     lab_ripristinato.carico-20260906-114646 5295/5295 (100.0%) — finished rest…\r\n"]
+[3.556845, "o", "11:47:17.246  BACKUP     lab_ripristinato.ordini 5851054/6092227 (96.0%) — [#######################…\r\n"]
+[3.667358, "o", "11:47:17.357  BACKUP     lab_ripristinato.ordini 6092227/6092227 (100.0%) — [######################…\r\n"]
+[3.667428, "o", "11:47:17.357  BACKUP     lab_ripristinato.ordini 50000/50000 (100.0%) — finished restoring `lab_rip…\r\n"]
+[3.690658, "o", "11:47:17.380  FASE       quanti ce n'erano, quanti ne sono tornati\r\n"]
+[3.706083, "o", "restore     5386 all'origine · 5295 nella copia · differenza 91\r\n            /tmp/mongolab-backup → lab_ripristinato\r\n            91 scritti mentre il dump era in corso: stanno nell'oplog, che il restore non riapplica\r\n            finished restoring `lab_ripristinato.ordini` (50000 documents, 0 failures)\r\nfasi        restore · verifica\r\n"]

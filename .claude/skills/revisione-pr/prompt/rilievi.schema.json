@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Rilievi di una revisione di Pull Request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["rilievi"],
+  "properties": {
+    "rilievi": {
+      "type": "array",
+      "description": "Elenco dei rilievi. Un array vuoto e' una risposta legittima: significa che la PR e' a posto.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "titolo",
+          "categoria",
+          "gravita",
+          "confidenza",
+          "dove",
+          "evidenza",
+          "perche",
+          "rimedio",
+          "controllo_iso"
+        ],
+        "properties": {
+          "titolo": {
+            "type": "string",
+            "description": "Una riga in italiano che dice il problema, non la soluzione."
+          },
+          "categoria": {
+            "type": "string",
+            "enum": ["congruita-commit", "security", "iso-27001", "altro"]
+          },
+          "gravita": {
+            "type": "string",
+            "enum": ["alta", "media", "bassa"]
+          },
+          "confidenza": {
+            "type": "string",
+            "enum": ["alta", "media", "bassa"],
+            "description": "Quanto sei sicuro del rilievo. bassa quando dipende da qualcosa non verificabile dal dossier."
+          },
+          "dove": {
+            "type": "string",
+            "description": "File e riga, oppure lo sha del commit se il rilievo riguarda il messaggio."
+          },
+          "evidenza": {
+            "type": "string",
+            "description": "Citazione letterale presa dal dossier. Senza questa il rilievo non va scritto."
+          },
+          "perche": {
+            "type": "string",
+            "description": "Perche' e' un problema, in due o tre frasi."
+          },
+          "rimedio": {
+            "type": "string",
+            "description": "Che cosa si dovrebbe fare, in concreto."
+          },
+          "controllo_iso": {
+            "type": "string",
+            "description": "Numero del controllo Annex A della ISO/IEC 27001:2022, oppure stringa vuota se incerto."
+          }
+        }
+      }
+    }
+  }
+}

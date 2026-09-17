@@ -435,7 +435,8 @@ Dal Task 12 lo stesso comando ha due modi di girare, e la variabile che sceglie 
 
 ```make
 DOVE ?= rete
-ESEGUI = $(if $(filter host,$(DOVE)),uv run --directory app mongolab,$(COMPOSE_DI_$(TARGET)) run --rm app)
+DALL_HOST = uv run --directory app mongolab
+ESEGUI = $(if $(filter host,$(DOVE)),$(DALL_HOST),$(COMPOSE_DI_$(TARGET)) run --rm app)
 ```
 
 ```sh
@@ -453,6 +454,11 @@ due**, non solo che il terzo non esiste. Stessa cosa per `TARGET`, che dal Task 
 anche qui e non solo dalla CLI: in container il bersaglio sceglie il *file Compose* prima che
 l'applicazione parta, e un nome sconosciuto darebbe una riga di comando monca invece di un errore
 comprensibile. L'uscita è 2, la stessa con cui Typer respinge un parametro sbagliato.
+
+Due bersagli il `DOVE` non ce l'hanno, e il ramo host è diventato `DALL_HOST` per loro: `app-backup`
+e `app-restore` girano solo sull'host — `mongodump` non è nell'immagine ([M-044](Sources.md#m-044))
+e questo container non ha il socket del demone Docker — quindi ci vanno da sé, e rifiutano un
+`DOVE` scritto a mano diverso da `host` invece di eseguire altrove ([ADR-0120](../../docs/Decision.md#adr-0120)).
 
 ### Il flag che non esiste
 

@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Mapping
 
 __all__ = [
+    "ContoCollezione",
     "ContoShard",
     "DescrizioneServer",
     "DescrizioneTopologia",
@@ -112,6 +113,28 @@ class DescrizioneTopologia:
     @property
     def ha_primario(self) -> bool:
         return self.primario is not None
+
+
+@dataclass(frozen=True, slots=True)
+class ContoCollezione:
+    """Quanti documenti stanno in una collezione, con il suo nome accanto.
+
+    Esiste perche' `dbStats` risponde per **database**, e per il database `lab` quella
+    risposta e' una somma: `ordini` piu' tutte le collezioni di carico che le corse
+    dell'Atto III lasciano indietro. Chi controllava lo stato atteso del runbook leggeva
+    62 602 dove il documento diceva 50 000 e concludeva che lo stack era rotto, mentre era
+    soltanto gia' stato usato. Un totale non risponde alla domanda «quanti ordini ci
+    sono»: il dettaglio si', e la somma resta stampata sotto per chi vuole verificarla.
+
+    Il conteggio e' **esatto**, non stimato: `countDocuments` e non i metadati della
+    collezione. Costa una scansione, e su cinquantamila documenti in un laboratorio e' un
+    prezzo che non si sente; in cambio il numero e' lo stesso che le scene del talk
+    verificano, e due numeri diversi per la stessa cosa sullo stesso schermo sono peggio
+    di un numero lento.
+    """
+
+    nome: str
+    documenti: int
 
 
 @dataclass(frozen=True, slots=True)

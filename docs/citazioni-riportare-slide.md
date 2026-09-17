@@ -3255,3 +3255,666 @@ tracce nel posto in cui si guarda. `docker compose ps` mostra «Up» per un cont
 esattamente come per uno sano. E perché la correzione ha una forma che si porta via: il `try` si
 apre **dopo** ciò che rompe, non prima — un `finally` deve coprire ciò che è stato rotto, non ciò
 che non si è riusciti a rompere.
+
+
+---
+
+### Zero scritture perse, e tre che il database ha e il client non sa di avere
+
+> Nella scena del failover il bilancio dice **31 952 confermate contro 31 955 ritrovate**. Le tre
+> in più non sono un errore di conteggio: sono arrivate al database, e il loro `ack` non è mai
+> tornato indietro perché il primario è caduto in mezzo. L'applicazione le chiama **scritture non
+> confermate**, e le tiene in una colonna diversa dalle **scritture perse** — che restano a zero.
+> Con i tentativi automatici del driver spenti la perdita resta zero lo stesso, perché è
+> `w: "majority"` a garantirla; quello che cambia è l'altra colonna, che diventa **8** in una corsa
+> e **1** nell'altra.
+> Fonte: [V-076](Sources.md#v-076), registrazione [12](05-talk/registrazioni/README.md#registrazioni-di-terminale).
+
+**Perché una slide:** perché smonta la domanda sbagliata. Il pubblico chiede «quante ne perdo?» e
+la risposta è nessuna — ma la risposta utile è un'altra, ed è che **`retryWrites` non compra
+durabilità, compra sapere**. Senza, l'applicazione ha scritture di cui non conosce l'esito, e se le
+riprova a mano senza una chiave di idempotenza le duplica: il guasto non ha perso un dato, ne ha
+creato uno di troppo. È la distinzione che una platea abituata a una transazione SQL che o c'è o
+non c'è non ha mai dovuto fare, e sta in due colonne accostate.
+
+
+---
+
+### Il numero veloce dice zero, e la collezione ne contiene quattordicimila
+
+> Sullo stack 01, il 6 settembre: `mongolab stats` elenca trentotto collezioni in `lab` che sommano
+> **1 528 002** documenti, e la riga del database — che viene da `dbStats` — ne dichiara **1 505 885**.
+> Lo scarto, 22 117, sta tutto in **due** collezioni che nei metadati risultano a **zero** mentre
+> contengono 7 847 e 14 270 documenti. `validate()` su una delle due risponde **`valid: true`, zero
+> avvisi**, e intanto rimette il contatore a 7 847: la collezione non era corrotta, era **stantio il
+> numero**, e nessuno lo segnalava.
+> Fonte: [V-090](Sources.md#v-090), [ADR-0121](Decision.md#adr-0121).
+
+**Perché una slide:** perché è la differenza fra `count()` e `countDocuments()` mostrata invece che
+raccontata, e perché il caso peggiore non è il numero un po' sbagliato — è lo **zero**. Una collezione
+piena che dichiara zero passa qualunque controllo scritto come «se è vuota, salta»: il backup che non
+copia niente, la migrazione che non trova nulla da migrare, il monitoraggio che non allarma. Il numero
+veloce esiste per essere veloce, non per essere vero, e la platea che viene da SQL — dove `COUNT(*)`
+è sempre esatto e al massimo è lento — questa distinzione non l'ha mai dovuta fare.
+
+---
+
+### Un totale stampato sopra i suoi addendi si legge come il primo di essi
+
+> `mongolab stats` diceva `database lab · 50 000 documenti`, una riga sola. Su uno stack pulito
+> coincide con la collezione che interessa; appena una demo è girata, no. Chi verificava lo stato
+> atteso leggeva **62 602** dove il runbook diceva 50 000 e concludeva che lo stack fosse rotto —
+> era solo già stato usato. Sullo stack 01 la stessa riga diceva **un milione e mezzo**, e i
+> cinquantamila c'erano.
+> Fonte: [ADR-0121](Decision.md#adr-0121).
+
+**Perché una slide:** perché non è una decisione su MongoDB, è una decisione su come si scrive un
+numero, e vale ovunque. Il dettaglio va **prima** della somma: sotto, il totale chiude il conto;
+sopra, il totale diventa il primo addendo agli occhi di chi legge in fretta. E perché la regola di
+lettura che ne è uscita si porta via intera — **se le due righe litigano, ha ragione quella sopra**.
+
+---
+
+### `dropDatabase()` risponde «rimosso» anche per un database che non è mai esistito
+
+> `reset-demo.sh` doveva dire a chi prova la vigilia se l'Atto III era già girato su quello stack:
+> «database rimosso» oppure «non c'era». Il verdetto leggeva il campo `dropped` della risposta, che
+> sembra fatto apposta. Misurato su mongod 7.0.40: un nome inventato risponde
+> `{"ok":1,"dropped":"lab_inesistente_0906"}` esattamente come un database pieno. Lo script
+> raccontava una pulizia che non aveva fatto, e il ramo «non c'era» non poteva accadere mai.
+> Fonte: `tools/reset-demo.sh`, prova
+> `test_il_verdetto_del_drop_non_si_fida_del_campo_dropped`.
+
+**Perché una slide:** perché il nome del campo prometteva una cosa e il comando ne faceva un'altra, e
+nessuna rilettura del codice l'avrebbe mostrato — solo la seconda corsa. È l'esempio più corto che
+esista del perché una prova che legge il **file** non sostituisce una corsa che legge il **server**:
+la prova rossa scritta quella mattina verificava che il nome fosse scritto nello script, ed era vero.
+
+---
+
+### Lo stato che nessuno nomina è quello che nessuno pulisce
+
+> `reset-demo.sh` toglieva le collezioni e i database, e li toglieva bene. La copia del backup non
+> era né una collezione né un database: era una cartella dentro il container,
+> `/tmp/mongolab-backup`, e `mongodump --out` non la svuota — ci aggiunge. Cinque prove generali,
+> cinque dump, e `mongorestore` li rimette in piedi tutti: il 6 settembre, **sei collezioni invece
+> di una**, elencate una per riga davanti alla sala.
+> Fonte: [ADR-0122](Decision.md#adr-0122), [V-091](Sources.md#v-091).
+
+**Perché una slide:** perché mostra che in uno stack containerizzato lo stato ha **tre** vite
+diverse e le procedure ne nominano due. Quello che sta in un database si toglie con un `drop`,
+quello che sta in un volume sopravvive a `down` e si toglie con `down -v`, e quello che sta nel
+livello scrivibile del container non lo nomina nessuno: muore quando muore il container e vive per
+sempre finché il container vive. È la terza vita a fare i danni, perché è l'unica che nessuna
+procedura elenca — e la platea che viene da SQL, dove lo stato sta in un posto solo e quel posto ha
+un nome, questa distinzione non l'ha mai dovuta fare.
+
+---
+
+### Il testo che si accende da solo va letto prima di installarlo, e si legge dalla riga che lo accende
+
+> Dodici skill importate da un altro repository, con 127 prove che passano. Le prove dicono che il
+> codice è portabile; non dicono se qui servano. A quella domanda rispondono dodici righe di
+> frontmatter: **nove** nominano il repository d'origine come condizione e qui non si sarebbero
+> accese mai, **due** lo nominano per negazione — «use when the repository is NOT the origin one»
+> — e quelle qui si accendono sempre. Fra le due c'era `git-flow`, che offre `git flow feature
+> finish`: il comando vietato qui da quando, sulla PR #1, chiuse un ramo saltando la revisione.
+> Fonte: [ADR-0123](Decision.md#adr-0123), [V-092](Sources.md#v-092).
+
+**Perché una slide:** perché è il caso più netto in cui **la somiglianza è più pericolosa della
+differenza**. Un modello palesemente estraneo lo si scarta a colpo d'occhio; uno che combacia per il
+90% — stessi nomi di ramo, stesse direzioni di merge, una sola differenza nella chiusura — lo si
+segue fino al 10% che non combacia, ed è lì che si perde la revisione. Vale ben oltre le skill: è la
+stessa ragione per cui un replica set che *sembra* un'istanza singola inganna più di uno sharded
+cluster, che almeno dichiara di essere un'altra cosa.
+
+**Perché una slide, secondo motivo:** perché mostra a cosa serve davvero un registro delle
+decisioni. Cercando la scheda che vieta `git flow feature finish` per citarla, non c'era: in
+centoventitré schede questo repository non ha mai scritto il proprio modello dei rami. La regola era
+rispettata da tutti e scritta da nessuno — e a rendere visibile il vuoto è stato un pacchetto
+importato che quella scheda la pretendeva.
+
+---
+
+### Un doppio più ubbidiente dell'originale non prova niente
+
+> La skill di revisione chiedeva a `agy` una risposta conforme a uno schema con `--output-format
+> text --json-schema`. `agy 1.1.22` rifiuta quella combinazione, e usciva con un errore su tutti e
+> sei i fascicoli della release. Il difetto era sopravvissuto a **53 prove verdi** perché la finta
+> `agy` del banco stampava il JSON nudo e accettava qualunque opzione. Resa fedele — stesse opzioni,
+> stesso rifiuto, stessa busta — **sette prove sono diventate rosse in un colpo: le tre nuove e
+> quattro che passavano da sempre.**
+> Fonte: [ADR-0124](Decision.md#adr-0124), [V-093](Sources.md#v-093).
+
+**Perché una slide:** perché nomina il modo in cui una suite di prove mente senza che nessuno abbia
+mentito. Un doppio si scrive per non dipendere da un servizio esterno, e mentre lo si scrive si
+sceglie — senza accorgersene — quanto farlo somigliare all'originale. La tentazione è farlo
+*collaborativo*: risponde sempre, non si lamenta delle opzioni, restituisce esattamente la forma che
+il codice si aspetta. Ma il valore di un doppio sta tutto nei rifiuti che riproduce, non nelle
+risposte che dà: un finto che non sa dire di no verifica il codice contro un mondo che non esiste.
+
+**Perché una slide, secondo motivo:** perché il guasto non si presentava come un guasto. Codex
+rispondeva regolarmente, quindi il terminale non diceva «la revisione è rotta»: diceva «un revisore
+su due non ha trovato niente». **Un errore che somiglia a un esito è più caro di un errore che
+somiglia a un errore**, e vale identico sugli stack di questo lab — `up --wait` che esce zero su un
+replica set non ancora inizializzato, `dropDatabase()` che risponde `dropped` per un database mai
+esistito. In tutti e tre i casi il sistema non tace: risponde bene a una domanda diversa da quella
+che gli era stata fatta.
+
+---
+
+### La redazione più rapida è l'unica che non si può correggere rileggendo
+
+> Prima di rendere pubblico questo repository, il nome di un repository privato importato andava
+> tolto: **84 occorrenze in 28 file**. La sostituzione secca — quel nome, questo nome — è un comando
+> solo e rende **falsa metà del testo**, perché metà di quelle occorrenze nomina l'altro repository
+> **per contrasto**. «Nove descrizioni nominano *quel* repository come condizione e qui non si
+> sarebbero accese mai» diventa «nove descrizioni nominano SqlStart2026 come condizione e qui non si
+> sarebbero accese mai», che dice il contrario del vero. **Il nome costa riservatezza una volta; una
+> frase falsa costa credibilità per sempre.**
+> Fonte: [ADR-0125](Decision.md#adr-0125), [V-094](Sources.md#v-094).
+
+**Perché una slide:** perché è il caso più insidioso di modifica di massa. Una sostituzione che
+sbaglia la grammatica si vede — tre passaggi automatici sono stati buttati proprio così, con «chi
+nominal…» e «In il repository d'origine» in bella vista. Una sostituzione che sbaglia il *senso* non
+si vede: le frasi restano grammaticali, scorrevoli, e sbagliate. Non c'è `grep` che la trovi e non
+c'è rilettura veloce che la noti, perché il difetto non è nella riga, è nel rapporto fra la riga e
+il mondo. La regola che ne esce è indipendente dal caso: **prima di sostituire un nome, chiedersi
+di chi parla la frase** — e dove la risposta cambia, cambia anche la sostituzione.
+
+**Perché una slide, secondo motivo:** perché la stessa passata ha corretto una supposizione mai
+misurata. La giustezza dei documenti era «più o meno 95 colonne»; misurata, è **100** — moda fra 97
+e 99. Con la soglia supposta sarebbero stati riavvolti 28 paragrafi in più, e ognuno sarebbe stato
+una riga di diff da rileggere per niente. **Una convenzione che nessuno ha misurato è un'opinione
+con l'aria di una regola**, e il costo non è l'errore: è il lavoro inutile che l'errore autorizza.
+
+---
+
+### Una regola che sta fuori dal blocco che si copia non è una regola
+
+> Il §5 della pagina del backup stabiliva che un dump fallito lascia sul disco qualcosa che sembra
+> un backup, e che «l'unico segnale è il codice di uscita 1». Il §7, centoventi righe dopo,
+> consegnava al lettore un blocco unico da copiare in cui **nessuno legge quel codice** e il secondo
+> comando è un `dropDatabase()`. **Una regola che non sta dentro il blocco che il lettore esegue non
+> è una regola: è un'osservazione.**
+> Fonte: [ADR-0126](Decision.md#adr-0126), [V-095](Sources.md#v-095).
+
+**Perché una slide:** perché è il modo in cui una documentazione onesta produce un incidente. Nessuno
+ha nascosto niente: l'avvertimento c'era, scritto bene, nella stessa pagina. Ma chi esegue una
+procedura la esegue **dal blocco**, non dal paragrafo — e ogni riga di distanza fra la cautela e il
+comando è una probabilità che la cautela non venga applicata. La misura di una buona procedura non è
+quanto è completa: è quanto ne sopravvive al copia-incolla.
+
+**Perché una slide, secondo motivo:** perché il rimedio è banale e nessuno lo fa. Il controllo che
+mancava — `test -f "${DESTINAZIONE}/oplog.bson"` — non interroga il server, non costa niente, e
+distingue il dump completo da tutto il resto. Costava una riga. Stava già scritta in prosa.
+
+---
+
+### Misurato su un caso, scritto come se valesse su una classe
+
+> La regola «se `mongodump` fallisce, cancella la destinazione» nasce da un guasto vero, in cui il
+> dump si fermò **dopo** aver scritto 1,8 GB: lì `rm -rf` toglie esattamente ciò che il comando
+> aveva creato. Riprodotto un fallimento **precoce** — credenziale sbagliata, errore in fase di
+> handshake — il dump esce 1 senza creare niente, e la stessa regola cancella un backup preesistente
+> che non aveva mai toccato. **Un errore di quantificatore: misurato su un caso, scritto come se
+> valesse su una classe.**
+> Fonte: [ADR-0126](Decision.md#adr-0126), [V-095](Sources.md#v-095), [V-036](Sources.md#v-036).
+
+**Perché una slide:** perché è l'errore che si commette proprio quando si fa la cosa giusta. La
+regola non era inventata: era **estratta da una misura**, che è il modo raccomandato di scrivere le
+regole. Il salto avviene nel silenzio fra «ho visto fallire così» e «quando fallisce». Chi misura una
+volta si sente autorizzato a generalizzare più di chi non ha misurato affatto — ed è per questo che
+la trappola prende chi lavora bene.
+
+**Il rimedio, in tre parole:** `mktemp -d`. Non complica la regola, la **fonda**: la proprietà della
+directory è ciò che autorizza la cancellazione ricorsiva. Si cancella solo ciò che si è creato.
+
+---
+
+### Un argomento gonfiato non è più forte: è più fragile
+
+> La pagina su keyfile e X.509 citava la fonte per esteso — «The certificates match if their
+> subjects contain the same values for the Organization (`O`), Organizational Unit (`OU`), and
+> Domain Component (`DC`) attributes» — e tre paragrafi dopo ne traeva la conclusione opposta,
+> chiudendo il confronto con «Tre giri di riavvii, da programmare prima della scadenza, per ogni
+> cluster, per sempre». Se il confronto guarda quei tre attributi, un certificato rinnovato che li
+> conserva **corrisponde**: il rinnovo costa **un** giro di riavvii, non tre. I tre sono il prezzo di
+> un evento diverso e più raro, il cambio di `DN`.
+> Fonte: [S-063](Sources.md#s-063),
+> [`sicurezza-keyfile-x509.md`](03-amministrazione/sicurezza-keyfile-x509.md) §3.5.
+
+**Perché una slide:** perché **un argomento gonfiato non è più forte: è più fragile.** La frase
+sbagliata stava esattamente nel punto in cui la pagina tira la somma, cioè nell'unica riga che un
+lettore di fretta si porta via — e triplicava proprio la voce su cui il confronto si regge. Chi
+conosce X.509 la smonta in una domanda, e con essa smonta anche la parte vera, che c'era: il rinnovo
+è manutenzione periodica obbligatoria, un keyfile non scade, il divario di gestibilità è reale alla
+sua misura.
+
+**Perché una slide, secondo motivo:** perché nessuna misura è servita a scoprirlo. La fonte che
+smentiva la conclusione era **già nella pagina**, citata per esteso dall'autore stesso. È il modo più
+comune di sbagliare un documento ben documentato: la fonte è giusta, il riassunto no, e nessuno
+rilegge il riassunto contro la fonte perché la fonte l'ha scelta lui.
+
+---
+
+### Dipende dallo strumento, e il modo di saperlo è provarlo
+
+> `mongosh` 2.10.0 riscrive il proprio `argv`: dentro il container `ps` mostra
+> `mongodb://<credentials>@…` e zero occorrenze del segreto. `mongodump` e `mongorestore` 100.18.0
+> **no**: la riga esce intera. Sono binari della stessa distribuzione MongoDB, invocati allo stesso
+> modo, e si comportano in modo opposto. Quindi né «`-p` espone» né «`-p` è sicuro»: **dipende dallo
+> strumento, e il modo di saperlo è provarlo.**
+> Fonte: [ADR-0127](Decision.md#adr-0127), [V-096](Sources.md#v-096), [V-047](Sources.md#v-047),
+> [M-025](../app/docs/Sources.md#m-025).
+
+**Perché una slide:** perché è la forma di errore che una revisione attenta produce più spesso di una
+distratta. Il rilievo che ha aperto la questione citava una frase **vera** — «un `ps -eo args` dentro
+il container lo mostra a chiunque», scritta a proposito di `mongodump` — e la applicava a un esempio
+con `mongosh`, dove la stessa misura dice il contrario. Trasportare una misura da uno strumento a un
+altro sembra economia di pensiero; è il modo in cui una prova diventa un pregiudizio.
+
+**Il corollario operativo:** una pagina che mostra un comando con una credenziale fra gli argomenti
+deve dire **quale dei due casi è**, perché il lettore non può dedurlo. E la tabella va rimisurata a
+ogni cambio di immagine: il comportamento di `argv` non è una garanzia documentata.
+
+---
+
+### Non «potresti leggere dati incompleti», ma «sedici secondi alla volta»
+
+> Due sezioni della stessa pagina si contraddicevano sulla perdita di uno shard: una parlava di
+> risposte parziali restituite in silenzio, l'altra di query che falliscono. Nessuna delle due era
+> misurata, e la fonte citata diceva soltanto che «reads or writes directed at the available shards
+> can still succeed» — cioè niente sulle altre. Eseguita la scena: la query sullo shard sano
+> risponde in **1 s**; quella sullo shard perduto e il conteggio totale falliscono dopo **16 s**
+> con `FailedToSatisfyReadPreference: Could not find host matching read preference { mode:
+> "primary" } for set shard1rs`. Il client **viene** informato, e l'errore **nomina** lo shard.
+> Fonte: [ADR-0128](Decision.md#adr-0128), [V-097](Sources.md#v-097), [S-069](Sources.md#s-069).
+
+**Perché una slide:** perché la misura cambia il **destinatario** della lezione. «Attento, potresti
+leggere dati incompleti» mette in guardia da un pericolo che non esiste, e chi lo scopre smette di
+fidarsi del resto. «Attento, un ramo delle tue query smetterà di rispondere per sedici secondi alla
+volta» descrive ciò che un'applicazione sincrona subisce davvero, ed è azionabile: si cambia il
+timeout, si cambia il profilo, si cambia la chiamata.
+
+**Perché una slide, secondo motivo:** perché i sedici secondi non sono indecisione. Sono il router
+che cerca un primario per uno shard che ha un membro solo, e non c'è nessuno da eleggere. È la
+differenza fra la ridondanza **dentro** lo shard — che è il suo replica set — e la ridondanza **fra**
+shard, che non esiste: nessun altro nodo ha una copia di quello che teneva `shard1rs`.
+
+---
+
+### Il ✓ verde che nessuno ha guardato
+
+> Uno strumento del lab puliva tre database e annunciava «collezioni rimosse» senza rileggere: se
+> una `drop` fosse fallita, avrebbe detto verde lo stesso. Confrontava l'impronta dei dati caricati
+> con i numeri attesi scritti **in un commento**, cioè con niente. E distingueva uno sharded
+> cluster da un replica set travestito cercando **uno spazio** nella risposta — ma
+> `shard1rs=0 shard2rs=5` uno spazio ce l'ha: un chunk vuoto su uno shard e cinque documenti
+> sull'altro passavano per «documenti su entrambi gli shard». Il caso non è stato immaginato: è
+> stato costruito su un database usa-e-getta spostando un chunk vuoto, e la prima stesura del
+> controllo l'ha dichiarato verde davanti alla misura.
+> Fonte: [ADR-0132](Decision.md#adr-0132), [V-101](Sources.md#v-101).
+
+**Perché una slide:** perché è la frase più corta che ho trovato per una cosa che tutti facciamo.
+**Un valore atteso scritto in un commento non è una verifica: è una speranza documentata.** Il
+commento sembra un controllo — sta accanto al codice, contiene il numero giusto, si legge come una
+promessa — e non lo è, perché nessuno lo confronta con niente. La distanza fra il commento e la
+costante è di tre righe di codice, ed è tutta la distanza fra sapere e sperare.
+
+**Perché una slide, secondo motivo:** perché il terzo caso è più insidioso dei primi due e riguarda
+chiunque scriva controlli. Lì il codice **guardava** l'esito: leggeva la risposta, la esaminava, e
+decideva. Solo che esaminava la proprietà sbagliata. Uno spazio è una traccia della distribuzione,
+non la distribuzione — e una traccia si può avere senza la cosa. Contare gli shard e guardare i
+numeri costa tre righe in più e non ha questo problema.
+
+**Il corollario operativo:** dopo aver modificato uno stato, rileggerlo. E le risposte possibili
+sono **tre**, non due: riuscito, residui con i nomi, e *nessuna risposta* — perché
+un'interrogazione muta non è una pulizia riuscita, ed è il caso che il codice originale non
+contemplava.
+
+---
+
+### L'eccezione localhost non si riapre quando togli l'ultimo utente
+
+> Un nodo MongoDB avviato con `--auth` e **zero utenti** lascia aperta l'eccezione localhost: chi
+> si collega da dentro può creare il primo amministratore senza presentare credenziali. La domanda
+> misurabile è che cosa succede quando quell'utente viene poi tolto. Costruito il caso su un
+> container usa-e-getta — creare l'unico utente, toglierlo, richiedere — la risposta è
+> `Unauthorized`, **con zero utenti nell'istanza**. Dopo un `docker restart`, la stessa domanda
+> risponde `CREATO`. L'eccezione localhost è un **fermo di processo**: si chiude alla creazione del
+> primo utente e resta chiusa per la vita di quel `mongod`, indipendentemente da quanti utenti
+> restino.
+> Fonte: [ADR-0133](Decision.md#adr-0133), [V-102](Sources.md#v-102).
+
+**Perché una slide:** perché ribalta l'intuizione, e l'intuizione sbagliata qui costa. Chi pensa
+«l'eccezione è aperta quando non ci sono utenti» conclude che un nodo rimasto senza amministratori
+è spalancato, e corre a spegnerlo. È il contrario: finché quel processo è acceso il nodo rifiuta
+tutti, e diventa spalancato **appena riparte**. Spegnerlo per metterlo in sicurezza è precisamente
+la mossa che lo apre.
+
+**Perché una slide, secondo motivo:** perché è una lezione sulla forma delle domande. «L'eccezione
+è aperta?» sembra una domanda sullo stato del database — quanti utenti ci sono — e invece è una
+domanda sullo stato di un processo. Due domande che si somigliano fino al momento in cui si riavvia
+qualcosa.
+
+**Il corollario operativo:** un amministratore residuo su un nodo va tolto **prima** del riavvio,
+non dopo. Dopo è tardi in un modo che non si vede.
+
+---
+
+### Un rilievo giusto può avere la causa sbagliata, e la causa cambia il rimedio
+
+> Una review esterna ha segnalato che una prova di smoke poteva lasciare su uno shard un `root` che
+> non doveva esistere: la prova verifica che l'eccezione localhost sia chiusa provando a creare un
+> utente, e se la porta è aperta l'utente viene creato davvero. Il rilievo era giusto. La causa che
+> proponeva — «il `dropUser` potrebbe fallire» — era sbagliata. Misurato: `dropUser` riesce. A
+> fallire era la **verifica**, con `Unauthorized`, perché togliendo l'utente con cui ci si è
+> autenticati si perdono nello stesso istante i privilegi per guardare se è andato via. Il rimedio
+> che discende dalla causa vera è un altro: non «riprovare il drop», ma «verificare da una
+> connessione nuova».
+> Fonte: [ADR-0133](Decision.md#adr-0133), [V-102](Sources.md#v-102).
+
+**Perché una slide:** perché è la ragione per cui i rilievi di un recensore — umano o modello — si
+arbitrano **eseguendo**. Accettare un rilievo giusto con la sua motivazione sbagliata produce un
+rimedio che sembra sensato, passa la revisione, e non ripara. Qui avrebbe prodotto un `dropUser`
+con un nuovo tentativo: codice in più che gira su un problema che non esiste, e il problema vero
+intatto.
+
+**Perché una slide, secondo motivo:** perché anche le mie due prime stesure sono state smentite
+dalla misura, non dal ragionamento. La prima verificava la rimozione nella stessa sessione; la
+seconda la confermava rilanciando la sonda, e misurava il fermo di processo invece dell'esistenza
+dell'utente. Entrambe mi sembravano corrette mentre le scrivevo. Il repository le registra invece
+di lasciarle cadere, perché un'ipotesi smentita è la cosa che più somiglia a una prova.
+
+**Il corollario operativo:** la prova che una credenziale non c'è più è che **non apre più**,
+chiesta da una connessione che non ha privilegi da perdere. Non «il documento non c'è nella
+collezione»: quella è una domanda che richiede proprio i privilegi che l'operazione ha appena
+tolto.
+
+
+---
+
+### Una prova verde nel guasto per cui esiste non sorveglia niente
+
+> Tre prove di questo repository sono state accusate da una review di non verificare ciò che il
+> loro nome dichiara. L'arbitrato è stato mettere in produzione **esattamente il difetto che
+> ciascuna dichiarava di impedire**. Il lettore ciclico che smette di girare e cammina in avanti
+> per sempre: **650 prove su 650 restano verdi**. La promessa «restaura, **poi** conta» invertita
+> in «conta, poi restaura»: 650 su 650 verdi. E la più chiara delle tre, perché è successa dentro
+> una sola esecuzione: mentre la prova falliva dimostrando che il database della demo era stato
+> riscritto, l'asserzione sul suo conteggio — due righe più su, nella stessa corsa — **passava**.
+> Fonte: [ADR-0135](Decision.md#adr-0135),
+> [`app/docs/Sources.md` M-060](../app/docs/Sources.md#m-060),
+> [M-061](../app/docs/Sources.md#m-061), [M-064](../app/docs/Sources.md#m-064).
+
+**Perché una slide:** perché nessuna delle tre prove era scritta male, e il difetto era lo stesso
+in tutte e tre: **guardavano un valore che il guasto non cambia**. La prima ricalcolava dentro di
+sé la formula della produzione, e quando la produzione ha smesso di girare la copia ha smesso
+insieme a lei. La seconda contava una destinazione che il doppio non riempiva mai, e contare prima
+o dopo dava lo stesso numero. La terza contava documenti dopo un `mongorestore` che **inserisce e
+non aggiorna**: cinquantamila chiavi duplicate lasciano il conteggio esattamente dov'era, e con
+uscita 0. Tre prove verdi, tre guasti passati.
+
+**Perché una slide, secondo motivo:** perché dice che cosa fare, e non è «asserire di più». Su un
+valore cieco, asserire di più non serve: bisogna cambiare **che cosa si guarda**. Se la differenza
+sta in ciò che il codice *chiede* a un collaboratore, si registra l'argomento. Se la promessa è un
+**ordine** fra due passi, il doppio deve compiere davvero il primo, altrimenti i due momenti sono
+indistinguibili. Se il numero non cambia, si mette nel sistema una traccia che al momento del dump
+c'era e al momento del controllo non c'è più: se riappare, il guasto è avvenuto. **Finché non è
+stata vista fallire, una prova è una speranza.**
+
+**Il corollario scomodo:** la copertura contava tutte e tre. Le righe che il guasto ha cambiato
+erano eseguite da tutte e tre le prove. **La copertura misura le righe eseguite, non le promesse
+verificate**, e la distanza fra le due cose è tutto il rilievo.
+
+---
+
+### Ciò su cui una macchina deve decidere va scritto dove quella macchina legge
+
+> Due rilievi che sembravano di argomento diverso — uno sui marcatori di `pytest`, l'altro sulla
+> pulizia dei database di prova — misurati si sono rivelati lo stesso errore. Una prova che si
+> collegava allo sharded cluster aprendo un client per conto proprio, invece di chiedere la
+> fixture, restava fuori da `-m "not stack03"`: in questo repository il marcatore non si scrive,
+> lo **deriva** `pytest` dai `fixturenames`, e chi raggiunge lo stack per un'altra strada esce dal
+> meccanismo. E la spazzata iniziale, che toglie i database `mongolab_prove_*`, cancellava quelli
+> di una sessione ancora viva: **due `pytest` avviati insieme, e il secondo ha portato via i
+> cinque documenti su cui il primo stava lavorando — senza un errore, dentro una prova che parlava
+> d'altro.**
+> Fonte: [ADR-0136](Decision.md#adr-0136),
+> [`app/docs/Sources.md` M-062](../app/docs/Sources.md#m-062),
+> [M-063](../app/docs/Sources.md#m-063).
+
+**Perché una slide:** perché in tutti e due i casi **l'informazione esisteva**. La prova sapeva di
+volere lo stack 03 — c'era scritto nella sua docstring. Il processo sapeva di essere vivo. Ma
+stavano dove il meccanismo che decide non guarda: la selezione legge `fixturenames`, la spazzata
+legge il **nome** del database. Una dichiarazione che vive fuori da ciò che il meccanismo legge non
+è una dichiarazione: è un promemoria per gli umani, e nessuno lo esegue.
+
+**Perché una slide, secondo motivo:** perché il rimedio si è fatto bocciare dalla propria prova.
+La prima stesura risparmiava le altre sessioni vive e toglieva i **propri** residui, con un
+argomento che sembrava solido: alla prima spazzata i miei database non esistono ancora, quindi uno
+firmato con il mio numero viene da un `pid` riciclato. L'argomento è vero e poggia su un ordine di
+creazione delle fixture che nessuno verifica. La prova scritta per fissare il rimedio è diventata
+rossa alla prima corsa. **Un'assunzione tacita sull'ordine costa un modo silenzioso di cancellare
+lavoro vivo; un residuo di troppo costa una corsa.** L'invariante che è rimasto si dice in una
+riga: `spazza` non tocca niente che appartenga a una sessione viva.
+
+---
+
+### La redazione ha ripulito il testo, e il commit dopo l'ha risporcato
+
+> Il commit della redazione toglie il nome del repository d'origine da 28 file. Il commit
+> **immediatamente successivo** è quello che scrive la scheda per raccontare la pulizia — e
+> rimette dentro il nome, **nel comando che l'aveva cercato**.
+
+Fonte: [ADR-0137](Decision.md#adr-0137), misurato in [V-105](Sources.md#v-105).
+
+**Perché una slide:** perché la clausola «84 occorrenze → 0 nei tracciati» di
+[V-094](Sources.md#v-094) era **vera quando è stata misurata e falsa nel momento in cui è stata
+scritta**. La misura è arrivata prima del testo che la riporta, e il testo che la riporta contiene
+l'oggetto misurato. È il caso limite che nessuna disciplina di verifica prevede: non «ho misurato
+male», non «è cambiato dopo», ma «l'atto di documentare la misura l'ha invalidata». Si racconta in
+trenta secondi e resta addosso.
+
+---
+
+### Una guardia che condivide un'assunzione con ciò che sorveglia non la può violare
+
+> La redazione cercava il nome con le maiuscole al loro posto. La verifica che controllava la
+> redazione cercava il nome con le maiuscole al loro posto. Il nome, in due righe, era scritto
+> tutto minuscolo — perché lì era l'argomento di una ricerca che il caso non lo distingue.
+
+Fonte: [V-105](Sources.md#v-105) — il sesto punto per il caso delle maiuscole, il quarto per lo
+stesso guasto in un'altra forma: la guardia sulle tabelle cercava le righe che cominciano con `|`,
+e dentro un `> [!IMPORTANT]` le righe di tabella cominciano con `> |`.
+
+**Perché una slide:** è la lezione generale, e vale ben oltre questo repository. Due controlli
+indipendenti non sono indipendenti se poggiano sulla stessa assunzione: contarli come due dà una
+falsa sicurezza esattamente dove non ce n'è. In questo repository è capitato **due volte in due
+giorni**, su due assunzioni diverse — «il nome si scrive così» e «una riga di tabella comincia
+con `|`» — e nessuna delle due volte l'ha trovato una prova automatica: la prima l'ha trovata il
+diff, la seconda l'ha trovata **il caso, leggendo un blocco di comandi per tutt'altro motivo**.
+
+---
+
+### Un albero giusto raggiunto da diff sbagliati resta sbagliato
+
+> Confrontare la versione finale non basta. Il confronto che conta è il **diffstat di ogni
+> commit, prima contro dopo**: file, righe aggiunte, righe tolte, insieme dei percorsi. Su 23
+> commit riscritti ne differiscono 4, e le differenze si sommano **esattamente** alle otto righe
+> che la perifrasi aggiunge.
+
+Fonte: [ADR-0137](Decision.md#adr-0137), sesto punto della decisione.
+
+**Perché una slide:** perché è l'invariante che ha fatto il lavoro. Il confronto ovvio — l'albero
+del tip — era verde mentre la riscrittura schiacciava una tabella dentro il paragrafo che la
+precede: quel guasto stava in un commit di mezzo, e l'ultima versione non lo mostrava. Chi riscrive
+una storia sta consegnando **la storia**, non l'ultima versione, e la sola verifica onesta è quella
+che guarda ciò che consegna. Vale identica per i database: uno stato finale corretto non dice
+niente sulla correttezza delle transazioni che l'hanno prodotto.
+
+---
+
+### Riscrivere la storia toglie le firme, comprese quelle dei commit che non c'entrano
+
+> Il commit iniziale di `main` e il merge di testa di `develop` sono firmati dall'interfaccia web
+> di GitHub. Una riscrittura completa le avrebbe tolte **in silenzio**, per ripulire commit che
+> il nome non lo contengono nemmeno.
+
+Fonte: [ADR-0137](Decision.md#adr-0137), terzo punto; misurato in [V-105](Sources.md#v-105).
+
+**Perché una slide:** il costo di una riscrittura non si paga solo dove si riscrive. Qui la cura è
+stata restringere il taglio — **23 commit su 172**, gli altri 149 intatti con le loro firme — e la
+ragione per restringerlo non era la prudenza generica: riscrivere tutto avrebbe cambiato l'SHA di
+`develop`, che avrebbe smesso di essere antenato di `release/1.0`, e la fusione del 16 settembre
+avrebbe **duplicato** la storia invece di unirla. Due effetti collaterali, nessuno dei due visibile
+nel comando che li produce.
+
+---
+
+### Un force-push non cancella: rende irraggiungibile, che è un'altra cosa
+
+> Dopo la riscrittura i vecchi commit non sono raggiungibili da nessun ramo. Ma sono ancora **sul
+> server**, e GitHub continua a servirli a chi li chiede per SHA — accettando anche il prefisso di
+> **sette caratteri**. Il feed degli eventi del repository ne espone sette così, e due portano
+> dentro il nome che la riscrittura aveva tolto.
+
+Fonte: [V-105](Sources.md#v-105), dodicesimo punto; [ADR-0137](Decision.md#adr-0137), Conseguenze.
+
+**Perché una slide:** perché è il punto in cui «l'ho fatto» e «è fatto» si separano, e la platea
+scoprirà di aver creduto il contrario. `git` risponde a «è raggiungibile?»; l'hosting risponde a
+«esiste?», e sono domande diverse. La riscrittura è completa per chiunque cloni — e aggirabile da
+chiunque conservi quaranta caratteri, o sette. Il rimedio non è un altro comando: è una richiesta
+all'assistenza, con un'attesa che non si controlla, e va **verificata richiedendo uno di quegli
+SHA** invece di credere alla risposta.
+
+---
+
+### Le schede che spiegavano la redazione ne pubblicavano le chiavi
+
+> Per raccontare la riscrittura, ADR-0137 e V-105 nominavano i commit ripuliti con l'SHA che
+> avevano **prima**: quindici volte, cinque commit. Erano insieme citazioni rotte — quei commit
+> nella storia pubblicata non esistono più — e chiavi funzionanti verso la storia non redatta.
+
+Fonte: [V-105](Sources.md#v-105), tredicesimo punto.
+
+**Perché una slide:** è la terza volta, nella stessa vicenda, che il guasto nasce dal **documento
+che spiega la difesa** e non dalla difesa: prima il comando che cercava il nome e ce lo rimetteva
+dentro, poi la verifica che condivideva l'assunzione con ciò che sorvegliava, adesso la scheda che
+pubblica gli identificatori di ciò che ha nascosto. Documentare una misura di sicurezza è **parte**
+di quella misura, e va controllata con lo stesso controllo. Qui la riparazione ha due regole, non
+una: dove il riferimento identifica si scrive l'SHA nuovo; dove la frase descrive com'era il commit
+*prima*, si nomina la cosa invece del commit — perché quel commit, oggi, è vuoto, e l'SHA nuovo lì
+direbbe il falso.
+
+---
+
+### L'uscita di sicurezza ha una condizione, e va letta prima di contarci
+
+> «GitHub Support won't remove non-sensitive data, and will only assist in the removal of sensitive
+> data in cases where we determine that the risk can't be mitigated by rotating affected
+> credentials.»
+
+Fonte: [S-078](Sources.md#s-078) — GitHub Docs, Removing sensitive data from a repository.
+
+**Perché una slide:** il consiglio che circola è «riscrivi la storia e chiedi a GitHub di fare la
+garbage collection», e suona come una procedura. Non lo è: è una **richiesta**, e chi la valuta è
+l'altra parte. Il criterio con cui la valuta presuppone per giunta che il dato sia una credenziale
+— qualcosa che si può *ruotare* —, e un dato che non si ruota può cadere fuori da entrambi i lati
+della frase. Da qui la sola cosa che si controlla davvero: **chiedere presto**. Non per ottenere
+prima, ma per sapere prima, mentre un no è ancora rimediabile.
+
+---
+
+### Il requisito era «non visibile», non «non recuperabile»
+
+> «Il nome non deve essere visibile nel repo, ma non è un dato critico come una credenziale, e se
+> viene recuperato esaminando la storia va bene. Il repo originale è in ogni caso privato e
+> inaccessibile.»
+
+Fonte: la decisione del Product Owner del 7 settembre 2026, registrata in
+[ADR-0139](Decision.md#adr-0139).
+
+**Perché una slide:** chiude la sequenza, e la chiude **non facendo**. Il rimedio successivo —
+chiedere all'assistenza la garbage collection degli oggetti orfani — era disponibile, documentato e
+già deciso; è caduto quando si è riletto il requisito accanto al suo prezzo. La distinzione che lo
+ha fatto cadere vale ovunque: un dato che **è** il rischio (una credenziale, che vale finché non la
+si ruota) chiede «non recuperabile»; un dato che si preferisce non pubblicare chiede «non
+visibile». Sono due requisiti diversi, e trattare il secondo come il primo è il modo in cui la
+sicurezza diventa un rituale — si continua a pagare perché si è cominciato. Da notare, per onestà
+del racconto: ciò che ha reso visibile la sproporzione è stato **leggere la pagina del rimedio**.
+Una fonte può servire a non fare una cosa, e vale quanto una che la giustifica.
+
+---
+
+### Il file era giusto; sbagliato era il numero che lo raccontava
+
+> Lo strumento di registrazione annunciava «2,0 s» per un filmato di tre secondi. Sul file,
+> `ffprobe` leggeva `duration=2.966668` e 88 fotogrammi: c'era tutto. A sbagliare era la riga che
+> *stampava* la durata — `awk`, in locale italiana, prende il punto di `2.966668` per la fine del
+> numero e ne ricava `2`. Con `LC_ALL=C`, la stessa riga scrive `3.0`.
+
+Fonte: [V-106](Sources.md#v-106), quinto punto.
+
+**Perché una slide:** questo talk mostra numeri — un'elezione che costa dieci secondi col gesto
+brutale e mezzo secondo con quello educato — e chiede al pubblico di crederci. Qui il numero era
+falso mentre la cosa misurata era sana, e la prima ipotesi, plausibile, incolpava l'acquisizione
+(`-framerate 30`): ha retto finché non si è guardato il file invece del suo resoconto. La regola
+che ne esce è che **lo strumento di misura è sospetto quanto l'oggetto misurato**, e che il punto
+e la virgola non sono un dettaglio tipografico: `2.966668` è un dato, «2,966668» è una frase, e
+una locale che le confonde falsa i numeri senza sbagliare una riga di codice. Si legge alla
+maniera dei dati, si scrive alla maniera di chi legge — sono due cose diverse.
+
+---
+
+### La riserva durava la metà della scena, e sembrava riuscita
+
+> Cinque dei sei filmati di riserva non andavano girati: erano già lì, dentro le registrazioni di
+> terminale. `agg` le ridisegna in mezzo secondo — e per predefinito accorcia a cinque secondi ogni
+> pausa più lunga. La scena del guasto a uno shard, che dura 40,1 s, ne usciva **21,3**: si apriva,
+> scorreva, sembrava riuscita. Mancavano i quindici secondi di attesa prima dell'errore, che di
+> quella scena non sono la pausa: sono la risposta.
+
+Fonte: [V-107](Sources.md#v-107), primo e secondo punto.
+
+**Perché una slide:** è la stessa lezione della locale italiana, spostata di un passo e resa
+visibile. Lì un numero mentiva su un file sano; qui un file mente, e mente **in modo credibile** —
+perché nessuno guarda un filmato con il cronometro. Il predefinito non era nascosto: `agg` lo
+dichiara nel suo aiuto, «Limit idle time to max number of seconds [default: 5]», e stava facendo
+esattamente quello che prometteva. A sbagliare era chi non gliel'aveva chiesto. Vale come esempio
+generale di che cos'è un predefinito: non una scelta neutra, ma la scelta di qualcun altro, presa
+per un altro caso d'uso — qui, quello di chi pubblica una GIF in un `README` e vuole che sia corta.
+La contromisura non è leggere meglio: è **contare**. Lo strumento del repository confronta ogni
+filmato con la somma delle scene che lo compongono e si ferma se non torna, perché una riserva che
+dura la metà della scena che sostituisce non è la riserva di quella scena — e questo, davanti a un
+pubblico, si scopre troppo tardi per rimediare.
+
+---
+
+### La prova e il segreto abitavano la stessa striscia di schermo
+
+> Cinque filmati su sei si potevano fabbricare dalle registrazioni di terminale. Il sesto no, e il
+> motivo era netto: la sua prova non stava nel terminale, stava nell'icona del Wi-Fi barrata in
+> barra dei menu. Girato a schermo intero, il filmato conteneva la prova — e insieme una sessione
+> di lavoro aperta, i nomi di altri progetti, una finestra del Finder. Ritagliato per pubblicarlo,
+> ha perso esattamente la cosa per cui era stato girato. **Non è una coincidenza: sono la stessa
+> striscia di schermo.** Tutto ciò che una registrazione di terminale non contiene è anche tutto
+> ciò che non hai scelto di far vedere.
+
+Fonte: [V-108](Sources.md#v-108), ultimo punto; [ADR-0142](Decision.md#adr-0142).
+
+**Perché una slide:** perché il confine si scopre due volte, e la seconda fa male. La prima volta
+lo trovi mentre decidi *che cosa si può fabbricare*: ciò che vive dentro il terminale sì, ciò che
+vive fuori no. La seconda volta lo ritrovi mentre decidi *che cosa si può pubblicare*, ed è la
+stessa linea vista dall'altro lato — perché «fuori dal terminale» vuol dire «il tuo schermo», e il
+tuo schermo non è materiale che hai preparato: è materiale che c'era. Qualsiasi dimostrazione che
+per essere credibile ha bisogno di mostrare il contesto, ha bisogno di mostrare un contesto che
+nessuno ha revisionato.
+
+La contromisura non arriva dopo. Un ritaglio toglie la scrivania e con lei la prova; una maschera
+a riquadri copre ciò che c'era quando l'hai piazzata, non la notifica che compare al minuto dopo.
+Si paga prima — cinque minuti di scrivania sgombra e notifiche spente — oppure si paga in
+dimostrazione: qui il filmato si pubblica ritagliato, e che la rete fosse spenta lo deve dire una
+voce. Una prova detta a parole è più debole di una prova che si vede, e vale la pena ammetterlo
+invece di far finta che il filmato la contenga ancora.

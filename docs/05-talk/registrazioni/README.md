@@ -58,11 +58,11 @@ e non una ricostruzione.
 
 | # | File | Che cosa mostra | Durata | Il numero che porta | Momento |
 |---:|---|---|---:|---|---|
-| 10 | [`10-app-fotografia-dello-stack.cast`](10-app-fotografia-dello-stack.cast) | `mongolab stats`: topologia, versione, database e distribuzione in otto righe | 1,5 s | `mongod 7.0.40` · tre membri e un primario · `lab` con **50 000** documenti | apertura dell'Atto I — «che cosa c'è, prima che lo rompa» |
+| 10 | [`10-app-fotografia-dello-stack.cast`](10-app-fotografia-dello-stack.cast) | `mongolab stats`: topologia, versione, **dettaglio per collezione**, totale del database e distribuzione | 2,3 s | `mongod 7.0.40` · tre membri e un primario · `ordini` con **50 000** documenti, e `lab` con lo stesso totale perché lo stack è pulito | apertura dell'Atto I — «che cosa c'è, prima che lo rompa» |
 | 11 | [`11-app-cronaca-dell-elezione.cast`](11-app-cronaca-dell-elezione.cast) | `mongolab watch`: l'elezione **senza carico intorno**, una riga per transizione | 42,5 s | primario perso a `26.047`, `mongo-rs-2` eletto a `36.082`: **10 035 ms** | l'Atto I quando la domanda è «e il driver come fa a saperlo?» |
 | 12 | [`12-app-failover-e-i-due-numeri.cast`](12-app-failover-e-i-due-numeri.cast) | la scena centrale: carico attivo, `SIGKILL` sul primario, l'elezione, il bilancio | 53,3 s | interruzione **10 019 ms** · **0 scritture perse** · 31 952 confermate contro 31 955 ritrovate | l'Atto II, ed è la ragione per cui l'applicazione esiste |
-| 13 | [`13-app-backup-a-caldo.cast`](13-app-backup-a-caldo.cast) | `mongodump --readPreference=secondary --oplog` mentre il carico continua a scrivere | 11,4 s | ritmo **546/s** prima, **539/s** durante: **calo 1,3 %** | l'Atto III — «si fa a caldo, e questo è quanto costa» |
-| 14 | [`14-app-restore-e-i-due-conteggi.cast`](14-app-restore-e-i-due-conteggi.cast) | la copia rientra in `lab_ripristinato`, e i due conteggi **non** coincidono | 3,2 s | 5 886 all'origine · 5 740 nella copia · **differenza 146** | subito dopo la 13: la finestra che il dump non copre |
+| 13 | [`13-app-backup-a-caldo.cast`](13-app-backup-a-caldo.cast) | `mongodump --readPreference=secondary --oplog` mentre il carico continua a scrivere | 11,3 s | ritmo **506/s** prima, **516/s** durante: **calo −1,9 %**, cioè il ritmo è salito | l'Atto III — «si fa a caldo, e questo è quanto costa» |
+| 14 | [`14-app-restore-e-i-due-conteggi.cast`](14-app-restore-e-i-due-conteggi.cast) | la copia rientra in `lab_ripristinato`, e i due conteggi **non** coincidono | 3,7 s | 5 386 all'origine · 5 295 nella copia · **differenza 91** | subito dopo la 13: la finestra che il dump non copre |
 
 Le scene 13 e 14 vanno **una dopo l'altra** e in quest'ordine, perché la 14 conta ciò che la 13 ha
 copiato: i 146 documenti di differenza sono quelli scritti *mentre* il dump era in corso, e stanno
@@ -319,35 +319,195 @@ non è il numero, è che da una parte si aspetta e dall'altra no.
 ---
 
 <a id="filmati"></a>
-## I filmati, che ancora non ci sono
+## I filmati
 
-**`make preflight` avvisa, ed è giusto così.** Il controllo cerca file `.mp4` in
-`~/SqlStart2026-registrazioni` (impostabile con `DEMO_VIDEOS_DIR`), e quella cartella è vuota. Non
-ci è stato messo un file finto per far tacere l'avviso: il controllo verifica una cosa che manca
-davvero, e dal **18 settembre 2026** diventa un errore bloccante. Zittirlo adesso significherebbe
-scoprire il buco la mattina del talk, che è precisamente lo scenario per cui il controllo esiste.
-
-I filmati da girare — i primi quattro del Blocco 2, gli ultimi due del Blocco 3, in ordine di
+I filmati servono — i primi quattro del Blocco 2, gli ultimi due del Blocco 3, in ordine di
 importanza dentro ciascun blocco:
 
-| # | Che cosa filmare | Corrisponde a | Durata attesa | Perché serve |
-|---:|---|---|---:|---|
-| 1 | il failover con `docker kill`, dal vivo e con la voce | scena 2 | ~2 min | è la scena del talk. Se salta questa, salta il blocco |
-| 2 | le due varianti a confronto, `kill` e terminazione | scene 2 e 3 | ~3 min | il confronto è il punto, non le due scene separate |
-| 3 | la maggioranza persa | scena 4 | ~2 min | risponde alla domanda che il pubblico fa sempre |
-| 4 | `make up-02` da zero, con la rete disattivata | — | ~4 min | dimostra che il lab è offline davvero, e apre il talk |
-| 5 | il guasto di uno shard nei due profili | scene 8 e 9 | ~3 min | è la scena del Blocco 3, e dal vivo costa due stack e uno scambio di `.env` |
-| 6 | il Blocco 3 per intero: avvio, `sh.status()`, distribuzione | scene 5, 6 e 7 | ~4 min | se il cluster non parte in sala non c'è modo di raccontarlo a voce |
+| # | Che cosa filmare | Corrisponde a | Come si ottiene | Perché serve |
+|---:|---|---|---|---|
+| 1 | il failover con `docker kill` | scena 2 | `make filmati` | è la scena del talk. Se salta questa, salta il blocco |
+| 2 | le due varianti a confronto, `kill` e terminazione | scene 2 e 3 | `make filmati` | il confronto è il punto, non le due scene separate |
+| 3 | la maggioranza persa | scena 4 | `make filmati` | risponde alla domanda che il pubblico fa sempre |
+| 4 | `make up-02` da zero, con la rete disattivata | — | `make filmato`, dal vivo | apre il talk. Ma leggi la nota qui sotto: il file pubblicato non mostra la rete spenta |
+| 5 | il guasto di uno shard nei due profili | scene 8 e 9 | `make filmati` | è la scena del Blocco 3, e dal vivo costa due stack e uno scambio di `.env` |
+| 6 | il Blocco 3 per intero: avvio, `sh.status()`, distribuzione | scene 5, 6 e 7 | `make filmati` | se il cluster non parte in sala non c'è modo di raccontarlo a voce |
 
-Procedura, quando si gira:
+Cinque su sei escono dalle registrazioni di terminale già archiviate. Il quarto no, e il motivo è
+istruttivo: **la sua prova sta fuori dal terminale.** Un `.cast` contiene quello che il terminale
+ha scritto, non l'icona del Wi-Fi spenta nella barra dei menu — e quella icona *è* la
+dimostrazione. Va girato dal vivo.
 
-1. `./tools/reset-demo.sh 02` — o `03`, secondo il blocco — e si aspetta l'impronta del dataset.
-2. Si registra lo schermo — un terminale a 100×30, come le registrazioni di terminale, così le due
-   specie di riserva mostrano la stessa cosa.
-3. Il file va sul canale YouTube del relatore **e** in `~/SqlStart2026-registrazioni`, con lo stesso
-   nome della scena corrispondente e l'estensione `.mp4`.
-4. `make preflight`: l'avviso sui filmati diventa `filmati locali disponibili: N`.
-5. Il collegamento a YouTube torna in questa pagina, nella colonna che oggi non c'è.
+> **Girato il 17 settembre 2026 — e il filmato che si pubblica quella icona non ce l'ha.** Fuori
+> dalla finestra del terminale, nella stessa striscia di schermo dov'era la barra dei menu, c'era
+> anche una scrivania che non si poteva pubblicare. Il file è ritagliato sulla finestra, e che la
+> rete fosse spenta lo dichiara il relatore a voce ([ADR-0142](../../Decision.md#adr-0142),
+> [V-108](../../Sources.md#v-108)). Il confine che rende questa scena non fabbricabile è lo stesso
+> che la rende difficile da pubblicare, e non è una coincidenza: è la stessa striscia di schermo.
+> Chi la rigirerà legga prima [«Lo schermo intero è anche quello che non vuoi
+> pubblicare»](#schermo-intero) — cinque minuti di preparazione la restituiscono intera.
+
+**Per costruire le slide c'è una pagina a parte:** [«I filmati di riserva — che cosa mostra
+ognuno, e come intitolarlo»](titoli-per-le-slide.md) elenca tutti e quattordici i file prodotti,
+con durata, titolo proposto per la slide, il numero che ognuno porta e che cosa dire mentre scorre.
+Una copia sta anche in `~/SqlStart2026-registrazioni/TOC.md`, accanto ai file.
+
+### Due strade, e non sono intercambiabili
+
+C'è più di un modo di ottenere un `.mp4`, e sceglierlo male costa un pomeriggio o una bugia.
+
+**`make filmati` fabbrica il filmato dalla registrazione.** Le scene sono già state eseguite
+davvero; [`agg`](#agg) le ridisegna fotogramma per fotogramma rispettando gli intervalli originali,
+e `ffmpeg` ne fa un `.mp4`. Dura secondi, non tocca nessuno stack, e il filmato che ne esce mostra
+**la stessa esecuzione** che il `.cast` conserva — non una sua imitazione rifatta a memoria.
+
+**`make filmato` registra lo schermo.** Serve quando la scena vive fuori dal terminale: una
+finestra di Compass, un grafico che si muove, la barra dei menu, la voce di chi parla.
+
+Detto in breve: se la scena sta tutta dentro il terminale ed esiste già come `.cast`, si fabbrica;
+altrimenti si gira.
+
+### Il comando che fabbrica
+
+```bash
+make filmati                                        # tutti: cinque montaggi e otto scene singole
+make filmati NOME=03-maggioranza-persa-muto         # uno solo
+make filmati-elenco                                 # che cosa uscirebbe, senza produrlo
+```
+
+Lo strumento è
+[`tools/filmati-da-registrazioni.sh`](../../../tools/filmati-da-registrazioni.sh). I file escono in
+`~/SqlStart2026-registrazioni`, la stessa cartella che `make preflight` conta. Escono **muti**, e
+non è una rinuncia: un `.cast` non ha voce da restituire, e il muto è esattamente quello che va
+dentro le slide (vedi sotto).
+
+Oltre ai cinque montaggi produce le otto scene singole, con il prefisso `scena-`, per chi in slide
+le vuole separate invece che di fila.
+
+#### Che cosa dichiara, e perché conta invece di fidarsi
+
+A ogni filmato lo strumento affianca la somma delle scene che lo compongono, e se le due non
+coincidono entro mezzo secondo **si ferma con un errore**:
+
+```
+  ✓ 05-guasto-shard-nei-due-profili-muto.mp4      56.4 s (attesi 56.4) · 7447730 byte
+```
+
+Non è zelo. Un filmato più corto della scena che sostituisce *sembra riuscito* — si apre, scorre,
+si vede — e mente sull'unica cosa per cui esiste. È successo due volte mentre lo strumento veniva
+scritto, per due cause diverse e nessuna delle due visibile a occhio ([V-107](../../Sources.md#v-107)):
+
+* il limite di inattività di `agg` vale **cinque secondi** se non glielo si dice, e comprime a
+  cinque ogni pausa più lunga: la scena 8, che dura 40,1 s, ne usciva 21,3;
+* i `.mp4` nati da una GIF hanno fotogrammi a durata variabile, e il montaggio che li incolla senza
+  ricodificare scarta i secondi che non sa incastrare: il filmato 05 usciva 47,1 s invece di 52,5.
+
+Tutt'e due contraddicono lo stesso principio, che vale qui quanto vale per le registrazioni: i
+tempi si rispettano di proposito, perché la scena **è** l'attesa. Una riserva che dura la metà
+della scena che sostituisce non è la riserva di quella scena ([ADR-0116](../../Decision.md#adr-0116)).
+
+<a id="agg"></a>
+#### `agg`, la seconda installazione
+
+```bash
+brew install agg
+```
+
+[`agg`](../../Sources.md#s-080) — *asciinema gif generator* — disegna un `.cast` in una GIF animata.
+È un solo eseguibile, senza dipendenze di esecuzione.
+
+Insieme a `ffmpeg` sono **le due sole installazioni che questo repository chiede**, e vanno lette
+per quello che sono: servono a *fabbricare* le riserve, non a usarle. Per eseguire il lab non
+servono; per riprodurre una registrazione in sala nemmeno — quello resta
+`python3 tools/registra-terminale.py --riproduci`, che non chiede niente, ed è deliberato: un piano
+B che richiede un `brew install` non è un piano B.
+
+### Il comando che registra
+
+Lo strumento è [`tools/registra-schermo.sh`](../../../tools/registra-schermo.sh), e la riga da
+imparare è una sola:
+
+```bash
+make filmato NOME=02-failover-docker-kill-muto AUDIO=no   # la passata muta
+make filmato NOME=02-failover-docker-kill                 # la passata parlata
+```
+
+Il file esce come `<NOME>.mp4` in `~/SqlStart2026-registrazioni` — la stessa cartella che
+`make preflight` conta, e che si sposta con `DEMO_VIDEOS_DIR`. Senza `DURATA` si registra finché
+non si preme **`q`** nella finestra del terminale; con `DURATA=120` si ferma da sé dopo due minuti,
+che è comodo quando le mani servono altrove. Alla fine lo strumento rilegge il file e dichiara che
+cosa contiene davvero: dimensioni, secondi, byte e **quante tracce audio**. Se si è chiesta la voce
+e la traccia non c'è, esce con errore invece di dire «fatto».
+
+Due nomi e non uno, nell'esempio qui sopra, perché **una registrazione non si sovrascrive**: lo
+strumento rifiuta un nome già occupato, e la passata muta va conservata comunque (vedi sotto).
+
+> **La prima volta chiede due permessi, e uno riavvia il terminale.** macOS domanda
+> «Registrazione schermo» e «Microfono» alla prima corsa; concedere il secondo **fa ripartire
+> l'applicazione del terminale**, misurato su iTerm. È un costo da pagare una volta sola, e si paga
+> **adesso**: la sera prima del talk è il momento sbagliato per incontrare una finestra di dialogo.
+> Serve anche `ffmpeg` (`brew install ffmpeg`): è una delle due installazioni che questo repository
+> chiede, insieme ad [`agg`](#agg), e nessuna delle due serve per eseguire il lab.
+
+### Le due passate, e perché la muta si tiene
+
+Si gira **prima il muto**, e lo si guarda. Una elezione dura i secondi che dura, non quelli che ci
+si ricorda: vedere la scena prima di commentarla è ciò che permette di raccontarla: si sa dove
+stanno le pause, che cosa compare mentre si parla, e quando conviene tacere. Poi si rigira la stessa
+scena parlandoci sopra.
+
+Il muto non è uno scarto della lavorazione: **è il filmato da mettere dentro la presentazione**,
+dove una voce registrata che si sovrappone a quella di chi parla dal vivo è un difetto e non un di
+più. Le due passate producono due file che servono a due cose diverse — quello parlato va su
+YouTube, quello muto va nelle slide — ed è il motivo per cui `AUDIO=no` esiste come opzione e non
+come ripiego.
+
+### Procedura, quando si gira
+
+1. **Si prepara lo schermo**, e viene prima dello stack — vedi [qui sotto](#schermo-intero).
+2. `./tools/reset-demo.sh 02` — o `03`, secondo il blocco — e si aspetta l'impronta del dataset.
+3. Un terminale a 100×30, come le registrazioni di terminale, così le due specie di riserva
+   mostrano la stessa cosa.
+4. `make filmato NOME=<scena>-muto AUDIO=no`, si esegue la scena, si preme `q`. Si riguarda.
+5. `make filmato NOME=<scena>`, si rifà la stessa scena parlandoci sopra, si preme `q`.
+6. Il file parlato va sul canale YouTube del relatore **e** resta in `~/SqlStart2026-registrazioni`,
+   con lo stesso nome della scena corrispondente e l'estensione `.mp4`.
+7. `make preflight`: l'avviso sui filmati diventa `filmati locali disponibili: N`.
+8. Il collegamento a YouTube torna in questa pagina, nella colonna che oggi non c'è.
+
+Le tre righe di rumore che `ffmpeg` stampa a ogni corsa — `NSKVONotifying_AVCaptureScreenInput`,
+`Configuration of video device failed` e `not enough frames to estimate rate` — sono attese e non
+sono guasti: la ragione di ognuna sta nei commenti dello strumento, misurata in
+[V-106](../../Sources.md#v-106).
+
+<a id="schermo-intero"></a>
+
+#### Lo schermo intero è anche quello che non vuoi pubblicare
+
+`registra-schermo.sh` riprende **lo schermo**, non la finestra. È voluto — la scena 4 esiste
+proprio perché la sua prova sta fuori dal terminale, nell'icona del Wi-Fi barrata in barra dei
+menu — ma significa che finisce nel file anche tutto il resto: le notifiche che arrivano, i nomi
+delle altre schede del terminale, le finestre aperte dietro, la scrivania con i suoi documenti. Il
+17 settembre 2026 è successo davvero, e la ripresa della scena 4 conteneva una sessione di lavoro
+aperta, i nomi di altri progetti e una finestra del Finder ([V-108](../../Sources.md#v-108)).
+
+**Non si rimedia dopo.** Un ritaglio che toglie la scrivania toglie anche la barra dei menu, cioè
+la prova; una maschera a riquadri copre quello che c'era quando l'hai piazzata, non quello che
+compare al minuto dopo. **Cinque minuti prima di premere `registra`:**
+
+- si chiude o si nasconde tutto ciò che non è la scena — `Cmd`+`Opt`+`H` nasconde le altre
+  applicazioni in un colpo;
+- si spengono le notifiche («Non disturbare»), che sono l'unica cosa che compare *mentre* giri e
+  quindi l'unica che nessun controllo preventivo intercetta;
+- si guarda la **barra delle schede** del terminale: i nomi delle schede sono nomi di progetti;
+- si sgombra la scrivania, o si registra in uno Spazio nuovo che ne è privo.
+
+Poi si riguarda il file **prima** di caricarlo, e si guarda intorno alla scena, non la scena.
+
+La scena 4 di questo talk è l'eccezione che spiega la regola: era già girata quando ce ne si è
+accorti, e si pubblica ritagliata, senza la prova del Wi-Fi, che il relatore dichiara a voce
+([ADR-0142](../../Decision.md#adr-0142)). Chi rigirerà quella scena la prepari prima, e la
+pubblichi intera.
 
 ---
 
@@ -363,13 +523,19 @@ Procedura, quando si gira:
   `--sink plain`, perché una riserva deve mostrare ciò che il pubblico vedrebbe, e ciò che il
   pubblico vede dal vivo è il pannello. Il pannello si ridisegna dieci volte al secondo e in un
   `.cast` diventa illeggibile e pesantissimo insieme; `plain` è il **contenuto** delle stesse righe
-  ([ADR-0116](../../Decision.md#adr-0116)). Chi vuole vedere la resa `rich` la fa girare, o guarderà
-  il filmato quando ci sarà.
+  ([ADR-0116](../../Decision.md#adr-0116)). Chi vuole vedere la resa `rich` la fa girare: nemmeno i
+  filmati fabbricati da qui la contengono, perché nascono dagli stessi `.cast`.
+- **Non contiene i filmati.** Un `.mp4` per scena pesa quanto tutte le registrazioni messe insieme,
+  e si rifà in pochi secondi con `make filmati`: il repository conserva il `.cast`, che è la fonte,
+  e lascia fuori ciò che dalla fonte si rigenera. I file vivono in `~/SqlStart2026-registrazioni`
+  ([ADR-0016](../../Decision.md#adr-0016)).
+- **La passata parlata non è fabbricabile.** `make filmati` restituisce l'esecuzione, non la voce:
+  il commento per YouTube si registra con `make filmato`, sulla scena già vista.
 - **Le registrazioni non sostituiscono i filmati, e i due branch lo chiedono in modo diverso.** Il
   criterio 8 di `feature/02` chiedeva entrambe le specie — «almeno una registrazione di riserva
-  esiste in locale e `make preflight` non avvisa più» — ed è soddisfatto a metà, con la metà
-  mancante scritta qui sopra invece che nascosta. Il criterio 8 di `feature/03` chiede che la
-  riserva del Blocco 3 sia «registrata e **riprodotta**», e quello è soddisfatto per intero.
+  esiste in locale e `make preflight` non avvisa più»: soddisfatto per intero dal 17 settembre 2026,
+  quando i filmati sono stati fabbricati dalle registrazioni. Il criterio 8 di `feature/03` chiede
+  che la riserva del Blocco 3 sia «registrata e **riprodotta**», e quello era già soddisfatto.
 
 ---
 

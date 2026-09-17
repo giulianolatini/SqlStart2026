@@ -3,9 +3,10 @@
 from pathlib import Path
 from typing import Iterator, Sequence
 
-from mongolab.domain.modelli import Progress
+from mongolab.domain.modelli import Documento, Progress
+from mongolab.domain.porte import DocumentStore
 
-__all__ = ["FakeBackup"]
+__all__ = ["BackupCheRiempie", "FakeBackup"]
 
 
 class FakeBackup:
@@ -69,3 +70,46 @@ class FakeBackup:
         yield from self._avanzamenti
         if self._errore is not None:
             raise self._errore
+
+
+class BackupCheRiempie(FakeBackup):
+    """Un `FakeBackup` che, restaurando, **mette davvero i documenti nella destinazione**.
+
+    Esiste per una ragione sola, e la ragione è un difetto trovato dalla review. Con un
+    doppio che non tocca la destinazione, una scena che contasse **prima** di restaurare
+    darebbe gli stessi numeri di una che conta dopo: la destinazione ha già i suoi
+    documenti in partenza e nessuno li cambia. La promessa di `ScenarioRestore.esegui` —
+    «restaura, **poi** conta» — restava così verificata da nessuno, e invertire le due
+    righe non faceva diventare rossa una sola prova
+    ([M-061](../../docs/Sources.md#m-061), [ADR-0135](../../../docs/Decision.md#adr-0135)).
+
+    Il riempimento avviene **mentre** l'iteratore scorre, e non alla chiamata, perché è
+    così che si comporta `mongorestore`: i documenti compaiono man mano, e un chiamante
+    che non consumasse la cronaca non ne troverebbe nessuno. Un doppio che riempisse
+    subito renderebbe di nuovo indistinguibili le due scene.
+    """
+
+    def __init__(
+        self,
+        destinazione: DocumentStore,
+        quanti: int,
+        avanzamenti: Sequence[Progress] = (),
+        errore: Exception | None = None,
+    ) -> None:
+        super().__init__(avanzamenti, errore)
+        self._destinazione = destinazione
+        self._quanti = quanti
+
+    def restore(self, origine: Path, destinazione_db: str) -> Iterator[Progress]:
+        self.restore_chiesti.append((origine, destinazione_db))
+        return self._restaurando()
+
+    def _restaurando(self) -> Iterator[Progress]:
+        documenti: list[Documento] = [{"indice": posto} for posto in range(self._quanti)]
+        for avanzamento in self._avanzamenti:
+            yield avanzamento
+        if documenti:
+            self._destinazione.insert_many(documenti)
+        if self._errore is not None:
+            raise self._errore
+

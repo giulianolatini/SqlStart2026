@@ -26,6 +26,7 @@ from mongolab.application.scenari import (
 from mongolab.application.topologia import Bilancio, Interruzione
 from mongolab.application.workload import Latenze, Riepilogo
 from mongolab.domain.modelli import (
+    ContoCollezione,
     ContoShard,
     DescrizioneServer,
     DescrizioneTopologia,
@@ -82,18 +83,24 @@ STATISTICHE: Mapping[str, object] = {
 }
 
 
+COLLEZIONI = (ContoCollezione(nome="ordini", documenti=50_000),)
+
+
 def ispettore(
     *,
     topologia: DescrizioneTopologia = SET,
     stato: Mapping[str, object] = STATO,
     statistiche: Mapping[str, object] = STATISTICHE,
     distribuzione: Distribuzione | None = None,
+    collezioni: Sequence[ContoCollezione] = COLLEZIONI,
 ) -> FakeInspector:
     """Un `FakeInspector` sul caso normale, con le sostituzioni che la prova chiede."""
     distribuzioni = (
         {} if distribuzione is None else {distribuzione.collezione: [distribuzione]}
     )
-    return FakeInspector([topologia], stato, statistiche, distribuzioni)
+    return FakeInspector(
+        [topologia], stato, statistiche, distribuzioni, collezioni=collezioni
+    )
 
 
 def sparsa(*conti: ContoShard, collezione: str = "ordini") -> Distribuzione:
@@ -250,6 +257,55 @@ def test_il_rapporto_legge_db_stats() -> None:
     assert "50000 documenti" in testo
     assert "dati 12.0 MB" in testo
     assert "indici 2.0 MB" in testo
+
+
+def test_il_rapporto_elenca_le_collezioni_con_i_loro_documenti() -> None:
+    """Il difetto che questa prova toglie e' costato una lettura sbagliata dello stato
+    atteso: `dbStats` risponde per **database**, e la riga «50000 documenti» diventa
+    62 602 appena una corsa dell'Atto III lascia in giro una collezione di carico. Chi
+    controllava leggeva un guasto dove non c'era. Il dettaglio per collezione toglie la
+    domanda: si legge quale numero appartiene a chi.
+    """
+    testo = rapporto(
+        ispettore(
+            collezioni=(
+                ContoCollezione(nome="carico-20260906-153012", documenti=5_886),
+                ContoCollezione(nome="ordini", documenti=50_000),
+            )
+        ),
+        collezione="ordini",
+        titolo="rs",
+    )
+
+    assert "carico-20260906-153012" in testo
+    assert "5886 documenti" in testo
+    assert "ordini" in testo
+    assert "50000 documenti" in testo
+
+
+def test_il_totale_del_database_sta_dopo_il_dettaglio_delle_collezioni() -> None:
+    """L'ordine e' il messaggio: prima di che cosa e' fatto, poi quanto fa in tutto.
+
+    Non e' impaginazione. La riga del database e' una **somma**, e una somma stampata
+    sopra i suoi addendi si legge come se fosse il primo di essi — che e' precisamente
+    l'errore di lettura da cui questa scena viene.
+    """
+    testo = rapporto(ispettore(), collezione="ordini", titolo="rs")
+    righe = testo.splitlines()
+
+    prima_collezione = next(i for i, r in enumerate(righe) if r.startswith("collezioni"))
+    totale = next(i for i, r in enumerate(righe) if r.startswith("database"))
+
+    assert prima_collezione < totale
+
+
+def test_un_database_senza_collezioni_dichiara_il_vuoto() -> None:
+    # La stessa regola di `_shard`: una riga assente si legge come una dimenticanza, una
+    # riga che dichiara il vuoto si legge come una risposta. Su uno stack appena acceso
+    # prima del seed la domanda «e le collezioni?» e' legittima.
+    testo = rapporto(ispettore(collezioni=()), collezione="ordini", titolo="rs")
+
+    assert "nessuna" in testo
 
 
 def test_senza_shard_il_rapporto_lo_dice() -> None:
@@ -460,6 +516,10 @@ class IspettoreCheRicorda:
     def db_stats(self) -> Mapping[str, object]:
         self.chiamate.append("db_stats")
         return STATISTICHE
+
+    def collection_counts(self) -> tuple[ContoCollezione, ...]:
+        self.chiamate.append("collection_counts")
+        return COLLEZIONI
 
     def shard_distribution(self, collezione: str) -> Distribuzione:
         self.chiamate.append("shard_distribution")

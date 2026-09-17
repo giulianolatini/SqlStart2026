@@ -95,6 +95,92 @@ def test_le_statistiche_del_database_contano_la_collezione_che_c_e(
     assert vuoto["objects"] == 0
 
 
+def test_le_collezioni_si_contano_una_per_una_e_in_ordine_di_nome(
+    stack01: MongoClient[dict[str, Any]],
+) -> None:
+    """Il dettaglio che `dbStats` non da': quale numero appartiene a quale collezione.
+
+    Due collezioni con conteggi **diversi**, e diversi anche dal totale: un ispettore che
+    restituisse due volte lo stesso numero, o il totale del database per entrambe,
+    passerebbe una prova costruita con due collezioni uguali.
+
+    L'ordine e' asserito perche' e' parte del contratto della porta: questa fotografia
+    esiste per essere confrontata a colpo d'occhio con lo stato atteso del runbook, e un
+    elenco che si riordina da solo a ogni corsa non si confronta.
+    """
+    with collezione_usa_e_getta(stack01) as ordini:
+        database = ordini.database
+        ordini.insert_many([{"n": n} for n in range(7)])
+        database["carico-20260906-153012"].insert_many([{"n": n} for n in range(3)])
+
+        conti = PymongoInspector(stack01, database.name).collection_counts()
+
+    assert [conto.nome for conto in conti] == ["carico-20260906-153012", "ordini"]
+    assert [conto.documenti for conto in conti] == [3, 7]
+
+
+def test_la_somma_delle_collezioni_torna_con_il_totale_del_database(
+    stack01: MongoClient[dict[str, Any]],
+) -> None:
+    """La proprieta' per cui la fotografia si chiama verificabile — su dati appena scritti.
+
+    Attraverso un mongos i due numeri possono divergere, perche' `dbStats` somma i
+    metadati degli shard, orfani compresi: ed e' il motivo per cui questa prova sta sullo
+    stack 01 e non sul 03, dove la disuguaglianza sarebbe un'informazione e non un guasto.
+
+    **Ma nemmeno su uno standalone l'uguaglianza e' garantita, e questa prova non la
+    promette.** Vale qui perche' il database e' appena stato creato da questa corsa: i
+    metadati di `dbStats` sono contatori conservati per collezione, e possono restare
+    indietro. Misurato sullo stesso stack 01 il 6 settembre, su `lab`, che vive dal 4:
+    somma 1 528 002 contro `dbStats.objects` 1 505 885, con due collezioni ferme a zero
+    nei metadati e piene di 7 847 e 14 270 documenti
+    ([V-090](../../../docs/Sources.md#v-090)). La prima stesura di questa docstring diceva
+    «fuori da uno sharded cluster i due numeri **devono** coincidere»: era una
+    generalizzazione da sedici documenti, e il laboratorio l'ha smentita.
+    """
+    with collezione_usa_e_getta(stack01) as ordini:
+        database = ordini.database
+        ordini.insert_many([{"n": n} for n in range(11)])
+        database["carico"].insert_many([{"n": n} for n in range(5)])
+
+        ispettore = PymongoInspector(stack01, database.name)
+        conti = ispettore.collection_counts()
+        totale = int(ispettore.db_stats()["objects"])  # type: ignore[call-overload]
+
+    assert sum(conto.documenti for conto in conti) == totale == 16
+
+
+def test_una_vista_non_si_conta_come_collezione(
+    stack01: MongoClient[dict[str, Any]],
+) -> None:
+    """Una vista non ha documenti propri: contarla raddoppierebbe quelli della sorgente.
+
+    `listCollections` le elenca insieme alle collezioni, e senza il filtro sul tipo
+    `ordini_visti` comparirebbe con i quattro documenti di `ordini` — cioe' la somma
+    direbbe otto dove i documenti sono quattro.
+
+    **`system.views` invece si conta, ed e' giusto cosi'.** Non e' la vista: e' la
+    collezione vera in cui il database *scrive la definizione* della vista, un documento
+    per vista, e `dbStats` la somma insieme alle altre. Escluderla per farla sparire dallo
+    schermo romperebbe la sola proprieta' per cui questo dettaglio esiste — che i pezzi
+    tornino con il totale. Misurato scrivendo questa prova: l'attesa iniziale era che
+    creare una vista non lasciasse altro, e non e' vero.
+    """
+    with collezione_usa_e_getta(stack01) as ordini:
+        database = ordini.database
+        ordini.insert_many([{"n": n} for n in range(4)])
+        database.create_collection("ordini_visti", viewOn="ordini", pipeline=[])
+
+        ispettore = PymongoInspector(stack01, database.name)
+        conti = ispettore.collection_counts()
+        totale = int(ispettore.db_stats()["objects"])  # type: ignore[call-overload]
+
+    nomi = [conto.nome for conto in conti]
+    assert "ordini_visti" not in nomi, "una vista non e' una collezione da contare"
+    assert nomi == ["ordini", "system.views"]
+    assert sum(conto.documenti for conto in conti) == totale
+
+
 def test_su_un_istanza_singola_non_c_e_distribuzione_per_shard(
     stack01: MongoClient[dict[str, Any]],
 ) -> None:
@@ -203,7 +289,9 @@ def test_lo_stato_di_un_mongos_dice_di_essere_un_mongos(
     assert "wiredTiger" not in stato
 
 
-def test_la_prima_domanda_a_un_client_appena_aperto_non_nega_il_cluster() -> None:
+def test_la_prima_domanda_a_un_client_appena_aperto_non_nega_il_cluster(
+    stack03: MongoClient[dict[str, Any]],
+) -> None:
     """Il difetto che nessuna prova vedeva, perché tutte partivano da un client già caldo.
 
     `_e_sharded()` legge la topologia **come il client la conosce**, e un client appena
@@ -219,9 +307,18 @@ def test_la_prima_domanda_a_un_client_appena_aperto_non_nega_il_cluster() -> Non
     parte fredda — schermata con `sbilancio —` e `chunk —` su un cluster perfettamente
     distribuito ([M-053](../../docs/Sources.md#m-053)).
 
-    Questa prova apre il proprio client apposta e non usa `stack03`: il client della
-    fixture è caldo per costruzione, e su un client caldo il difetto non si riproduce.
+    Questa prova apre il proprio client apposta: quello della fixture è caldo per
+    costruzione, e su un client caldo il difetto non si riproduce. Ma **chiede** lo stack
+    03 lo stesso, e i due fatti non sono in conflitto — la scoperta della topologia è per
+    oggetto `MongoClient`, quindi la spazzata che scalda quello di sessione non tocca
+    questo. Chiedere la fixture procura le due cose che servono e che aprirsi un client da
+    soli non dà: lo stack **acceso** quando la prova gira da sola, e il marcatore
+    `stack03`, che `pytest_collection_modifyitems` deduce dalle fixture. Senza,
+    `-m "not stack03"` lasciava selezionata proprio la prova che si collega al cluster, e
+    il comando faceva il contrario di quello che dice
+    ([M-062](../../docs/Sources.md#m-062), [ADR-0136](../../../docs/Decision.md#adr-0136)).
     """
+    del stack03  # chiesto per l'accensione e per il marcatore, non per il client caldo
     cliente: MongoClient[dict[str, Any]] = connetti(BERSAGLI["sharded"])
     try:
         # Prima operazione in assoluto su questo client. Nessun ping, nessuna scrittura.

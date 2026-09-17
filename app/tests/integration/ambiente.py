@@ -35,6 +35,7 @@ from importlib.metadata import version
 from dataclasses import dataclass
 from typing import Any, Final, Iterator, Mapping
 from uuid import uuid4
+import os
 import shlex
 import subprocess
 import threading
@@ -56,6 +57,7 @@ from mongolab.infrastructure.bersagli import credenziali_di as _credenziali_di
 __all__ = [
     "IMMAGINE",
     "PREFISSO_PROVE",
+    "SESSIONE",
     "STACK",
     "Credenziali",
     "Scena",
@@ -66,9 +68,11 @@ __all__ = [
     "credenziali_di",
     "immagine_in_cache",
     "nel_container",
+    "nome_di_prova",
     "radice",
     "rimetti_in_piedi",
     "scena_nel_container",
+    "sessione_viva",
     "sveglia",
 ]
 
@@ -79,7 +83,61 @@ Esiste perché la pulizia sia **riconoscibile**: se una prova viene interrotta a
 Ctrl-C, un kill, un timeout di CI — il suo database resta sullo stack, e senza un prefisso
 convenuto nessuno saprebbe distinguerlo da `lab`. Con il prefisso, la sessione successiva
 lo trova e lo toglie, e nessuno tocca mai un database che non abbia questo nome.
+
+Il prefisso da solo non basta, e il perché è misurato in
+[M-063](../../docs/Sources.md#m-063): è **comune a tutte le sessioni**, quindi la spazzata
+di chi parte adesso arrivava anche sui database di chi sta ancora lavorando. Il nome porta
+per questo anche la sessione — vedi `SESSIONE` e `nome_di_prova`.
 """
+
+SESSIONE: Final = str(os.getpid())
+"""Chi ha creato un database di prova, scritto dentro il nome del database.
+
+Il `pid` del processo `pytest`, e non un `uuid`, per una ragione sola: deve essere
+**interrogabile**. Un identificatore casuale distingue le sessioni ma non dice se quella
+che l'ha scritto esiste ancora, e la spazzata ha bisogno esattamente di quella risposta —
+altrimenti può solo scegliere fra cancellare tutto (e portarsi via il lavoro di chi sta
+girando) e non cancellare niente (e lasciare che gli orfani si accumulino). Un `pid` la
+risposta ce l'ha, in una chiamata di sistema e senza registri da tenere.
+
+**Il limite, dichiarato.** Vale finché le sessioni girano sulla stessa macchina degli
+stack, che è il caso di questo laboratorio: gli stack sono Compose locale. Due macchine
+diverse contro lo stesso MongoDB si scambierebbero `pid`, e l'errore possibile sarebbe in
+tutte e due le direzioni. Con `pytest-xdist` invece funziona senza aggiunte, perché ogni
+worker è un processo con il suo `pid`.
+"""
+
+
+def nome_di_prova(etichetta: str = "") -> str:
+    """Il nome di un database di prova: prefisso, sessione, e ciò che la prova ci mette.
+
+    Senza `etichetta` la coda è casuale, perché due prove della stessa sessione non si
+    contino i documenti a vicenda. Con `etichetta`, il nome è stabile dentro la sessione e
+    diverso fra sessioni — è ciò che serve alle fixture di modulo, che quel database lo
+    vogliono ritrovare.
+    """
+    return f"{PREFISSO_PROVE}{SESSIONE}_{etichetta or uuid4().hex[:12]}"
+
+
+def _sessione_di(nome: str) -> str | None:
+    """La sessione firmata nel nome, oppure `None` se quel nome non ne porta una."""
+    testa, _, coda = nome.removeprefix(PREFISSO_PROVE).partition("_")
+    return testa if coda and testa.isdigit() else None
+
+
+def sessione_viva(sessione: str) -> bool:
+    """Il processo che ha firmato quel nome esiste ancora su questa macchina?
+
+    `os.kill(pid, 0)` non manda niente: chiede al kernel se avrebbe qualcuno a cui
+    mandarlo. `PermissionError` è un **sì** — il processo c'è e non è nostro.
+    """
+    try:
+        os.kill(int(sessione), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 @dataclass(frozen=True)
@@ -453,17 +511,43 @@ def rimetti_in_piedi(stack: Stack) -> None:
 
 
 def spazza(client: MongoClient[dict[str, Any]]) -> int:
-    """Toglie i database rimasti da una sessione interrotta. Restituisce quanti.
+    """Toglie i database rimasti da una sessione **finita**. Restituisce quanti.
 
-    Tocca **solo** ciò che comincia per `PREFISSO_PROVE`, e questa è l'unica garanzia che
-    conta: uno strumento di pulizia che si sbaglia sul filtro cancella il lavoro di
-    qualcun altro, e lo fa in silenzio perché è il suo mestiere cancellare.
+    Tocca solo ciò che comincia per `PREFISSO_PROVE`, e questa è la prima garanzia: uno
+    strumento di pulizia che si sbaglia sul filtro cancella il lavoro di qualcun altro, e
+    lo fa in silenzio perché è il suo mestiere cancellare.
+
+    La seconda garanzia è arrivata dopo, da un rilievo della review misurato eseguendolo
+    ([M-063](../../docs/Sources.md#m-063), [ADR-0136](../../../docs/Decision.md#adr-0136)).
+    Il prefisso è comune a tutte le sessioni, e ogni sessione spazza appena parte: una
+    seconda esecuzione sullo stesso stack cancellava i database usa-e-getta della prima
+    **mentre li stava usando**, e la prima se ne accorgeva come di un conteggio che non
+    torna. Il nome porta ora la sessione che l'ha creato, e qui si risparmia ciò che
+    appartiene a una sessione ancora viva.
+
+    I nomi che non portano una sessione — quelli scritti prima di questa regola — sono
+    orfani per definizione e se ne vanno.
+
+    **La propria sessione si risparmia come le altre**, e la prima stesura di questo
+    rimedio faceva il contrario. L'argomento era che alla prima spazzata i propri database
+    non esistono ancora, quindi uno firmato con il proprio `pid` non può che venire da un
+    `pid` riciclato. L'argomento è vero e non serve: vale per un'assunzione sull'ordine in
+    cui le fixture vengono create, che nessuno verifica e che il giorno in cui cambiasse
+    non farebbe rumore. La prova scritta per fissare il rimedio l'ha bocciato subito. Un
+    residuo da `pid` riciclato costa una corsa in più prima di sparire — se la prossima
+    sessione ha un numero diverso, e ce l'ha quasi sempre — mentre l'assunzione costava un
+    modo silenzioso di cancellare del lavoro vivo. L'invariante ora si dice in una riga:
+    **`spazza` non tocca niente che appartenga a una sessione viva.**
     """
     tolti = 0
     for nome in client.list_database_names():
-        if nome.startswith(PREFISSO_PROVE):
-            client.drop_database(nome)
-            tolti += 1
+        if not nome.startswith(PREFISSO_PROVE):
+            continue
+        sessione = _sessione_di(nome)
+        if sessione is not None and sessione_viva(sessione):
+            continue
+        client.drop_database(nome)
+        tolti += 1
     return tolti
 
 
@@ -479,9 +563,11 @@ def collezione_usa_e_getta(
     prova dopo, con un conteggio che non torna e un motivo che sembra un altro.
 
     Il nome è casuale perché le prove possano girare in parallelo sullo stesso stack senza
-    accordarsi, e perché due esecuzioni sovrapposte non si contino i documenti a vicenda.
+    accordarsi, e porta la sessione perché due esecuzioni sovrapposte non si contino i
+    documenti a vicenda **e non si spazzino a vicenda** — la seconda metà della promessa
+    mancava, ed è `nome_di_prova` a mantenerla.
     """
-    nome = f"{PREFISSO_PROVE}{uuid4().hex[:12]}"
+    nome = nome_di_prova()
     try:
         yield client[nome][collezione]
     finally:

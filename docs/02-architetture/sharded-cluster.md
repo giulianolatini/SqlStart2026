@@ -60,7 +60,9 @@ Il manuale ne elenca tre, e la terza è quella che sorprende chi arriva dal repl
 
 La terza va letta con attenzione, perché è diversa da quello che dà un replica set. Un replica set
 perde un membro e continua a rispondere **su tutti i dati**. Uno sharded cluster perde uno shard e
-continua a rispondere **su una parte dei dati**, senza dire al client che l'altra parte non c'è: la
+continua a rispondere **su una parte dei dati**: passano le query che toccano solo gli shard sani,
+falliscono quelle che toccano lo shard perduto. Non in silenzio — l'errore arriva, e nomina il
+replica set che manca — ma nemmeno subito: sedici secondi ([V-097](../Sources.md#v-097)). La
 disponibilità non è più una proprietà del cluster, è una proprietà della singola query.
 
 ### 1.3 Quando non serve — e qui il manuale non aiuta
@@ -585,10 +587,27 @@ significa che nessuno ha mai chiamato `shardCollection()`.
 
 Ripresa da [§1.2](#12-che-cosa-si-guadagna-in-tre-voci) perché qui è il client a sentirne l'effetto:
 perso uno shard, il cluster «can continue to perform partial reads and writes»
-([S-069](../Sources.md#s-069)). Una query che tocca solo lo shard sano riesce; una che tocca l'altro
-no; una in broadcast fallisce anche se i dati che le servivano stavano dalla parte viva. Il replica
-set ha una disponibilità del cluster; lo sharded cluster ha una disponibilità **della singola
-query**, e un'applicazione va scritta sapendolo.
+([S-069](../Sources.md#s-069)). La fonte si ferma lì; il resto è misurato fermando un membro con
+`make guasto-03` ([V-097](../Sources.md#v-097)). La query che tocca solo lo shard sano risponde in
+**1 s**. Quella che tocca lo shard perduto e il conteggio totale falliscono tutte e due, con lo
+stesso errore:
+
+```text
+FailedToSatisfyReadPreference: Could not find host matching read preference
+{ mode: "primary" } for set shard1rs
+```
+
+Il client non riceve un risultato mutilato: riceve un errore, che nomina lo shard mancante. Lo riceve
+dopo **16 s**, ed è la parte che sorprende — sono il tempo che il router impiega a smettere di
+sperare in un primario che non c'è. Un'applicazione che chiama in sincrono se li prende tutti.
+
+Un caso resta ragionato e non provato: una query in broadcast i cui documenti stiano **tutti** sullo
+shard vivo. Deve fallire per costruzione — il router la manda a tutti proprio perché non sa dove
+siano i documenti — ma questa pagina non l'ha eseguita, e la differenza fra «deve» e «l'ho visto»
+qui si dichiara.
+
+Il replica set ha una disponibilità del cluster; lo sharded cluster ha una disponibilità **della
+singola query**, e un'applicazione va scritta sapendolo.
 
 ---
 

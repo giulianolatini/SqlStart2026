@@ -2293,7 +2293,7 @@ web:
   set da uno o tre membri, ma il perché non è stato verificato. La seconda: la pagina descrive
   anche zone, resharding, change stream e transazioni distribuite, che il laboratorio non usa e su
   cui questa fonte non è stata letta con attenzione.
-- **Usata da:** ADR-0068
+- **Usata da:** ADR-0068, ADR-0128
 
 <a id="s-070"></a>
 ### S-070 — MongoDB Manual 7.0: Sharded Cluster Balancer
@@ -4979,7 +4979,7 @@ USCITA=1
   rotolare via sotto il dump. Il limite è reale, il messaggio d'errore esiste nel programma, e la
   fonte primaria tace.
 - **Data:** 2026-09-01
-- **Usata da:** ADR-0047
+- **Usata da:** ADR-0047, ADR-0126
 
 ---
 
@@ -5786,7 +5786,7 @@ copie della password nella singola riga di comando di docker sull'host: 2
   il resto: è una password di laboratorio, e il file che la porta è fuori dal repository
   ([ADR-0014](Decision.md#adr-0014)).
 - **Data:** 2026-09-01
-- **Usata da:** ADR-0054
+- **Usata da:** ADR-0054, ADR-0127
 
 
 <a id="v-048"></a>
@@ -9594,3 +9594,1534 @@ uv run --directory app mongolab demo restore --target rs --sink plain --from /tm
 - **Usata da:** ADR-0115, ADR-0116
 
 ---
+
+<a id="v-090"></a>
+### V-090 — La riga del database dice 1 505 885 e le collezioni ne sommano 1 528 002: due contatori fermi a zero
+
+- **Comandi:** la fotografia nuova, contro i tre stack accesi insieme, e poi la caccia allo scarto
+  dal di dentro:
+
+
+```unknown
+make -s app-stats TARGET=standalone
+make -s app-stats TARGET=rs
+make -s app-stats TARGET=sharded
+```
+
+
+  e sullo stack 01, che non ha autenticazione, uno script che per ogni collezione di `lab` mette
+  accanto il contatore conservato e il conteggio vero:
+
+
+```unknown
+for (const nome of db.getCollectionNames()) {
+  const meta = db.getCollection(nome).stats().count;      // metadati
+  const vera = db.getCollection(nome).countDocuments({});  // scansione
+  if (meta !== vera) print(`${nome}: metadati ${meta}, contati ${vera}`);
+}
+```
+
+
+- **Ambiente:** MongoDB 7.0.40 su tutti e tre gli stack, portatile Apple Silicon, Docker Desktop,
+  i nove container accesi contemporaneamente. Gli stack 01 e 03 portavano i residui delle
+  registrazioni del 4 settembre e non erano stati azzerati; lo stack 02 era appena passato da
+  `./tools/reset-demo.sh 02`. Il container `mongo-standalone` era stato riavviato la mattina del 6
+  e il suo giornale dichiara `"Startup from clean shutdown?": true`: lo scarto **non** viene da
+  quell'avvio.
+
+- **Esito, primo punto — la fotografia distingue la collezione dal database, e i tre stack lo
+  mostrano subito.** Prima di questa riga `stats` stampava un totale solo, e quel totale è una
+  somma:
+
+| stack | `ordini` | collezioni in `lab` | totale del database |
+|---|---:|---:|---:|
+| 01 standalone | 50 000 | 38 | **1 505 885** |
+| 02 replica set | 50 000 | 2 | **55 386** |
+| 03 sharded | 20 000 | 12 | **99 699** |
+
+  Sullo stack 01 la vecchia riga diceva **un milione e mezzo** dove il runbook si aspettava
+  cinquantamila, e non c'era modo di sapere dallo schermo che i cinquantamila c'erano davvero: le
+  altre trentasette collezioni sono carichi dell'Atto III lasciati indietro dal 4 settembre.
+
+- **Esito, secondo punto — la somma delle collezioni e il totale del database non coincidono, su uno
+  standalone.** 1 528 002 contro 1 505 885: **22 117** di scarto, l'1,45 %. Non è sharding, non sono
+  orfani, non è una vista: `dbStats.objects` somma i `count` conservati per collezione, e **due**
+  collezioni dichiarano zero mentre contengono documenti.
+
+| collezione | metadati | contati |
+|---|---:|---:|
+| `carico-20260904-151041` | **0** | 14 270 |
+| `carico-20260904-151230` | **0** | 7 847 |
+
+  Sono le ultime due scritte quel giorno. 14 270 + 7 847 = 22 117, cioè tutto lo scarto: le altre
+  trentasei coincidono al documento.
+
+- **Esito, terzo punto — `validate()` rimette il contatore a posto, e non lo dice.** Su
+  `carico-20260904-151230`:
+
+
+```unknown
+prima  metadati 0 contati 7847
+validate: valid=true nrecords=7847 warnings=[]
+dopo   metadati 7847 contati 7847
+dbStats.objects: 1513732
+```
+
+
+  Risponde `valid: true` **senza un avviso**, e intanto il totale del database sale di 7 847. La
+  collezione non era corrotta: era stantio il numero, e nessuno lo segnalava. `carico-20260904-151041`
+  è stata lasciata così apposta, perché la differenza resti visibile a chi rifà la misura.
+
+- **Riserve:** la causa dello zero non è stata dimostrata, solo circoscritta. Il riavvio del 6
+  settembre è dichiarato pulito dal giornale di `mongod`, quindi il contatore era già zero prima; i
+  giornali del 4 settembre non ci sono più, perché `docker logs` conserva solo la corsa in corso, e
+  la spiegazione naturale — un arresto del container mentre quelle due collezioni erano appena state
+  scritte e il contatore non era ancora stato messo nel checkpoint — resta un'ipotesi. Ciò che è
+  misurato è il fatto, non il perché: il numero veloce può dire zero su una collezione che ne
+  contiene quattordicimila. Una osservazione sola, su un laboratorio, non tre corse.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0121
+
+---
+
+<a id="v-091"></a>
+### V-091 — Il dump sta nel container e non in un volume: i due rami del verdetto, e una frase da correggere
+
+- **Comandi:** che cosa c'è davvero nella cartella dopo la registrazione 13, poi le due
+  corse che mostrano i due rami del blocco nuovo, poi la domanda che nessuno aveva fatto:
+
+```bash
+docker exec mongo-rs-1 ls -1R /tmp/mongolab-backup
+./tools/reset-demo.sh 02          # primo ramo: la cartella c'è
+./tools/reset-demo.sh 02          # secondo ramo: non c'è più
+docker exec mongo-rs-1 mkdir -p /tmp/mongolab-backup/lab
+make down-02
+make up-02
+docker exec mongo-rs-1 ls -1 /tmp
+```
+
+- **Ambiente:** MongoDB 7.0.40, stack 02 in piedi con i tre membri sani e `mongo-rs-1`
+  primario, portatile Apple Silicon, Docker Desktop. La cartella conteneva il dump della
+  registrazione 13 del 6 settembre, cioè una sola corsa di `demo backup-live`.
+
+- **Esito, primo punto — il dump non è solo `lab`, ma il restore sì.** L'albero, per
+  intero:
+
+```
+/tmp/mongolab-backup:        admin  lab  oplog.bson  prelude.json
+/tmp/mongolab-backup/admin:  system.users.bson   system.users.metadata.json
+                             system.version.bson system.version.metadata.json
+/tmp/mongolab-backup/lab:    carico-20260906-114646.bson   carico-20260906-114646.metadata.json
+                             ordini.bson                   ordini.metadata.json
+```
+
+  Cinque `.bson` in tutto, ma sullo schermo ne tornano due: `argomenti_restore` passa
+  `--nsInclude lab.*`, quindi `admin/` e `oplog.bson` restano dove sono. Il numero che
+  vale, per chi guarda la scena, è quello dei `.bson` sotto `lab`.
+
+- **Esito, secondo punto — i due rami, dal vivo.** Prima corsa, con la cartella piena:
+
+```
+La cartella del dump, dentro il nodo
+  ✓ dump rimossi: 2 collezioni che il restore avrebbe rimesso in piedi
+```
+
+  Seconda corsa, subito dopo, senza toccare niente:
+
+```
+La cartella del dump, dentro il nodo
+  ✓ nessun dump da togliere
+```
+
+- **Esito, terzo punto — `down` la porta via, e la voce del registro di poche ore prima
+  diceva il contrario.** Quella voce dice «nessuno lo svuota, né `reset-demo.sh` né
+  `down`/`up`», e la seconda metà è falsa: era un ragionamento, non una misura. Messo un
+  marcatore con `mkdir`, fatto `make down-02` e `make up-02`, dentro `/tmp` resta questo:
+
+```
+mongodb-27017.sock
+```
+
+  Il motivo sta scritto nel compose: `mongo-rs-1` monta `keyfile` e `dati-1:/data/db` e
+  nient'altro, quindi `/tmp` è il livello scrivibile del container e `docker compose down`
+  rimuove il container. La cartella sopravviveva a ogni corsa di `reset-demo.sh` e a ogni
+  `restart` — non a `down`.
+
+- **Riserve:** la corsa di `down`/`up` è una sola, e il marcatore era una cartella vuota,
+  non un dump vero. Il fatto misurato è che il livello scrivibile si ricrea, non che
+  qualcuno «pulisca» il dump: sparisce perché sparisce il container che lo teneva. Del
+  conteggio dei `.bson` sotto `lab` si è visto un caso solo, a due collezioni; il numero
+  che il difetto aveva prodotto — sei — non è stato riprodotto apposta, perché per farlo
+  servirebbero cinque prove generali di fila.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0122
+
+---
+
+<a id="v-092"></a>
+### V-092 — Dodici skill importate: quante si accendono qui, e la riga che offre il comando vietato
+
+- **Comandi:** la copia e la sua verifica, il setaccio dei segreti, il censimento delle
+  descrizioni sul commit verbatim, e le tre suite di prove:
+
+```bash
+git clone --branch step/azure-policy/allineamento-e-fase-1 --depth 1 \
+  <URL del repository d'origine, privato> /tmp/origine
+diff -r /tmp/origine/.claude/skills .claude/skills
+python3 rimisura.py                       # legge da `git show 3f22d6f:<file>`
+bash .claude/skills/revisione-pr/tests/test-revisione.sh
+bash .claude/skills/changelog-di-chiusura/tests/test-changelog.sh
+bash .claude/skills/worktree-di-step/tests/test-step.sh
+```
+
+- **Ambiente:** portatile Apple Silicon, macOS 25.6, `git` di sistema, Python 3.13, nessuna
+  rete durante le prove. Il pacchetto misurato è quello del commit `3f22d6f` di
+  `release/1.0`, cioè la copia **prima** dell'adattamento: 33 file, 272 KB, 12 skill.
+  Il confronto `diff -r` contro il clone non ha prodotto alcuna riga: le due copie sono
+  identiche byte per byte.
+
+- **Esito, primo punto — la superficie che decide se una skill si accende.** Il campo
+  `description` del frontmatter è l'unica parte di una skill che non si può correggere da
+  fuori: è quella che il modello legge per stabilire se il caso è suo. Censite le dodici
+  descrizioni del pacchetto verbatim, distinguendo chi nomina il repository d'origine come
+  condizione da chi lo nomina per negazione:
+
+| Come nominano il repository d'origine | Quante | Quali |
+|---|---|---|
+| come **condizione** | 9 | `changelog-di-chiusura`, `decision-md`, `modello-dei-rami`, `project-memory`, `registro-di-sviluppo`, `revisione-pr`, `sources-md`, `workflow-conventions`, `worktree-di-step` |
+| per **negazione** («NOT the origin one») | 2 | `git-flow`, `github-flow` |
+| non lo nominano | 1 | `adr-brainstorm` |
+
+  Le nove della prima riga, importate così, non si sarebbero accese mai: la condizione che
+  chiedono qui è falsa. Le due della seconda si sarebbero accese **sempre**, perché la
+  condizione che chiedono è vera esattamente fuori dal repository d'origine. La dodicesima si
+  accende ma scrive gli ADR in `docs/adr/`, che qui non esiste.
+
+- **Esito, secondo punto — la riga che vale il rilievo.** `git-flow` è una delle due che si
+  accendono, e il suo file `references/comandi.md` elenca fra gli equivalenti AVH:
+
+```
+git flow feature finish <slug>
+```
+
+  È il comando che in questo repository è vietato da quando, sulla PR #1, chiuse un ramo
+  saltando la revisione. Il pericolo non è la presenza del testo — un repository può
+  benissimo ospitare la descrizione di un comando che non usa — ma la combinazione fra
+  quel testo e una descrizione che qui si accende da sola. Il modello dei rami di qui **ha
+  la forma** di Git Flow (`main`, `develop`, `feature/NN-nome`, `release/1.0`) e differisce
+  solo nella chiusura: è la somiglianza a rendere efficace la trappola.
+
+- **Esito, terzo punto — nomi di cartella.** Nel pacchetto verbatim ricorrono **95**
+  occorrenze di `Docs/` con la maiuscola, su 82 righe in 21 file: è la convenzione del
+  repository d'origine, dove le decisioni stanno in `Docs/Decision.md`. Qui la cartella è `docs/`,
+  minuscola. Su macOS il filesystem non distingue, su Linux sì — e la skill `git-flow`
+  dedica una sezione proprio a questo.
+
+- **Esito, quarto punto — il setaccio e le prove.** Il setaccio dei segreti di
+  `revisione-pr` passato sull'intero pacchetto ha prodotto **una** segnalazione, in una
+  fixture di prova: confrontata con la chiave vera per prefisso SHA-256, senza stampare né
+  l'una né l'altra, non coincide. Le tre suite, rilanciate **dopo** l'adattamento del
+  6 settembre:
+
+| Suite | Prove |
+|---|---|
+| `revisione-pr/tests/test-revisione.sh` | 53 passate, 0 fallite |
+| `changelog-di-chiusura/tests/test-changelog.sh` | 40 passate, 0 fallite |
+| `worktree-di-step/tests/test-step.sh` | 34 passati, 0 falliti |
+| **totale** | **127** |
+
+  Girano senza rete e senza spendere token: si costruiscono un repository temporaneo e
+  sostituiscono `gh`, `agy` e `codex` con dei finti.
+
+- **Riserve:** il censimento è **sintattico**. Legge il campo `description` e vi cerca la
+  stringa con il nome d'origine e la forma «NOT <quel nome>»; non prova che una descrizione così
+  scritta si accenda o non si accenda davvero in una sessione, perché quella decisione la
+  prende il modello e non è deterministica. Il verdetto «nove non si accendono mai» è
+  quindi una lettura del testo, non una misura di comportamento — solida perché il testo
+  dice esplicitamente «use when the repository in question is <il nome d'origine>», ma
+  una lettura.
+
+  Le 127 prove sono prove **degli script** della skill, non della loro applicabilità qui:
+  dicono che il codice è portabile, non che la skill sia adatta a questo repository. Il
+  `diff -r` è stato eseguito una volta sola, il giorno della copia; da lì in avanti le due
+  copie divergono per costruzione.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0123
+
+---
+
+---
+
+<a id="v-093"></a>
+### V-093 — La skill di revisione messa al lavoro sul serio: otto falsi positivi, e un revisore su due che non partiva
+
+- **Comandi:** la costruzione dei sei fascicoli della release, il setaccio su ciascuno, la prova a
+  vuoto, l'invio, e la suite dopo ogni correzione:
+
+```bash
+.claude/skills/revisione-pr/scripts/revisione.sh dossier-rami app-sorgenti main..HEAD app/src app/pyproject.toml
+.claude/skills/revisione-pr/scripts/revisione.sh segreti   app-sorgenti
+.claude/skills/revisione-pr/scripts/revisione.sh interroga app-sorgenti          # a vuoto
+.claude/skills/revisione-pr/scripts/revisione.sh interroga app-sorgenti --invia
+bash .claude/skills/revisione-pr/tests/test-revisione.sh
+```
+
+- **Ambiente:** portatile Apple Silicon, macOS 25.6, 6 settembre 2026. `codex-cli 0.153.4`
+  autenticato con ChatGPT, `agy 1.1.22` autenticato, modello `gemini-3.1-pro-high`. Repository
+  **privato** (`gh repo view --json isPrivate` → `true`), quindi l'invio è una pubblicazione verso
+  terzi che non si annulla. Intervallo revisionato: `main...HEAD` di `release/1.0`, merge-base
+  `1523ebf`, 213 file e 125 969 righe aggiunte in tutto.
+
+- **Esito, primo punto — l'intervallo non entra in un prompt, e va spezzato per aree.** Il diff
+  intero pesa 11 322 719 byte contro un limite d'invio di 700 000: oltre quella soglia il prompt non
+  entra più negli argomenti di un processo su macOS e `agy` lo riceverebbe **troncato in silenzio**.
+  Escluse le tre aree che non sono artefatto — i tre registri (1 738 597 byte: sono il verbale),
+  `docs/00-progetto` (i piani), `app/docs` (710 795 byte, sopra il limite da sola) e i due `.cast`
+  (tracciati di terminale illeggibili, 30 441 righe) — restano sei fascicoli:
+
+| fascicolo | percorsi | prompt (byte) | commit |
+|---|---|---|---|
+| `talk` | `docs/05-talk` senza i `.cast` | 91 255 | 9 |
+| `stack-docker` | `docker` | 232 200 | 20 |
+| `documentazione-tecnica` | `docs/01`…`docs/04` | 438 192 | 23 |
+| `app-sorgenti` | `app/src`, `app/pyproject.toml` | 456 168 | 19 |
+| `strumenti` | `tools`, `Makefile`, `README.md` | 518 821 | 60 |
+| `app-prove` | `app/tests` | 625 817 | 21 |
+
+  Il primo tentativo teneva `docker` e `tools` insieme: 718 038 byte, **oltre il limite**. È stato
+  il limite a decidere la partizione, non il gusto.
+
+- **Esito, secondo punto — il setaccio dei segreti si è fermato otto volte, e tutte e otto a
+  vuoto.** Due fascicoli su sei, `app-sorgenti` (1) e `app-prove` (7). Ogni valore segnalato è stato
+  confrontato con quelli dei due `.env` non versionati **per SHA-256, senza stampare né gli uni né
+  gli altri**: nessuna corrispondenza. Le forme erano tre sole:
+
+```
+password=credenziali.password,                    l'attributo di un oggetto
+password=PASSWORD_DI_PROVA,                       il nome di una costante
+password="non-e-un-segreto-e-non-lo-sara-mai"     una frase italiana in chiaro
+```
+
+  Il pattern che le trova è corretto e non è stato toccato: cerca un nome di credenziale seguito da
+  `=` e da almeno sedici caratteri buoni, e queste tre righe li hanno. La correzione sta dall'altra
+  parte, in `segreti.esclusioni`, ancorata alla forma del **valore** — mai al nome, che è la regola
+  scritta in testa a `segreti.pattern`. L'underscore obbligatorio nell'esclusione delle costanti è
+  ciò che le impedisce di spegnere anche `AKIAIOSFODNN7EXAMPLE`, e c'è una prova che lo verifica.
+
+- **Esito, terzo punto — la metà Gemini della revisione non partiva.** All'invio, `agy` è uscito
+  male su tutti e sei i fascicoli:
+
+```
+Error: --json-schema can only be used when --output-format is 'json' or 'stream-json'
+```
+
+  La skill chiedeva `--output-format text --json-schema`, combinazione che `agy 1.1.22` rifiuta.
+  Codex rispondeva regolarmente, quindi **il guasto non si presentava come un guasto**: si
+  presentava come «un revisore su due non ha trovato niente».
+
+- **Esito, quarto punto — perché 53 prove verdi non l'avevano visto.** La finta `agy` del banco
+  stampava il JSON nudo e accettava qualunque opzione. Riscritta fedele alla vera — legge le
+  opzioni, rifiuta la combinazione con lo stesso messaggio, avvolge la risposta nella stessa busta —
+  **sette prove sono diventate rosse: le tre nuove e quattro che passavano da sempre.** La busta
+  vera, verificata a mano su un prompt minuscolo prima di scrivere il doppio, è:
+
+```json
+{"conversation_id":"…","status":"SUCCESS","response":"…","structured_output":{…},"usage":{…}}
+```
+
+  Il primo oggetto bilanciato della risposta grezza è quindi la **busta**, non i rilievi: senza
+  sbustare, il foglio di triage avrebbe scritto «il JSON non contiene un elenco rilievi», di nuovo
+  indistinguibile da un revisore che non ha trovato niente. Verificato nello stesso passaggio che
+  `--effort high` con `gemini-3.1-pro-high` non fa conflitto, mentre `--effort low` sì.
+
+- **Verdetto.** La skill importata funziona nella struttura e falliva in due punti che solo l'uso
+  reale poteva mostrare: un setaccio tarato su un altro codice, e una riga di comando disallineata
+  dalla versione installata di `agy`. Entrambi corretti nel repository, entrambi con prove:
+  **98 passate, 0 fallite** contro le 53 di partenza.
+
+- **Riserve.** Il confronto SHA-256 dei valori segnalati copre le credenziali che stanno nei due
+  `.env` presenti sulla macchina al momento della misura: se un `.env` fosse cambiato dopo, la
+  verifica andrebbe rifatta. Le tre esclusioni sono ancorate alla forma e non al contesto: una riga
+  che contenesse insieme un segreto vero **e** una di quelle forme verrebbe scartata: è un limite
+  che il file delle esclusioni ha già per costruzione, non introdotto qui. Il collaudo di `agy` è
+  stato fatto su una versione sola, la 1.1.22: una versione successiva può cambiare di nuovo la
+  busta, e allora saranno le prove della sezione 19 a dirlo.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0124, ADR-0125
+
+---
+
+<a id="v-094"></a>
+### V-094 — Censimento dei riferimenti esterni prima della pubblicazione, e la giustezza dei documenti misurata invece che supposta
+
+- **Comandi:** il censimento, la sostituzione, il riavvolgimento e la riverifica:
+
+```bash
+git grep -c -i <nome del repository d'origine> -- .              # quante e dove, fra i tracciati
+grep -ril <nome del repository d'origine> . --exclude-dir=.git   # anche fra i non tracciati
+git grep -ohE "github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+" -- '*.md' | sort | uniq -c
+git grep -n "/Users/giulianolatini" -- .          # percorsi assoluti della macchina
+python3 anonimizza3.py --scrivi                   # frasi intere, poi regole a confine di parola
+python3 riavvolgi.py da-riavvolgere.txt --scrivi  # gli a capo rimessi al loro posto
+make docs-check
+```
+
+- **Ambiente:** portatile Apple Silicon, macOS 25.6, 6 settembre 2026. Ramo `release/1.0`,
+  albero pulito prima di cominciare. Repository ancora **privato**; la pubblicazione è
+  prevista al talk del 18 settembre, ed è irreversibile.
+
+- **Esito, primo punto — il censimento.** Il nome di un repository privato compare **84
+  volte in 28 file tracciati**: 21 file sotto `.claude/skills/` e 7 documenti sotto `docs/`.
+  Una di queste è un **URL di clonazione** completo, nel comando che riproduce il confronto
+  di [V-093](#v-093). Fuori dai tracciati ce ne sono altre **6**, in due fascicoli sotto
+  `.revisioni/`: quella cartella è gitignorata, ma `revisione.sh archivia --scrivi` **copia**
+  i fascicoli in `docs/revisioni/`, che si pubblica — quindi contano.
+
+- **Esito, secondo punto — che altro è esterno.** Nessun'altra sorpresa:
+
+| Che cosa | Dove | Quante | Verdetto |
+|---|---|---|---|
+| `github.com/giulianolatini/SqlStart2026` | README e tre documenti | 6 | è questo repository, resta |
+| altri `github.com/...` | citazioni bibliografiche | 15 | progetti pubblici di terzi, restano |
+| percorso assoluto della macchina | [`registro-operativo-sviluppo.md`](registro-operativo-sviluppo.md) | 1 | nomina `SqlStart2026-registrazioni`, cartella locale; l'utente è già pubblico nell'URL del repo |
+| nome del ramo d'origine | cinque documenti | 5 | nomina un ramo, non un repository: senza il nome del repo non è risolvibile |
+| indirizzi di posta | tre piani di feature | 3 | `noreply@anthropic.com`, la firma dei commit |
+
+- **Esito, terzo punto — la giustezza vera dei documenti.** La supposizione era 95 colonne.
+  Misurata, è **100**: su quattro documenti la moda sta fra 97 e 99, e le righe oltre 100
+  sono una minoranza dichiarata (144 su 6409 in `Decision.md`, 153 su 8129 in `Sources.md`,
+  172 su 6488 nel registro, 63 su 2443 nelle citazioni). La differenza non è accademica:
+  con la soglia sbagliata sarebbero stati riavvolti 28 paragrafi in più, senza motivo.
+
+- **Esito, quarto punto — tre passaggi automatici buttati, e perché.** Nessuno dei tre è
+  stato scoperto dalle prove: sono stati scoperti **rileggendo il diff**.
+
+  1. Sostituzioni di **sottostringa**: mordono dentro le parole. «chi nomina X» è diventato
+     «chi nominal…», perché la regola cercava «a X» e l'ha trovata dentro «nomina X».
+  2. Regole a confine di parola, ma con `\s+` fra preposizione e nome: `\s` comprende l'a
+     capo, e dove il nome cadeva a inizio riga la sostituzione ha **unito due righe**, da 85
+     a 183 colonne. Grammatica giusta, impaginazione rotta.
+  3. Lo stesso `\s+` dove l'a capo portava con sé il capo di una citazione (`> `), che
+     whitespace non è: lì la regola **non è scattata affatto**, e restava «In il repository
+     d'origine» spezzato su due righe — invisibile a qualunque `grep` di una riga sola.
+
+  La stesura buona ha un separatore che accetta sia spazi sia un a capo col suo capo di
+  riga, e lo **riscrive identico**: nessun file cambia numero di righe, e la preposizione si
+  articola comunque. Il controllo di quella proprietà è dentro lo script.
+
+- **Esito, quinto punto — dopo.** 84 → 0 nei tracciati, 6 → 0 nei fascicoli, 28 file
+  modificati, 146 righe aggiunte e 138 tolte. Nessun apice inverso orfano, nessuna
+  preposizione non articolata, nessuna riga portata oltre le 100 colonne che non ci fosse
+  già. `make docs-check` verde: citazioni e collegamenti coerenti.
+
+- **Riserve:** il censimento è **testuale**, e cerca un nome noto. Non trova ciò che allude
+  senza nominare, e non trova un nome scritto diversamente. Cerca inoltre solo dentro i file
+  di testo: la cronologia dei commit non è stata toccata, e chi cloni il repository troverà
+  il nome nei messaggi e nei diff precedenti a questa scheda — riscriverla è una decisione
+  diversa, con costi diversi, e non è stata presa qui. Infine: il comando di riproduzione di
+  [V-093](#v-093) ora contiene un segnaposto al posto dell'URL, quindi **non è più
+  eseguibile da fuori**; resta eseguibile da chi conosce il repository d'origine.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0125
+
+---
+
+<a id="v-095"></a>
+### V-095 — Un dump fallisce in due modi diversi, e la regola di pulizia ne conosceva uno solo
+
+- **Comandi:** una directory con dentro un backup finto, un `mongodump` che fallisce
+  sull'autenticazione, e i due controlli che il documento propone:
+
+```bash
+docker exec mongo-rs-1 mkdir -p /tmp/archivio-v095
+docker exec mongo-rs-1 touch /tmp/archivio-v095/backup-di-ieri.bson
+docker exec mongo-rs-1 mongodump --host rs0/localhost:27017 \
+  -u admin -p credenziale-sbagliata --authenticationDatabase admin \
+  --oplog --out /tmp/archivio-v095            # credenziale finta: mai la vera
+docker exec mongo-rs-1 ls -la /tmp/archivio-v095
+docker exec mongo-rs-1 rm -rf /tmp/archivio-v095   # la riga che il documento prescriveva
+docker exec mongo-rs-1 test -f /tmp/dump-v095/oplog.bson
+```
+
+- **Ambiente:** macOS 26.6.2 arm64 (build 25G83), Docker 29.7.2, immagine `mongo:7.0.40`,
+  `mongodump` **100.18.0**, stack 02 `mongo-rs-1/2/3` sani, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** un revisore esterno ha contestato la regola di pulizia scritta in
+  [`backup-restore.md`](03-amministrazione/backup-restore.md) §5 —
+  `mongodump … || { rm -rf "${DESTINAZIONE}"; exit 1; }` — sostenendo che cancella troppo. La
+  regola non era nata dal nulla: viene da [V-036](#v-036), dove un dump vero fallì **dopo** aver
+  scritto 1,8 GB, e in quel caso `rm -rf` toglie esattamente ciò che il comando aveva creato. La
+  domanda era se valesse anche quando il dump fallisce **prima** di scrivere.
+
+- **Esito, primo punto — un dump può fallire senza creare niente.** Con una credenziale sbagliata,
+  `mongodump` esce **1** e non tocca la destinazione:
+
+```
+Failed: can't create session: failed to connect to mongodb://localhost:27017/?replicaSet=rs0:
+connection() error occurred during connection handshake: auth error: unable to authenticate
+using mechanism "SCRAM-SHA-256": (AuthenticationFailed) Authentication failed.
+```
+
+  Il `ls` subito dopo mostra la directory **come prima**: `backup-di-ieri.bson`, e nient'altro.
+  L'errore arriva a livello di handshake, cioè prima che esista un solo byte da scrivere.
+
+- **Esito, secondo punto — la regola cancella allora ciò che non ha creato.** Applicato il
+  `rm -rf "${DESTINAZIONE}"` che il documento prescriveva, il backup preesistente sparisce con la
+  directory: `ls: cannot access '/tmp/archivio-v095': No such file or directory`. Il fallimento non
+  aveva prodotto niente da ripulire, e la pulizia ha preso l'unica cosa che c'era.
+
+- **Esito, terzo punto — la guardia proposta discrimina davvero.** Dopo lo stesso fallimento in una
+  destinazione nuova, `test -f /tmp/dump-v095/oplog.bson` esce **1**. È un controllo che non
+  interroga il server e non costa niente, e distingue il dump completo da tutto il resto: `--oplog`
+  scrive `oplog.bson` per ultimo, quindi la sua presenza è la firma della riuscita.
+
+- **Riserve:** provato **un solo** modo di fallire presto, l'autenticazione. Un disco pieno o una
+  connessione che cade a metà appartengono al caso di V-036 — creano file e poi si fermano — e per
+  quelli il `rm -rf` resta corretto: la correzione non toglie la pulizia, le mette davanti la
+  proprietà della directory (`mktemp -d`). Non è stato misurato il caso in cui `--out` punta a una
+  directory che il chiamante ha creato ma che contiene già un dump precedente della stessa data:
+  lì `mongodump` sovrascrive, e la perdita avviene prima di qualunque `rm`.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0126
+
+---
+
+<a id="v-096"></a>
+### V-096 — Chi si oscura e chi no: `mongosh`, `mongodump` e `mongorestore` a confronto su `argv`
+
+- **Comandi:** un `mongodump` verso un indirizzo irraggiungibile, tenuto vivo dal timeout di
+  selezione del server, e una fotografia della tabella dei processi mentre gira:
+
+```bash
+docker exec -d mongo-rs-1 mongodump --host 192.0.2.1:27017 \
+  -u admin -p SENTINELLA-NON-E-UNA-PASSWORD-VERA \
+  --authenticationDatabase admin --out /tmp/dump-v096
+docker exec mongo-rs-1 ps -eo args | grep mongodump | grep -v grep
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, immagine `mongo:7.0.40`, `mongodump`
+  **100.18.0**, 6 settembre 2026. `192.0.2.1` è di [RFC 5737](https://www.rfc-editor.org/rfc/rfc5737),
+  riservato alla documentazione: non risponde, e il processo resta in piedi il tempo di
+  fotografarlo. Il valore passato è una sentinella, non la credenziale vera.
+
+- **Che cosa si voleva sapere:** [M-025](../app/docs/Sources.md#m-025) aveva misurato
+  `mongorestore` — 16 campioni su 16 con la password in chiaro — e chiudeva dichiarando una
+  riserva: «Non è stato verificato se `mongodump` riscriva `argv` dopo l'avvio, come fanno alcuni
+  strumenti». [V-047](#v-047) intanto aveva misurato che `mongosh` 2.10.0 lo fa. Restava aperto
+  l'unico dei tre che nessuno aveva guardato, e con esso la domanda vera: se l'esposizione sia una
+  proprietà del protocollo o dello strumento.
+
+- **Esito — `mongodump` non si oscura.** La riga esce intera:
+
+```
+mongodump --host 192.0.2.1:27017 -u admin -p SENTINELLA-NON-E-UNA-PASSWORD-VERA
+  --authenticationDatabase admin --out /tmp/dump-v096
+```
+
+  Nessuna riscrittura, nessun `<credentials>`: il valore è leggibile da chiunque possa eseguire
+  `ps` dentro il container. La riserva di M-025 si chiude, e il quadro dei tre strumenti diventa:
+
+| strumento | versione | dentro il container | sull'host |
+|---|---|---|---|
+| `mongosh` | 2.10.0 | **oscurato** — `mongodb://<credentials>@…` ([V-047](#v-047)) | visibile nella riga del client `docker` |
+| `mongodump` | 100.18.0 | **in chiaro** (questa scheda) | visibile nella riga del client `docker` |
+| `mongorestore` | 100.18.0 | **in chiaro** — 16/16 ([M-025](../app/docs/Sources.md#m-025)) | visibile nella riga del client `docker` |
+
+- **Esito, secondo punto — la regola che se ne ricava.** Non «`-p` espone» e nemmeno «`-p` è
+  sicuro»: **dipende dallo strumento, e il modo di saperlo è provarlo.** Due binari della stessa
+  distribuzione MongoDB, invocati allo stesso modo, si comportano in modo opposto. Una pagina che
+  mostra un comando con `-p` deve dire quale dei due casi è, perché il lettore non può dedurlo.
+
+- **Riserve:** misurato su una sola versione di ciascuno strumento, e su Linux dentro il container.
+  Il comportamento di `argv` non è documentato da MongoDB come garanzia: può cambiare fra versioni
+  in entrambe le direzioni, e la tabella qui sopra va rimisurata quando il lab cambia immagine. Non
+  è stato provato se `mongodump` si oscuri in una fase più tarda della sua esecuzione: la
+  fotografia è stata presa durante la selezione del server, cioè prima della connessione. La colonna
+  «sull'host» non è stata rimisurata qui — viene da V-047, ed è una proprietà del client `docker`,
+  non dello strumento invocato.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0127
+
+---
+
+<a id="v-097"></a>
+### V-097 — Uno shard perduto: che cosa risponde ancora, con quale errore, e dopo quanti secondi
+
+- **Comandi:** la scena che il repository ha già, che ferma un membro e lo rialza da sé:
+
+```bash
+make guasto-03      # PROFILO=palco ./tools/demo-sharded.sh guasto
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, stack 03 nel profilo **palco** — un membro per
+  shard — immagine `mongo:7.0.40`, `lab.ordini` con 20 000 documenti, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** [`sharded-cluster.md`](02-architetture/sharded-cluster.md) diceva
+  due cose incompatibili. Il §1.2 parlava di risposte parziali restituite «senza dire al client che
+  l'altra parte non c'è»; il §6.4 diceva che le query sullo shard perduto falliscono. Nessuna delle
+  due era misurata, e la fonte citata dal §6.4 — [S-069](#s-069) — dice soltanto che «reads or
+  writes directed at the available shards can still succeed», cioè **non** dice niente sulle altre.
+
+- **Esito, primo punto — il client viene informato, e l'errore nomina lo shard.** Fermato
+  `shard1a`, il router risponde così:
+
+```
+• l'ordine su shard2rs: trovato: 3   [1 s]
+• l'ordine su shard1rs: ✗ FailedToSatisfyReadPreference: Could not find host matching
+    read preference { mode: "primary" } for set shard1rs   [16 s]
+• il conteggio totale:  ✗ FailedToSatisfyReadPreference: Could not find host matching
+    read preference { mode: "primary" } for set shard1rs   [16 s]
+```
+
+  Non c'è nessuna risposta mutilata e nessun silenzio: c'è un errore, e dentro c'è il nome del
+  replica set mancante. Il §1.2 era falso su tutti e due i punti che affermava.
+
+- **Esito, secondo punto — il costo vero è il tempo, non la silenziosità.** La query che passa
+  costa **1 s**; le due che non passano costano **16 s** ciascuna prima di dire che non passano. È
+  il router che cerca un primario per `shard1rs` finché la selezione del server non scade — e in
+  questo profilo non lo troverà mai, perché lo shard ha un membro solo e non c'è nessuno da
+  eleggere. Un'applicazione che chiama in sincrono se li prende tutti.
+
+- **Esito, terzo punto — il ritorno è rapido.** `docker compose start shard1a`, e il totale è di
+  nuovo 20 000 **3 s** dopo il comando. La scena si ripara da sé: ferma un container e lo rialza,
+  non distrugge dati (ADR-0119).
+
+- **Riserve:** un caso resta **ragionato e non provato** — una query in broadcast i cui documenti
+  stiano *tutti* sullo shard vivo. Deve fallire per costruzione, perché il router la manda a tutti
+  proprio in quanto non sa dove siano i documenti; ma il conteggio totale misurato qui li vuole
+  entrambi, quindi non discrimina il caso. I 16 secondi sono il valore predefinito di
+  `serverSelectionTimeoutMS` visto da `mongosh` in questo lab, non una costante: un client che lo
+  configuri diversamente vedrà un'attesa diversa. Infine, tutto questo è il profilo **palco**: con
+  tre membri per shard la stessa scena finisce con un'elezione invece che con un'attesa, ed è la
+  differenza che il profilo `completo` esiste per mostrare.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0128
+
+---
+
+<a id="v-098"></a>
+### V-098 — Chi vince sul nome del progetto Compose: la flag, l'ambiente, il `name:` del file
+
+- **Comandi:** lo stesso stack 02 acceso, interrogato con un ambiente ostile — una variabile che
+  qualcuno potrebbe avere nel proprio profilo di shell senza pensarci:
+
+```bash
+COMPOSE_PROJECT_NAME=altro docker compose \
+  --env-file tools/images.env --env-file docker/02-replicaset/.env \
+  -f docker/02-replicaset/compose.yaml config | grep -m1 '^name:'
+COMPOSE_PROJECT_NAME=altro docker compose … ps --format '{{.Name}}'
+COMPOSE_PROJECT_NAME=altro docker compose -p sqlstart-02-replicaset … ps --format '{{.Name}}'
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, stack 02 acceso con i tre membri, 6 settembre
+  2026.
+
+- **Che cosa si voleva sapere:** il rilievo C-4 della review generale osservava che i tre file
+  Compose dichiarano `name:` e che questo non basta a fissare il progetto. L'osservazione da sola
+  non dice niente di operativo: la domanda misurabile è **chi vince** quando i due si contraddicono,
+  e che cosa diventano i bersagli del Makefile quando a perdere è il file.
+
+- **Esito, primo punto — l'ambiente batte il file.** `config` risolve `name: altro`. Il `name:`
+  scritto dentro `compose.yaml` non è un'imposizione: è un valore predefinito, e
+  `COMPOSE_PROJECT_NAME` gli passa davanti senza avvisare.
+
+- **Esito, secondo punto — e allora `ps` non vede più niente.** Con l'ambiente ostile e senza `-p`,
+  l'elenco dei container è **vuoto**, mentre i tre membri sono accesi e `docker ps` li mostra. Non è
+  un errore: è una risposta corretta a una domanda su un progetto che non esiste. Un `down` lanciato
+  lì dentro sarebbe un nulla di fatto che esce 0 — la forma peggiore, perché somiglia alla riuscita.
+
+- **Esito, terzo punto — `-p` batte tutti e due.** Stesso ambiente ostile, `-p
+  sqlstart-02-replicaset` sulla riga di comando: `config` risolve `name: sqlstart-02-replicaset`, e
+  `ps` elenca `mongo-rs-1`, `mongo-rs-2`, `mongo-rs-3`.
+
+- **Esito, quarto punto — il danno non è uniforme, ed è questo che scagiona `reset-01`.** `reset-02`
+  è `down` seguito da `docker volume rm --force $(DATI_02)`, e `DATI_02` si costruisce da
+  `PROGETTO_02`: con l'ambiente ostile i volumi verrebbero cancellati **comunque**, per nome
+  letterale, mentre il `down` che avrebbe dovuto smontarli prima non ha fatto niente — cancellare i
+  volumi di container ancora accesi. `reset-01` invece è `down -v` e basta: `-v` segue la selezione
+  del progetto, quindi nell'ambiente ostile non cancella **niente**. Sbaglia per difetto, e per
+  difetto non fa danno. Il rilievo C-5 chiedeva di nominare i volumi anche in `reset-01`: sarebbe
+  stato portarlo dentro il difetto di `reset-02`, non toglierlo.
+
+- **Riserve:** misurato su Docker 29.7.2 con Compose v2; la precedenza flag > ambiente > file è
+  documentata e stabile, ma resta una scelta dell'implementazione, non una legge. Non è stato
+  provato `down` con l'ambiente ostile, e deliberatamente: lo stack 02 serviva acceso, e la
+  conseguenza si legge già in `ps`. Il caso in cui `COMPOSE_PROJECT_NAME` valga per caso proprio
+  uno dei tre nomi del lab non è stato costruito: lì non ci sarebbe niente da vedere.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0129
+
+---
+
+<a id="v-099"></a>
+### V-099 — Una guardia che valida un valore e nel farlo lo interpreta
+
+- **Comandi:** il meccanismo isolato dalla guardia che lo usa, e poi la guardia intera:
+
+```bash
+printf 'completo\npalco\nstrumenti\n' | grep -qx  -- 'palco[ ]*' ; echo $?
+printf 'completo\npalco\nstrumenti\n' | grep -qxF -- 'palco[ ]*' ; echo $?
+make profilo-03 PROFILO='palco[ ]*'
+make profilo-03 PROFILO="palco'; echo IRRUZIONE; #"
+make profilo-03 PROFILO=palco
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, GNU Make 3.81 di sistema, `grep` BSD di macOS, file Compose
+  `docker/03-sharded/compose.yaml` con i tre profili dichiarati, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** i rilievi G-2 e G-3 dicevano che la guardia del profilo interpolava
+  il valore dentro il testo della shell. Sono due difetti diversi con lo stesso indirizzo, e
+  valevano misurati separatamente: uno riguarda **che cosa può eseguire** un valore ostile, l'altro
+  **che cosa può far passare** un valore soltanto sciatto.
+
+- **Esito, primo punto — il metacarattere passava, ed è il difetto che nessun recensore aveva
+  visto.** `grep -qx` tratta ciò che riceve come espressione regolare: con `palco[ ]*` risponde
+  **0**, cioè valido, perché la regex descrive «palco seguito da zero o più spazi» e `palco` la
+  soddisfa. Con `-F` la stessa riga risponde **1**. Una guardia che accetta `palco[ ]*` non è
+  permissiva per un capello: accetta una famiglia infinita di stringhe che poi arrivano a Compose
+  come nomi di profilo letterali, e lì non corrispondono a niente.
+
+- **Esito, secondo punto — l'apice non chiude più niente.** `PROFILO="palco'; echo IRRUZIONE; #"`
+  arriva alla guardia e ne esce come dato: la parola `IRRUZIONE` **non compare** in nessun punto
+  dell'output, e il messaggio d'errore riporta il valore intero, apice compreso:
+
+```
+PROFILO=palco'; echo IRRUZIONE; # non è un profilo di docker/03-sharded/compose.yaml.
+Quelli dichiarati sono: completo palco strumenti
+```
+
+- **Esito, terzo punto — la guardia continua a fare il suo mestiere.** `PROFILO=palco` esce **0** e
+  non stampa niente; `PROFILO='palco[ ]*'` esce **1** con il messaggio che elenca i tre profili
+  veri. L'elenco non è scritto nel Makefile: viene da `config --profiles`, cioè dal file Compose,
+  che è l'unico posto dove quell'elenco è vero.
+
+- **Riserve:** `grep -qxF` confronta stringhe intere e non normalizza niente, quindi uno spazio
+  finale invisibile resta un valore diverso e viene respinto — corretto, ma il messaggio d'errore
+  non aiuta a vederlo, perché uno spazio in coda non si distingue a schermo. Il valore arriva alla
+  ricetta per ambiente: chi invocasse la guardia da un contesto che non esporta `PROFILO`
+  misurerebbe un'altra cosa. Non è stato cercato un valore che sopravviva a `-F` e faccia comunque
+  danno a valle: dopo la guardia il valore va solo a `--profile` di Compose, che lo tratta
+  come nome.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0130
+
+---
+
+<a id="v-100"></a>
+### V-100 — Una sonda che esce in rete proprio per diagnosticare che la rete non c'è, e che conta le porte di qualcun altro
+
+- **Comandi:** la stessa immagine assente chiesta nei due modi, cronometrata:
+
+```bash
+time docker run --rm mongo:immagine-che-non-esiste true
+time docker run --rm --pull=never mongo:immagine-che-non-esiste true
+docker ps --filter 'label=com.docker.compose.project' --format '{{.Label "com.docker.compose.project"}}'
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** due rilievi diversi sullo stesso strumento. C-6 diceva che
+  `preflight.sh` può scaricare; C-9 che il conteggio delle porte occupate guarda più in là del lab.
+  Il preflight esiste per una sola scena — la sala senza rete, mezz'ora prima del talk — e in quella
+  scena entrambi i difetti si pagano.
+
+- **Esito, primo punto — senza `--pull=never` la sonda esce dalla macchina.** Con l'immagine
+  assente, il comando impiega **1,011 s** e nel mezzo c'è una richiesta a `docker.io`. Con la flag
+  risponde «No such image» in **0,023 s** e non esce dalla macchina. Quarantatré volte più veloce è
+  il dettaglio meno interessante: il punto è che il caso da diagnosticare — «le immagini non ci
+  sono» — è esattamente il caso in cui la sonda andava a chiederle alla rete che non c'è, e lì i
+  1,011 s diventano il timeout di chi aspetta un server irraggiungibile.
+
+- **Esito, secondo punto — «le porte del lab» erano le porte di chiunque.** Il filtro
+  `label=com.docker.compose.project` seleziona **ogni** container avviato da Compose sulla macchina,
+  non i tre progetti di questo repository. Su una macchina di sviluppo con altri stack accesi il
+  preflight annunciava porte occupate che nessun bersaglio di questo `make` avrebbe mai chiesto, e
+  al tempo stesso non aveva modo di dire quale delle proprie porte fosse davvero contesa.
+
+- **Esito, terzo punto — l'elenco dei progetti non si scrive due volte.** Il rimedio nomina i tre
+  progetti nel preflight, e questo crea subito una seconda copia di una verità che sta nel Makefile.
+  La copia è tenuta onesta da una prova, `test_il_preflight_conosce_i_progetti_del_makefile`, che
+  legge i due elenchi dai due file e li confronta. I due lettori sono stati verificati:
+  restituiscono entrambi `['sqlstart-01-standalone', 'sqlstart-02-replicaset',
+  'sqlstart-03-sharded']`, cioè la prova non passa a vuoto su due liste vuote.
+
+- **Riserve:** i due tempi sono una misura sola per caso, su una macchina con rete funzionante: in
+  sala il ramo senza flag durerebbe quanto il timeout del client, non 1,011 s, e quindi la misura
+  qui **sottostima** il danno che descrive. Il conteggio per progetto resta cieco a una porta
+  occupata da un processo che non è un container: quella la vede solo chi prova ad aprirla.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0131
+
+---
+
+<a id="v-101"></a>
+### V-101 — Un valore atteso scritto in un commento non è una verifica, e uno spazio non è una distribuzione
+
+- **Comandi:** i controlli di `reset-demo.sh` staccati dallo script e provati su casi costruiti, più
+  un chunk vuoto spostato davvero su un database usa-e-getta:
+
+```bash
+./tools/prova-c8.sh          # il solo riconoscimento della risposta, su cinque casi
+mongosh --eval 'sh.moveChunk(…)'   # su un database usa-e-getta, non sul lab
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, stack 03 nel profilo **palco**, immagine
+  `mongo:7.0.40`, database usa-e-getta creato e distrutto nella stessa sessione, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** i rilievi C-7 e C-8 dicevano che `reset-demo.sh` stampa esiti che
+  non ha guardato. Sono due forme dello stesso difetto e valevano separate, perché la prima si vede
+  leggendo e la seconda no.
+
+- **Esito, primo punto — le tre pulizie stampavano il verde a comando dato, non a esito visto.** Le
+  collezioni venivano tolte e poi si annunciava che erano state tolte, senza rileggere. Se una
+  `drop` fosse fallita — o se una collezione fosse ricomparsa nel frattempo — lo script lo avrebbe
+  detto verde. Il rimedio rilegge `getCollectionNames()` dopo la rimozione e distingue tre risposte:
+  quelle andate via, `RESIDUI:` con i nomi di quelle rimaste, e la risposta vuota, che è il terzo
+  caso e prima non esisteva: un'interrogazione che non risponde non è una pulizia riuscita.
+
+- **Esito, secondo punto — l'impronta attesa era in un commento.** I 50 000 documenti e la loro
+  somma erano scritti accanto al codice come promemoria per chi legge, e nessuno li confrontava.
+  Ora sono due costanti, `IMPRONTA_50K` e `IMPRONTA_20K`, e il confronto è una funzione che stampa
+  l'atteso e l'ottenuto quando divergono. È la nota di metodo che ne è uscita: **un valore atteso
+  scritto in un commento non è una verifica, è una speranza documentata.**
+
+- **Esito, terzo punto — uno spazio non è una distribuzione, e il caso è stato costruito davvero.**
+  Il controllo che distingue uno sharded cluster da un replica set travestito cercava uno spazio
+  nella risposta. La risposta `shard1rs=0 shard2rs=5` ne ha uno: un chunk vuoto su uno shard e
+  cinque documenti sull'altro passavano per «documenti su entrambi gli shard». Il caso non è stato
+  immaginato: è stato costruito su un database usa-e-getta spostando un chunk vuoto sul secondo
+  shard, e la prima stesura del controllo l'ha dichiarato verde davanti alla misura. Il rimedio
+  conta i token `nome=numero` e chiede due cose insieme: almeno due shard letti, e tutti con
+  documenti.
+
+- **Esito, quarto punto — il riconoscimento provato in isolamento, su cinque casi.** Passa solo
+  `shard1rs=10000 shard2rs=10000`. Sono errori tutti e quattro gli altri: il falso verde originale
+  `shard1rs=0 shard2rs=5`, un solo shard, una risposta vuota, e un testo libero di errore. Provare
+  il riconoscitore staccato dallo script è ciò che ha reso possibile costruire i casi che sullo
+  stack vero non si sanno provocare senza rompere qualcosa.
+
+- **Riserve:** l'impronta è legata al seme dei dati di demo: se cambiano i documenti cambiano le due
+  costanti, e la prova diventa un promemoria da aggiornare — è il costo che si paga per avere un
+  confronto invece di un commento. Il conteggio dei token non verifica che gli shard nominati siano
+  quelli attesi, solo che siano almeno due e tutti popolati; nominare gli shard avrebbe legato lo
+  script al profilo. Il terzo caso, la risposta vuota, è provato in isolamento ma non è mai stato
+  osservato sullo stack vero.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0132
+
+---
+
+<a id="v-102"></a>
+### V-102 — L'eccezione localhost è un fermo di processo, e una sessione che si toglie l'utente non può verificare di averlo tolto
+
+- **Comandi:** tre misure su container usa-e-getta con `--auth` e **zero utenti**, che è la sola
+  condizione in cui l'eccezione localhost è aperta, e che sugli stack del lab non si verifica mai
+  perché l'init crea subito l'amministratore. Nessuna tocca il lab:
+
+```bash
+docker run -d --name c3-porta-aperta mongo@sha256:b6421fd6… --auth --bind_ip_all
+mongosh --host localhost --eval 'createUser → auth → dropUser → verifica'
+docker restart c3-latch      # e la stessa sonda, prima e dopo
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Docker 29.7.2, immagine `mongo:7.0.40` fissata per digest,
+  container `c3-porta-aperta`, `c3-diagnosi`, `c3-latch`, `c3-finale`, tutti rimossi a fine misura,
+  6 settembre 2026.
+
+- **Che cosa si voleva sapere:** il rilievo C-3 diceva che la sonda dell'eccezione localhost in
+  `smoke-sharded.sh` può lasciare sullo shard un amministratore che non doveva esistere. Il rilievo
+  era giusto. La causa che proponeva — che `dropUser` potesse fallire — si è rivelata sbagliata, e
+  la causa cambia il rimedio.
+
+- **Esito, primo punto — l'utente viene rimosso, e la prima verifica lo negava.** La prima stesura
+  del rimedio verificava la rimozione con `admin.system.users.countDocuments(...)` subito dopo il
+  `dropUser`, nella stessa sessione. Misurato: `CREATO-VERIFICA-FALLITA: Unauthorized`. La prima
+  lettura — «il drop è fallito» — era **sbagliata**. La diagnosi passo per passo dice
+  `5 dropUser: OK` e mette il rosso solo sui passi successivi: togliendo l'utente con cui ci si è
+  autenticati si perdono nello stesso istante i privilegi per guardare se è andato via, e sia
+  `getUsers` sia `system.users` rispondono `Unauthorized`.
+
+- **Esito, secondo punto — la prova che una credenziale non c'è più è che non apre più.** Una
+  connessione nuova con la credenziale usa-e-getta risponde `MongoServerError: Authentication
+  failed.` — ed è l'unica verifica possibile, perché è l'unica che non ha privilegi da perdere. Per
+  fortuna è anche la più diretta: non chiede se il documento c'è, chiede se la porta si apre.
+
+- **Esito, terzo punto — anche il secondo controllo era invalido, e l'ha detto la misura.** Per
+  confermare la rimozione avevo rilanciato la sonda: «se il primo utente è sparito, la porta deve
+  essere di nuovo aperta». Non misura l'esistenza dell'utente. Costruito il caso apposta — creare
+  l'unico utente e toglierlo, poi chiedere — la risposta è `Unauthorized — eccezione CHIUSA` con
+  **zero utenti** nell'istanza. Dopo `docker restart`, la stessa domanda risponde
+  `CREATO — eccezione APERTA`. L'eccezione localhost è un **fermo di processo**: si chiude alla
+  creazione del primo utente e resta chiusa per la vita di quel `mongod`, indipendentemente da
+  quanti utenti restino.
+
+- **Esito, quarto punto — che cosa cambia per chi opera.** Un nodo che perde tutti i suoi
+  amministratori non è «aperto»: continua a rifiutare finché è acceso, e si riapre al riavvio. È il
+  contrario dell'intuizione, ed è la ragione per cui la nota della sonda dice di rimuovere a mano un
+  residuo **prima** del riavvio del nodo, non dopo.
+
+- **Esito, quinto punto — la forma finale provata sui due casi per cui esiste.** Porta aperta, su
+  container usa-e-getta: `TOLTO`, seguito da «la sua credenziale non apre più». Porta chiusa, sul
+  nodo vero `sh-shard1a`: `Unauthorized`, e **niente creato**. `make smoke-03` intero riporta le due
+  righe della sonda verdi.
+
+- **Riserve:** la password usa-e-getta transita nell'argv del client `docker` sull'host, che
+  [ADR-0054](Decision.md#adr-0054) tiene lontano dalla credenziale vera; è ammesso qui perché è
+  casuale, vive qualche millisecondo e appartiene a un utente che lo stesso comando cancella — ma
+  resta una deroga, non un modello da copiare. Il fermo di processo è misurato su MongoDB 7.0.40:
+  non è stato cercato nella documentazione se sia garantito o incidentale, e su un'altra versione
+  andrebbe rimisurato. Il ramo `NON-TOLTO` non è mai stato osservato: è provato per costruzione del
+  codice, non per esperimento.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0133
+
+---
+
+<a id="v-103"></a>
+### V-103 — Un file che sembra una registrazione e non lo è
+
+- **Comandi:** due copioni che sbagliano la riga di regia, provati contro la versione corretta e
+  contro la copia pre-rimedio presa da `HEAD`:
+
+```bash
+# riga con le virgolette aperte:      /bin/echo "non chiusa
+# riga che nomina un comando assente: /bin/comando-che-non-esiste
+uv run --directory tools pytest tools/tests/test_registra_terminale.py -q
+```
+
+- **Ambiente:** macOS 26.6.2 arm64, Python 3.13.15 di `uv`, 6 settembre 2026.
+
+- **Che cosa si voleva sapere:** il rilievo C-10 diceva che `registra-terminale.py` non gestisce una
+  riga di regia inanalizzabile. Restava da misurare che cosa succede davvero, perché la differenza
+  tra «esce con un errore brutto» e «lascia sul disco un file che mente» è tutta la differenza.
+
+- **Esito, primo punto — prima del rimedio, tre cose insieme.** Contro la copia di `HEAD`: uscita
+  **1**, un `Traceback` intero fino a `FileNotFoundError`, e sul disco un `.cast` di **192 byte**
+  che contiene la riga di regia e nessun marcatore. Il terzo è il danno vero: un file che ha
+  l'estensione giusta, l'intestazione giusta e nessun contenuto, e che chi lo trova più tardi non ha
+  modo di distinguere da una registrazione riuscita se non aprendolo.
+
+- **Esito, secondo punto — dopo il rimedio, le due scene escono 125.** Entrambi i casi escono
+  **125**, con il nome dell'eccezione nel messaggio (`ValueError`, `FileNotFoundError`) e **nessun**
+  traceback. Nel `.cast` la parola «ripartito» compare **zero** volte: la scena non riparte su un
+  comando che non è mai stato eseguito. Nessun processo resta appeso.
+
+- **Esito, terzo punto — 125 non è forma.** È il solo codice che distingue «è fallita la regia» da
+  «è fallito il comando registrato». Chi registra le scene ha bisogno della differenza, perché la
+  prima si ripara nel copione e la seconda no. Senza il rimedio l'eccezione saliva fino in cima e il
+  processo usciva **1**, cioè il codice che un comando registrato usa per dire di essere
+  andato male.
+
+- **Esito, quarto punto — il percorso buono non è cambiato.** Un copione che funziona esce **0** e
+  la scena riparte come prima. La suite di `tools` passa da 181 a **183** prove.
+
+- **Riserve:** il `.cast` continua a essere scritto anche quando la regia fallisce, ed è una scelta
+  — vedi [ADR-0132](Decision.md#adr-0132). Le due prove verificano il codice di uscita, l'assenza di
+  traceback e il contenuto del `.cast`, non il messaggio parola per parola: cambiare la formulazione
+  non le fa cadere, ed è voluto. Non sono stati cercati altri modi di far fallire `shlex.split` o
+  `subprocess.run` oltre a questi due: sono i due che `OSError` e `ValueError` coprono per
+  categoria, non per elenco.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0132
+
+---
+
+<a id="v-104"></a>
+### V-104 — La convenzione di questo repository, ricavata dai suoi 164 commit invece che dichiarata
+
+- **Comandi:** la storia interrogata, non la memoria:
+
+```bash
+git log --format=%s          # i 164 soggetti, poi contati per tipo, scope, maiuscola, lunghezza
+git log --merges --format='%h %s'
+git branch -a --format='%(refname:short)'
+git log --oneline -3 main
+```
+
+- **Ambiente:** `release/1.0` del repository al 6 settembre 2026, 164 commit dall'inizio.
+
+- **Che cosa si voleva sapere:** [ADR-0123](Decision.md#adr-0123) dichiara che questo repository non
+  ha una scheda che fissi il proprio modello dei rami, la strategia di merge o lo standard dei
+  messaggi di commit. Sei rilievi della review generale — C-1, C-2, G-1, G-5, G-6, G-7 — chiedono
+  cose diverse che poggiano tutte su quella sede mancante. Prima di scriverla bisognava sapere che
+  cosa il repository **fa già**, perché una convenzione dichiarata che contraddice
+  centosessantaquattro commit non è una convenzione: è un secondo problema.
+
+- **Esito, primo punto — cinque tipi, e la distribuzione dice a che cosa serve il repository.**
+  `docs` 77, `feat` 52, `fix` 22, `test` 5, `chore` 3. Centocinquantanove commit su 164 hanno la
+  forma `tipo: soggetto`; i cinque che non ce l'hanno sono i quattro merge di PR e il commit
+  iniziale. Che `docs` sia il tipo più frequente non è un'anomalia da correggere: questo è il
+  repository di un talk, e il materiale didattico è il prodotto quanto il codice.
+
+- **Esito, secondo punto — lo scope non si usa. Zero volte su 159.** Non «raramente», non «solo dove
+  serve»: mai. La parentesi di Conventional Commits non compare in nessun soggetto della storia.
+
+- **Esito, terzo punto — il soggetto è minuscolo, tranne quando comincia con qualcosa che si scrive
+  maiuscolo.** Ventinove soggetti su 159 cominciano con una maiuscola, e non sono eccezioni sparse:
+  tredici aprono con un identificatore del repository (`ADR-0123`, `V-090`, `PR`, `README`), sedici
+  con il designatore di un compito di piano (`Task 8 — le due morti di un primario…`). Nessuno dei
+  159 comincia con una parola comune maiuscola. La regola vera non è «minuscolo»: è «minuscolo,
+  e gli identificatori tengono le loro maiuscole».
+
+- **Esito, quarto punto — il soggetto non sta in 72 colonne, e nemmeno ci prova.** Cinquantaquattro
+  soggetti su 164 superano le 72 colonne, il più lungo ne ha **100**. Il limite di fatto è 100, lo
+  stesso del corpo dei documenti. Scrivere 72 in una scheda vorrebbe dire dichiarare fuori norma un
+  terzo della storia.
+
+- **Esito, quinto punto — quattro merge, tutti da PR, tutti in `develop`.** Le uniche fusioni della
+  storia sono `Merge pull request #2…#5`, una per feature, ciascuna con il nome del ramo d'origine
+  nel soggetto: `feature/01-stack-standalone`, `feature/02-stack-replicaset`,
+  `feature/03-stack-sharded`, `feature/04-app-python`. Nessun rebase sopra `develop`, nessuna
+  fusione fast-forward, nessun ramo chiuso fuori da una PR.
+
+- **Esito, sesto punto — `main` è fermo al commit iniziale.** Non è dimenticanza: è il modello. Il
+  lavoro vive su `develop`, i rami di feature entrano lì, e `main` riceve solo la release. Al 6
+  settembre 2026 `main` ha un commit solo, `1523ebf Initial commit`, e i rami che esistono sono
+  `main`, `develop`, `release/1.0`.
+
+- **Riserve:** questa è la convenzione **osservata**, non una che qualcuno abbia scelto in
+  anticipo — e la differenza conta, perché una regolarità può essere un'abitudine di chi ha scritto
+  finora invece di una decisione. Scriverla in una scheda la trasforma nella seconda, ed è
+  esattamente lo scopo. I quattro merge sono pochi per chiamarla strategia provata: dicono che
+  finora non se n'è usata un'altra, non che un'altra sia stata scartata. Il conteggio dei tipi vale
+  per la storia fino a qui: `refactor`, `style`, `perf`, `ci` e `build` non compaiono, ma non per un
+  divieto — semplicemente non è ancora capitato di averne bisogno.
+
+- **Data:** 2026-09-06
+- **Usata da:** ADR-0134
+
+---
+
+<a id="v-105"></a>
+### V-105 — La cronologia di `release/1.0` riscritta: gli invarianti che tengono, e le due righe che due passate di redazione non avevano visto
+
+- **Comandi:** la misura dell'esposizione, la riscrittura in un clone di lavoro, e gli invarianti
+  dopo. Il nome cercato è scritto col segnaposto di [V-094](#v-094): metterlo per esteso qui
+  rimetterebbe nel repository proprio ciò che questa verifica racconta di aver tolto.
+
+```bash
+git log --format=%B                                          # 5 messaggi, per 14 righe
+git log -p -U0 | grep -ci <nome del repository d'origine>    # 8 commit col diff sporco
+git grep -c -i <nome del repository d'origine> release/1.0   # e 2 nell'albero di oggi
+git show --numstat --format= <il commit della redazione>     # 28 file, +146/-138: pura redazione
+
+git clone --no-local .claude/worktrees/release-1.0 ../SqlStart2026-riscrittura
+git-filter-repo --refs 5ce4e5b..release/1.0 --prune-empty never \
+    --prune-degenerate never --blob-callback "$CB_BLOB" --commit-callback "$CB_COMMIT"
+
+git diff --numstat <vecchio>^ <vecchio>      # 23 volte, contro il gemello riscritto
+git merge-base --is-ancestor develop release/1.0
+uv run --directory app pytest -q && uv run --directory tools pytest -q && make docs-check
+```
+
+- **Ambiente:** portatile Apple Silicon, macOS 26.6, 7 settembre 2026. `git` di sistema e
+  `git-filter-repo` da Homebrew. Il lavoro si è svolto **in un clone**, mai nel repository:
+  `~/Sviluppo/GITHUB/SqlStart2026-riscrittura`, con i due `.env` raggiunti per collegamento
+  ([ADR-0083](Decision.md#adr-0083)). Repository ancora **privato**. Demone Docker **spento**:
+  le prove d'integrazione non erano misurabili, ed è dichiarato invece che aggirato.
+
+- **Che cosa si voleva sapere:** [ADR-0125](Decision.md#adr-0125) ha ripulito l'albero e ha lasciato
+  la cronologia com'era, dichiarando che riscriverla è una decisione del Product Owner. Il Product
+  Owner l'ha presa. Prima di eseguirla servivano tre risposte: **quanto** nome c'è davvero e dove;
+  **che cosa** deve restare identico perché la riscrittura sia una redazione e non un rifacimento;
+  e **come accorgersi** che qualcosa è cambiato per sbaglio, dato che il confronto ovvio —
+  l'albero finale — è proprio quello che una riscrittura sbagliata può lasciare intatto.
+
+- **Esito, primo punto — l'esposizione, e dov'è confinata.** Cinque messaggi di commit nominano il
+  repository d'origine, per **14 righe**; otto commit hanno il **diff** sporco; tutti stanno fra
+  `3f22d6f` e la scheda che li racconta, dentro `release/1.0`. `develop` e `main` sono puliti, il
+  che è la ragione per cui l'operazione è possibile oggi e non dopo il 16 settembre. Il nome compare
+  in due forme e in due misure diverse: **218 volte** con le maiuscole al loro posto, **6** tutto
+  minuscolo.
+
+- **Esito, secondo punto — la redazione era pura, e il conto lo dimostra.** Il commit che
+  l'applicò — `69321fd` nella storia riscritta, dove ormai è vuoto — toccava 28 file, e in
+  ognuno aggiungeva quasi esattamente quanto toglieva:
+  **+146 / −138**, otto righe di scarto in tutto, che sono i paragrafi allungati dalla perifrasi e
+  riavvolti. Non porta ADR-0125 con sé — quella scheda entra col commit dopo. È questo a rendere
+  lecito applicare la sua redazione **all'indietro**: quel commit non fa altro.
+
+- **Esito, terzo punto — tre regole, e 27 paragrafi presi verbatim.** I 48 blob che portano il nome
+  nella forma esatta si risolvono così: **28** coincidono con la versione pre-redazione, e prendono
+  la post-redazione così com'è; **5** accettano quella toppa per il loro percorso; **15**
+  vanno redatti a mano, per **44 occorrenze**. Dentro questi ultimi, dove il **paragrafo** di
+  partenza è identico a quello che la mano umana aveva davanti, si prende la sua resa letterale, a
+  capo compresi: **27 paragrafi su 40**. Riavvolgerli da capo avrebbe dato le stesse parole spezzate
+  in punti diversi, e ogni differenza di quel genere diventa rumore nel diff dei commit successivi.
+
+- **Esito, quarto punto — un paragrafo che si è mangiato una tabella.** La prima stesura della
+  redazione a mano ha prodotto, in `.claude/skills/workflow-conventions/SKILL.md`, una riga così:
+  `conflitto vince la scheda. | Decisione | Qui è già | Scheda | |---|---|---| | 1. Merge strategy`.
+  Il riavvolgimento aveva schiacciato una tabella dentro il paragrafo che la precede. La causa è di
+  una riga: la guardia che protegge le righe di struttura cercava le tabelle fra quelle che
+  cominciano con `|`, e **dentro un `> [!IMPORTANT]` le righe di tabella cominciano con `> |`**.
+  Nessuna prova l'ha trovato: è saltato fuori **guardando il diff**. Il rimedio ha due metà — la
+  guardia spoglia la riga dei capi di citazione prima di giudicarla, e un controllo nuovo pretende
+  che l'elenco delle righe di struttura sia identico prima e dopo.
+
+- **Esito, quinto punto — la verifica che non poteva vedere il difetto.** Il controllo che
+  confrontava la mia redazione con quella umana lavorava su paragrafi **normalizzati**, e la
+  normalizzazione butta via gli a capo: una tabella inghiottita gli passava davanti senza far
+  rumore. Rifatto anche sul testo letterale, ha subito segnalato **11 paragrafi** con le parole
+  giuste e gli a capo in punti diversi. Non sono stati corretti aggiustando il riavvolgitore, ma
+  togliendogli il lavoro: dove il paragrafo di partenza è identico, si copia la resa umana. Da
+  allora: 0 discordanze di parole, 0 di a capo.
+
+- **Esito, sesto punto — due righe minuscole, e chi ce le ha rimesse.** Le tre regole cercano il
+  nome **con le maiuscole al loro posto**, come faceva la redazione di ADR-0125. Il blocco comandi
+  di [V-094](#v-094) lo scrive **tutto minuscolo**, perché lì è l'argomento di una ricerca che il
+  caso non lo distingue. Nessuna delle due passate l'ha visto, e le due righe sono arrivate
+  **nell'albero di oggi**. L'ordine dei fatti è ciò che vale: la redazione ripulisce il testo, e
+  il commit **immediatamente successivo** — quello che scrive la scheda per raccontare la pulizia —
+  rimette dentro il nome, nel comando che l'aveva cercato. La clausola «84 → 0 nei tracciati» era
+  vera quando è stata misurata e falsa nel momento in cui è stata scritta. Le riserve di V-094 lo
+  avevano perfino previsto: «non trova un nome scritto diversamente». Cinque versioni storiche di
+  `docs/Sources.md` portano quelle righe, per **10 occorrenze**; tre di quelle versioni non erano
+  sporche in nessun altro modo, e nessuna delle tre regole le avrebbe mai toccate. Da qui la quarta
+  regola, e la decisione che ogni controllo di questa faccenda si faccia **senza guardare il caso**.
+
+- **Esito, settimo punto — le firme, e perché il taglio è parziale.** La riscrittura **non conserva
+  le firme GPG**. Il commit iniziale di `main` e il merge di testa di `develop` sono firmati
+  dall'interfaccia web di GitHub. Riscrivere tutta la storia le avrebbe tolte in silenzio, e avrebbe
+  cambiato l'SHA di `develop`, che smetterebbe di essere antenato: la fusione del 16 duplicherebbe
+  la storia invece di unirla. La base del taglio è quindi `5ce4e5b`, e i commit riscritti sono
+  **23 su 172**.
+
+- **Esito, ottavo punto — il conto che chiude, commit per commit.** Confrontare solo l'albero finale
+  non basta: un albero giusto raggiunto da diff sbagliati resta sbagliato per chi legge la storia.
+  Il confronto vero è il **diffstat di ogni commit, prima contro dopo**: file, righe aggiunte,
+  righe tolte, insieme dei percorsi. Su 23 commit ne differiscono **4**, e le differenze si sommano
+  esattamente alle otto righe che la perifrasi aggiunge: **+6** su `3f22d6f` (le sei skill),
+  **+1** su `e7fb19d`, **+1** su `72cd01b`, e la redazione che passa da 28 file a **zero**. È questo
+  controllo, e non il confronto degli alberi, ad aver scoperto il difetto del quarto punto: il
+  diffstat di `71f4e00` era passato da un uniforme +9/−1 su 12 file a +35/−22.
+
+- **Esito, nono punto — gli invarianti, misurati sull'esito.** L'albero del tip è identico
+  all'originale **tranne le due righe del sesto punto** — un file, due righe, ed è la correzione,
+  non un effetto collaterale. Sui rami locali: **982 blob distinti, 0 sporchi**; **172 commit, 0
+  messaggi sporchi**, e stavolta la domanda è posta senza guardare il caso. `develop` è ancora
+  antenato di `release/1.0`; `develop` resta a `b854e5f7db3c` e `main` a `1523ebfed54e`. I due
+  soggetti riscritti restano dentro le colonne d'uso: 90 e 57.
+
+- **Esito, decimo punto — le citazioni di SHA, e la trappola dei due per riga.** Ventitré commit
+  hanno un identificatore nuovo, e **13 siti in 5 file** li citavano. Due righe di
+  `docs/Decision.md` portano lo stesso SHA **due volte**: una dentro i backtick e una dentro l'URL
+  di GitHub. Una ricerca sulla sola forma con i backtick ne trova 10 e ne ripara metà, lasciando
+  l'altra rotta e l'impressione di aver finito. Riparati tutti, ricontati a **0**. I 22 candidati
+  che la forma pesca e la mappa non conosce sono estranei: 18 sono sole cifre — codici di log di
+  MongoDB, conteggi di byte, la data del talk — e 4 sono identificatori altrui, fra cui un commit
+  di `mongodb/mongo` e l'identificatore di un'immagine Docker.
+
+- **Esito, undicesimo punto — le suite.** `649/650` prove unitarie, `183/183` sugli strumenti,
+  `mypy` pulito su 67 sorgenti, `make docs-check` verde. L'unica rossa è
+  `test_un_nodo_scritto_a_mano_che_non_esiste_si_ferma_prima_del_carico`, e **fallisce allo stesso
+  modo nel worktree originale**: con il demone Docker spento lo stack `02` non è in piedi, l'elenco
+  dei nodi è vuoto, e Click emette l'errore d'uso prima che il messaggio dell'applicazione possa
+  nominare `mongo-rs-9`. È ambientale, non una regressione della riscrittura.
+
+- **Esito, dodicesimo punto — pubblicata, e che cosa resta sui server di GitHub.** Il Product Owner
+  ha eseguito la push il 7 settembre: `release/1.0` remota a `7916b29`, `develop` e `main` fermi, il
+  worktree riallineato. Rifatte sulla storia pubblicata, le misure tengono: **990 blob distinti e 0
+  sporchi, 174 commit e 0 messaggi sporchi**, sempre senza guardare il caso. Ma il force-push **non
+  cancella**: rende gli oggetti irraggiungibili dai rami, e GitHub continua a servirli per SHA
+  finché non passa la garbage collection — anche col prefisso di sette, verificato chiedendoli. Il
+  feed degli eventi del repository espone **10** SHA di `release/1.0`, **7** dei quali nessun ramo
+  raggiunge più; tutti e sette rispondono ancora, e **due portano il nome**: 3 occorrenze nel
+  messaggio e 21 nel diff restituito per uno, 3 e 4 per l'altro. E da un orfano si cammina ai
+  genitori: quei sette sono porte, non l'inventario di ciò che c'è dietro.
+
+- **Esito, tredicesimo punto — le schede che spiegano la redazione stavano pubblicando le chiavi.**
+  [ADR-0137](Decision.md#adr-0137), questa scheda e le citazioni nominavano cinque commit con l'SHA
+  che avevano **prima** della riscrittura, in **15 punti**. Sono due difetti nello stesso posto:
+  citazioni rotte, perché quei commit nella storia pubblicata non esistono più; e chiavi
+  funzionanti verso la storia non redatta, perché a GitHub il prefisso di sette basta. Riparati a
+  **0**. La regola che li ripara non è una sola: dove il riferimento serve a identificare un commit
+  si scrive l'SHA nuovo, che è anche l'unico vero; dove la frase descrive com'era il commit *prima*
+  della riscrittura si nomina la cosa invece del commit, perché un SHA nuovo lì direbbe il falso —
+  quel commit, oggi, è vuoto.
+
+- **Riserve:** le prove d'integrazione **non sono state misurate**, perché avrebbero richiesto di
+  accendere gli stack, e lo stack `01` non va ripulito ([V-090](#v-090)) né lo `03` azzerato. Finché
+  restano non misurate, l'invariante «le suite verdi» vale per due terzi. Il censimento è
+  **testuale** come quello di V-094, e la lezione del sesto punto è che «testuale» ha più modi di
+  fallire di quanti se ne prevedano: adesso guarda anche il minuscolo, ma non troverebbe il nome
+  spezzato da un a capo dentro una parola, né un'allusione che non nomina. In modalità parziale i
+  riferimenti `origin/*` del clone puntano ancora alla storia vecchia, quindi gli oggetti vecchi
+  esistono ancora e chiedere «esiste?» risponde di sì anche per uno SHA che nessun ramo raggiunge
+  più: la domanda giusta è «è raggiungibile?», ed è quella che le misure qui sopra pongono — ma la
+  risposta di GitHub non coincide con quella di `git`, ed è il dodicesimo punto. Che cosa farne è
+  stato deciso lo stesso giorno, due volte: [ADR-0138](Decision.md#adr-0138) chiedeva la garbage
+  collection all'assistenza, [ADR-0139](Decision.md#adr-0139) l'ha ritirata perché il requisito era
+  «non visibile», non «non recuperabile». Resta quindi vero, e per scelta, che la redazione è
+  completa nella storia che si clona e aggirabile da chi conosce quaranta caratteri, o sette — che
+  però il repository non scrive più da nessuna parte, ed è la condizione che rende la scelta
+  sostenibile. Questa scheda misura; che cosa farne dei numeri è una decisione, e sta altrove.
+
+- **Data:** 2026-09-07
+- **Usata da:** ADR-0137, ADR-0138, ADR-0139
+
+---
+
+<a id="s-078"></a>
+### S-078 — GitHub Docs: Removing sensitive data from a repository
+
+- **URL:** https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository
+- **Editore:** GitHub, Inc. — GitHub Docs
+- **Versione documentata:** free-pro-team / GitHub Enterprise Cloud (corrente)
+- **Consultata:** 2026-09-07
+- **Verdetto:** conferma il meccanismo su cui si appoggia [ADR-0138](Decision.md#adr-0138), e vi
+  aggiunge una condizione che questo caso potrebbe non soddisfare
+- **Perché è stata cercata.** Dopo il force-push del 7 settembre gli oggetti orfani erano ancora
+  serviti per SHA ([V-105](#v-105), dodicesimo punto). La strada scelta — chiedere all'assistenza
+  la garbage collection — poggiava su una convinzione diffusa e mai verificata da questo
+  repository. Andava letta la pagina, non ricordata.
+- **Cosa afferma, primo punto — riscrivere e spingere non basta, e la pagina lo dice per prima
+  cosa.** «If you only rewrite your history and force push it, the commits with sensitive data may
+  still be accessible elsewhere:» e ne elenca tre: «In any clones or forks of your repository»,
+  «Directly via their SHA-1 hashes in cached views on GitHub», «Through any pull requests that
+  reference them». È la conferma indipendente della misura del dodicesimo punto di V-105.
+- **Cosa afferma, secondo punto — che cosa fa l'assistenza, e a quali condizioni.** «If you have
+  successfully cleaned up all references other than PRs, and no forks have references to the
+  sensitive data, Support will then:» — «Dereference or delete any affected PRs on GitHub.», «Run a
+  garbage collection on the server to expunge the sensitive data from storage.», «Remove cached
+  views.» Le due precondizioni qui sono soddisfatte: **0 fork** e **0 PR coinvolte** (i cinque
+  `refs/pull/*/head` sono tutti antenati di `develop`, e i commit riscritti stanno tutti dopo).
+- **Cosa afferma, terzo punto — la condizione che può fermare tutto.** «GitHub Support won't remove
+  non-sensitive data, and will only assist in the removal of sensitive data in cases where we
+  determine that the risk can't be mitigated by rotating affected credentials.» La frase compare
+  **due volte** nella pagina, e non è una postilla: è il criterio con cui l'assistenza decide se
+  aiutare. Chi giudica è GitHub, non chi chiede.
+- **Cosa afferma, quarto punto — che cosa chiede il ticket.** «The owner and repository name in
+  question» e «The number of affected pull requests, found in the previous step. This is used by
+  Support to verify you understand how much will be affected.» Nessuno dei due campi chiede di
+  scrivere il dato da rimuovere.
+- **Riserve:** la pagina è scritta per le **credenziali** — la sua prima raccomandazione è
+  revocarle e ruotarle, e il criterio del terzo punto presuppone che il dato sia ruotabile. Il dato
+  di questo caso è il nome di un altro repository: non è una credenziale, e non si ruota. Può
+  quindi cadere fuori dal criterio da entrambi i lati, ed è il rischio che
+  [ADR-0138](Decision.md#adr-0138) assume esplicitamente. Le citazioni qui sopra vengono dal
+  **sorgente Markdown** della pagina (`github/docs`, `main`), non dalla resa HTML: la lettura
+  mediata restituiva un testo mutilo delle
+  parole funzione, che non si può citare. I segnaposto Liquid del sorgente — `{% raw %}{% data
+  variables.product.github %}{% endraw %}` — sono stati risolti in «GitHub».
+- **Data:** 2026-09-07
+- **Usata da:** ADR-0138, ADR-0139
+
+---
+
+<a id="v-106"></a>
+### V-106 — Registrare lo schermo di questo portatile: i dispositivi, le opzioni che il dispositivo accetta davvero, e un guasto che non c'era
+
+- **Comandi:** l'enumerazione dei dispositivi, sei acquisizioni brevi con opzioni diverse, e la
+  rilettura di ciò che ne è uscito.
+
+```bash
+ffmpeg -f avfoundation -list_devices true -i ""
+ffmpeg -f avfoundation -pixel_format uyvy422 -capture_cursor 1 -i "3:0" -t 3 \
+  -c:v h264_videotoolbox -b:v 6M -pix_fmt yuv420p -color_range mpeg -c:a aac -b:a 128k prova.mp4
+ffprobe -show_entries format=duration,size -show_entries stream=codec_type,nb_frames prova.mp4
+ffmpeg -i prova.mp4 -af volumedetect -f null -
+```
+
+- **Ambiente:** MacBook Pro Apple Silicon, macOS 26.6.2, 7 settembre 2026. `ffmpeg` e `ffprobe`
+  6.x da Homebrew (`/opt/homebrew/bin`), terminale iTerm, schermo interno. Demone Docker spento:
+  nessuno stack era acceso, e le acquisizioni hanno ripreso una finestra di terminale qualunque.
+- **Che cosa si voleva sapere:** la procedura dei filmati diceva «si registra lo schermo» e non
+  diceva con che cosa ([ADR-0016](Decision.md#adr-0016) chiede i `.mp4`,
+  [`preflight.sh`](../tools/preflight.sh) già li conta, e la cartella era vuota). Prima di
+  scrivere uno strumento servivano quattro risposte: quali dispositivi ci sono e come si nominano;
+  quali opzioni AVFoundation accetta davvero; quanto costa registrare mentre una scena misura sé
+  stessa; e come accorgersi che il microfono non ha inciso.
+
+- **Esito, primo punto — gli indici esistono, e si spostano.** `-list_devices true` elenca oggi
+  quattro ingressi video — `[0]` FaceTime HD Camera, `[1]` OBS Virtual Camera, `[2]` OBSBOT
+  Virtual Camera, `[3]` Capture screen 0 — e due audio: `[0]` MacBook Pro Microphone, `[1]`
+  Microsoft Teams Audio. L'indice dello schermo è `3` **su questa macchina oggi**: l'ordine è
+  quello di scoperta, e installare o togliere un'applicazione che espone una fotocamera virtuale
+  lo cambia. Uno strumento che scrivesse `3` nel comando un giorno registrerebbe la webcam del
+  relatore invece dello schermo, e lo scoprirebbe riguardando il filmato.
+
+- **Esito, secondo punto — i permessi sono un costo di prima corsa, e uno riavvia il terminale.**
+  Il primo tentativo di acquisizione **non è terminato**: è rimasto appeso oltre novanta secondi
+  in attesa della finestra di dialogo TCC, e i due processi sono stati uccisi a mano. Concedere
+  «Registrazione schermo» sblocca il video; concedere «Microfono» **ha fatto ripartire iTerm**,
+  riferito dall'operatore. Non è un difetto dello strumento e non si può eliminare: si può solo
+  pagare in anticipo. È la ragione per cui la pagina delle registrazioni lo dice in un riquadro.
+
+- **Esito, terzo punto — il formato d'ingresso si dichiara, o si ricevono cinque righe.** Lo
+  schermo offre `uyvy422, yuyv422, nv12, 0rgb, bgr0`. Senza `-pixel_format` prima di `-i`, ffmpeg
+  chiede `yuv420p` — che è il formato d'**uscita** — e stampa a ogni corsa cinque righe che
+  elencano i formati e annunciano `Overriding selected pixel format to use uyvy422 instead`, per
+  poi produrre lo stesso file. Il comportamento è quello documentato in [S-079](#s-079); la
+  scelta di dichiararlo è per chi legge l'output, non per il file.
+
+- **Esito, quarto punto — `-framerate 30` è inerte, e la sua assenza non cambia niente.** Con e
+  senza, `-t 3` produce **2,966667** e **2,966668** secondi, 87 e 88 fotogrammi, e in tutti e due
+  i casi `r_frame_rate=30/1`. AVFoundation lo dichiara da sé nella riga
+  `Configuration of video device failed, falling back to default.`, che compare **anche senza
+  nessuna opzione d'ingresso** — provato. Da notare che il predefinito documentato di `-framerate`
+  è `ntsc`, cioè 30000/1001 ([S-079](#s-079)): chiedere «30» e ottenere 30/1 non è l'opzione
+  che funziona, è il dispositivo che ignora la richiesta e impone la propria cadenza.
+
+- **Esito, quinto punto — il guasto che non c'era, ed è il risultato più utile della sessione.**
+  Lo strumento annunciava **1,0 s** per una registrazione da 2 e **2,0 s** per una da 3, e la
+  prima spiegazione plausibile era che `-framerate 30` falsasse i tempi. Non era così: `ffprobe`
+  sul file diceva `duration=2.966668` e `nb_frames=88`. Il file era giusto; sbagliato era il
+  numero che lo raccontava. `ffprobe` scrive la durata **col punto**, sempre, perché è un formato
+  dati; `awk` con `LC_NUMERIC=it_IT.UTF-8` legge quel punto come fine del numero e ne ricava `2`.
+  Misurato in isolamento: `echo 2.966668 | awk '{printf "%.1f", $1}'` dà **2,0** in locale
+  italiana e **3.0** con `LC_ALL=C`. La correzione è leggere alla maniera dei dati e scrivere alla
+  maniera di chi legge, che sono due cose diverse. Controllato per la stessa causa anche
+  [`preflight.sh`](../tools/preflight.sh), che formatta la memoria della VM: lì il valore in
+  ingresso è un intero puro e le soglie confrontano interi, quindi il punto decimale non compare
+  mai e il difetto non si presenta.
+
+- **Esito, sesto punto — quanto costa comprimere, e perché si sceglie il chip.**
+  `libx264 -crf 23` produce circa **107 KB/s** e `h264_videotoolbox -b:v 6M` circa **920 KB/s**
+  alla stessa scena e alla stessa risoluzione, cioè un filmato di quattro minuti da ~25 MB contro
+  uno da ~220 MB. Il fattore otto va a favore del software, e la scelta è comunque l'hardware: le
+  scene di questo talk **si misurano mentre si girano** — un failover dichiara la propria
+  interruzione in millisecondi — e un encoder software che occupa i core durante la ripresa falsa
+  il numero che la scena esiste per mostrare. Duecento megabyte su un disco costano meno di una
+  cifra sbagliata su uno schermo. Resta comunque vero che **i tempi di un filmato non sono la
+  misura**: le mediane stanno in [V-029](#v-029) e [V-031](#v-031), e un filmato le illustra.
+
+- **Esito, settimo punto — che il microfono abbia inciso si verifica, non si spera.** Con la voce:
+  una traccia `aac`, 48 000 Hz, mono; `volumedetect` dà **mean −49,5 dB / max −35,7 dB** su una
+  stanza silenziosa e **mean −46,2 dB / max −27,6 dB** su una in cui si parlava. Il silenzio
+  digitale sarebbe −91 dB: fra «ha inciso l'ambiente» e «non ha inciso niente» la differenza si
+  legge a colpo d'occhio. Con `AUDIO=no`: `ffprobe -select_streams a` non restituisce **nessuna**
+  traccia. Sono i due esiti che lo strumento controlla da sé alla fine di ogni corsa, e su cui
+  esce con errore se non corrispondono a quello che gli era stato chiesto.
+
+- **Riserve:** tutto questo è misurato su **una** macchina, e gli indici dei dispositivi sono la
+  parte che scade per prima — è il motivo per cui lo strumento li cerca a ogni corsa invece di
+  ricordarli. Le acquisizioni sono di due o tre secondi: dicono che il meccanismo funziona, non
+  come si comporta su una ripresa di quattro minuti, che nessuno ha ancora girato. Il costo dei
+  permessi è stato osservato una volta sola, e per costruzione non è ripetibile.
+- **Data:** 2026-09-07
+- **Usata da:** ADR-0140
+
+---
+
+<a id="s-079"></a>
+### S-079 — FFmpeg Devices Documentation: il dispositivo d'ingresso AVFoundation
+
+- **URL:** https://ffmpeg.org/ffmpeg-devices.html
+- **Editore:** FFmpeg Project
+- **Versione documentata:** documentazione corrente del ramo `master`
+- **Consultata:** 2026-09-07
+- **Verdetto:** conferma parziale — descrive le opzioni usate dallo strumento e il modo di
+  nominare i dispositivi, ma non copre la cattura dello schermo né l'ordine degli argomenti
+- **Perché è stata cercata.** Lo strumento di registrazione mette nel comando cinque opzioni
+  d'ingresso, e ognuna andava sostenuta da qualcosa di più della corsa che l'aveva vista
+  funzionare ([V-106](#v-106)).
+- **Cosa afferma, primo punto — i dispositivi si nominano per nome o per indice.** «All available
+  devices can be enumerated using `-list_devices true`, listing all device names and
+  corresponding indices», e uno stream «can be specified by device name or device index shown by
+  the device list». La sintassi del nome di ingresso è `-i "[[VIDEO]:[AUDIO]]"`, dove «the first
+  entry selects the video input while the latter selects the audio input».
+- **Cosa afferma, secondo punto — `-pixel_format` è una richiesta, non un obbligo.** L'opzione
+  «Request the video device to use a specific pixel format», e se «the specified format is not
+  supported, a list of available formats is given and the first one in this list is used
+  instead». È esattamente il comportamento osservato: cinque righe di elenco e un
+  `Overriding selected pixel format to use uyvy422 instead`.
+- **Cosa afferma, terzo punto — i due predefiniti che vanno cambiati o conosciuti.**
+  `-capture_cursor`: «Capture the mouse pointer. Default is 0» — il puntatore va quindi chiesto,
+  e per una registrazione didattica serve. `-framerate`: «Set the grabbing frame rate. Default is
+  `ntsc`, corresponding to a frame rate of `30000/1001`» — cioè il predefinito **non** è 30, e
+  ottenere `30/1` senza chiederlo è il segno che a decidere è stato il dispositivo.
+- **Riserve, due, e contano.** *Primo:* la pagina **non enuncia** la regola per cui le opzioni
+  d'ingresso devono precedere `-i`; la mostra in ogni esempio senza dichiararla, e la regola vera
+  appartiene alla sintassi generale di `ffmpeg`, dove ogni opzione si applica al file che segue.
+  Lo strumento la rispetta, ma questa pagina non è la fonte che la stabilisce. *Secondo:* la
+  sezione **non nomina la cattura dello schermo**: «Capture screen 0» non compare, e che il
+  dispositivo dello schermo si presenti nell'elenco insieme alle fotocamere è un fatto osservato
+  qui ([V-106](#v-106)), non documentato lì. Anche la resa in testo della pagina è risultata
+  mutila in alcune righe d'esempio: le citazioni riportate sopra vengono tutte dalle
+  **descrizioni delle opzioni**, non dagli esempi.
+- **Data:** 2026-09-07
+- **Usata da:** ADR-0140
+
+---
+
+<a id="v-107"></a>
+### V-107 — Fabbricare un filmato da una registrazione di terminale: due modi di uscirne più corti, e nessuno dei due si vede guardando
+
+- **Comandi:** due rese della stessa scena con e senza il limite di inattività, e la rilettura di
+  quello che ne è uscito; poi il montaggio di più scene in un filmato solo, contato contro la somma
+  delle sue parti.
+
+```bash
+agg -q --font-size 14 --fps-cap 10 08-guasto-shard-palco.cast 08-predefinito.gif
+agg -q --font-size 14 --fps-cap 10 --idle-time-limit 3600 08-guasto-shard-palco.cast 08-intero.gif
+ffprobe -v error -show_entries format=duration,size -of csv=p=0:nk=1 08-predefinito.gif
+ffmpeg -y -f concat -safe 0 -i elenco.txt -c copy 05-guasto-shard-nei-due-profili-muto.mp4
+```
+
+- **Ambiente:** MacBook Pro Apple Silicon, macOS 26.6.2, 17 settembre 2026. `agg` 1.9.0 da Homebrew
+  ([S-080](#s-080)), `ffmpeg` e `ffprobe` 6.x, encoder `h264_videotoolbox`. Nessuno stack acceso e
+  nessuno necessario: le quattordici registrazioni erano già in archivio.
+- **Che cosa si voleva sapere:** se i `.cast` archiviati bastassero a produrre i filmati di riserva
+  invece di rigirare le scene dal vivo — e, prima ancora, se il filmato che ne esce racconti la
+  stessa cosa della scena che sostituisce.
+
+- **Esito, primo punto — il predefinito accorcia le attese, e l'attesa è la scena.** `agg` ha un
+  `--idle-time-limit` che vale **5 secondi** se non glielo si dice, e comprime a cinque ogni pausa
+  più lunga. Sulla scena 8, che dura **40,10 s** contati sull'ultimo evento del `.cast`, la resa
+  predefinita dà **21,35 s**: meno della metà. Con `--idle-time-limit 3600` dà **43,09 s**, cioè
+  40,10 più i 3 s di fermo immagine finale che `agg` aggiunge di suo. La resa è esatta al
+  centesimo; è il predefinito a non esserlo per questo uso. Un valore «spento» non è documentato, e
+  alzare il limite a un'ora è il modo di ottenerne l'effetto.
+
+- **Esito, secondo punto — perché quel predefinito è sbagliato proprio qui.** In una registrazione
+  di questo archivio la pausa non è tempo morto: nella scena 8 i quindici secondi prima dell'errore
+  **sono** la risposta alla domanda, ed è la stessa ragione per cui la riproduzione dei `.cast`
+  rispetta i tempi invece di scorrere. Il numero misurato dà a
+  [ADR-0116](Decision.md#adr-0116) una conferma letterale: una riserva che dura la metà della scena
+  che sostituisce non è la riserva di quella scena — qui la metà è 21,35 su 40,10.
+
+- **Esito, terzo punto — il montaggio perde secondi, e lo dice in una riga che scorre via.** Unendo
+  più scene con `ffmpeg -f concat -c copy`, due filmati su tre sono usciti corti: il **05**
+  (scene 8 e 9) ha dato **47,1 s** invece di 52,5, e il **06** (scene 5, 6 e 7) **31,9 s** invece di
+  33,6; il **02**, di due sole scene, era esatto. La causa è a monte: una GIF ha fotogrammi a durata
+  variabile, il `.mp4` che ne nasce eredita timestamp fuori ordine, e il montaggio scarta ciò che
+  non sa incastrare avvisando con `Non-monotonic DTS … This may result in incorrect timestamps`,
+  cioè un avviso fra decine di righe di avanzamento.
+
+- **Esito, quarto punto — la cura è a monte, e recupera anche una cosa che si stava perdendo.**
+  Ricodificando ogni scena a passo costante (`-r 15 -fps_mode cfr`) prima di unirle, tutti e tredici
+  i file coincidono con la somma delle loro scene entro un decimo. In più, il fermo immagine finale
+  **ricompare**: prima della cura la conversione GIF→`.mp4` lo perdeva — la scena 8 usciva 40,1 s
+  invece di 42,1 — perché l'ultimo fotogramma non ha un successore che ne dichiari la durata.
+
+- **Esito, quinto punto — costa poco, ed è questo che cambia la decisione.** Rendere la scena 8 a
+  corpo 28 richiede **0,45 s** e produce una GIF da 354 KB; i tredici filmati completi occupano
+  **48 MB** e si rifanno da capo in meno di un minuto, senza accendere nessuno stack. Rigirare le
+  stesse scene dal vivo costerebbe due stack, uno scambio di `.env` e un pomeriggio, per ottenere
+  comunque una esecuzione diversa da quella misurata.
+
+- **Riserve:** i due guasti sono stati osservati su una macchina, una versione di `agg` e un
+  encoder; il secondo in particolare dipende da come `ffmpeg` scrive i timestamp di un `.mp4` nato
+  da GIF, e una versione diversa potrebbe comportarsi altrimenti — motivo per cui lo strumento
+  **conta** invece di fidarsi della cura. Le durate dei `.cast` sono lette sull'istante dell'ultimo
+  evento, che è la definizione usata anche dal riproduttore: una registrazione che finisse con una
+  pausa senza output risulterebbe più corta di come è stata vissuta. Nessun filmato è stato
+  confrontato fotogramma per fotogramma con la scena originale: si è confrontata la durata, che è
+  ciò che i due guasti alteravano.
+- **Data:** 2026-09-17
+- **Usata da:** ADR-0141
+
+---
+
+<a id="s-080"></a>
+### S-080 — `agg`, il convertitore da asciicast a GIF: il manuale e i suoi predefiniti
+
+- **URL:** https://docs.asciinema.org/manual/agg/
+- **Editore:** asciinema (progetto)
+- **Versione documentata:** `agg` 1.9.0, letta dall'aiuto dell'eseguibile installato
+- **Consultata:** 2026-09-17
+- **Verdetto:** conferma — l'aiuto del programma dichiara i predefiniti che contano, compreso
+  quello che accorcia le scene
+- **Perché è stata cercata.** Cinque dei sei filmati di riserva potevano nascere dalle
+  registrazioni già archiviate invece che da una nuova ripresa, ma solo se la resa rispettava i
+  tempi originali. Prima di produrre qualcosa serviva sapere che cosa il programma fa **quando non
+  gli si dice niente** ([V-107](#v-107)).
+- **Che cos'è.** *asciicast to GIF converter*: legge un file `.cast` — lo stesso formato versione 2
+  che questo repository archivia — e ne disegna una GIF animata. Un solo eseguibile, GPL-3.0-or-later,
+  senza dipendenze di esecuzione; su macOS si installa con `brew install agg` (16,2 MB, 8 file).
+- **Cosa afferma, primo punto — il predefinito che va cambiato.** `--idle-time-limit <SECONDI>`:
+  «Limit idle time to max number of seconds **[default: 5]**». È dichiarato, non nascosto: chi non
+  legge l'aiuto ottiene scene accorciate senza nessun avviso, perché il programma sta facendo
+  esattamente quello che promette.
+- **Cosa afferma, secondo punto — i tempi si compongono, e l'ordine è dichiarato.** Di
+  `--last-frame-duration` l'aiuto precisa: «Times are on the adjusted output timeline, after
+  `--idle-time-limit` and `--speed`». Cioè il fermo immagine finale si somma a una linea del tempo
+  **già** compressa, e non basta guardarne il valore per sapere quanto durerà il filmato.
+- **Cosa afferma, terzo punto — gli altri predefiniti che questo repository sposta o accetta.**
+  `--font-size` vale 16 e qui diventa 28, perché una registrazione a 100 colonne va letta dal fondo
+  di una sala; `--fps-cap` vale 30 e qui diventa 15, perché un terminale non ha niente da mostrare
+  a trenta fotogrammi al secondo; `--speed` vale 1 e resta 1, che è tutto il punto; `--theme`
+  offre tredici temi e qui resta `asciinema`, lo stesso colore delle registrazioni riprodotte.
+- **Riserve:** le affermazioni qui sopra sono lette dall'aiuto dell'eseguibile **installato**, che
+  è la fonte più vicina al comportamento osservato ma non è la pagina del manuale in linea: se le
+  due divergessero, vale quella dell'eseguibile, ed è quella che il repository usa. La pagina in
+  linea documenta il programma in generale e non è stata consultata riga per riga. Non è stato
+  verificato il comportamento su `.cast` di versione 1, che questo archivio non contiene.
+- **Data:** 2026-09-17
+- **Usata da:** ADR-0141
+
+---
+
+<a id="v-108"></a>
+### V-108 — La ripresa della scena 4: la prova era in campo, e insieme a lei tutto il resto dello schermo
+
+- **Comandi:** la rilettura dei tre file usciti dalla ripresa, e l'estrazione di singoli fotogrammi
+  per guardare che cosa ci fosse davvero dentro l'inquadratura.
+
+```bash
+ffprobe -v error -show_entries format=duration,size \
+  -show_entries stream=index,codec_type,width,height,avg_frame_rate,nb_frames \
+  -of default=noprint_wrappers=1 04-avvio-offline-muto.mp4
+ffmpeg -ss 68 -i 04-avvio-offline-muto.mp4 -frames:v 1 -vf "crop=1500:64:1524:0" barra.png
+ffmpeg -ss 49 -i 04-avvio-offline-muto-2.mp4 -frames:v 1 ritagliato.png
+```
+
+- **Ambiente:** MacBook Pro Apple Silicon, macOS 26.6.2, 17 settembre 2026, `ffmpeg` e `ffprobe`
+  6.x. La scena è `make up-02` seguito da `make smoke-02` sul replica set, girata con
+  `make filmato NOME=04-avvio-offline-muto AUDIO=no` con Wi-Fi spento e cavo Ethernet staccato.
+- **Che cosa si voleva sapere:** se la ripresa fosse muta come richiesto, se durasse quanto la
+  scena, e — la domanda che conta — se la **prova** della scena, l'icona del Wi-Fi barrata nella
+  barra dei menu, fosse effettivamente dentro l'inquadratura.
+
+- **Che cosa si è misurato.** Tre file, dalla stessa ripresa:
+
+  | file | inquadratura | durata | tracce audio | byte |
+  |---|---|---|---|---|
+  | `04-avvio-offline-muto.mp4` | schermo intero, 3024×1964, 29,79 fps | 70,53 s | **0** | 52 780 589 |
+  | `04-avvio-offline-muto-2.m4v` | finestra, 1662×1080, 60 fps | 50,62 s | **0** | 43 268 444 |
+  | `04-avvio-offline-muto-2.mp4` | finestra, 1662×1080, 30 fps | 50,63 s | **0** | 4 299 236 |
+
+  I due file `-2` sono il primo, ritagliato sulla finestra del terminale e accorciato di 19,9 s.
+  Nessuno dei tre ha una traccia audio: `AUDIO=no` ha fatto quello che promette.
+
+- **La prova c'è, e sta dove ci si aspettava.** Nel fotogramma a 68 s dello schermo intero, la
+  barra dei menu mostra l'icona del Wi-Fi **barrata**; il terminale, nello stesso fotogramma,
+  chiude con `Superati: 42 · Errori: 0` e con il prompt sul ramo `release/1.0`. La scena riesce, e
+  riesce senza rete: le due cose stanno nella stessa immagine, che è esattamente il motivo per cui
+  questa scena non era fabbricabile da un `.cast` ([ADR-0141](Decision.md#adr-0141)).
+
+- **Nella stessa immagine, però, c'è dell'altro.** Il fotogramma a 5 s dello schermo intero
+  contiene: una sessione di Claude Code aperta con dentro l'elenco dei passi in esecuzione, la
+  barra delle schede del terminale con i nomi di **altri progetti**, e una finestra del Finder con
+  nomi di documenti. Nel ritagliato non c'è niente di tutto questo — e non c'è nemmeno la barra
+  dei menu, perché la barra sta in alto e il ritaglio comincia sotto.
+
+- **Che cosa se ne ricava.** Le due cose si escludono con la geometria, non con la buona volontà:
+  la prova della scena e il materiale da non pubblicare abitano **la stessa striscia di schermo**,
+  quella fuori dalla finestra del terminale. Un ritaglio che salva la privacy toglie la prova; una
+  ripresa che tiene la prova pubblica una scrivania. Se ne esce prima di premere `registra`,
+  preparando lo schermo — non dopo, tagliando. È la misura che sta sotto
+  [ADR-0142](Decision.md#adr-0142).
+
+- **Riserve:** i tre file vengono da **una** ripresa, e i secondi che riportano sono quelli di
+  quella esecuzione, non una mediana su più giri: le misure del replica set stanno in
+  [V-045](#v-045). La lettura dei fotogrammi è visiva — l'icona barrata si riconosce guardandola,
+  non c'è un numero che la certifichi — e l'elenco di ciò che c'era sullo schermo è quello che si
+  vede in due fotogrammi su 2101, non un inventario dell'intera ripresa.
+- **Data:** 2026-09-17
+- **Usata da:** ADR-0142

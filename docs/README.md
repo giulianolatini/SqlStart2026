@@ -11,6 +11,14 @@ l'applicazione `mongolab` **accanto al suo codice**, perché sono pagine che si 
 sorgenti aperti nella finestra di fianco. Quelle pagine citano queste e non le duplicano; il
 controllo dei collegamenti percorre entrambe le cartelle.
 
+## Da dove si comincia
+
+**[`guida-rapida.md`](guida-rapida.md) — da clone a tutto acceso.** I tre stack con le loro prove
+end-to-end, `mongolab` lanciato contro tutte e tre le architetture, le scene, e il comando per
+registrare un filmato. Comandi e output atteso, niente teoria: è la pagina per chi vuole vedere
+qualcosa girare prima di leggere perché funziona. Il [runbook](05-talk/runbook-demo.md) è il
+gradino dopo, ed è quello che si tiene aperto il giorno del talk.
+
 ## Come si legge
 
 Il repository è più esteso di quanto entri in sessanta minuti, e lo è per scelta: i criteri
@@ -95,7 +103,7 @@ sono state eseguite qui, perché qui non c'è né un Ubuntu né un Windows
 
 | Pagina | Contenuto | Disponibile da |
 |---|---|---|
-| `05-talk/runbook-demo.md` | documento unico del talk: scaletta, comandi, tempi, piani di ripiego, criteri di rinuncia in appendice ([ADR-0015](Decision.md#adr-0015)) | `release/1.0` |
+| [`05-talk/runbook-demo.md`](05-talk/runbook-demo.md) | documento unico del talk: preflight e stato atteso dei dati, copione minuto per minuto dei tre blocchi con i comandi esatti e l'output misurato che ci si aspetta, quando si passa alle registrazioni, tabella sintomo → azione; criteri di rinuncia di scena in appendice A e comandi di emergenza in appendice B ([ADR-0015](Decision.md#adr-0015)) | già nel repository |
 | [`05-talk/registrazioni/`](05-talk/registrazioni/README.md) | indice dei filmati di riserva e delle registrazioni di terminale. Quattordici scene di terminale sono nel repository — quattro del replica set, cinque dell'applicazione `mongolab` sullo stesso stack, cinque dello sharded cluster; i filmati stanno sul canale YouTube del relatore, con copia locale obbligatoria ([ADR-0016](Decision.md#adr-0016), [ADR-0050](Decision.md#adr-0050)) | già nel repository |
 
 ## 06-sviluppo — come è fatto il lab
@@ -106,6 +114,33 @@ sono state eseguite qui, perché qui non c'è né un Ubuntu né un Windows
 | [`06-sviluppo/worktree-e-branch-di-lavoro.md`](06-sviluppo/worktree-e-branch-di-lavoro.md) | come si apre un branch di feature con il suo worktree e come lo si chiude dopo la PR; l'ordine vincolante della rimozione, e come si esce se una sessione è rimasta agganciata a un worktree cancellato | già nel repository |
 | [`06-sviluppo/architettura-app.md`](06-sviluppo/architettura-app.md) | stratificazione dell'applicazione, porte, modello a eventi, composition root; racconta a chi non apre i sorgenti quello che [`app/docs/`](../app/docs/README.md) spiega a chi li apre, e mostra che cosa quella forma ha reso: 634 prove in quattro secondi, con Docker irraggiungibile | già nel repository |
 | [`06-sviluppo/tdd-e-doppi.md`](06-sviluppo/tdd-e-doppi.md) | separazione fra suite unitaria e di integrazione, fake contro mock, come si prova il failover senza aspettarlo; il contratto condiviso che ha smascherato due bugiardi, di cui uno era MongoDB. Rimanda a [`app/docs/05-tipi-prove-e-guardie.md`](../app/docs/05-tipi-prove-e-guardie.md) invece di ripeterlo | già nel repository |
+| [`06-sviluppo/concetti-generali/`](06-sviluppo/concetti-generali/README.md) | il flusso di lavoro importato dal repository d'origine il 6 settembre 2026: da dove viene, quali delle dodici skill di `.claude/skills/` governano qui e quali no, e la regola che le tiene innocue — in conflitto con una scheda accettata di [`Decision.md`](Decision.md), vince la scheda | già nel repository |
+| [`06-sviluppo/concetti-generali/introduzione-flusso-di-lavoro.md`](06-sviluppo/concetti-generali/introduzione-flusso-di-lavoro.md) | *Dall'idea al software funzionante*, v3.1, verbatim: commit atomici contro commit raggruppati, ADR e razionale, pull request, review, piano di lavoro, politiche di branching — sei temi con bibliografia annotata. **Testo di riferimento: descrive pratiche che questo repository in parte non segue** | già nel repository |
+| [`06-sviluppo/concetti-generali/runbook-installazione-skill.md`](06-sviluppo/concetti-generali/runbook-installazione-skill.md) | come si installano e si collaudano le skill, installazione personale o di progetto; in coda «Il caso di SqlStart2026», che racconta l'installazione di qui e le 127 prove passate | già nel repository |
+| [`06-sviluppo/concetti-generali/esempio-adr-0001.md`](06-sviluppo/concetti-generali/esempio-adr-0001.md) | l'ADR di riferimento prodotto dal collaudo delle skill, verbatim: serve a vedere che forma deve avere il risultato. Il percorso che nomina, `docs/adr/0001-<slug>.md`, è quello del repository d'origine — qui le schede stanno tutte in [`Decision.md`](Decision.md) | già nel repository |
+
+## revisioni — le review esterne, arbitrate
+
+I sei fascicoli della revisione generale di `release/1.0`, uno per perimetro. **72 rilievi**
+sollevati da due revisori esterni indipendenti — Codex 45, Gemini Pro 27 — **50 accolti e 22
+respinti**. Un rilievo qui non si chiude leggendo il codice: si chiude **eseguendo**, e il verdetto
+riporta la misura che lo conferma o lo smentisce ([ADR-0135](Decision.md#adr-0135)).
+
+Il dato che vale più dei rilievi: **14 dei 22 respinti non parlavano del repository, ma delle
+istruzioni date ai revisori**. Undici sono lo stesso rilievo sull'«ambito obbligatorio» dei commit,
+sollevato da tutti e due i revisori in tutti e sei i fascicoli — che due revisori indipendenti
+concordino non aumenta la fondatezza di un rilievo, se leggono lo stesso prompt: l'accordo misura
+la fonte comune. Le righe che li producevano sono state corrette **prima** della revisione
+successiva.
+
+| Pagina | Contenuto | Disponibile da |
+|---|---|---|
+| [`revisioni/2026-09-06-talk.md`](revisioni/2026-09-06-talk.md) | il runbook della demo e l'indice delle registrazioni: 17 rilievi, 12 accolti e 5 respinti | già nel repository |
+| [`revisioni/2026-09-06-stack-docker.md`](revisioni/2026-09-06-stack-docker.md) | i tre stack Compose con i loro script di inizializzazione: 7 rilievi, 3 accolti e 4 respinti | già nel repository |
+| [`revisioni/2026-09-06-documentazione-tecnica.md`](revisioni/2026-09-06-documentazione-tecnica.md) | installazione, architetture, amministrazione e `mongosh`: 9 rilievi, 7 accolti e 2 respinti | già nel repository |
+| [`revisioni/2026-09-06-strumenti.md`](revisioni/2026-09-06-strumenti.md) | `tools/`, il `Makefile` e il `README.md` di radice: 18 rilievi, 12 accolti e 6 respinti — il fascicolo con i tre rilievi di gravità alta | già nel repository |
+| [`revisioni/2026-09-06-app-sorgenti.md`](revisioni/2026-09-06-app-sorgenti.md) | i sorgenti di `mongolab`: 12 rilievi, 10 accolti e 2 respinti | già nel repository |
+| [`revisioni/2026-09-06-app-prove.md`](revisioni/2026-09-06-app-prove.md) | le prove di `mongolab`: 9 rilievi, 6 accolti e 3 respinti — cinque prove erano verdi dentro il guasto che dichiaravano di sorvegliare | già nel repository |
 
 ## Dove sta il resto
 

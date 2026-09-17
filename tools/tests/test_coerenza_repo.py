@@ -447,3 +447,286 @@ def test_il_guardiano_del_target_accetta_esattamente_i_bersagli():
         f"CHIEDI_TARGET accetta {sorted(ramo.group(1).split('|'))}, "
         f"BERSAGLI dichiara {sorted(bersagli_dell_applicazione())}"
     )
+
+
+# --- Le scene dell'applicazione e i bersagli che le girano ------------------------------
+
+CLI = RADICE / "app/src/mongolab/cli.py"
+BERSAGLI = RADICE / "app/src/mongolab/infrastructure/bersagli.py"
+RESET_DEMO = RADICE / "tools/reset-demo.sh"
+
+
+def scene_della_cli():
+    """I nomi dei sottocomandi di `mongolab demo`, letti con `ast` da `cli.py`.
+
+    Il nome non è sempre quello della funzione: `@demo.command(name="backup-live")` lo
+    riscrive, ed è la forma che si digita. Si legge con `ast` per la stessa ragione di
+    `bersagli_dell_applicazione`: `tools/` è un progetto uv distinto e non ha `mongolab`
+    fra le dipendenze.
+    """
+    trovate = set()
+    for nodo in ast.walk(ast.parse(CLI.read_text(encoding="utf-8"))):
+        if not isinstance(nodo, ast.FunctionDef):
+            continue
+        for decoratore in nodo.decorator_list:
+            if not isinstance(decoratore, ast.Call):
+                continue
+            funzione = decoratore.func
+            if not (isinstance(funzione, ast.Attribute) and funzione.attr == "command"):
+                continue
+            if not (isinstance(funzione.value, ast.Name) and funzione.value.id == "demo"):
+                continue
+            detto = [chiave.value for chiave in decoratore.keywords if chiave.arg == "name"]
+            trovate.add(
+                ast.literal_eval(detto[0]) if detto else nodo.name.replace("_", "-")
+            )
+    return trovate
+
+
+def scene_del_makefile():
+    """`{scena: bersaglio che la gira}` dalle ricette che invocano `… demo <scena> …`."""
+    bersaglio = None
+    trovate = {}
+    intestazione = re.compile(r"^([a-zA-Z0-9_-]+):")
+    invocazione = re.compile(r"\bdemo ([a-z][a-z-]*)\b")
+    for riga in MAKEFILE.read_text(encoding="utf-8").splitlines():
+        if not riga.startswith("\t"):
+            nome = intestazione.match(riga)
+            if nome:
+                bersaglio = nome.group(1)
+            continue
+        trovata = invocazione.search(riga)
+        if trovata and bersaglio:
+            trovate.setdefault(trovata.group(1), bersaglio)
+    return trovate
+
+
+def test_ogni_scena_dell_applicazione_ha_un_bersaglio_nel_makefile():
+    # Il difetto che questa prova toglie non rompe niente: rende il copione bilingue. Con
+    # una scena sola nel Makefile, le altre tre si dicono in `uv run --directory app
+    # mongolab demo …`, e chi legge il runbook sotto pressione cambia registro a metà
+    # Atto III senza che nulla gli spieghi perché.
+    assert set(scene_del_makefile()) == scene_della_cli(), (
+        f"il Makefile gira {sorted(scene_del_makefile())}; "
+        f"la CLI dichiara {sorted(scene_della_cli())}"
+    )
+
+
+def valore_di(percorso, nome):
+    """Il valore di un'assegnazione a livello di modulo, letto con `ast`.
+
+    Legge `NOME = "..."` e `NOME: Final = "..."`, e risolve una f-string i cui pezzi sono
+    costanti o nomi già noti. Non importa niente: `tools/` è un progetto uv distinto e
+    `mongolab` non è fra le sue dipendenze, quindi un `import` qui non gira su un clone
+    appena fatto — che è la proprietà per cui questi controlli esistono.
+    """
+    noti = {}
+    for nodo in ast.walk(ast.parse(percorso.read_text(encoding="utf-8"))):
+        if isinstance(nodo, ast.Assign) and len(nodo.targets) == 1:
+            bersaglio, valore = nodo.targets[0], nodo.value
+        elif isinstance(nodo, ast.AnnAssign) and nodo.value is not None:
+            bersaglio, valore = nodo.target, nodo.value
+        else:
+            continue
+        if not isinstance(bersaglio, ast.Name):
+            continue
+        if isinstance(valore, ast.Constant) and isinstance(valore.value, str):
+            noti[bersaglio.id] = valore.value
+    if nome in noti:
+        return noti[nome]
+    for nodo in ast.walk(ast.parse(percorso.read_text(encoding="utf-8"))):
+        if isinstance(nodo, ast.AnnAssign) and isinstance(nodo.target, ast.Name):
+            if nodo.target.id == nome and isinstance(nodo.value, ast.JoinedStr):
+                return "".join(
+                    pezzo.value
+                    if isinstance(pezzo, ast.Constant)
+                    else noti[pezzo.value.id]
+                    for pezzo in nodo.value.values
+                )
+    raise AssertionError(f"{nome} non si trova in {percorso.name}")
+
+
+def database_del_ripristino():
+    """Il nome del database che `demo restore` costruisce: `lab_ripristinato`.
+
+    Composto da due file — `DATABASE` sta in `bersagli.py`, il suffisso in `cli.py` — e
+    per questo si risolve invece di scriverlo qui: una prova che ripetesse la stringa
+    passerebbe anche il giorno in cui il database cambia nome, cioè il giorno in cui
+    servirebbe.
+    """
+    noti = {"DATABASE": valore_di(BERSAGLI, "DATABASE")}
+    for nodo in ast.walk(ast.parse(CLI.read_text(encoding="utf-8"))):
+        if (
+            isinstance(nodo, ast.AnnAssign)
+            and isinstance(nodo.target, ast.Name)
+            and nodo.target.id == "DATABASE_RIPRISTINO"
+            and isinstance(nodo.value, ast.JoinedStr)
+        ):
+            return "".join(
+                pezzo.value if isinstance(pezzo, ast.Constant) else noti[pezzo.value.id]
+                for pezzo in nodo.value.values
+            )
+    raise AssertionError("DATABASE_RIPRISTINO non si trova in cli.py")
+
+
+def blocco_del_ripristino() -> str:
+    """Il pezzo di `reset-demo.sh` che toglie il database costruito dal ripristino.
+
+    Si guarda un blocco e non le singole righe perché il nome, il `dropDatabase` e il
+    verdetto stanno su righe diverse: cercarli sulla stessa riga legava la prova a una
+    stesura invece che al comportamento, e infatti si è rotta appena il verdetto ha
+    smesso di fidarsi di `dropped`.
+    """
+    testo = RESET_DEMO.read_text(encoding="utf-8")
+    apertura = 'titolo "Il database che il ripristino costruisce"'
+    assert apertura in testo, "il blocco del ripristino non c'è più in reset-demo.sh"
+    return testo.split(apertura)[1].split('titolo "Dataset"')[0]
+
+
+def test_reset_demo_toglie_anche_il_database_che_il_ripristino_costruisce():
+    """Il difetto che questa prova toglie è costato una scena, e si vedeva solo alla
+    seconda corsa: `demo restore` costruisce `lab_ripristinato`, `reset-demo.sh` puliva le
+    collezioni di `lab` e non guardava gli altri database, e `down`/`up` conservano i
+    volumi. Alla corsa dopo `mongorestore` ritrova i documenti già lì, li conta come
+    falliti ed esce zero: 6 766 ripristinati e 55 740 persi, misurato il 6 settembre.
+    Cioè la prova generale rompeva la replica del giorno dopo.
+    """
+    nome = database_del_ripristino()
+    blocco = blocco_del_ripristino()
+
+    assert nome in blocco and "dropDatabase" in blocco, (
+        f"reset-demo.sh non toglie {nome}: il blocco che dovrebbe farlo non lo nomina "
+        f"insieme a dropDatabase. Chi prova l'Atto III due volte senza azzerare i volumi "
+        f"vede la seconda corsa fallire con RestoreIncompleto."
+    )
+
+
+def test_il_verdetto_del_drop_non_si_fida_del_campo_dropped():
+    """`dropDatabase` risponde `dropped` anche per un database che non e' mai esistito.
+
+    Misurato sullo stack 02 il 6 settembre, mongod 7.0.40, dal primario:
+    `db.getSiblingDB("lab_inesistente_0906").dropDatabase()` risponde
+    `{"ok":1,"dropped":"lab_inesistente_0906"}` esattamente come per un database pieno.
+    La prima stesura di questo blocco leggeva quel campo per decidere fra «rimosso» e
+    «non c'era», e diceva sempre «rimosso»: un'uscita che si legge sotto pressione la
+    sera prima del talk, e che avrebbe raccontato una pulizia mai avvenuta.
+
+    Chi c'era davvero lo sa solo l'elenco dei database, chiesto **prima** del drop.
+    """
+    blocco = blocco_del_ripristino()
+    assert ".dropped" not in blocco, (
+        "il verdetto legge `esito.dropped`, che e' presente anche quando il database "
+        "non c'era: misurato, risponde `dropped` per un nome inventato"
+    )
+    assert "getDBNames" in blocco, (
+        "per dire se il database c'era serve l'elenco, chiesto prima del drop"
+    )
+
+
+def cartella_del_dump() -> str:
+    """Dove il dump atterra dentro il nodo: `DESTINAZIONE_DUMP`, letta da `cli.py`.
+
+    Non passa da `valore_di` perché la costante è avvolta in `Path(...)`: nel codice è un
+    percorso, qui serve la stringa che finisce scritta dentro `reset-demo.sh`.
+    """
+    for nodo in ast.walk(ast.parse(CLI.read_text(encoding="utf-8"))):
+        if (
+            isinstance(nodo, ast.AnnAssign)
+            and isinstance(nodo.target, ast.Name)
+            and nodo.target.id == "DESTINAZIONE_DUMP"
+            and isinstance(nodo.value, ast.Call)
+            and nodo.value.args
+            and isinstance(nodo.value.args[0], ast.Constant)
+        ):
+            return nodo.value.args[0].value
+    raise AssertionError("DESTINAZIONE_DUMP non si trova in cli.py")
+
+
+def blocco_del_dump() -> str:
+    """Il pezzo di `reset-demo.sh` che svuota la cartella in cui il dump atterra."""
+    testo = RESET_DEMO.read_text(encoding="utf-8")
+    apertura = 'titolo "La cartella del dump, dentro il nodo"'
+    assert apertura in testo, "il blocco della cartella del dump non c'è in reset-demo.sh"
+    return testo.split(apertura)[1].split('titolo "Dataset"')[0]
+
+
+def test_reset_demo_svuota_anche_la_cartella_del_dump():
+    """La copia non è un database e non è un volume: è una cartella dentro `mongo-rs-1`,
+    e `mongodump --out` non la svuota prima di scriverci — ci aggiunge. Alla quinta prova
+    generale la cartella tiene cinque dump, e `demo restore` li rimette in piedi tutti:
+    misurato il 6 settembre, **sei** collezioni ripristinate invece di una, elencate una
+    per riga su uno schermo proiettato.
+
+    È l'unico pezzo di stato della demo che non sta né in un database né in un volume, e
+    per questo era l'unico che nessuno toglieva.
+    """
+    cartella = cartella_del_dump()
+    blocco = blocco_del_dump()
+
+    assert cartella in blocco and "rm -rf" in blocco, (
+        f"reset-demo.sh non svuota {cartella}: chi ripete l'Atto III ritrova nella copia "
+        f"le collezioni di tutte le corse precedenti"
+    )
+
+
+def test_il_verdetto_della_cartella_guarda_prima_di_togliere():
+    """`rm -rf` esce zero sia se la cartella c'era sia se non c'era.
+
+    È lo stesso difetto del `dropDatabase` di due blocchi più su, con un altro comando:
+    un verdetto che si fida dell'esito racconta una pulizia che non ha fatto. Qui la
+    domanda si fa prima, con un `ls` che serve anche a dire **quanti** dump c'erano — che
+    è l'informazione per cui questo blocco esiste.
+    """
+    # I soli comandi: il commento qui sopra il blocco spiega perché `rm -rf` non basta, e
+    # quindi lo nomina prima del `ls` che invece lo precede davvero. Misurare l'ordine sul
+    # testo intero avrebbe accusato la spiegazione al posto del codice.
+    comandi = "\n".join(
+        riga for riga in blocco_del_dump().splitlines() if not riga.lstrip().startswith("#")
+    )
+
+    assert "ls " in comandi, (
+        "per dire se la cartella c'era serve guardarla: `rm -rf` non lo dice"
+    )
+    assert comandi.index("ls ") < comandi.index("rm -rf"), (
+        "la cartella si guarda **prima** di toglierla: dopo non c'è più niente da contare"
+    )
+
+
+def progetti_del_makefile() -> list[str]:
+    """I tre `PROGETTO_0N :=` del Makefile, nell'ordine in cui sono dichiarati."""
+    trovati = re.findall(
+        r"^PROGETTO_0\d\s*:=\s*(\S+)\s*$", MAKEFILE.read_text(encoding="utf-8"), re.M
+    )
+    assert len(trovati) == 3, f"nel Makefile ci sono {len(trovati)} nomi di progetto, non 3"
+    return trovati
+
+
+def progetti_del_preflight() -> list[str]:
+    """L'array `PROGETTI_LAB` di `preflight.sh`, quello con cui il controllo delle porte
+    distingue un container del lab da un container qualsiasi del demone."""
+    corpo = re.search(
+        r"^\s*PROGETTI_LAB=\(([^)]*)\)", PREFLIGHT.read_text(encoding="utf-8"), re.M
+    )
+    assert corpo, "PROGETTI_LAB non si trova in preflight.sh"
+    return corpo.group(1).split()
+
+
+def test_il_preflight_conosce_i_progetti_del_makefile():
+    """Due elenchi degli stessi tre nomi, in due file che non si leggono a vicenda.
+
+    Il controllo delle porte perdona una porta occupata quando è un container **del lab**
+    a tenerla, e per sapere quali lo sono legge l'etichetta `com.docker.compose.project`
+    che Compose scrive su ogni container. Quei nomi sono gli stessi che il Makefile impone
+    con `-p`: se il Makefile ne cambia uno, il preflight smette di riconoscere i propri
+    container e chiama estranee otto porte che sono sue.
+
+    Nasce misurando il difetto opposto — prima della correzione il preflight guardava le
+    porte di **tutti** i container del demone, e uno estraneo che pubblicava la 27152 gli
+    faceva contare nove porte «del lab» invece di otto (V-100, ADR-0131). Il rimedio ha
+    creato questa seconda copia dell'elenco, e questo test è il prezzo che paga.
+    """
+    assert sorted(progetti_del_preflight()) == sorted(progetti_del_makefile()), (
+        f"preflight.sh conosce {progetti_del_preflight()}, il Makefile impone "
+        f"{progetti_del_makefile()}: il controllo delle porte scambierebbe per estranei "
+        f"i container del lab"
+    )
