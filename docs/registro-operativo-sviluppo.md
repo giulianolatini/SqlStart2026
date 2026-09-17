@@ -8062,3 +8062,53 @@ restano non urgenti: servono a YouTube, mentre dentro le slide va il muto
 
 Stato aggiornato: decisioni fino ad **ADR-0142**, verifiche fino a **V-108**, fonti fino a
 **S-080**, misure dell'applicazione fino a **M-064**, note di metodo fino alla **266**.
+
+## 2026-09-17 — Due voci del catalogo, un file solo: i doppioni tolti prima delle slide
+
+Montando le slide il PO si è accorto che la cartella dei filmati conteneva quattro file per due
+contenuti: `01-failover-docker-kill-muto.mp4` e `scena-02-failover-docker-kill-muto.mp4`,
+`03-maggioranza-persa-muto.mp4` e `scena-04-maggioranza-persa-muto.mp4`. Non somigliavano: erano
+**identici byte per byte**. Il catalogo di `tools/filmati-da-registrazioni.sh` li produceva
+entrambi, perché i montaggi `01` e `03` contengono **una scena sola** e la voce «scena singola»
+chiedeva quella stessa scena.
+
+### Deciso
+
+- **Restano i numerati, spariscono gli `scena-`.** La prima idea era l'opposto — tenere gli
+  `scena-*` perché il nome dice che cosa contengono — ed è stata rovesciata per un motivo che si
+  vede solo dal palco: i numeri `01`…`06` sono **l'ordine del talk**, corrispondono alla tabella
+  «Che cosa filmare» e alle slide già montate, mentre uno `scena-*` esiste per un caso preciso,
+  «questa slide deve mostrare un pezzo solo di un montaggio». Per le scene 2 e 4 quel caso non
+  esiste: il montaggio **è** la scena.
+- **Cancellarli non bastava.** Stavano nel catalogo, e `make filmati` li avrebbe rifatti al primo
+  giro. Le due righe sono state tolte da lì, e il commento sopra il catalogo dice adesso perché
+  quei due nomi non ci sono — altrimenti il prossimo lettore li rimette credendo a una svista.
+- **Niente ADR.** Non è una decisione nuova: è [ADR-0141](Decision.md#adr-0141) applicata fino in
+  fondo. Il vincolo è finito dove vale di più, in una prova.
+
+### Misurato
+
+- **Le due coppie erano identiche**, `shasum -a 256` alla mano:
+  `97d67077…a1c6bb` per la prima, `1df74904…c1f88e` per la seconda.
+- **Catalogo da 13 voci a 11**, filmati sul disco **da 14 a 12**, `make preflight`
+  «filmati locali disponibili: **12**» · «Superati: 10 · Avvisi: 0 · Errori: 0» · «Pronto».
+- **`make tools-test` da 213 a 214**: la prova in più è quella che vieta il doppione. Verificata
+  **in rosso** contro il catalogo del commit precedente, dove segnala esattamente le due coppie.
+
+### Note di metodo
+
+267. **Il doppione non era un errore di battitura: era implicito nella forma del catalogo.** Un
+     filmato lì dentro è «un nome più una lista di scene», e da quella forma discende che due voci
+     con la stessa lista *sono* lo stesso file — nessuno l'aveva scritto, e quindi nessuno se n'era
+     accorto finché non si trattava di scegliere una slide. La prova nuova non nomina i due file
+     colpevoli, vieta la classe: «due voci con le stesse scene danno due file identici». Quando un
+     difetto è la conseguenza di una struttura, la difesa va scritta sulla struttura, perché i
+     nomi cambiano e la struttura resta. Un commento avrebbe spiegato l'assenza; solo una prova
+     impedisce il ritorno.
+
+### Prossimo passo
+
+Invariato e del PO: la **fusione di `release/1.0` in `main`** e la pubblicazione del repository.
+
+Stato aggiornato: decisioni fino ad **ADR-0142**, verifiche fino a **V-108**, fonti fino a
+**S-080**, misure dell'applicazione fino a **M-064**, note di metodo fino alla **267**.

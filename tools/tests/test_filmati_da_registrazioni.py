@@ -108,6 +108,23 @@ def test_ogni_filmato_del_catalogo_nasce_da_registrazioni_che_esistono():
             )
 
 
+def test_nessuna_voce_del_catalogo_e_il_doppione_di_un_altra():
+    """Due voci con le stesse scene danno due file identici byte per byte.
+
+    È il motivo per cui le scene 2 e 4 non hanno un file separato: i montaggi 01 e 03
+    contengono una scena sola, e il separato sarebbe stato il montaggio con un altro nome.
+    Costava due volte la CPU e due righe nel conto di `make preflight`.
+    """
+    per_scene: dict[tuple[str, ...], list[str]] = {}
+    for filmato, scene in catalogo().items():
+        per_scene.setdefault(tuple(scene), []).append(filmato)
+
+    doppioni = [nomi for nomi in per_scene.values() if len(nomi) > 1]
+    assert not doppioni, "stesse scene, quindi stesso file: " + "; ".join(
+        " ≡ ".join(sorted(nomi)) for nomi in doppioni
+    )
+
+
 def test_ogni_filmato_del_catalogo_esce_muto():
     """Il filmato che va dentro le slide non ha voce: è il muto di ADR-0140."""
     for filmato in catalogo():

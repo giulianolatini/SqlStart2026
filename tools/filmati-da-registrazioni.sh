@@ -2,7 +2,7 @@
 # Fabbrica i filmati di riserva `.mp4` dalle registrazioni di terminale già archiviate,
 # senza riaccendere nessuno stack.
 #
-#   ./tools/filmati-da-registrazioni.sh              # tutti: cinque montaggi e otto scene
+#   ./tools/filmati-da-registrazioni.sh              # tutti: cinque montaggi e sei scene
 #   ./tools/filmati-da-registrazioni.sh --elenco     # che cosa uscirebbe, senza produrlo
 #   ./tools/filmati-da-registrazioni.sh 03-maggioranza-persa-muto   # uno solo
 #
@@ -68,8 +68,12 @@ if [[ ! -t 1 ]]; then ROSSO=''; VERDE=''; NEUTRO=''; fi
 
 # Il catalogo: a sinistra il filmato, a destra le scene che lo compongono, nell'ordine in
 # cui vanno viste. I cinque montaggi sono quelli della tabella in
-# docs/05-talk/registrazioni/README.md; le otto scene singole servono a chi, in slide, le
+# docs/05-talk/registrazioni/README.md; le sei scene singole servono a chi, in slide, le
 # vuole separate invece che di fila.
+#
+# Le scene 2 e 4 non sono qui, e non è una dimenticanza: i montaggi 01 e 03 contengono una
+# scena sola, quindi il file separato sarebbe stato identico byte per byte al montaggio. Chi
+# lo rimettesse fabbricherebbe due doppioni e li conterebbe come filmati diversi.
 catalogo() {
   cat <<'FINE'
 01-failover-docker-kill-muto: 02-failover-docker-kill
@@ -77,9 +81,7 @@ catalogo() {
 03-maggioranza-persa-muto: 04-maggioranza-persa
 05-guasto-shard-nei-due-profili-muto: 08-guasto-shard-palco 09-failover-membro-shard
 06-blocco-3-per-intero-muto: 05-avvio-sharded 06-stato-sharded 07-distribuzione-sharded
-scena-02-failover-docker-kill-muto: 02-failover-docker-kill
 scena-03-failover-terminazione-pulita-muto: 03-failover-terminazione-pulita
-scena-04-maggioranza-persa-muto: 04-maggioranza-persa
 scena-05-avvio-sharded-muto: 05-avvio-sharded
 scena-06-stato-sharded-muto: 06-stato-sharded
 scena-07-distribuzione-sharded-muto: 07-distribuzione-sharded
