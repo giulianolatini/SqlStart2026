@@ -8112,3 +8112,105 @@ Invariato e del PO: la **fusione di `release/1.0` in `main`** e la pubblicazione
 
 Stato aggiornato: decisioni fino ad **ADR-0142**, verifiche fino a **V-108**, fonti fino a
 **S-080**, misure dell'applicazione fino a **M-064**, note di metodo fino alla **267**.
+
+## 2026-09-17 — Il tag, la pubblicazione, e le difese che cambiano quando il repository diventa pubblico
+
+A poche ore dalla voce precedente il PO ha fatto due cose e ne ha detta una terza: ha autorizzato
+il tag `v1.0` su `f0ccc88`, ha **reso pubblico il repository** da sé — un giorno prima del previsto
+— e ha scritto di avere paura di problemi di connettività in sala. Le tre cose sembrano slegate.
+Non lo sono: la pubblicazione cambia quali difese bastano, e la paura della rete si risponde solo
+eseguendo finché la rete c'è.
+
+### Deciso
+
+- **Il tag è annotato, non leggero.** Un'etichetta leggera è un puntatore e basta; l'oggetto
+  annotato porta autore, data e un messaggio, e il messaggio qui contiene i numeri misurati alla
+  posa. Fra un anno la domanda «in che stato era il lab quando è andato in scena» ha una risposta
+  dentro il tag, non da ricostruire.
+- **Lo stack 01 si lascia sporco, ed era sul punto di non essere così.** `make app-stats
+  TARGET=standalone` mostra una trentina di collezioni `carico-*` lasciate dalle prove del
+  4 settembre, e la prima reazione è stata consigliare di pulirle. Andando a vedere che cosa
+  protegge il divieto, quell'accumulo **è** la prova di [V-090](Sources.md#v-090) — lo scarto fra il
+  contatore del database e la somma delle collezioni esiste *per via* di quelle collezioni. Poi il
+  confine: la riga 112 del runbook è un controllo di preparazione, non una scena. Sul palco il
+  comando è `TARGET=rs`, e il replica set è pulito. Il rumore non arriva mai al pubblico, e pulirlo
+  sarebbe costato una verifica pubblicata per un fastidio privato.
+- **Il clone locale che ha fatto da rete di sicurezza per la riscrittura perde il push, non la
+  lettura.** Quel clone tiene la cronologia **non redatta** nei suoi riferimenti remoti e punta al
+  repository che da stasera è pubblico. Fino a ieri un push distratto da lì era un guaio
+  recuperabile; da stasera no. L'URL di push è stato sostituito con una stringa che non è un
+  indirizzo: il push fallisce **in locale**, prima di toccare la rete, mentre fetch e lettura
+  restano intatti — la rete di sicurezza non perde nulla di ciò per cui esiste. La rimozione della
+  cartella resta prevista dopo il 18 ([ADR-0139](Decision.md#adr-0139)).
+- **Niente ADR nuova.** Nessuna di queste è una norma nuova: il tag è il §10 del design eseguito,
+  la cintura è ADR-0139 applicata a un ambiente cambiato, il divieto sullo stack 01 è V-090 letta
+  fino in fondo.
+
+### Misurato
+
+- **Tag `v1.0`**, oggetto annotato `617441c`, che dereferenzia a `f0ccc88`; presente sul remoto.
+- **Repository pubblico**: `isPrivate: false`, `visibility: PUBLIC`.
+- **`make preflight`: «Superati: 10 · Avvisi: 0 · Errori: 0»**, 12 filmati. Non solo inventario:
+  l'immagine pinnata viene **avviata** (`db version v7.0.40`) e `mongolab:0.1.0` risulta in cache.
+- **Il buco che il preflight non copriva era `uv`.** `DALL_HOST = uv run --directory app mongolab`
+  sta nel percorso della demo ed è obbligatorio per `app-backup` e `app-restore`. Con
+  `UV_OFFLINE=1` tutt'e due gli ambienti (`app` e `tools`) si risolvono, e `UV_OFFLINE=1 make
+  app-stats TARGET=standalone DOVE=host` ha parlato con lo stack e stampato le statistiche.
+- **Il palco è pulito:** `make app-stats TARGET=rs` dà otto righe strutturate — tre membri con un
+  primario su `rs0`, `mongod 7.0.40`, `ordini · 50000 documenti`, `lab · 50000 documenti · dati
+  5.8 MB` — esattamente ciò che il runbook promette. Lo standalone, per contrasto, dichiara `lab ·
+  1 513 732 documenti · dati 2.8 GB`.
+- **Audit dei segreti sull'albero pubblicato:** 227 file tracciati, 7 variabili con valore lungo
+  almeno 8 caratteri, e `PASSWORD_AMMINISTRATORE` di **tutt'e due** gli stack presente in **zero**
+  file. I soli valori che combaciavano erano nomi di topologia — `NOME_REPLICA_SHARD1` in 38 file,
+  `NOME_REPLICA_SHARD2` in 33, `MEMBRI_CFG` in 12 — che è giusto siano pubblici. In tutta la storia
+  del repository nessun `.env` vero e nessun keyfile è mai stato aggiunto: i soli file col nome
+  sospetto sono i `.env.example` e gli script che il keyfile lo **generano**.
+- **La cintura regge:** un push di prova dal clone della riscrittura fallisce con «does not appear
+  to be a repository», senza che nulla esca dalla macchina.
+
+### Note di metodo
+
+268. **Un controllo della mattina copre l'inventario, non il percorso.** `make preflight` verifica
+     ciò che sapeva di dover verificare — demone, porte, immagini, filmati — e lo fa bene. `uv` era
+     fuori dal suo campo visivo, e stava nel percorso **obbligatorio** di due scene su undici: se
+     avesse cercato l'indice dei pacchetti, la scena del backup sarebbe morta in diretta con la
+     sala che guarda. La domanda che trova questi buchi non è «c'è tutto?», che è la domanda di un
+     inventario, ma «quale comando che darò domani può uscire dalla macchina?», che è la domanda di
+     un percorso. La seconda si risponde leggendo i target che si useranno, non il controllo.
+
+269. **Prima di rimuovere ciò che sembra residuo, chiedersi di che cosa è la traccia.** Trenta
+     collezioni `carico-*` con nomi generati e date vecchie hanno tutta la forma dello sporco da
+     buttare. Erano la prova di una verifica pubblicata, e cancellarle l'avrebbe resa
+     irriproducibile senza che nessun test diventasse rosso — il tipo di danno che non si annuncia.
+     Il secondo passo è stato altrettanto utile del primo: **pesare il rimedio contro il requisito**
+     invece che contro il sintomo. Il requisito era «sullo schermo del palco non ci deve essere
+     rumore», e il palco non passa da quel comando. Il rimedio era già inutile prima di essere
+     costoso.
+
+270. **Un allarme che non dice il nome di ciò che ha suonato non è un allarme, è panico.** La prima
+     versione della sonda sui segreti cercava tutti i valori dei `.env` e stampava i file colpiti:
+     quaranta file, e sembrava una fuga di credenziali su un repository appena pubblicato. La
+     seconda versione stampava **il nome della variabile accanto al conteggio** — e il nome è
+     pubblico, mentre il valore no — mostrando in una riga che i quaranta erano
+     `NOME_REPLICA_SHARD1` e compagni. Stessa misura, stessi dati, conclusione opposta. Una sonda
+     su materiale sensibile deve restituire abbastanza contesto da poter essere *smentita*, o
+     produce solo spavento; e il contesto che serve non è mai il segreto.
+
+271. **La pubblicazione non cambia i rischi, cambia la loro reversibilità — e le difese si
+     dimensionano sulla reversibilità.** Il clone con la cronologia non redatta era lì da giorni,
+     identico, e la difesa «va rimosso dopo il 18» era stata giudicata sufficiente. Lo era finché
+     un push sbagliato finiva in un repository privato, cioè in un errore che si poteva cancellare
+     prima che qualcuno lo vedesse. Dal momento in cui il repository è pubblico lo stesso gesto
+     diventa definitivo, e una difesa che era proporzionata smette di esserlo senza che nulla nel
+     codice si muova. Quando cambia l'ambiente vanno riaperte le difese che si erano chiuse, non
+     solo aggiunte quelle nuove: qui è bastato un URL di push che non è un indirizzo, reversibile
+     in un comando, ed è stato messo prima di sapere se sarebbe mai servito.
+
+### Prossimo passo
+
+Il talk, domani. Sul repository resta una sola pendenza, ed è del PO: **rimuovere dopo il 18 il
+clone locale della riscrittura**, che non va mai pubblicato né condiviso.
+
+Stato aggiornato: decisioni fino ad **ADR-0142**, verifiche fino a **V-108**, fonti fino a
+**S-080**, misure dell'applicazione fino a **M-064**, note di metodo fino alla **271**.
