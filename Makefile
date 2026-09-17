@@ -11,7 +11,7 @@
         failover-02 failover-02-termina failover-02-maggioranza \
         up-03 down-03 reset-03 logs-03 seed-03 smoke-03 reset-demo-03 profilo-03 \
         stato-03 distribuzione-03 guasto-03 \
-        filmato
+        filmato filmati filmati-elenco
 
 # `--env-file tools/images.env` porta MONGO_IMAGE, che nei file Compose è dichiarato
 # nella forma `${MONGO_IMAGE:?...}`: senza, Compose si ferma subito dicendo cosa manca
@@ -46,7 +46,7 @@ help: ## Elenca i target disponibili
 		ARGS    'opzioni girate alla CLI, per esempio ARGS="--step --sink plain"' \
 		PROFILO 'la taglia dello stack 03: palco (predefinito) | completo' \
 		NOMI    'quali immagini riscaricare: NOMI="PYTHON_IMAGE UV_IMAGE"' \
-		NOME    'come si chiama la scena da girare: il file esce come <NOME>.mp4' \
+		NOME    'la scena da girare, o il filmato da rifabbricare: esce come <NOME>.mp4' \
 		AUDIO   'la voce nel filmato: si (predefinito) | no, per la passata muta' \
 		DURATA  'quanti secondi dura il filmato; se manca, si ferma con «q»'
 
@@ -557,3 +557,20 @@ CHIEDI_NOME = @case "$(NOME)" in \
 filmato: ## Gira un .mp4 dello schermo: make filmato NOME=02-failover [AUDIO=no] [DURATA=20]
 	$(CHIEDI_NOME)
 	@AUDIO=$(AUDIO) ./tools/registra-schermo.sh $(NOME) $(DURATA)
+
+# La terza via, e la più economica: i `.cast` già archiviati sono esecuzioni vere, con i
+# tempi che hanno avuto, e `agg` li ridisegna fotogramma per fotogramma. Rigirare quelle
+# stesse scene dal vivo costerebbe due stack, uno scambio di `.env` e un pomeriggio, per
+# ottenere comunque una esecuzione diversa da quella misurata. Quello che di qui non può
+# uscire è ciò che vive fuori dal terminale — la scena 4, che dimostra l'avvio offline
+# mostrando l'icona del Wi-Fi spenta, resta lavoro di `filmato`.
+#
+# Chiede `agg` (`brew install agg`), che è la seconda e ultima installazione richiesta da
+# questo repository dopo `ffmpeg`. Nessuna delle due serve per eseguire il lab né per
+# riprodurre le registrazioni in sala: servono a fabbricare le riserve, non a usarle.
+
+filmati: ## Fabbrica i .mp4 di riserva dalle registrazioni: make filmati [NOME=<filmato>]
+	@./tools/filmati-da-registrazioni.sh $(NOME)
+
+filmati-elenco: ## Che cosa produrrebbe `make filmati`, senza produrlo
+	@./tools/filmati-da-registrazioni.sh --elenco

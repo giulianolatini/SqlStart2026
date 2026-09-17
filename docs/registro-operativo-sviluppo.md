@@ -7909,3 +7909,88 @@ importata ([ADR-0124](Decision.md#adr-0124)); e la fusione del 16 settembre con 
 
 Stato aggiornato: decisioni fino ad **ADR-0140**, verifiche fino a **V-106**, fonti fino a
 **S-079**, misure dell'applicazione fino a **M-064**, note di metodo fino alla **262**.
+
+---
+
+## 2026-09-17 — Cinque filmati di riserva erano già nel repository, e uno di loro durava la metà
+
+Il PO stava preparando le slide e ha chiesto i filmati di riserva delle demo, da mettere dentro
+la presentazione, ricordando che dal palco userà il profilo `palco` mentre il `completo` resta a
+chi prenderà il lab da GitHub. La preoccupazione dei due profili si è sciolta da sé: cinque dei
+sei filmati elencati nella pagina delle registrazioni non contengono niente che stia fuori dal
+terminale, e le loro scene erano già archiviate come registrazioni `.cast`. Riprodurle non
+accende nessun container — il profilo `palco`, acceso e sano, non è stato toccato.
+
+### Deciso
+
+- **I filmati che stanno dentro un terminale si fabbricano, non si girano**
+  ([ADR-0141](Decision.md#adr-0141)). `agg` ridisegna il `.cast` rispettando i tempi originali,
+  `ffmpeg` ne fa un `.mp4` muto, e lo strumento del repository confronta ogni filmato con la
+  somma delle scene che lo compongono. Rigirarle dal vivo sarebbe costato due stack, uno scambio
+  di `.env` e un pomeriggio, per ottenere una esecuzione **diversa** da quella misurata.
+- **Il confronto delle durate è un errore, non un avviso.** Un filmato più corto della scena che
+  sostituisce si apre, scorre e sembra riuscito: è precisamente il guasto che non si vede
+  guardando. Un avviso in mezzo a tredici barre di avanzamento è la forma in cui il difetto si
+  era già presentato senza essere visto.
+- **`agg` è la seconda e ultima installazione richiesta**, e va detto insieme a quello che
+  *non* comporta: né `ffmpeg` né `agg` servono per eseguire il lab o per riprodurre una
+  registrazione in sala. Quello resta `registra-terminale.py --riproduci`, che non chiede niente
+  — un piano B che richiede un `brew install` non è un piano B.
+- **La scena 4 resta da girare dal vivo**, e il motivo disegna il confine fra i due strumenti:
+  la sua prova non è ciò che il terminale scrive, è l'icona del Wi-Fi spenta nella barra dei
+  menu. Procedura consegnata al PO, che la esegue lui: la rete della sua macchina non si spegne
+  da qui.
+
+### Misurato
+
+[V-107](Sources.md#v-107), e le due misure che contano sono state prese **prima** di produrre
+qualsiasi cosa, leggendo l'aiuto del programma invece di lanciarlo e guardare.
+
+- **Il limite di inattività predefinito di `agg` vale cinque secondi**, e comprime a cinque ogni
+  pausa più lunga. Sulla scena 8, che dura 40,10 s contati sull'ultimo evento del `.cast`, la
+  resa predefinita dà **21,35 s**. È ADR-0116 confermato alla lettera, con il numero sotto: una
+  riserva che dura la metà della scena che sostituisce non è la riserva di quella scena. Con
+  `--idle-time-limit 3600` la resa dà 43,09 s, cioè 40,10 più il fermo immagine finale: esatta
+  al centesimo.
+- **Il montaggio `-c copy` toglieva secondi ai filmati composti da più scene.** Il 05 usciva
+  47,1 s invece di 52,5, il 06 31,9 invece di 33,6; il 02, di due sole scene, era esatto —
+  abbastanza da far sembrare il metodo sano. La causa sta a monte: una GIF ha fotogrammi a
+  durata variabile, il `.mp4` che ne nasce eredita timestamp fuori ordine, e `ffmpeg` scarta ciò
+  che non sa incastrare avvisando in una riga che scorre via. Ricodificando a passo costante
+  (`-r 15 -fps_mode cfr`) tutti e tredici i file coincidono entro un decimo — e ricompare il
+  fermo immagine finale, che la conversione stava perdendo senza dirlo.
+- **Costa poco, ed è questo che ha cambiato la decisione.** Rendere la scena 8 a corpo 28
+  richiede 0,45 s; i tredici filmati occupano 48 MB e si rifanno da capo in meno di un minuto.
+- **`make preflight`** è passato da «nessun filmato» a **«filmati locali disponibili: 13»**:
+  10 superati, 0 avvisi, 0 errori. L'avviso diventa errore bloccante domani, 18 settembre.
+
+### Note di metodo
+
+263. **Un predefinito non è una scelta neutra: è la scelta di qualcun altro, presa per un altro
+     caso d'uso.** Il limite di inattività di `agg` è giusto per chi pubblica una GIF in un
+     `README` e la vuole corta, ed è sbagliato qui, dove l'attesa è il contenuto. Non era
+     nascosto — l'aiuto lo dichiara, e il programma faceva esattamente quello che prometteva.
+     A sbagliare sarebbe stato chi non gliel'aveva chiesto. La regola pratica: di uno strumento
+     nuovo si leggono i predefiniti **prima** della prima corsa, chiedendosi per chi sono stati
+     scelti.
+
+264. **Fabbricare introduce guasti che girare non ha, e si trovano contando, non guardando.**
+     Tutt'e due i difetti producevano file che si aprono, scorrono e sembrano riusciti: nessuno
+     guarda un filmato con il cronometro in mano. La contromisura non è rivedere meglio il
+     codice — nessuno dei due si vedeva leggendolo — ma dare allo strumento un numero atteso
+     contro cui confrontarsi. Vale in generale: quando si automatizza la produzione di qualcosa
+     che prima si faceva a mano, la prima cosa da scrivere non è il produttore, è il metro.
+
+### Prossimo passo
+
+Il runbook del talk, che era il passo previsto e resta tale, più le due cose che questa sessione
+lascia in mano al PO: **girare il filmato 4** con il Wi-Fi spento (procedura consegnata: reset a
+rete accesa, Wi-Fi giù, `make filmato NOME=04-avvio-offline-muto AUDIO=no`, `make up-02` e
+`make smoke-02` in una seconda finestra, poi Wi-Fi su e `make reset-demo-02`), e **la fusione di
+`release/1.0` in `main`** prima di rendere pubblico il repository.
+
+Le passate parlate dei cinque filmati fabbricati non esistono e non sono urgenti: servono a
+YouTube, mentre dentro le slide va il muto ([ADR-0140](Decision.md#adr-0140)).
+
+Stato aggiornato: decisioni fino ad **ADR-0141**, verifiche fino a **V-107**, fonti fino a
+**S-080**, misure dell'applicazione fino a **M-064**, note di metodo fino alla **264**.

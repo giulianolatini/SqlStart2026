@@ -319,27 +319,96 @@ non è il numero, è che da una parte si aspetta e dall'altra no.
 ---
 
 <a id="filmati"></a>
-## I filmati, che ancora non ci sono
+## I filmati
 
-**`make preflight` avvisa, ed è giusto così.** Il controllo cerca file `.mp4` in
-`~/SqlStart2026-registrazioni` (impostabile con `DEMO_VIDEOS_DIR`), e quella cartella è vuota. Non
-ci è stato messo un file finto per far tacere l'avviso: il controllo verifica una cosa che manca
-davvero, e dal **18 settembre 2026** diventa un errore bloccante. Zittirlo adesso significherebbe
-scoprire il buco la mattina del talk, che è precisamente lo scenario per cui il controllo esiste.
-
-I filmati da girare — i primi quattro del Blocco 2, gli ultimi due del Blocco 3, in ordine di
+I filmati servono — i primi quattro del Blocco 2, gli ultimi due del Blocco 3, in ordine di
 importanza dentro ciascun blocco:
 
-| # | Che cosa filmare | Corrisponde a | Durata attesa | Perché serve |
-|---:|---|---|---:|---|
-| 1 | il failover con `docker kill`, dal vivo e con la voce | scena 2 | ~2 min | è la scena del talk. Se salta questa, salta il blocco |
-| 2 | le due varianti a confronto, `kill` e terminazione | scene 2 e 3 | ~3 min | il confronto è il punto, non le due scene separate |
-| 3 | la maggioranza persa | scena 4 | ~2 min | risponde alla domanda che il pubblico fa sempre |
-| 4 | `make up-02` da zero, con la rete disattivata | — | ~4 min | dimostra che il lab è offline davvero, e apre il talk |
-| 5 | il guasto di uno shard nei due profili | scene 8 e 9 | ~3 min | è la scena del Blocco 3, e dal vivo costa due stack e uno scambio di `.env` |
-| 6 | il Blocco 3 per intero: avvio, `sh.status()`, distribuzione | scene 5, 6 e 7 | ~4 min | se il cluster non parte in sala non c'è modo di raccontarlo a voce |
+| # | Che cosa filmare | Corrisponde a | Come si ottiene | Perché serve |
+|---:|---|---|---|---|
+| 1 | il failover con `docker kill` | scena 2 | `make filmati` | è la scena del talk. Se salta questa, salta il blocco |
+| 2 | le due varianti a confronto, `kill` e terminazione | scene 2 e 3 | `make filmati` | il confronto è il punto, non le due scene separate |
+| 3 | la maggioranza persa | scena 4 | `make filmati` | risponde alla domanda che il pubblico fa sempre |
+| 4 | `make up-02` da zero, con la rete disattivata | — | `make filmato`, dal vivo | dimostra che il lab è offline davvero, e apre il talk |
+| 5 | il guasto di uno shard nei due profili | scene 8 e 9 | `make filmati` | è la scena del Blocco 3, e dal vivo costa due stack e uno scambio di `.env` |
+| 6 | il Blocco 3 per intero: avvio, `sh.status()`, distribuzione | scene 5, 6 e 7 | `make filmati` | se il cluster non parte in sala non c'è modo di raccontarlo a voce |
 
-### Il comando
+Cinque su sei escono dalle registrazioni di terminale già archiviate. Il quarto no, e il motivo è
+istruttivo: **la sua prova sta fuori dal terminale.** Un `.cast` contiene quello che il terminale
+ha scritto, non l'icona del Wi-Fi spenta nella barra dei menu — e quella icona *è* la
+dimostrazione. Va girato dal vivo.
+
+### Due strade, e non sono intercambiabili
+
+C'è più di un modo di ottenere un `.mp4`, e sceglierlo male costa un pomeriggio o una bugia.
+
+**`make filmati` fabbrica il filmato dalla registrazione.** Le scene sono già state eseguite
+davvero; [`agg`](#agg) le ridisegna fotogramma per fotogramma rispettando gli intervalli originali,
+e `ffmpeg` ne fa un `.mp4`. Dura secondi, non tocca nessuno stack, e il filmato che ne esce mostra
+**la stessa esecuzione** che il `.cast` conserva — non una sua imitazione rifatta a memoria.
+
+**`make filmato` registra lo schermo.** Serve quando la scena vive fuori dal terminale: una
+finestra di Compass, un grafico che si muove, la barra dei menu, la voce di chi parla.
+
+Detto in breve: se la scena sta tutta dentro il terminale ed esiste già come `.cast`, si fabbrica;
+altrimenti si gira.
+
+### Il comando che fabbrica
+
+```bash
+make filmati                                        # tutti: cinque montaggi e otto scene singole
+make filmati NOME=03-maggioranza-persa-muto         # uno solo
+make filmati-elenco                                 # che cosa uscirebbe, senza produrlo
+```
+
+Lo strumento è
+[`tools/filmati-da-registrazioni.sh`](../../../tools/filmati-da-registrazioni.sh). I file escono in
+`~/SqlStart2026-registrazioni`, la stessa cartella che `make preflight` conta. Escono **muti**, e
+non è una rinuncia: un `.cast` non ha voce da restituire, e il muto è esattamente quello che va
+dentro le slide (vedi sotto).
+
+Oltre ai cinque montaggi produce le otto scene singole, con il prefisso `scena-`, per chi in slide
+le vuole separate invece che di fila.
+
+#### Che cosa dichiara, e perché conta invece di fidarsi
+
+A ogni filmato lo strumento affianca la somma delle scene che lo compongono, e se le due non
+coincidono entro mezzo secondo **si ferma con un errore**:
+
+```
+  ✓ 05-guasto-shard-nei-due-profili-muto.mp4      56.4 s (attesi 56.4) · 7447730 byte
+```
+
+Non è zelo. Un filmato più corto della scena che sostituisce *sembra riuscito* — si apre, scorre,
+si vede — e mente sull'unica cosa per cui esiste. È successo due volte mentre lo strumento veniva
+scritto, per due cause diverse e nessuna delle due visibile a occhio ([V-107](../../Sources.md#v-107)):
+
+* il limite di inattività di `agg` vale **cinque secondi** se non glielo si dice, e comprime a
+  cinque ogni pausa più lunga: la scena 8, che dura 40,1 s, ne usciva 21,3;
+* i `.mp4` nati da una GIF hanno fotogrammi a durata variabile, e il montaggio che li incolla senza
+  ricodificare scarta i secondi che non sa incastrare: il filmato 05 usciva 47,1 s invece di 52,5.
+
+Tutt'e due contraddicono lo stesso principio, che vale qui quanto vale per le registrazioni: i
+tempi si rispettano di proposito, perché la scena **è** l'attesa. Una riserva che dura la metà
+della scena che sostituisce non è la riserva di quella scena ([ADR-0116](../../Decision.md#adr-0116)).
+
+<a id="agg"></a>
+#### `agg`, la seconda installazione
+
+```bash
+brew install agg
+```
+
+[`agg`](../../Sources.md#s-080) — *asciinema gif generator* — disegna un `.cast` in una GIF animata.
+È un solo eseguibile, senza dipendenze di esecuzione.
+
+Insieme a `ffmpeg` sono **le due sole installazioni che questo repository chiede**, e vanno lette
+per quello che sono: servono a *fabbricare* le riserve, non a usarle. Per eseguire il lab non
+servono; per riprodurre una registrazione in sala nemmeno — quello resta
+`python3 tools/registra-terminale.py --riproduci`, che non chiede niente, ed è deliberato: un piano
+B che richiede un `brew install` non è un piano B.
+
+### Il comando che registra
 
 Lo strumento è [`tools/registra-schermo.sh`](../../../tools/registra-schermo.sh), e la riga da
 imparare è una sola:
@@ -363,7 +432,8 @@ strumento rifiuta un nome già occupato, e la passata muta va conservata comunqu
 > «Registrazione schermo» e «Microfono» alla prima corsa; concedere il secondo **fa ripartire
 > l'applicazione del terminale**, misurato su iTerm. È un costo da pagare una volta sola, e si paga
 > **adesso**: la sera prima del talk è il momento sbagliato per incontrare una finestra di dialogo.
-> Serve anche `ffmpeg` (`brew install ffmpeg`), l'unica installazione che questo repository chiede.
+> Serve anche `ffmpeg` (`brew install ffmpeg`): è una delle due installazioni che questo repository
+> chiede, insieme ad [`agg`](#agg), e nessuna delle due serve per eseguire il lab.
 
 ### Le due passate, e perché la muta si tiene
 
@@ -409,13 +479,19 @@ sono guasti: la ragione di ognuna sta nei commenti dello strumento, misurata in
   `--sink plain`, perché una riserva deve mostrare ciò che il pubblico vedrebbe, e ciò che il
   pubblico vede dal vivo è il pannello. Il pannello si ridisegna dieci volte al secondo e in un
   `.cast` diventa illeggibile e pesantissimo insieme; `plain` è il **contenuto** delle stesse righe
-  ([ADR-0116](../../Decision.md#adr-0116)). Chi vuole vedere la resa `rich` la fa girare, o guarderà
-  il filmato quando ci sarà.
+  ([ADR-0116](../../Decision.md#adr-0116)). Chi vuole vedere la resa `rich` la fa girare: nemmeno i
+  filmati fabbricati da qui la contengono, perché nascono dagli stessi `.cast`.
+- **Non contiene i filmati.** Un `.mp4` per scena pesa quanto tutte le registrazioni messe insieme,
+  e si rifà in pochi secondi con `make filmati`: il repository conserva il `.cast`, che è la fonte,
+  e lascia fuori ciò che dalla fonte si rigenera. I file vivono in `~/SqlStart2026-registrazioni`
+  ([ADR-0016](../../Decision.md#adr-0016)).
+- **La passata parlata non è fabbricabile.** `make filmati` restituisce l'esecuzione, non la voce:
+  il commento per YouTube si registra con `make filmato`, sulla scena già vista.
 - **Le registrazioni non sostituiscono i filmati, e i due branch lo chiedono in modo diverso.** Il
   criterio 8 di `feature/02` chiedeva entrambe le specie — «almeno una registrazione di riserva
-  esiste in locale e `make preflight` non avvisa più» — ed è soddisfatto a metà, con la metà
-  mancante scritta qui sopra invece che nascosta. Il criterio 8 di `feature/03` chiede che la
-  riserva del Blocco 3 sia «registrata e **riprodotta**», e quello è soddisfatto per intero.
+  esiste in locale e `make preflight` non avvisa più»: soddisfatto per intero dal 17 settembre 2026,
+  quando i filmati sono stati fabbricati dalle registrazioni. Il criterio 8 di `feature/03` chiede
+  che la riserva del Blocco 3 sia «registrata e **riprodotta**», e quello era già soddisfatto.
 
 ---
 

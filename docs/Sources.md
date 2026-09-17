@@ -10956,3 +10956,111 @@ ffmpeg -i prova.mp4 -af volumedetect -f null -
   **descrizioni delle opzioni**, non dagli esempi.
 - **Data:** 2026-09-07
 - **Usata da:** ADR-0140
+
+---
+
+<a id="v-107"></a>
+### V-107 — Fabbricare un filmato da una registrazione di terminale: due modi di uscirne più corti, e nessuno dei due si vede guardando
+
+- **Comandi:** due rese della stessa scena con e senza il limite di inattività, e la rilettura di
+  quello che ne è uscito; poi il montaggio di più scene in un filmato solo, contato contro la somma
+  delle sue parti.
+
+```bash
+agg -q --font-size 14 --fps-cap 10 08-guasto-shard-palco.cast 08-predefinito.gif
+agg -q --font-size 14 --fps-cap 10 --idle-time-limit 3600 08-guasto-shard-palco.cast 08-intero.gif
+ffprobe -v error -show_entries format=duration,size -of csv=p=0:nk=1 08-predefinito.gif
+ffmpeg -y -f concat -safe 0 -i elenco.txt -c copy 05-guasto-shard-nei-due-profili-muto.mp4
+```
+
+- **Ambiente:** MacBook Pro Apple Silicon, macOS 26.6.2, 17 settembre 2026. `agg` 1.9.0 da Homebrew
+  ([S-080](#s-080)), `ffmpeg` e `ffprobe` 6.x, encoder `h264_videotoolbox`. Nessuno stack acceso e
+  nessuno necessario: le quattordici registrazioni erano già in archivio.
+- **Che cosa si voleva sapere:** se i `.cast` archiviati bastassero a produrre i filmati di riserva
+  invece di rigirare le scene dal vivo — e, prima ancora, se il filmato che ne esce racconti la
+  stessa cosa della scena che sostituisce.
+
+- **Esito, primo punto — il predefinito accorcia le attese, e l'attesa è la scena.** `agg` ha un
+  `--idle-time-limit` che vale **5 secondi** se non glielo si dice, e comprime a cinque ogni pausa
+  più lunga. Sulla scena 8, che dura **40,10 s** contati sull'ultimo evento del `.cast`, la resa
+  predefinita dà **21,35 s**: meno della metà. Con `--idle-time-limit 3600` dà **43,09 s**, cioè
+  40,10 più i 3 s di fermo immagine finale che `agg` aggiunge di suo. La resa è esatta al
+  centesimo; è il predefinito a non esserlo per questo uso. Un valore «spento» non è documentato, e
+  alzare il limite a un'ora è il modo di ottenerne l'effetto.
+
+- **Esito, secondo punto — perché quel predefinito è sbagliato proprio qui.** In una registrazione
+  di questo archivio la pausa non è tempo morto: nella scena 8 i quindici secondi prima dell'errore
+  **sono** la risposta alla domanda, ed è la stessa ragione per cui la riproduzione dei `.cast`
+  rispetta i tempi invece di scorrere. Il numero misurato dà a
+  [ADR-0116](Decision.md#adr-0116) una conferma letterale: una riserva che dura la metà della scena
+  che sostituisce non è la riserva di quella scena — qui la metà è 21,35 su 40,10.
+
+- **Esito, terzo punto — il montaggio perde secondi, e lo dice in una riga che scorre via.** Unendo
+  più scene con `ffmpeg -f concat -c copy`, due filmati su tre sono usciti corti: il **05**
+  (scene 8 e 9) ha dato **47,1 s** invece di 52,5, e il **06** (scene 5, 6 e 7) **31,9 s** invece di
+  33,6; il **02**, di due sole scene, era esatto. La causa è a monte: una GIF ha fotogrammi a durata
+  variabile, il `.mp4` che ne nasce eredita timestamp fuori ordine, e il montaggio scarta ciò che
+  non sa incastrare avvisando con `Non-monotonic DTS … This may result in incorrect timestamps`,
+  cioè un avviso fra decine di righe di avanzamento.
+
+- **Esito, quarto punto — la cura è a monte, e recupera anche una cosa che si stava perdendo.**
+  Ricodificando ogni scena a passo costante (`-r 15 -fps_mode cfr`) prima di unirle, tutti e tredici
+  i file coincidono con la somma delle loro scene entro un decimo. In più, il fermo immagine finale
+  **ricompare**: prima della cura la conversione GIF→`.mp4` lo perdeva — la scena 8 usciva 40,1 s
+  invece di 42,1 — perché l'ultimo fotogramma non ha un successore che ne dichiari la durata.
+
+- **Esito, quinto punto — costa poco, ed è questo che cambia la decisione.** Rendere la scena 8 a
+  corpo 28 richiede **0,45 s** e produce una GIF da 354 KB; i tredici filmati completi occupano
+  **48 MB** e si rifanno da capo in meno di un minuto, senza accendere nessuno stack. Rigirare le
+  stesse scene dal vivo costerebbe due stack, uno scambio di `.env` e un pomeriggio, per ottenere
+  comunque una esecuzione diversa da quella misurata.
+
+- **Riserve:** i due guasti sono stati osservati su una macchina, una versione di `agg` e un
+  encoder; il secondo in particolare dipende da come `ffmpeg` scrive i timestamp di un `.mp4` nato
+  da GIF, e una versione diversa potrebbe comportarsi altrimenti — motivo per cui lo strumento
+  **conta** invece di fidarsi della cura. Le durate dei `.cast` sono lette sull'istante dell'ultimo
+  evento, che è la definizione usata anche dal riproduttore: una registrazione che finisse con una
+  pausa senza output risulterebbe più corta di come è stata vissuta. Nessun filmato è stato
+  confrontato fotogramma per fotogramma con la scena originale: si è confrontata la durata, che è
+  ciò che i due guasti alteravano.
+- **Data:** 2026-09-17
+- **Usata da:** ADR-0141
+
+---
+
+<a id="s-080"></a>
+### S-080 — `agg`, il convertitore da asciicast a GIF: il manuale e i suoi predefiniti
+
+- **URL:** https://docs.asciinema.org/manual/agg/
+- **Editore:** asciinema (progetto)
+- **Versione documentata:** `agg` 1.9.0, letta dall'aiuto dell'eseguibile installato
+- **Consultata:** 2026-09-17
+- **Verdetto:** conferma — l'aiuto del programma dichiara i predefiniti che contano, compreso
+  quello che accorcia le scene
+- **Perché è stata cercata.** Cinque dei sei filmati di riserva potevano nascere dalle
+  registrazioni già archiviate invece che da una nuova ripresa, ma solo se la resa rispettava i
+  tempi originali. Prima di produrre qualcosa serviva sapere che cosa il programma fa **quando non
+  gli si dice niente** ([V-107](#v-107)).
+- **Che cos'è.** *asciicast to GIF converter*: legge un file `.cast` — lo stesso formato versione 2
+  che questo repository archivia — e ne disegna una GIF animata. Un solo eseguibile, GPL-3.0-or-later,
+  senza dipendenze di esecuzione; su macOS si installa con `brew install agg` (16,2 MB, 8 file).
+- **Cosa afferma, primo punto — il predefinito che va cambiato.** `--idle-time-limit <SECONDI>`:
+  «Limit idle time to max number of seconds **[default: 5]**». È dichiarato, non nascosto: chi non
+  legge l'aiuto ottiene scene accorciate senza nessun avviso, perché il programma sta facendo
+  esattamente quello che promette.
+- **Cosa afferma, secondo punto — i tempi si compongono, e l'ordine è dichiarato.** Di
+  `--last-frame-duration` l'aiuto precisa: «Times are on the adjusted output timeline, after
+  `--idle-time-limit` and `--speed`». Cioè il fermo immagine finale si somma a una linea del tempo
+  **già** compressa, e non basta guardarne il valore per sapere quanto durerà il filmato.
+- **Cosa afferma, terzo punto — gli altri predefiniti che questo repository sposta o accetta.**
+  `--font-size` vale 16 e qui diventa 28, perché una registrazione a 100 colonne va letta dal fondo
+  di una sala; `--fps-cap` vale 30 e qui diventa 15, perché un terminale non ha niente da mostrare
+  a trenta fotogrammi al secondo; `--speed` vale 1 e resta 1, che è tutto il punto; `--theme`
+  offre tredici temi e qui resta `asciinema`, lo stesso colore delle registrazioni riprodotte.
+- **Riserve:** le affermazioni qui sopra sono lette dall'aiuto dell'eseguibile **installato**, che
+  è la fonte più vicina al comportamento osservato ma non è la pagina del manuale in linea: se le
+  due divergessero, vale quella dell'eseguibile, ed è quella che il repository usa. La pagina in
+  linea documenta il programma in generale e non è stata consultata riga per riga. Non è stato
+  verificato il comportamento su `.cast` di versione 1, che questo archivio non contiene.
+- **Data:** 2026-09-17
+- **Usata da:** ADR-0141

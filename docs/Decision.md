@@ -9082,7 +9082,10 @@ esiste. Una fonte letta può servire a **non** fare una cosa, e vale quanto una 
 <a id="adr-0140"></a>
 ## ADR-0140 — Lo schermo si registra con uno strumento del repository, e la passata muta è la prima delle due
 
-**Data:** 2026-09-07 · **Stato:** Accettata
+**Data:** 2026-09-07 · **Stato:** Accettata — **integrata da [ADR-0141](#adr-0141)**, che aggiunge
+la seconda installazione e il modo di fabbricare un filmato senza girarlo. Il testo resta com'era:
+la conseguenza «`ffmpeg` è l'unica installazione» era vera il 7 settembre e ha smesso di esserlo il
+17, e il registro lo mostra invece di correggerlo all'indietro.
 
 **Contesto:** [ADR-0016](#adr-0016) stabilisce che la riserva del talk sta su YouTube **e** in una
 copia locale, e [`tools/preflight.sh`](../tools/preflight.sh) conta già i `.mp4` di
@@ -9185,3 +9188,77 @@ controllare.
   riga che un giorno dirà che qualcosa è andato storto davvero.
 
 **Fonti:** [V-106](Sources.md#v-106), [S-079](Sources.md#s-079)
+
+---
+
+<a id="adr-0141"></a>
+## ADR-0141 — I filmati di riserva si fabbricano dalle registrazioni, e chi li fabbrica conta i secondi
+
+**Data:** 2026-09-17 · **Stato:** Accettata
+
+**Contesto:** [ADR-0140](#adr-0140) ha dato al repository uno strumento per registrare lo schermo, e
+la [pagina delle registrazioni](05-talk/registrazioni/README.md#filmati) elencava sei filmati da
+girare, stimati in circa quattro ore fra riprese, reset degli stack e uno scambio di `.env` per
+mostrare il guasto di uno shard nei due profili. La stima non era gonfiata: quelle scene, dal vivo,
+costano davvero così. Ma nel repository c'erano già **quattordici registrazioni di terminale**,
+ognuna un'esecuzione vera con i tempi che ha avuto, e cinque dei sei filmati non contengono niente
+che stia fuori dal terminale. Rigirarle significava spendere un pomeriggio per ottenere una
+esecuzione **diversa** da quella misurata e archiviata.
+
+**Decisione:** i filmati di riserva che stanno dentro un terminale si **fabbricano** dalle
+registrazioni già archiviate, con [`tools/filmati-da-registrazioni.sh`](../tools/filmati-da-registrazioni.sh)
+e `make filmati`. `agg` ([S-080](Sources.md#s-080)) ridisegna il `.cast` fotogramma per fotogramma,
+`ffmpeg` ne fa un `.mp4` muto, e lo strumento **confronta ogni filmato con la somma delle scene che
+lo compongono**, fermandosi con un errore se la differenza supera il mezzo secondo. `make filmato`
+resta, e resta necessario, per tutto ciò che vive fuori dal terminale.
+
+**Conseguenze.**
+
+- Il repository chiede ora **due** installazioni, `ffmpeg` e `agg`, e nessuna delle due serve per
+  eseguire il lab né per riprodurre le registrazioni in sala: servono a fabbricare le riserve, non
+  a usarle. La riproduzione resta `python3 tools/registra-terminale.py --riproduci`, che non chiede
+  niente — un piano B che richiede un `brew install` non è un piano B.
+- I `.mp4` **non entrano nel repository**: pesano quanto tutto il resto e si rigenerano in meno di
+  un minuto dalla fonte, che è il `.cast`. Vivono in `~/SqlStart2026-registrazioni`, dove
+  `make preflight` li conta.
+- Il filmato che ne esce è **muto per costruzione**, perché un `.cast` non ha voce da restituire.
+  Coincide con ciò che [ADR-0140](#adr-0140) vuole dentro le slide, e lascia scoperta solo la
+  passata parlata per YouTube, che resta lavoro di `make filmato`.
+- **Il conteggio non è zelo, è il cuore della decisione.** Fabbricare introduce guasti che girare
+  non ha: due sono stati misurati subito ([V-107](Sources.md#v-107)), e nessuno dei due si vede
+  guardando il filmato. Il limite di inattività predefinito di `agg` riduceva la scena 8 da 40,1 s
+  a 21,3 s; il montaggio senza ricodifica toglieva 5,4 s al filmato 05. Un filmato più corto della
+  scena che sostituisce si apre, scorre e sembra riuscito: se lo strumento non contasse, il difetto
+  si scoprirebbe davanti al pubblico. È [ADR-0116](#adr-0116) applicato alla fabbricazione.
+- La quarta scena — `make up-02` da zero con la rete spenta — **non** è fabbricabile, e il motivo
+  chiarisce il confine: la sua prova non è ciò che il terminale scrive, è l'icona del Wi-Fi spenta
+  nella barra dei menu. Un `.cast` non la contiene.
+
+**Alternative scartate.**
+
+- *Girare tutte e sei le scene dal vivo, come la pagina prevedeva.* È il metodo più fedele a ciò
+  che il pubblico vedrà, e per la scena 4 resta l'unico. Per le altre cinque costa un pomeriggio e
+  due stack per produrre una esecuzione che **non è** quella misurata: le registrazioni archiviate
+  sono già state riprodotte e verificate ([ADR-0055](#adr-0055)), e un filmato che ne nasce mostra
+  quell'esecuzione lì, non una sua imitazione rifatta a memoria.
+- *Registrare lo schermo mentre si riproduce il `.cast` con `--riproduci`.* Non chiederebbe nessuna
+  installazione nuova, ed è la strada che sembra ovvia. Costa però il tempo reale di ogni scena —
+  quaranta secondi di scena sono quaranta secondi di ripresa — richiede i permessi di macOS, cattura
+  la finestra del terminale con le sue decorazioni, e soprattutto produce un file che nessuno può
+  **contare**: non esiste una durata attesa contro cui confrontarlo, perché la ripresa dipende da
+  quando si preme `q`.
+- *Accettare i predefiniti di `agg` e non misurare.* Sarebbe passata inosservata: i filmati escono,
+  si aprono, scorrono. La scena 8 avrebbe raccontato in ventuno secondi un guasto che ne dura
+  quaranta, e i quindici secondi di attesa che **sono** la risposta alla domanda sarebbero diventati
+  cinque.
+- *Mettere i `.mp4` nel repository, per non dipendere da `agg`.* Renderebbe le riserve disponibili a
+  chiunque scarichi il lab senza installare niente. Sposterebbe però nel repository decine di
+  megabyte di materiale **derivato**, che invecchia rispetto alla fonte senza che niente lo segnali:
+  una registrazione rifatta e un filmato non rifatto racconterebbero due esecuzioni diverse con la
+  stessa etichetta.
+- *Un avviso invece di un errore, quando la durata non torna.* Un avviso su tredici file in una
+  corsa di un minuto è una riga che scorre via — è esattamente il modo in cui il guasto del
+  montaggio si era presentato la prima volta, in mezzo alle barre di avanzamento, e non è stato
+  visto.
+
+**Fonti:** [V-107](Sources.md#v-107), [S-080](Sources.md#s-080)

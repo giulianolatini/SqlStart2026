@@ -3865,3 +3865,27 @@ che ne esce è che **lo strumento di misura è sospetto quanto l'oggetto misurat
 e la virgola non sono un dettaglio tipografico: `2.966668` è un dato, «2,966668» è una frase, e
 una locale che le confonde falsa i numeri senza sbagliare una riga di codice. Si legge alla
 maniera dei dati, si scrive alla maniera di chi legge — sono due cose diverse.
+
+---
+
+### La riserva durava la metà della scena, e sembrava riuscita
+
+> Cinque dei sei filmati di riserva non andavano girati: erano già lì, dentro le registrazioni di
+> terminale. `agg` le ridisegna in mezzo secondo — e per predefinito accorcia a cinque secondi ogni
+> pausa più lunga. La scena del guasto a uno shard, che dura 40,1 s, ne usciva **21,3**: si apriva,
+> scorreva, sembrava riuscita. Mancavano i quindici secondi di attesa prima dell'errore, che di
+> quella scena non sono la pausa: sono la risposta.
+
+Fonte: [V-107](Sources.md#v-107), primo e secondo punto.
+
+**Perché una slide:** è la stessa lezione della locale italiana, spostata di un passo e resa
+visibile. Lì un numero mentiva su un file sano; qui un file mente, e mente **in modo credibile** —
+perché nessuno guarda un filmato con il cronometro. Il predefinito non era nascosto: `agg` lo
+dichiara nel suo aiuto, «Limit idle time to max number of seconds [default: 5]», e stava facendo
+esattamente quello che prometteva. A sbagliare era chi non gliel'aveva chiesto. Vale come esempio
+generale di che cos'è un predefinito: non una scelta neutra, ma la scelta di qualcun altro, presa
+per un altro caso d'uso — qui, quello di chi pubblica una GIF in un `README` e vuole che sia corta.
+La contromisura non è leggere meglio: è **contare**. Lo strumento del repository confronta ogni
+filmato con la somma delle scene che lo compongono e si ferma se non torna, perché una riserva che
+dura la metà della scena che sostituisce non è la riserva di quella scena — e questo, davanti a un
+pubblico, si scopre troppo tardi per rimediare.

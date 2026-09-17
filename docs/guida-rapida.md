@@ -13,7 +13,7 @@ giorno del talk. Questa qui è il gradino prima.
 - [I tre stack](#i-tre-stack)
 - [L'applicazione `mongolab` sulle tre architetture](#applicazione)
 - [Le scene](#le-scene)
-- [Registrare un filmato](#filmato)
+- [Un filmato: fabbricarlo o girarlo](#filmato)
 - [Quando qualcosa non torna](#non-torna)
 
 <a id="prima-di-tutto"></a>
@@ -209,10 +209,35 @@ Le prime due vanno guardate **una dopo l'altra**: il punto non è nessuna delle 
 brutale costa dieci secondi e quello educato uno — il contrario di quello che ci si aspetta.
 
 <a id="filmato"></a>
-## Registrare un filmato
+## Un filmato: fabbricarlo o girarlo
 
-I filmati `.mp4` sono la riserva del talk e il materiale da allegare alla presentazione. Si girano
-con un bersaglio, e le passate sono **due**:
+I filmati `.mp4` sono la riserva del talk e il materiale da allegare alla presentazione. Ci sono
+due modi di ottenerne uno, e non sono intercambiabili.
+
+### Fabbricarlo da una registrazione, quando la scena sta nel terminale
+
+```bash
+make filmati                                   # tutti: cinque montaggi e otto scene singole
+make filmati-elenco                            # che cosa uscirebbe, senza produrlo
+make filmati NOME=03-maggioranza-persa-muto    # uno solo
+```
+
+Le scene del talk sono già state eseguite davvero e vivono come registrazioni di terminale in
+`docs/05-talk/registrazioni/`. `agg` le ridisegna rispettando i tempi originali e `ffmpeg` ne fa un
+`.mp4` muto: dura secondi, non accende nessuno stack, e mostra **quella** esecuzione — non una sua
+imitazione rifatta a memoria ([ADR-0141](Decision.md#adr-0141)).
+
+Lo strumento confronta ogni filmato con la somma delle scene che lo compongono e si ferma se non
+torna. Non è zelo: un filmato più corto della scena che sostituisce si apre, scorre e sembra
+riuscito ([V-107](Sources.md#v-107)).
+
+> **Serve `agg`** (`brew install agg`). Non serve per eseguire il lab, né per riprodurre una
+> registrazione in sala.
+
+### Girarlo, quando la scena vive fuori dal terminale
+
+Serve quando in campo c'è una finestra di Compass, un grafico che si muove, la barra dei menu — o
+la voce di chi parla. Le passate sono **due**:
 
 ```bash
 make filmato NOME=02-failover-muto AUDIO=no   # prima il muto: si guarda
@@ -230,9 +255,14 @@ guardarla prima è ciò che permette di raccontarla. E il muto non si butta — 
 **dentro** le slide, dove una voce registrata sopra a quella di chi parla dal vivo dà fastidio
 ([ADR-0140](Decision.md#adr-0140)).
 
-> **La prima volta serve `ffmpeg`** (`brew install ffmpeg`, l'unica installazione che questo
-> repository chiede) **e due permessi di macOS**: «Registrazione schermo» e «Microfono». Concedere
-> il secondo **fa ripartire il terminale**. Si fa adesso, non la sera prima del talk.
+> **La prima volta serve `ffmpeg`** (`brew install ffmpeg`) **e due permessi di macOS**:
+> «Registrazione schermo» e «Microfono». Concedere il secondo **fa ripartire il terminale**. Si fa
+> adesso, non la sera prima del talk.
+
+`ffmpeg` e `agg` sono le due sole installazioni che questo repository chiede, e servono a
+*fabbricare* le riserve, non a usarle: per eseguire il lab non servono, e per riprodurre una
+registrazione in sala basta `python3 tools/registra-terminale.py --riproduci`, che non chiede
+niente.
 
 La procedura completa, con l'elenco delle scene da girare, sta nella
 [pagina delle registrazioni](05-talk/registrazioni/README.md#filmati).
