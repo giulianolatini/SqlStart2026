@@ -13,6 +13,9 @@ caldo, come si comporta la latenza quando le connessioni concorrenti crescono.
 > I tre stack accesi con le loro prove, l'applicazione lanciata contro tutte e tre le
 > architetture, le scene e il comando per registrare un filmato. Comandi e output atteso.
 
+## Slide
+Le slide sono scaricabili al link [Architetture MongoDB, ovvero mi faccio un cluster tutto mio](https://1drv.ms/p/c/27e3ac559581c63f/IQAclOsAkdReQafDVp0dFddAAbi_NH96QruTkJtJuAnpOWE?e=8EmAKL)
+
 ## Il talk
 
 **SqlStart 2026** — Ancona, venerdì 18 settembre 2026. Sessanta minuti, di cui circa metà
